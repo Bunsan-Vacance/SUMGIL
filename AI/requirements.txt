@@ -1,0 +1,32 @@
+# 최초 설치 후 `pip freeze > requirements.lock.txt`로 버전을 고정한다.
+
+# ── 코어 ──
+numpy
+pandas
+scipy
+
+# ── 분산 처리 ──
+pyspark
+pyarrow
+
+# ── ML / DL ──
+scikit-learn
+torch
+
+# ── 지리 공간 (격자·공간 조인) ──
+geopandas
+shapely
+h3
+
+# ── 탐색 · 시각화 ──
+jupyterlab
+matplotlib
+seaborn
+
+# ── 데이터 수집 ──
+requests
+python-dotenv
+
+# ── 품질 ──
+pytest
+ruff

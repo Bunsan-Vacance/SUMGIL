@@ -1,0 +1,7 @@
+# 로컬 실험 산출물
+outputs/
+runs/
+mlruns/
+wandb/
+*.lock.txt
+!requirements.lock.txt

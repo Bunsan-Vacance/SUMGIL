@@ -1,1 +1,69 @@
+# ── Claude Code ──
 .claude/
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ──
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+
+# ── 환경 변수 · 시크릿 ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# ── 로그 ──
+*.log
+logs/
+
+# ── FE (Node) ──
+node_modules/
+dist/
+dist-ssr/
+.vite/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ── BE (Java / Gradle) ──
+.gradle/
+build/
+out/
+bin/
+*.class
+!gradle/wrapper/gradle-wrapper.jar
+
+# ── AI (Python) ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ── 데이터 · 모델 산출물 (용량이 커 저장소에 올리지 않음) ──
+AI/data/raw/*
+AI/data/processed/*
+AI/models/*
+!AI/data/raw/.gitkeep
+!AI/data/processed/.gitkeep
+!AI/models/.gitkeep
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.parquet

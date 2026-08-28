@@ -1,0 +1,25 @@
+# 줄바꿈 정규화 — 저장소에는 LF로 저장한다
+* text=auto eol=lf
+
+# Windows 전용 스크립트는 CRLF 유지
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Gradle Wrapper
+gradlew      text eol=lf
+gradlew.bat  text eol=crlf
+
+# 바이너리 — diff/병합 대상에서 제외
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.jar  binary
+*.pt   binary
+*.pth  binary
+*.onnx binary
+
+# 문서 diff 가독성
+*.md diff=markdown
