@@ -28,30 +28,14 @@ Docs/
 - **개발 환경에 Python이 설치돼 있지 않다.** AI 파트 작업 전 확인이 필요하다.
 - 설치 확인된 도구: Node 24.19, npm 11.17, JDK 21, Docker 29.6. Gradle은 Wrapper를 쓴다.
 
-## 커밋 규칙
+## 커밋·브랜치 규칙
 
-전체 규칙은 [Docs/Convention/Git Convention.md](./Docs/Convention/Git%20Convention.md)에 있다. 요약하면 다음과 같다.
+**커밋·브랜치를 만들기 전에 항상 [Docs/Convention/Git Convention.md](./Docs/Convention/Git%20Convention.md) 원문을 먼저 읽는다.** 아래는 자주 놓치는 지점만 짚어둔 요약이지 전체 규칙이 아니다 — 이 요약과 원문이 어긋나면 원문이 맞다.
 
-```
-[<JIRA-KEY>] <type>: <subject>
-
-예) [S15P21A104-3] docs: 주제 선정 및 데이터 검토 리포트 작성
-```
-
-- `type`은 `feat` / `fix` / `docs` / `style` / `refactor` / `test` / `chore`
-- JIRA 키를 대괄호로 감싸 맨 앞에 둔다 — JIRA 연동이 이 패턴을 인식한다
-- 대응 티켓이 없는 저장소 설정성 작업은 키 없이 `chore:`로 쓴다
-- 여러 티켓을 닫을 때는 본문에 `Closes S15P21A104-##`를 줄 단위로 적는다
-- **커밋 단위는 티켓 단위로 나눈다.** 한 커밋에 여러 티켓 내용을 섞으면 JIRA 개발 탭 연결이 뭉개진다
-
-## 브랜치
-
-```
-feat/{스토리 키}-{작업 내용}   예) feat/S15P21A104-3-planning-docs
-hotfix/{이슈번호}-{작업 내용}
-```
-
-`main`, `develop-*`에는 직접 커밋하지 않고 MR로 반영한다. 브랜치는 작업(Task)이 아니라 **작업이 속한 스토리** 키를 쓴다.
+- 커밋: `[<JIRA-KEY>] <type>: <subject>` — `type`은 `feat`/`fix`/`docs`/`style`/`refactor`/`test`/`chore`. 기능·문서 작업은 예외 없이 실제 JIRA 이슈(작업/Task) 키를 붙인다. **티켓이 존재할 수 없는 순수 저장소 설정 작업**(예: 이 문서 자체 정비, 최초 리포 골격 구성)만 키 없이 `chore:`로 쓴다 — 이 예외는 `Docs/Convention/Git Convention.md`에는 없지만 `a898c32`가 실제 선례다. 애매하면 사용자에게 티켓 유무를 먼저 확인한다.
+- 커밋 단위는 작업(Task) 단위로 나눈다. 한 커밋에 여러 티켓을 섞으면 JIRA 개발 탭 연결이 뭉개진다. 여러 티켓을 한 MR에서 닫을 때는 MR 본문에 `Closes S15P21A104-##`를 줄 단위로 적는다(커밋 본문 아님, [Git Convention.md](./Docs/Convention/Git%20Convention.md) 3.3 MR 템플릿 참고).
+- 브랜치는 **작업이 속한 스토리** 키를 쓴다 (`feat/{스토리 키}-{작업 내용}`, 예: `feat/S15P21A104-3-planning-docs`). **스토리 없이 에픽에 바로 달린 예외 작업**은 스토리 키 대신 에픽 prefix를 쓴다(예: `feat/INFRA-ai-fastapi-scaffold`) — 이때도 커밋 메시지의 JIRA 키는 그 작업(Task) 이슈의 실제 키를 그대로 쓴다.
+- `main`, `develop-*`에는 직접 커밋하지 않고 MR로 반영한다.
 
 > 현재 로컬 브랜치는 `main`이지만 원격은 `master`다. 이름이 어긋나 있어 푸시 전 확인이 필요하다.
 
@@ -66,6 +50,12 @@ hotfix/{이슈번호}-{작업 내용}
 **문서는 한국어로 쓴다.** 기존 문서가 전부 한국어이며, 코드 주석도 한국어를 쓴다.
 
 **줄바꿈은 LF다.** `.gitattributes`에서 정규화하므로 편집 시 유지한다.
+
+**호출 한도·과금이 있는 외부 API는 대량·반복 실행 전 사용자에게 확인한다.** 서울 열린데이터광장·공공데이터포털 API 키는 발급 정책·호출 한도가 있고(`AI/README.md` 4절), `bikeList`처럼 호출당 건수 제한이 있는 것도 있다. 대여이력 몇 개월치 다운로드처럼 호출 횟수가 크거나 반복 실행되는 스크립트는 작성은 하되, 실행 범위(기간·건수)를 사용자와 먼저 맞추고 실행한다. 스키마 확인 수준의 1회성 호출은 예외.
+
+**커밋 전 해당 파트의 lint·테스트를 로컬에서 통과시킨다.** AI는 `ruff check .` / `black --check .` / `pytest -q`(`AI/CLAUDE.md` 참고), BE/FE는 초기화 후 각 파트 README의 검증 명령을 따른다.
+
+**`AI/` 안에서 작업할 때는 `AI/CLAUDE.md`(실행·CI·모듈 규약)를 추가로 참고한다.**
 
 ## 기획 배경
 
