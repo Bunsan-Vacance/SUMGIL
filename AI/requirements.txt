@@ -27,6 +27,7 @@ seaborn
 requests
 python-dotenv
 
-# ── 품질 ──
-pytest
-ruff
+# ── API 서빙 ──
+fastapi
+uvicorn[standard]
+pydantic-settings

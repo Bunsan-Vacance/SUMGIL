@@ -1,0 +1,8 @@
+# CI/개발 도구. requirements.txt는 별도로 함께 설치한다.
+-r requirements.txt
+
+# ── 품질 · 테스트 ──
+ruff
+black
+pytest
+httpx
