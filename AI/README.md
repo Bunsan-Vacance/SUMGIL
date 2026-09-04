@@ -18,13 +18,16 @@ B안 (내려서 따릉이) = 출구→대여소 도보 + 대여 1분 + 주행 + 
                                               ↑ 실측 이력에서 뽑은 값
 ```
 
-| 산출물 | 설명 | 소비처 |
-| --- | --- | --- |
-| **착석 기회 지수** | 혼잡도 → 앉을 확률 변환. 역·시간대·요일별 | BE 조회 API |
-| **자리 회전 예측** | "몇 정거장 뒤에 자리가 나는가" — 하차 피크 기반 | BE 조회 API |
-| **대여소 쌍별 실측 소요시간** | 대여이력 `반납시각 − 대여시각` 분포 | 역전 판정 |
-| **따릉이 고갈 예측** | "20분 후 예상 잔여 대수" | 재고 검증 |
-| **역전 테이블** | 역 × 목적지 × 시간대 × 요일 사전계산 | BE 조회 API |
+| 산출물 | 설명 | 소비처 | `app/` 도메인 |
+| --- | --- | --- | --- |
+| **착석 기회 지수** | 혼잡도 → 앉을 확률 변환. 역·시간대·요일별 | BE 조회 API | `CROWD` |
+| **자리 회전 예측** | "몇 정거장 뒤에 자리가 나는가" — 하차 피크 기반 | BE 조회 API | `CROWD` |
+| **대여소 쌍별 실측 소요시간** | 대여이력 `반납시각 − 대여시각` 분포 | 역전 판정 | `BYC` |
+| **따릉이 고갈 예측** | "20분 후 예상 잔여 대수" | 재고 검증 | `BYC` |
+| **역전 테이블** | 역 × 목적지 × 시간대 × 요일 사전계산 | BE 조회 API | `RVSL` |
+
+`RVSL`(역전 판정)은 `CROWD`·`BYC`의 산출물을 조합해서 만드는 결과물이라 별도 도메인으로 둔다.
+JIRA 에픽이 확정되면 위 도메인명(대문자)을 에픽 키에 맞춰 조정한다.
 
 ## 2. 모델 계획
 
@@ -128,34 +131,63 @@ source .venv/Scripts/activate   # Windows Git Bash
 # .venv\Scripts\activate.bat    # cmd
 # source .venv/bin/activate     # macOS / Linux
 
-# 의존성
-pip install -r requirements.txt
+# 의존성 (개발 도구 포함)
+pip install -r requirements-dev.txt
 
 # 설치 후 버전 고정 (최초 1회, 팀 공유)
 pip freeze > requirements.lock.txt
+
+# FastAPI 서버 (AI/에서 실행 — .env를 실행 CWD 기준으로 읽는다)
+uvicorn app.main:app --reload --port 8000
 ```
 
 ## 7. 디렉터리 구조
 
+FastAPI 기준 **도메인 우선(domain-first)** 구조를 쓴다. 기능(산출물)마다 `app/<도메인>/`
+자체완결 패키지를 만들고, 도메인 내부는 파일로 레이어를 나눈다.
+
 ```
 AI/
-├─ src/           수집 · 전처리 · 피처 · 모델 · 배치 잡
-├─ notebooks/     탐색적 분석(EDA), 실험 기록
+├─ app/                    # 프로덕션 코드
+│  ├─ main.py              #   FastAPI 앱 생성 + 도메인 router 등록 + /health
+│  ├─ core/                #   앱 전역 공통 — config.py 등
+│  ├─ shared/              #   여러 도메인이 공유하는 유틸(공공데이터 API 클라이언트 등)
+│  ├─ CROWD/               #   착석 기회 지수 · 자리 회전 예측
+│  │  ├─ router.py         #     APIRouter — 요청 검증·응답 변환만, 로직은 service로 위임
+│  │  ├─ service.py        #     비즈니스 로직
+│  │  ├─ schemas.py        #     요청/응답 pydantic 모델
+│  │  └─ pipeline/         #     오프라인 배치(피처 집계 등)
+│  ├─ BYC/                 #   대여소 쌍별 소요시간 · 따릉이 고갈 예측 (구조는 CROWD와 동일)
+│  └─ RVSL/                #   역전 테이블 — CROWD·BYC 산출물을 조합 (구조는 CROWD와 동일)
+├─ test/                   # app/<도메인>/ 구조를 그대로 미러 (test/CROWD/, test/BYC/, ...)
+├─ validation/             # PoC · 스파이크 코드 — 프로덕션 아님 (관례는 validation/README.md)
 ├─ data/
-│  ├─ raw/        원본 수집 데이터        ← Git 추적 제외
-│  └─ processed/  정제·가공 데이터        ← Git 추적 제외
-├─ models/        학습된 모델 산출물      ← Git 추적 제외
-└─ tests/         테스트 코드
+│  ├─ raw/                 # 원본 수집 데이터        ← Git 추적 제외
+│  └─ processed/           # 정제·가공 데이터        ← Git 추적 제외
+├─ models/                 # 학습된 모델 산출물      ← Git 추적 제외
+├─ requirements.txt        # 프로덕션 런타임 의존성
+├─ requirements-dev.txt    # + ruff/black/pytest/httpx
+└─ pyproject.toml          # ruff/black/pytest 설정
 ```
 
-**`data/`와 `models/`는 Git에 올리지 않는다.** 용량이 크고 재생성이 가능하기 때문이며 루트 `.gitignore`에서 제외 처리돼 있다. 공유가 필요하면 별도 스토리지를 쓰고 경로만 문서로 남긴다.
+- **`app/`은 게이트웨이·서빙 계층.** 무거운 학습·배치 코드는 각 도메인의 `pipeline/`에 두되,
+  torch 등 무거운 의존성이 서빙 경로(`router.py`/`service.py`)까지 끌려오지 않게 한다.
+- 도메인 테스트는 `test/<도메인>/`에 둔다(`app/` 아래에 `tests/`를 따로 만들지 않는다).
+  **`test/` 아래에는 `__init__.py`를 만들지 않는다** — 표준 라이브러리 `test` 패키지와 충돌한다.
+  대신 테스트 파일명이 리포 전체에서 유일해야 한다(`test_<도메인>_<대상>.py`).
+- **`data/`와 `models/`는 Git에 올리지 않는다.** 용량이 크고 재생성이 가능하기 때문이며 루트
+  `.gitignore`에서 제외 처리돼 있다. 공유가 필요하면 별도 스토리지를 쓰고 경로만 문서로 남긴다.
 
 ## 8. 작업 규칙
 
-- **노트북은 탐색용, `src/`는 재현용.** 노트북에서 검증된 로직은 `src/`의 순수 함수로 옮긴 뒤 파이프라인에 연결한다.
+- **`validation/`은 탐색용, `app/`은 재현·서빙용.** `validation/`에서 검증된 로직은
+  `app/<도메인>/service.py` 또는 `pipeline/`으로 옮긴 뒤 라우터에 연결한다. 반대 방향(`app/`이
+  `validation/`을 import)은 하지 않는다.
 - 피처 엔지니어링 함수는 **학습 코드와 Spark 양쪽에서 재사용 가능하게** numpy/pandas 기반 순수 함수로 작성한다. Spark에서는 `pandas_udf`로 감싸 쓴다.
 - 노트북 커밋 전 출력(output)을 비운다. diff가 읽히지 않는다.
 - API 키·인증 정보는 `.env`에 두고 커밋하지 않는다.
+- 커밋 전 로컬에서 `ruff check .`, `black --check .`, `pytest -q`를 돌려서 확인한다
+  (`requirements-dev.txt` 설치 필요).
 - **추정 데이터는 절대값이 아니라 변화율·상대 순위로 쓴다.** 표본이 부족한 구간에는 값을 채우지 않고 "데이터 부족"으로 명시한다. → [데이터 검증 리포트의 원칙 8가지](../Docs/Service%20Design/데이터-검증-리포트.md#5-검증에서-도출된-원칙)
 
 ## 9. 다음 할 일
