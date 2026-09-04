@@ -6,7 +6,10 @@ stages:
   image: python:3.11-slim
   rules:
     - changes:
-        - "AI/**/*"
+        - "AI/**/*.py"
+        - "AI/pyproject.toml"
+        - "AI/requirements.txt"
+        - "AI/requirements-dev.txt"
   variables:
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   cache:
