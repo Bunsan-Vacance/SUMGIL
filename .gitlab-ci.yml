@@ -4,6 +4,8 @@ stages:
 
 .ai_job:
   image: python:3.11-slim
+  tags:
+    - CI
   rules:
     - changes:
         - "AI/**/*.py"
