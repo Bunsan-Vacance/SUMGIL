@@ -1,0 +1,26 @@
+
+# systemd 유닛 템플릿. /etc/systemd/system/bike-realtime-poller.service 로 복사 후
+# WorkingDirectory / ExecStart의 <REPO_ROOT>, <VENV_PATH>를 실제 경로로 바꿔서 쓴다.
+#
+#   sudo cp AI/scripts/bike-realtime-poller.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now bike-realtime-poller
+#   sudo systemctl status bike-realtime-poller
+
+[Unit]
+Description=Ttareungyi realtime bike inventory poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=<REPO_ROOT>/AI
+EnvironmentFile=<REPO_ROOT>/AI/.env
+ExecStart=<VENV_PATH>/bin/python -m src.collect.bike_realtime
+Restart=always
+RestartSec=10
+StandardOutput=append:<REPO_ROOT>/AI/logs/bike_realtime.log
+StandardError=append:<REPO_ROOT>/AI/logs/bike_realtime.log
+
+[Install]
+WantedBy=multi-user.target

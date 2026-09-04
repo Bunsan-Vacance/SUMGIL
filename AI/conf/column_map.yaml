@@ -1,0 +1,38 @@
+# 서울 열린데이터광장 "파일형" 원본 컬럼명 → 정규화 컬럼명 매핑.
+#
+# 주의: 아래 매핑은 공개된 문서 기준 최선 추정치다. 실제로 다운로드한 파일의 헤더가
+# 다르면(연도별로 컬럼이 개정된 이력이 있음) 이 파일을 직접 수정해서 맞춰야 한다.
+# src/eda/parsers.py 는 이 파일을 그대로 신뢰하고 매핑하므로, 사용 전 헤더 대조 필수.
+
+rental_history:  # OA-15182, 따릉이 대여이력 (월별 CSV, cp949 가능성 높음)
+  자전거번호: bike_id
+  대여일시: rent_dt
+  대여 대여소번호: rent_station_id
+  대여 대여소명: rent_station_name
+  대여거치대: rent_rack_no
+  반납일시: return_dt
+  반납대여소번호: return_station_id
+  반납대여소명: return_station_name
+  반납거치대: return_rack_no
+  이용시간(분): duration_min
+  이용거리(M): distance_m
+  생년: birth_year
+  성별: gender
+  이용자종류: user_type
+
+station_5min:  # OA-21229, 대여소별 대여/반납 5분단위
+  대여일자: date
+  대여시간: time_5min
+  대여소번호: station_id
+  대여소명: station_name
+  대여건수: rent_count
+  반납건수: return_count
+
+station_master:  # OA-21235 / OA-13252, 대여소 마스터
+  대여소번호: station_id
+  대여소명: station_name
+  자치구: district
+  상세주소: address
+  위도: latitude
+  경도: longitude
+  거치대수: rack_total_cnt

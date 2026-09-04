@@ -26,6 +26,13 @@ seaborn
 # ── 데이터 수집 ──
 requests
 python-dotenv
+tenacity
+pyyaml
+chardet
+openpyxl
+
+# ── 통계 (EDA) ──
+statsmodels
 
 # ── API 서빙 ──
 fastapi
