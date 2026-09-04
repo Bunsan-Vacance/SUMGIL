@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
@@ -23,7 +24,9 @@ from src.collect.common import DATA_RAW, env, http_retry, now_kst, save_partitio
 
 logger = logging.getLogger("weather_nowcast")
 
-BASE_URL = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0"
+# 기상청 API허브(authKey 인증) 엔드포인트. 공공데이터포털(data.go.kr, serviceKey 인증)과는
+# 별개 시스템이라 혼동 주의 — apihub 발급 키는 이쪽에서만 동작한다.
+BASE_URL = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0"
 DEFAULT_NX = 60
 DEFAULT_NY = 127
 POLL_INTERVAL_SEC = (
@@ -33,20 +36,31 @@ POLL_INTERVAL_SEC = (
 ITEMS_KEEP = {"T1H", "RN1", "REH", "WSD", "PTY"}
 
 
-def _base_datetime() -> tuple[str, str]:
-    now = now_kst()
-    return now.strftime("%Y%m%d"), now.strftime("%H%M")
+def _ncst_base_datetime(now: datetime) -> tuple[str, str]:
+    # 초단기실황: 매시 정각 발표, 약 40분 이후부터 안정적으로 조회 가능.
+    candidate = now.replace(minute=0, second=0, microsecond=0)
+    if now < candidate + timedelta(minutes=40):
+        candidate -= timedelta(hours=1)
+    return candidate.strftime("%Y%m%d"), candidate.strftime("%H%M")
+
+
+def _fcst_base_datetime(now: datetime) -> tuple[str, str]:
+    # 초단기예보: 매시 30분 발표, 약 45분 이후부터 안정적으로 조회 가능.
+    candidate = now.replace(minute=30, second=0, microsecond=0)
+    if now < candidate + timedelta(minutes=15):
+        candidate -= timedelta(hours=1)
+    return candidate.strftime("%Y%m%d"), candidate.strftime("%H%M")
 
 
 @http_retry
-def _call(endpoint: str, nx: int, ny: int) -> dict:
+def _call(endpoint: str, nx: int, ny: int, base_date: str, base_time: str) -> dict:
     params = {
-        "serviceKey": env("KMA_API_KEY"),
+        "authKey": env("KMA_API_KEY"),
         "dataType": "JSON",
         "numOfRows": "100",
         "pageNo": "1",
-        "base_date": _base_datetime()[0],
-        "base_time": _base_datetime()[1],
+        "base_date": base_date,
+        "base_time": base_time,
         "nx": nx,
         "ny": ny,
     }
@@ -67,8 +81,12 @@ def _items_to_df(body: dict, source: str) -> pd.DataFrame:
 
 
 def fetch_snapshot(nx: int = DEFAULT_NX, ny: int = DEFAULT_NY) -> pd.DataFrame:
-    ncst = _items_to_df(_call("getUltraSrtNcst", nx, ny), source="observed")
-    fcst = _items_to_df(_call("getUltraSrtFcst", nx, ny), source="forecast")
+    now = now_kst()
+    ncst_date, ncst_time = _ncst_base_datetime(now)
+    fcst_date, fcst_time = _fcst_base_datetime(now)
+
+    ncst = _items_to_df(_call("getUltraSrtNcst", nx, ny, ncst_date, ncst_time), source="observed")
+    fcst = _items_to_df(_call("getUltraSrtFcst", nx, ny, fcst_date, fcst_time), source="forecast")
     return pd.concat([ncst, fcst], ignore_index=True)
 
 
