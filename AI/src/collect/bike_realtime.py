@@ -77,6 +77,18 @@ def fetch_snapshot() -> pd.DataFrame:
         return df
 
     df = df[[c for c in FIELDS if c in df.columns]].copy()
+
+    numeric_cols = [
+        "rackTotCnt",
+        "parkingBikeTotCnt",
+        "shared",
+        "stationLatitude",
+        "stationLongitude",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     df["collected_at"] = collected_at
     return df
 
