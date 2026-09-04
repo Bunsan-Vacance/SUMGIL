@@ -1,0 +1,31 @@
+stages:
+  - lint
+  - test
+
+.ai_job:
+  image: python:3.11-slim
+  rules:
+    - changes:
+        - "AI/**/*"
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  cache:
+    key: ai-pip-$CI_COMMIT_REF_SLUG
+    paths:
+      - .cache/pip
+  before_script:
+    - cd AI
+    - pip install -r requirements-dev.txt
+
+ai-lint:
+  extends: .ai_job
+  stage: lint
+  script:
+    - ruff check .
+    - black --check .
+
+ai-test:
+  extends: .ai_job
+  stage: test
+  script:
+    - pytest -q
