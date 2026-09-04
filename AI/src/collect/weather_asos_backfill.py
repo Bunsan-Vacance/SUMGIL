@@ -31,6 +31,56 @@ logger = logging.getLogger("weather_asos_backfill")
 BASE_URL = "https://apihub.kma.go.kr/api/typ01/url/kma_sfctm3.php"
 STATION_ID = "108"  # 서울
 
+# help=1 응답으로 확인한 kma_sfctm3 컬럼 순서 (46개 고정폭 필드).
+COLUMNS = [
+    "tm",
+    "stn",
+    "wd",
+    "ws",
+    "gst_wd",
+    "gst_ws",
+    "gst_tm",
+    "pa",
+    "ps",
+    "pt",
+    "pr",
+    "ta",
+    "td",
+    "hm",
+    "pv",
+    "rn",
+    "rn_day",
+    "rn_jun",
+    "rn_int",
+    "sd_hr3",
+    "sd_day",
+    "sd_tot",
+    "wc",
+    "wp",
+    "ww",
+    "ca_tot",
+    "ca_mid",
+    "ch_min",
+    "ct",
+    "ct_top",
+    "ct_mid",
+    "ct_low",
+    "vs",
+    "ss",
+    "si",
+    "st_gd",
+    "ts",
+    "te_005",
+    "te_01",
+    "te_02",
+    "te_03",
+    "st_sea",
+    "wh",
+    "bf",
+    "ir",
+    "ix",
+]
+
 
 @http_retry
 def _fetch_range(tm1: str, tm2: str) -> str:
@@ -47,10 +97,22 @@ def _fetch_range(tm1: str, tm2: str) -> str:
 
 
 def _parse_asos_text(raw_text: str) -> pd.DataFrame:
-    """kma_sfctm3 응답(공백 구분 텍스트)을 DataFrame으로. 헤더는 최초 스키마 확인 호출로 검증 필요."""
+    """kma_sfctm3 응답(공백 구분 텍스트)을 DataFrame으로. 결측값(-9, -9.0 등)은 그대로 둔다 —
+    항목별 결측 코드가 달라(예: RN -9.0=무강수 아님/미관측 구분 필요) 일괄 NaN 치환은 하지 않음."""
     lines = [ln for ln in raw_text.splitlines() if ln and not ln.startswith("#")]
     rows = [ln.split() for ln in lines]
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=COLUMNS[: len(rows[0])] if rows else COLUMNS)
+
+    numeric_cols = [
+        c
+        for c in df.columns
+        if c not in {"tm", "wc", "wp", "ww", "ct", "ct_top", "ct_mid", "ct_low"}
+    ]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["tm"] = pd.to_datetime(df["tm"], format="%Y%m%d%H%M")
+
+    return df
 
 
 def backfill(start: date, end: date, chunk_days: int = 30) -> None:
