@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from src.collect.common import save_partitioned_parquet
+from DATA_ENGINE.collect.common import save_partitioned_parquet
 
 
 def test_save_partitioned_parquet_layout(tmp_path):

@@ -5,7 +5,7 @@ data/raw/bike/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet 로 저장한다.
 
 실행:
     cd AI
-    python -m src.collect.bike_realtime
+    python -m DATA_ENGINE.collect.bike_realtime
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import time
 import pandas as pd
 import requests
 
-from src.collect.common import (
+from DATA_ENGINE.collect.common import (
     DATA_RAW,
     env,
     http_retry,

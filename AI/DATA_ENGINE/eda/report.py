@@ -5,7 +5,7 @@ data/interim 산출물이 만들어진 이후. 지금은 데이터가 없어 실
 
 실행:
     cd AI
-    python -m src.eda.report
+    python -m DATA_ENGINE.eda.report
 """
 
 from __future__ import annotations
@@ -16,12 +16,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from src.eda import analysis
+from DATA_ENGINE.eda import analysis
 
 AI_ROOT = Path(__file__).resolve().parents[2]
 DATA_RAW = AI_ROOT / "data" / "raw"
 DATA_INTERIM = AI_ROOT / "data" / "interim"
-REPORTS_DIR = AI_ROOT / "reports"
+REPORTS_DIR = AI_ROOT / "DATA_ENGINE" / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 
 
@@ -40,7 +40,7 @@ def _load_rental_hourly() -> pd.DataFrame:
     if not files:
         raise FileNotFoundError(
             "data/interim 에 rental_history 파싱 결과가 없습니다. "
-            "reports/download_guide.md 안내대로 원본을 받아 src/eda/parsers.py로 파싱하세요."
+            "DATA_ENGINE/reports/download_guide.md 안내대로 원본을 받아 DATA_ENGINE/eda/parsers.py로 파싱하세요."
         )
     df = pd.concat((pd.read_parquet(f) for f in files), ignore_index=True)
     df["dt_hour"] = pd.to_datetime(df["rent_dt"]).dt.floor("h")

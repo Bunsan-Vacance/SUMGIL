@@ -8,21 +8,21 @@
 
 ## 1. 따릉이 대여이력 (OA-15182)
 
-- 월별 CSV. cp949 인코딩 가능성이 높습니다 (`src/eda/parsers.py`가 자동 감지·처리).
+- 월별 CSV. cp949 인코딩 가능성이 높습니다 (`DATA_ENGINE/eda/parsers.py`가 자동 감지·처리).
 - 저장 위치: `AI/data/raw/bike/rental_history/` — 파일명은 원본 그대로 둬도 됩니다.
-- 파싱: `cd AI && python -m src.eda.parsers rental_history data/raw/bike/rental_history/<파일명>.csv`
+- 파싱: `cd AI && python -m DATA_ENGINE.eda.parsers rental_history data/raw/bike/rental_history/<파일명>.csv`
 
 ## 2. 대여소별 대여/반납 5분단위 (OA-21229)
 
 - 일별 또는 월별 ZIP.
 - 저장 위치: `AI/data/raw/bike/station_5min/`
-- 파싱: `cd AI && python -m src.eda.parsers station_5min data/raw/bike/station_5min/<파일명>.zip`
+- 파싱: `cd AI && python -m DATA_ENGINE.eda.parsers station_5min data/raw/bike/station_5min/<파일명>.zip`
 
 ## 3. 따릉이 대여소 마스터 (OA-21235, OA-13252)
 
 - 대여소 좌표·거치대수. CSV 또는 엑셀(xlsx)로 제공될 수 있습니다.
 - 저장 위치: `AI/data/raw/bike/station_master/`
-- 파싱: `cd AI && python -m src.eda.parsers station_master data/raw/bike/station_master/<파일명>.csv`
+- 파싱: `cd AI && python -m DATA_ENGINE.eda.parsers station_master data/raw/bike/station_master/<파일명>.csv`
 
 ## 주의
 

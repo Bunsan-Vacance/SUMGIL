@@ -35,6 +35,15 @@
   **테스트 파일명은 리포 전체에서 유일해야 한다**(`test_<도메인>_<대상>.py`).
 - `validation/` — PoC·스파이크 코드(관례는 `validation/README.md`). 프로덕션(`app/`)에서
   import하지 않는다. 반대 방향(`test/`·`validation/`이 `app/`을 import)은 정상이다.
+- `DATA_ENGINE/` — 원천 데이터 수집·EDA 계층. `app/`(서빙)·`validation/`(모델 PoC) 어디에도
+  속하지 않는 별도 생애주기라 분리했다 — `collect/`(API 폴링·백필)와 `eda/`(파서·분석·리포트
+  생성)로 나뉜다. `app/`은 `DATA_ENGINE/`을 import하지 않는다(단방향). 대문자인 이유는
+  `CROWD/`·`BYC/`·`RVSL`과 같은 시각적 구분 규칙을 따른 것 — 최상위 패키지라 ruff N999가
+  중첩 도메인 패키지와 달리 이것만 잡아내서 `pyproject.toml`에 예외 처리해뒀다.
+  - `conf/`, `reports/`, `scripts/`도 `DATA_ENGINE/` 전용이라 그 안에 같이 둔다
+    (`conf/column_map.yaml` 설정, `reports/` 산출물, `scripts/` nohup·systemd 배포 템플릿).
+  - `data/`(원본·중간·가공 저장소)는 이름이 비슷해 보이지만 `AI/data/`에 그대로 있다 —
+    `.gitignore`가 이 경로를 기준으로 걸려 있어 옮기지 않았다.
 
 ## 테스트 작성 — 무거운 의존성 가드
 

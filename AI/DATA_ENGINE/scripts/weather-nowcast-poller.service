@@ -2,7 +2,7 @@
 # systemd 유닛 템플릿. /etc/systemd/system/weather-nowcast-poller.service 로 복사 후
 # WorkingDirectory / ExecStart의 <REPO_ROOT>, <VENV_PATH>를 실제 경로로 바꿔서 쓴다.
 #
-#   sudo cp AI/scripts/weather-nowcast-poller.service /etc/systemd/system/
+#   sudo cp AI/DATA_ENGINE/scripts/weather-nowcast-poller.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now weather-nowcast-poller
 #   sudo systemctl status weather-nowcast-poller
@@ -16,7 +16,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=<REPO_ROOT>/AI
 EnvironmentFile=<REPO_ROOT>/AI/.env
-ExecStart=<VENV_PATH>/bin/python -m src.collect.weather_nowcast
+ExecStart=<VENV_PATH>/bin/python -m DATA_ENGINE.collect.weather_nowcast
 Restart=always
 RestartSec=10
 StandardOutput=append:<REPO_ROOT>/AI/logs/weather_nowcast.log

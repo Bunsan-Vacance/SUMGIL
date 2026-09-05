@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.eda.analysis import _haversine_m, inventory_distribution, weekday_hour_heatmap
+from DATA_ENGINE.eda.analysis import _haversine_m, inventory_distribution, weekday_hour_heatmap
 
 
 def _snapshots():

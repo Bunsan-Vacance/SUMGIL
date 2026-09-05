@@ -8,7 +8,7 @@
 
 실행:
     cd AI
-    python -m src.collect.weather_nowcast
+    python -m DATA_ENGINE.collect.weather_nowcast
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
-from src.collect.common import DATA_RAW, env, http_retry, now_kst, save_partitioned_parquet
+from DATA_ENGINE.collect.common import DATA_RAW, env, http_retry, now_kst, save_partitioned_parquet
 
 logger = logging.getLogger("weather_nowcast")
 

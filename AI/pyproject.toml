@@ -4,6 +4,9 @@ target-version = "py311"
 
 [tool.ruff.lint.per-file-ignores]
 "validation/**" = ["E402", "BLE001", "F401"]
+# DATA_ENGINE는 app/의 CROWD/BYC/RVSL과 같은 대문자 패키지 컨벤션이지만, 최상위 패키지라
+# ruff N999(모듈명 snake_case 검사)가 중첩 패키지와 달리 이것만 잡아낸다 — 의도된 이름이라 무시.
+"DATA_ENGINE/**" = ["N999"]
 
 [tool.black]
 line-length = 100

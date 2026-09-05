@@ -10,9 +10,9 @@
 
 실행:
     cd AI
-    python -m src.collect.weather_asos_backfill                 # dry-run (호출 안 함)
-    python -m src.collect.weather_asos_backfill --yes            # 실제 백필 실행
-    python -m src.collect.weather_asos_backfill --start 2024-01-01 --end 2024-01-07 --yes  # 범위 좁혀 검증
+    python -m DATA_ENGINE.collect.weather_asos_backfill                 # dry-run (호출 안 함)
+    python -m DATA_ENGINE.collect.weather_asos_backfill --yes            # 실제 백필 실행
+    python -m DATA_ENGINE.collect.weather_asos_backfill --start 2024-01-01 --end 2024-01-07 --yes  # 범위 좁혀 검증
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import requests
 
-from src.collect.common import DATA_RAW, env, http_retry, now_kst
+from DATA_ENGINE.collect.common import DATA_RAW, env, http_retry, now_kst
 
 logger = logging.getLogger("weather_asos_backfill")
 

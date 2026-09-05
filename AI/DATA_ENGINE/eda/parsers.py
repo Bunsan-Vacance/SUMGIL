@@ -5,7 +5,7 @@
 
 실행 예:
     cd AI
-    python -m src.eda.parsers rental_history data/raw/bike/rental_history/2025년01월.csv
+    python -m DATA_ENGINE.eda.parsers rental_history data/raw/bike/rental_history/2025년01월.csv
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import pandas as pd
 import yaml
 
 AI_ROOT = Path(__file__).resolve().parents[2]
-COLUMN_MAP_PATH = AI_ROOT / "conf" / "column_map.yaml"
+COLUMN_MAP_PATH = AI_ROOT / "DATA_ENGINE" / "conf" / "column_map.yaml"
 INTERIM_DIR = AI_ROOT / "data" / "interim"
 
 logger = logging.getLogger("parsers")
