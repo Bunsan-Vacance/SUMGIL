@@ -73,6 +73,13 @@ def parse_rental_history(csv_path: Path) -> Path:
     return out_path
 
 
+def _add_dt_5min(df: pd.DataFrame) -> pd.DataFrame:
+    """date(YYYYMMDD) + time_code(0~2355, HMM 5분단위)를 dt_5min(datetime)으로 합친다."""
+    time_str = df["time_code"].astype(int).astype(str).str.zfill(4)
+    df["dt_5min"] = pd.to_datetime(df["date"].astype(str) + time_str, format="%Y%m%d%H%M")
+    return df
+
+
 def parse_station_5min(zip_path: Path) -> list[Path]:
     out_paths: list[Path] = []
     with zipfile.ZipFile(zip_path) as zf:
@@ -86,6 +93,7 @@ def parse_station_5min(zip_path: Path) -> list[Path]:
 
             df = pd.read_csv(io.BytesIO(raw), encoding=encoding)
             df = _normalize(df, "station_5min")
+            df = _add_dt_5min(df)
             out_path = INTERIM_DIR / f"station_5min_{Path(name).stem}.parquet"
             df.to_parquet(out_path, index=False)
             out_paths.append(out_path)
