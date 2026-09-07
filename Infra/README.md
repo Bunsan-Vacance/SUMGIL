@@ -8,11 +8,11 @@
 
 ## 현재 상태
 
-**골격만 잡아둔 단계다.** 각 파트의 Dockerfile이 아직 없어 `docker compose up`으로 전체 스택이 뜨지는 않는다.
+**골격만 잡아둔 단계다.** 각 파트의 Dockerfile이 아직 없어 `docker compose up`으로 전체 스택이 뜨지는 않는다. 다만 BE 로컬 개발에 필요한 `postgres`·`redis`는 실제로 뜬다.
 
 | 파일 | 상태 |
 | --- | --- |
-| `docker/docker-compose.yml` | 서비스 정의 골격 (fe·be·db는 주석 처리) |
+| `docker/docker-compose.yml` | `postgres`·`redis`는 실행 가능 (BE 로컬 개발용, [BE/README.md](../BE/README.md) 참고). `fe`·`be`는 각 파트 Dockerfile이 생기기 전까지 주석 처리 |
 | `nginx/nginx.conf` | 리버스 프록시 골격 (`server_name` 미지정) |
 
 ## 디렉터리 구조
