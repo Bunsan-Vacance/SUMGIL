@@ -28,6 +28,9 @@ public class EdgeTimeId implements Serializable {
     @Column(name = "mode", length = 8)
     private TravelMode mode;
 
+    @Column(name = "route_id", length = 24)
+    private String routeId;
+
     @Column(name = "dow_type")
     private Integer dowType;
 

@@ -12,9 +12,22 @@
 | 역 | 지하철역 | `station` |
 | 정류소 | 버스정류소 | `bus_stop` |
 | 대여소 | 따릉이 대여소 | `bike_station` |
-| 노선 | 지하철 노선 / 버스 노선 | `line` / `bus_route` |
+| 노선 | 지하철 노선 | `line` |
+| 버스노선 | 버스 노선 | `bus_route` |
 
 `station_id`는 역 ID 전용이다. 대여소는 `rental_id`, 정류소는 `stop_id`를 사용한다.
+`노선` 단독 사용 시 지하철 노선을 가리킨다. 버스 노선은 반드시 `버스노선`으로 표기한다.
+
+## 수단
+
+| 코드 | 한글 표기 |
+|---|---|
+| SUBWAY | 지하철 |
+| BUS | 버스 |
+| BIKE | 따릉이 |
+| WALK | 도보 |
+
+코드의 영문이 정본이며 한글은 표시용이다.
 
 ## 마스터
 
@@ -24,7 +37,7 @@
 | `bus_stop` | `stop_id` | 정류소 ID·이름·좌표 |
 | `bike_station` | `rental_id` | 대여소 ID·이름·좌표·거치대 수 |
 | `line` | `line_id` | 노선 ID·이름 (경로 legs 표시용) |
-| `bus_route` | `route_id` | 노선 ID·번호 (경로 legs 표시용) |
+| `bus_route` | `route_id` | 버스노선 ID·번호 (경로 legs 표시용) |
 
 역과 정류소는 컬럼 구성이 같으나 분리한다. 역은 노선에 소속되고 환승이 발생하며,
 정류소는 노선을 경유하므로 연결 관계가 다르다.
@@ -33,7 +46,7 @@
 
 | 테이블 | 키 | 내용 |
 |---|---|---|
-| `edge_time` | `from·to·mode·dow·slot` | 탐색 그래프의 엣지 |
+| `edge_time` | `from·to·mode·route·dow·slot` | 탐색 그래프의 엣지 |
 | `congestion` | `target·dow·slot` | 혼잡도 0.0~100.0 |
 | `bike_stock_pred` | `rental·dow·slot` | 도착 예상 시각 기준 재고 예측 |
 | `transfer_meta` | `station·from·to` | 동일 역 내 노선 간 환승 정보 |
@@ -49,6 +62,9 @@
 스키마로 강제하지 않으며 적재 시 검증한다.
 
 - SUBWAY는 역과 역을, BUS는 정류소와 정류소를, BIKE는 대여소와 대여소를 연결한다.
+  동일 정점 쌍도 노선마다 다른 행이 된다.
+- `route_id`는 노선 한정자이다. SUBWAY·TRANSFER는 `line_id`,
+  BUS는 `bus_route.route_id`, WALK는 `'-'`를 쓴다.
 - WALK는 모든 정점 간 이동이 가능하며 수단 간 연결을 전담한다.
 - TRANSFER는 동일 역 내 노선 간 이동에 사용한다.
 - `dow_type`은 0 평일 / 1 토요일 / 2 일요일·공휴일이다.
