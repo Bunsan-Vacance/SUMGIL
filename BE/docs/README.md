@@ -58,20 +58,27 @@ SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 
 1. **API 명세 불일치** — 지금 만든 `GET /api/routes/search`, `GET /api/stations/nearby`는 `BE/README.md` 2절에 이미 있던 API 초안(`/api/v1/escape` 등, `/api/v1/` 버전 프리픽스, 다른 응답 구조)과 형태가 다르다. FE 연동 전에 어느 쪽으로 갈지 정해야 한다. 자세한 건 [api/mock-endpoints.md](./api/mock-endpoints.md).
 2. **패키지 구조 전환 시점** — 지금의 평평한 `controller/`, `dto/`를 언제 도메인 단위(`domain.route`, `domain.station` ...)로 옮길지.
-3. **EC2 배포는 아직 준비 안 됨** — `BE/Dockerfile`이 없고, `Infra/docker/docker-compose.yml`의 `fe`/`be` 블록도 주석 처리 상태다. 환경변수를 `.env`/`.env.example`로 분리하는 작업(`Infra/README.md` 3번 항목)도 안 됐다. EC2에 올리려면 이것들부터 해야 한다.
+3. **EC2 배포(CD)는 아직 준비 안 됨** — CI(테스트)는 생겼지만 배포는 별개다. `BE/Dockerfile`이 없고, `Infra/docker/docker-compose.yml`의 `fe`/`be` 블록도 주석 처리 상태다. 환경변수를 `.env`/`.env.example`로 분리하는 작업(`Infra/README.md` 3번 항목)도 안 됐다. EC2에 올리려면 이것들부터 해야 한다.
 
-## 6. 검증 이력
+## 6. CI
+
+`BE/**/*` 변경 시 도는 `be-test` job을 루트 `.gitlab-ci.yml`에 추가했다 (`S15P11A108`의 be-test 참고, postgres:16/redis:7로 이 프로젝트 스택에 맞춤). 자세한 건 [infra/ci.md](./infra/ci.md).
+
+## 7. 검증 이력
 
 - `docker compose -f Infra/docker/docker-compose.yml up -d postgres redis`로 컨테이너 기동 확인 (정상)
 - `SPRING_PROFILES_ACTIVE=local ./gradlew build` → **`BUILD SUCCESSFUL`** (JPA/Redis 연결 포함한 `contextLoads()` 테스트까지 통과)
-- 단, 이건 테스트가 앱을 메모리 안에서 잠깐 띄워 연결만 확인한 것이고, `./gradlew bootRun`으로 실제 서버를 띄워 API를 직접 호출해보는 것까지는 아직 안 했다.
+- CI와 동일하게 `local` 프로필 없이 `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`REDIS_HOST`/`REDIS_PORT`만 export한 상태로 `./gradlew test --rerun`도 통과 확인 — `be-test` job이 실제로 성공할 조합임을 로컬에서 미리 검증한 것.
+- 단, `./gradlew bootRun`으로 실제 서버를 띄워 API를 직접 호출해보는 것까지는 아직 안 했다.
 - 검증 후 컨테이너는 다시 내려뒀다 (`docker compose ... down`).
 
-## 7. 커밋 상태
+## 8. 커밋 상태
 
-아래 2개 커밋으로 나눠서 로컬에 반영했고, **아직 push 전**이다.
+아래 커밋들로 나눠서 로컬에 반영했고, **아직 push 전**이다.
 
 ```
 [S15P21A104-60] chore: Spring Boot 프로젝트 초기화 및 mock 라우트/대여소 API 추가
 [S15P21A104-60] chore: 로컬 개발용 Postgres·Redis 서비스 추가
+[S15P21A104-60] docs: BE 초기 세팅 요약 문서 추가
+[S15P21A104-60] chore: BE 빌드/테스트 CI job(be-test) 추가
 ```
