@@ -22,28 +22,27 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DomainException.class)
     public ResponseEntity<ApiResult<Void>> handleDomainException(
             DomainException exception, HttpServletRequest request) {
-        ErrorCode errorCode = exception.getErrorCode();
+        ErrorType errorType = exception.getErrorType();
         log.warn("[Domain] {} {} -> {} {}", request.getMethod(), request.getRequestURI(),
-                errorCode.getCode(), exception.getMessage());
+                errorType.getCode(), exception.getMessage());
         return ResponseEntity
-                .status(errorCode.getStatus())
-                .body(ApiResult.fail(errorCode));
+                .status(errorType.getStatus())
+                .body(ApiResult.fail(errorType));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResult<Void>> handleValidationException(
             MethodArgumentNotValidException exception, HttpServletRequest request) {
-        String message = exception.getBindingResult()
+        String details = exception.getBindingResult()
                 .getFieldErrors()
                 .stream()
                 .map(this::formatFieldError)
                 .collect(Collectors.joining(", "));
-        log.warn("[Validation] {} {} -> {}", request.getMethod(), request.getRequestURI(), message);
+        log.warn("[Validation] {} {} -> {}", request.getMethod(), request.getRequestURI(), details);
 
         return ResponseEntity
                 .status(ErrorType.BAD_REQUEST.getStatus())
-                .body(ApiResult.fail(ErrorType.BAD_REQUEST,
-                        message.isBlank() ? ErrorType.BAD_REQUEST.getMessage() : message));
+                .body(ApiResult.fail(ErrorType.BAD_REQUEST));
     }
 
     @ExceptionHandler({

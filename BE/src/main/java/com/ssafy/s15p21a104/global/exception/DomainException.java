@@ -1,16 +1,15 @@
 package com.ssafy.s15p21a104.global.exception;
 
+import lombok.Getter;
+
+@Getter
 public class DomainException extends RuntimeException {
 
-    private final ErrorCode errorCode;
+    private final ErrorType errorType;
 
-    public DomainException(ErrorCode errorCode) {
-        super(errorCode.getMessage());
-        this.errorCode = errorCode;
-    }
-
-    public ErrorCode getErrorCode() {
-        return errorCode;
+    public DomainException(ErrorType errorType) {
+        super(errorType.getMessage());
+        this.errorType = errorType;
     }
 
     @Override
