@@ -67,3 +67,8 @@ AI/models/*
 *.onnx
 *.pkl
 *.parquet
+
+# DATA_ENGINE 리포트는 데이터로부터 재생성되는 산출물 — download_guide.md 등 직접 쓴 문서만 추적.
+AI/DATA_ENGINE/reports/bike_weather_eda.md
+AI/DATA_ENGINE/reports/figures/*
+!AI/DATA_ENGINE/reports/figures/.gitkeep
