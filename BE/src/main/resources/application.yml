@@ -1,6 +1,9 @@
 spring:
   application:
     name: s15p21a104
+  output:
+    ansi:
+      enabled: always
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -8,7 +11,7 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     show-sql: true
   data:
     redis:

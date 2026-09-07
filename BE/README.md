@@ -1,6 +1,6 @@
 # Backend
 
-**스택** Java 21 · Spring Boot 3.x · Gradle · PostgreSQL · Redis
+**스택** Java 21 · Spring Boot 4.1 · Gradle · PostgreSQL · Redis
 
 > **숨길** — 지하철 탈출 내비게이션.
 > AI 파트가 배치로 만들어둔 산출물과 실시간 스트림 결과를 **사용자 요청 시점에 조합해 두 선택지로 내려주는 파트**다.
@@ -98,7 +98,8 @@
 
 ## 6. 초기화
 
-**아직 프로젝트가 생성되지 않았다.** 폴더만 잡아둔 상태이며, [Spring Initializr](https://start.spring.io)에서 아래 설정으로 생성해 이 디렉터리에 푼다.
+프로젝트 생성 완료 (Initializr, 설정은 아래 표와 같다).
+추가 의존성: Flyway, springdoc-openapi, logstash 인코더, dotenv(로컬 전용).
 
 | 항목 | 값 |
 | --- | --- |
@@ -130,16 +131,19 @@ unzip starter.zip && rm starter.zip
 
 ```
 BE/src/main/java/com/ssafy/s15p21a104/
+├─ api/           인터페이스(*Api) + 구현(*Controller), 도메인별 하위 패키지
+├─ domain/
+│  ├─ station/     역·노선·환승 정보
+│  ├─ bus/         정류소·버스노선
+│  ├─ bike/        대여소·재고 예측
+│  ├─ congestion/  혼잡도
+│  └─ route/       경로 그래프 (엣지)
 ├─ global/
-│  ├─ config/      CORS, Swagger, Redis, JPA
+│  ├─ config/      필터·Swagger·JPA·Flyway·CORS(미사용)
 │  ├─ exception/   전역 예외 처리
-│  └─ common/      공통 응답 포맷, 유틸
-└─ domain/
-   ├─ station/     역 정보, 검색
-   ├─ escape/      A안/B안 비교 (킬러 기능)
-   ├─ congestion/  혼잡도, 착석 기회 지수
-   ├─ bike/        대여소, 실시간 재고
-   └─ route/       경로 그래프, 다익스트라, λ 반영
+│  ├─ response/    공통 응답 래퍼
+│  └─ common/      감사 기반 엔티티
+└─ infrastructure/ 외부 연동 (향후)
 ```
 
 도메인 단위로 수직 분할한다. 레이어를 최상위에 두면 도메인이 늘어날수록 탐색이 어려워진다.
@@ -147,10 +151,18 @@ BE/src/main/java/com/ssafy/s15p21a104/
 ## 8. 실행
 
 ```bash
-./gradlew bootRun    # 개발 서버 (http://localhost:8080)
+# DB·Redis 기동 (저장소 루트에서)
+docker compose -f Infra/docker/docker-compose.yml up -d postgres redis
+
+# BE 실행 (BE 디렉토리에서, local 프로파일 필수)
+cd BE
+SPRING_PROFILES_ACTIVE=local ./gradlew bootRun    # 개발 서버 (http://localhost:8080)
 ./gradlew build      # 빌드
 ./gradlew test       # 테스트
 ```
+
+로컬 접속 정보는 `application-local.yml`(Git 제외)에 둔다.
+`BE/.env.example`에 키 목록이 있다.
 
 ## 9. 작업 규칙
 
@@ -161,6 +173,6 @@ BE/src/main/java/com/ssafy/s15p21a104/
 
 ## 10. 다음 할 일
 
-1. Spring Initializr로 프로젝트 생성, Swagger 연결
+1. ~~Spring Initializr로 프로젝트 생성, Swagger 연결~~ — 완료
 2. **`POST /api/v1/escape` 응답 스키마를 FE와 확정** — 나머지는 여기서 파생된다
-3. 로컬 PostgreSQL·Redis를 Docker Compose로 띄우기 → [Infra](../Infra/README.md)
+3. ~~로컬 PostgreSQL·Redis를 Docker Compose로 띄우기~~ — 완료. `Infra/docker/docker-compose.yml`
