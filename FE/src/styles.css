@@ -313,6 +313,16 @@ small {
 .trip-fields button + button {
   border-top: 1px solid var(--line);
 }
+.swap-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  margin: 8px auto -2px;
+  padding: 4px 8px;
+  color: #687795;
+  font-size: 11px;
+}
 .trip-fields strong {
   flex: 1;
   font-size: 14px;
@@ -346,14 +356,17 @@ small {
   flex: 1;
   min-width: 0;
 }
-.trip-summary span {
+.trip-summary-field {
   display: flex;
   align-items: center;
   gap: 9px;
+  width: 100%;
+  min-height: 44px;
   font-size: 11px;
   padding: 7px 0;
+  text-align: left;
 }
-.trip-summary span + span {
+.trip-summary-field + .trip-summary-field {
   border-top: 1px solid #e9ecf0;
 }
 .trip-summary b {
@@ -591,6 +604,10 @@ small {
   width: 100%;
   font-size: 14px;
 }
+.search-action {
+  width: 100%;
+  margin-top: 10px;
+}
 .search-screen > .section-label {
   margin-top: 24px;
 }
@@ -628,6 +645,44 @@ small {
 }
 .place-list button > span:nth-child(2) {
   flex: 1;
+}
+.summary-swap {
+  margin-left: 8px;
+}
+.map-picker {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+.map-picker-header {
+  flex-shrink: 0;
+  margin-bottom: 10px;
+}
+.map-picker-header h2 {
+  font-size: 17px;
+}
+.map-picker-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: 0 -16px;
+  background: #e9eee8;
+}
+.map-picker-footer {
+  flex-shrink: 0;
+  padding-top: 12px;
+}
+.map-picker-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.map-picker-actions button {
+  flex: 1;
+  min-height: 45px;
+  padding: 8px;
+  font-size: 11px;
 }
 .place-list strong {
   display: block;

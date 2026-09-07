@@ -20,7 +20,7 @@ src/
   features/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
-    map/                    지도 컴포넌트, SDK 수명 관리, 현재 위치 훅
+  map/                    지도 컴포넌트, 지도 위치 선택, SDK 수명 관리, 현재 위치 훅
   api/
     contracts.ts            데이터 접근 인터페이스
     repositories.ts         실제로 사용할 구현 선택
@@ -38,7 +38,7 @@ src/
 - 기능 훅은 `api/repositories`를 통해 데이터를 받는다. `api/contracts`는 화면용 타입을 참조하는 프론트엔드 인터페이스다.
 - `selectors`와 reducer는 React·DOM·네트워크 없이 동작하는 함수다.
 - `components`는 특정 경로 데이터나 화면 이름을 알지 않는다.
-- 카카오 SDK 사용은 `features/map`과 `lib/kakao` 안으로 제한한다. 현재 위치 조회는 `useCurrentLocation`이 맡는다.
+- 카카오 SDK 사용은 `features/map`과 `lib/kakao` 안으로 제한한다. 일반 지도는 `useKakaoMap`, 지도 위치 선택은 `MapPlacePicker`, 현재 위치 조회는 `useCurrentLocation`이 맡는다.
 - 미리보기 시나리오용 제안 경로는 `app/preview`에서 주입한다. 초기 후보·선택 경로를 기능 훅 내부에 숨겨 넣지 않는다.
 
 타입을 참조하는 의존성은 `import type`으로 명시한다. 페이지의 `Navigate` 타입 참조는 화면 이동 계약이며, 페이지에서 앱 상태를 직접 조회하는 것은 아니다.
@@ -55,6 +55,7 @@ src/
 | 서버 경로 연결          | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts` |
 | 길안내 단계             | `features/guidance/guidanceReducer.ts`, `pages/GuidePage.tsx`          |
 | 지도 수명·마커·크기     | `features/map/useKakaoMap.ts`                                          |
+| 지도에서 위치 선택      | `features/map/MapPlacePicker.tsx`                                      |
 | 위치 권한·오류          | `features/map/useCurrentLocation.ts`                                   |
 
 ## 유지한 단순함
@@ -66,6 +67,6 @@ src/
 
 ## 지도와 레이아웃 사이의 계약
 
-지도 래퍼는 `z-index: 0`으로 별도 쌓임 맥락을 만든다. SDK 내부의 타일·마커가 앱의 길안내 헤더와 버튼을 덮지 않도록 이 경계를 유지한다.
+지도 래퍼는 `z-index: 0`으로 별도 쌓임 맥락을 만든다. SDK 내부의 타일·마커가 앱의 길안내 헤더와 버튼을 덮지 않도록 이 경계를 유지한다. 지도 위치 선택기는 검색 화면의 전체 영역을 직접 관리하고, 일반 지도 훅의 시트 높이 계산을 재사용하지 않는다.
 
 앱 셸은 `.page-viewport`와 안내 복귀 바를 세로로 배치한다. 복귀 바는 화면 영역 밖에 높이를 확보해 시트의 버튼이나 지도 출처 표시를 덮지 않는다. 현재 지도 훅은 부모 `.page-viewport`와 그 안의 `.bottom-sheet` 또는 `.home-panel` 높이를 관찰해 실제 지도 영역을 맞춘다. 화면 전환 시 `key={screen}`으로 다시 마운트되어 해당 화면의 패널을 관찰한다. 이 클래스나 DOM 배치를 바꾸면 지도 크기·마커·카카오 출처 표시를 함께 확인한다.

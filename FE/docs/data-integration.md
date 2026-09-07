@@ -2,16 +2,17 @@
 
 ## 현재 연결 상태
 
-| 영역                         | 실제 구현                              | 연결 위치                                         |
-| ---------------------------- | -------------------------------------- | ------------------------------------------------- |
-| 지도 타일·장소 마커          | 카카오 JavaScript SDK + 장소 검색      | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts` |
-| 현재 위치                    | 브라우저 Geolocation, 버튼 클릭 시 1회 | `features/map/useCurrentLocation.ts`              |
-| 검색 화면의 장소 후보        | 네 개의 샘플 장소                      | `api/mock/fixtures.ts`, `mockPlaceRepository`     |
-| 추천 경로                    | 역삼 → 도곡 고정 샘플, 비동기 응답     | `mockRouteRepository`                             |
-| 정렬·이동수단 필터           | 클라이언트 계산                        | `features/route/selectors.ts`                     |
-| 경로선·실제 길찾기·혼잡 추정 | 미구현                                 | 백엔드 계약 합의 필요                             |
+| 영역                         | 실제 구현                                            | 연결 위치                                         |
+| ---------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
+| 지도 타일·장소 마커          | 카카오 JavaScript SDK + 장소 검색                    | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts` |
+| 현재 위치                    | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회 | `features/map/useCurrentLocation.ts`              |
+| 지도 위치 선택               | 카카오 지도 클릭 + 좌표 역지오코딩                   | `features/map/MapPlacePicker.tsx`                 |
+| 검색 화면의 장소 후보        | 카카오 JavaScript SDK 장소·주소 검색                 | `lib/kakao/sdk.ts`, `api/repositories.ts`         |
+| 추천 경로                    | 역삼 → 도곡 고정 샘플, 비동기 응답                   | `mockRouteRepository`                             |
+| 정렬·이동수단 필터           | 클라이언트 계산                                      | `features/route/selectors.ts`                     |
+| 경로선·실제 길찾기·혼잡 추정 | 미구현                                               | 백엔드 계약 합의 필요                             |
 
-검색 목록용 샘플 저장소와 지도 마커를 찾는 카카오 검색은 현재 별개다. 향후 검색 결과에 좌표를 포함하면 지도에서 장소를 다시 검색하는 부분을 제거할 수 있다.
+장소 검색은 카카오 JavaScript SDK의 키워드 검색을 사용하며 결과가 없으면 지오코더 주소 검색으로 재시도한다. 화면 장소로 변환할 때 이름·주소·좌표를 검증하고 유효한 좌표가 없는 외부 결과는 제외한다. 선택한 장소는 검색 화면의 최근 목록에 최대 10개까지 저장하며 현재 위치는 저장하지 않는다. 지도 선택은 `coord2Address(lng, lat)`으로 도로명·지번 주소를 표시하고, 주소를 찾지 못해도 좌표를 선택할 수 있다. SDK 콜백은 `AbortSignal`을 확인해 취소된 요청의 늦은 응답을 반영하지 않는다. 경로 조회는 현재 샘플 저장소를 유지한다.
 
 ## 프론트엔드 인터페이스
 

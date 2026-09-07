@@ -1,12 +1,19 @@
-import { ArrowRight, Pencil, Search } from 'lucide-react'
+import { ArrowLeftRight, ArrowRight, Pencil, Search } from 'lucide-react'
 import type { Place } from '../features/route/types'
 interface Props {
   origin: Place
   destination: Place | null
   openSearch: (target: 'origin' | 'destination') => void
   findRoutes: () => void
+  swapPlaces: () => void
 }
-export default function HomePage({ origin, destination, openSearch, findRoutes }: Props) {
+export default function HomePage({
+  origin,
+  destination,
+  openSearch,
+  findRoutes,
+  swapPlaces,
+}: Props) {
   return (
     <>
       <div className="brand">
@@ -31,6 +38,15 @@ export default function HomePage({ origin, destination, openSearch, findRoutes }
             <Search size={17} />
           </button>
         </div>
+        <button
+          className="swap-button"
+          aria-label="출발지와 도착지 교환"
+          disabled={!destination}
+          onClick={swapPlaces}
+        >
+          <ArrowLeftRight size={16} />
+          출발·도착 교환
+        </button>
         <button className="primary" onClick={() => findRoutes()}>
           경로 찾기
           <ArrowRight size={18} />

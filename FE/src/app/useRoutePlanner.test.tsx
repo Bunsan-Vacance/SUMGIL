@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RouteRepository } from '../api/contracts'
 import { places, routes } from '../api/mock/fixtures'
 import { useRoutePlanner } from './useRoutePlanner'
@@ -53,8 +53,14 @@ describe('경로와 안내 화면의 수명', () => {
 
     act(() => result.current.openSearch('origin'))
     act(() => result.current.choosePlace(places[3]))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
     act(() => result.current.applyFilter(['bike']))
-    expect(result.current.trip).toMatchObject({ status: 'idle', selected: null })
+    expect(result.current.trip).toMatchObject({
+      status: 'success',
+      origin: places[3],
+      destination: places[2],
+      selected: null,
+    })
     expect(result.current.guidance).toMatchObject({ route: routes[0], step: 1 })
 
     act(() => result.current.resumeGuide())
@@ -133,7 +139,7 @@ describe('경로와 안내 화면의 수명', () => {
     expect(result.current.guidance.destination).toBe(places[1])
   })
 
-  it('출발지 변경 뒤 현재 탐색의 과거 상세 URL은 홈으로 보정한다', async () => {
+  it('출발지 변경 뒤 현재 탐색의 과거 상세 URL은 결과로 보정한다', async () => {
     const { result } = await renderLoadedPlanner()
     act(() => result.current.openSearch('origin'))
     act(() => result.current.choosePlace(places[2]))
@@ -143,7 +149,55 @@ describe('경로와 안내 화면의 수명', () => {
       history.replaceState(null, '', '#detail')
       window.dispatchEvent(new HashChangeEvent('hashchange'))
     })
-    await waitFor(() => expect(result.current.screen).toBe('home'))
-    expect(location.hash).toBe('#home')
+    await waitFor(() => expect(result.current.screen).toBe('results'))
+    expect(location.hash).toBe('#results')
+  })
+
+  it('결과 화면에서 검색을 취소하면 기존 결과 화면과 경로를 보존한다', async () => {
+    const { result } = await renderLoadedPlanner()
+
+    act(() => result.current.openSearch('destination'))
+    expect(result.current.screen).toBe('search')
+    act(() => result.current.cancelSearch())
+
+    expect(result.current.screen).toBe('results')
+    expect(result.current.trip.status).toBe('success')
+    expect(result.current.trip.destination).toBe(places[1])
+    expect(result.current.trip.selected).toBe(routes[0])
+    expect(result.current.trip.visible.length).toBeGreaterThan(0)
+  })
+
+  it('홈에서 검색을 취소하면 홈으로 돌아간다', async () => {
+    const { result } = await renderLoadedPlanner()
+
+    act(() => result.current.go('home'))
+    act(() => result.current.openSearch('destination'))
+    act(() => result.current.cancelSearch())
+
+    expect(result.current.screen).toBe('home')
+  })
+
+  it('결과 화면에서 교환하면 새 좌표로 재조회하고 안내 세션은 유지한다', async () => {
+    const search = vi.fn(
+      async (_request: Parameters<RouteRepository['search']>[0], _signal: AbortSignal) => routes,
+    )
+    const { result } = renderHook(() => useRoutePlanner({ search }))
+    act(() => result.current.findRoutes(places[1]))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    act(() => result.current.startGuide())
+    act(() => result.current.guidance.next())
+    act(() => result.current.go('results'))
+
+    act(() => result.current.swapPlaces())
+    expect(result.current.trip).toMatchObject({
+      origin: places[1],
+      destination: places[0],
+      status: 'loading',
+      selected: null,
+    })
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+
+    expect(search.mock.calls.at(-1)?.[0]).toEqual({ origin: places[1], destination: places[0] })
+    expect(result.current.guidance).toMatchObject({ route: routes[0], step: 1 })
   })
 })

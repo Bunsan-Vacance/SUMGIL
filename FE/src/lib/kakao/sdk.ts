@@ -22,6 +22,13 @@ export interface KakaoAddressSearchResult {
   x: string
   y: string
 }
+export interface KakaoCoord2AddressResult {
+  address?: { address_name?: string }
+  road_address?: { address_name?: string }
+}
+export interface KakaoMapClickEvent {
+  latLng: MapPoint
+}
 export interface MapBounds {
   extend(point: MapPoint): void
 }
@@ -64,8 +71,25 @@ export interface KakaoMaps {
         query: string,
         callback: (results: KakaoAddressSearchResult[], status: string) => void,
       ): void
+      coord2Address(
+        lng: number,
+        lat: number,
+        callback: (results: KakaoCoord2AddressResult[], status: string) => void,
+      ): void
     }
     Status: { OK: string; ZERO_RESULT: string; ERROR: string }
+  }
+  event: {
+    addListener(
+      target: KakaoMapInstance,
+      type: string,
+      handler: (event: KakaoMapClickEvent) => void,
+    ): void
+    removeListener(
+      target: KakaoMapInstance,
+      type: string,
+      handler: (event: KakaoMapClickEvent) => void,
+    ): void
   }
 }
 declare global {

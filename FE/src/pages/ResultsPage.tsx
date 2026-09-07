@@ -1,4 +1,4 @@
-import { Navigation, Pencil, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeftRight, Navigation, SlidersHorizontal } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
@@ -17,9 +17,11 @@ interface Props {
   priority: Priority
   setPriority: (value: Priority) => void
   openFilter: () => void
-  openSearch: (target: 'destination') => void
+  openSearch: (target: 'origin' | 'destination') => void
   go: Navigate
   startGuide: () => void
+  canSwap: boolean
+  swapPlaces: () => void
 }
 export default function ResultsPage({
   origin,
@@ -37,26 +39,39 @@ export default function ResultsPage({
   openSearch,
   go,
   startGuide,
+  canSwap,
+  swapPlaces,
 }: Props) {
   return (
     <>
       <div className="trip-summary">
         <div>
-          <span>
+          <button
+            type="button"
+            className="trip-summary-field"
+            aria-label="출발지 수정"
+            onClick={() => openSearch('origin')}
+          >
             <i className="dot start" />
             출발 <b>{origin.name}</b>
-          </span>
-          <span>
+          </button>
+          <button
+            type="button"
+            className="trip-summary-field"
+            aria-label="도착지 수정"
+            onClick={() => openSearch('destination')}
+          >
             <i className="dot end" />
             도착 <b>{destinationName}</b>
-          </span>
+          </button>
         </div>
         <button
-          className="icon-button"
-          aria-label="도착지 수정"
-          onClick={() => openSearch('destination')}
+          className="icon-button summary-swap"
+          aria-label="출발지와 도착지 교환"
+          disabled={!canSwap}
+          onClick={swapPlaces}
         >
-          <Pencil size={18} />
+          <ArrowLeftRight size={17} />
         </button>
       </div>
       <BottomSheet
@@ -94,6 +109,7 @@ export default function ResultsPage({
               <div>
                 <h2>추천 경로</h2>
                 <p>{visible.length}개 경로 · 09:41 출발 기준</p>
+                <p className="sample-note">경로·소요시간은 예시입니다.</p>
               </div>
               <button className="secondary filter-button" onClick={openFilter}>
                 <SlidersHorizontal size={16} />

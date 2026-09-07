@@ -10,16 +10,13 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
   const [state, dispatch] = useReducer(tripReducer, initial)
   const request = useRef<AbortController | null>(null)
   useEffect(() => () => request.current?.abort(), [])
-  const search = async (destination: Place) => {
+  const search = async (destination: Place, origin = state.origin) => {
     request.current?.abort()
     const pending = new AbortController()
     request.current = pending
-    dispatch({ type: 'search', destination })
+    dispatch({ type: 'search', origin, destination })
     try {
-      const candidates = await repository.search(
-        { origin: state.origin, destination },
-        pending.signal,
-      )
+      const candidates = await repository.search({ origin, destination }, pending.signal)
       if (!pending.signal.aborted) dispatch({ type: 'loaded', routes: candidates })
     } catch {
       if (!pending.signal.aborted) dispatch({ type: 'failed' })
@@ -32,6 +29,10 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
     setOrigin: (place: Place) => {
       if (place.id !== state.origin.id) request.current?.abort()
       dispatch({ type: 'origin', place })
+    },
+    swap: () => {
+      request.current?.abort()
+      dispatch({ type: 'swap' })
     },
     setModes: (modes: Mode[]) => dispatch({ type: 'modes', modes }),
     setPriority: (priority: Priority) => dispatch({ type: 'priority', priority }),

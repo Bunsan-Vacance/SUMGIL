@@ -127,4 +127,19 @@ describe('경로 검색 요청 수명', () => {
     })
     expect(result.current).toMatchObject({ candidates: [], selected: null, status: 'idle' })
   })
+
+  it('새 출발지를 명시한 재검색은 최신 출발지와 기존 목적지를 함께 보낸다', async () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+
+    await act(async () => {
+      await result.current.search(places[1], places[3])
+    })
+
+    expect(repository.search).toHaveBeenCalledWith(
+      { origin: places[3], destination: places[1] },
+      expect.any(AbortSignal),
+    )
+    expect(result.current).toMatchObject({ origin: places[3], destination: places[1] })
+  })
 })
