@@ -17,16 +17,28 @@ services:
   #   environment:
   #     - SPRING_PROFILES_ACTIVE=local
   #   depends_on:
-  #     - db
+  #     - postgres
+  #     - redis
 
-  # db:
-  #   image: postgres:16-alpine
-  #   environment:
-  #     - POSTGRES_DB=${POSTGRES_DB}
-  #     - POSTGRES_USER=${POSTGRES_USER}
-  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
+  postgres:
+    image: postgres:16
+    container_name: sumgil-postgres
+    environment:
+      POSTGRES_DB: sumgil
+      POSTGRES_USER: sumgil
+      POSTGRES_PASSWORD: sumgil1234
+    ports:
+      - "5432:5432"
+    volumes:
+      - sumgil_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: sumgil-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - sumgil_redis_data:/data
 
   nginx:
     image: nginx:alpine
@@ -38,5 +50,6 @@ services:
     #   - fe
     #   - be
 
-# volumes:
-#   pgdata:
+volumes:
+  sumgil_postgres_data:
+  sumgil_redis_data:
