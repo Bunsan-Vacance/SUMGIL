@@ -13,7 +13,8 @@ export interface TripState {
 }
 export type TripAction =
   | { type: 'origin'; place: Place }
-  | { type: 'search'; destination: Place }
+  | { type: 'search'; origin?: Place; destination: Place }
+  | { type: 'swap' }
   | { type: 'loaded'; routes: Route[] }
   | { type: 'failed' }
   | { type: 'modes'; modes: Mode[] }
@@ -35,10 +36,22 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
     case 'search':
       return {
         ...state,
+        origin: action.origin || state.origin,
         destination: action.destination,
         candidates: [],
         selected: null,
         status: 'loading',
+        error: '',
+      }
+    case 'swap':
+      if (!state.destination) return state
+      return {
+        ...state,
+        origin: state.destination,
+        destination: state.origin,
+        candidates: [],
+        selected: null,
+        status: 'idle',
         error: '',
       }
     case 'loaded': {

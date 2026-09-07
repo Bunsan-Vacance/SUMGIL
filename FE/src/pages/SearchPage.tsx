@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ArrowLeft, MapPin, Search, Trash2, X } from 'lucide-react'
+import { ArrowLeft, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-react'
 import type { Place } from '../features/route/types'
-import type { Navigate } from '../app/useNavigation'
+import MapPlacePicker from '../features/map/MapPlacePicker'
+import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import {
   clearRecentPlaces,
   loadRecentPlaces,
@@ -11,22 +12,69 @@ import {
 } from '../features/route/usePlaceSearch'
 interface Props {
   searchTarget: 'origin' | 'destination'
-  go: Navigate
+  cancelSearch: () => void
   choosePlace: (place: Place) => boolean | void
 }
-export default function SearchPage({ searchTarget, go, choosePlace }: Props) {
+export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: Props) {
   const [query, setQuery] = useState('')
   const [recentPlaces, setRecentPlaces] = useState<Place[]>(loadRecentPlaces)
-  const { places, loading, error } = usePlaceSearch(query)
+  const [mapMode, setMapMode] = useState(false)
+  const [locationMessage, setLocationMessage] = useState('')
+  const { places, loading, error } = usePlaceSearch(mapMode ? '' : query)
   const selectPlace = (place: Place, save = true) => {
     const accepted = choosePlace(place)
     if (accepted !== false && save) setRecentPlaces(saveRecentPlace(place))
     return accepted
   }
+  const { locating, locate } = useCurrentLocation(
+    (position) => {
+      const { latitude, longitude } = position.coords
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        setLocationMessage('현재 위치를 확인하지 못했어요. 다시 시도해 주세요.')
+        return
+      }
+      selectPlace(
+        {
+          id: `current-location:${latitude}:${longitude}`,
+          name: '현재 위치',
+          address: `위도 ${latitude.toFixed(6)}, 경도 ${longitude.toFixed(6)}`,
+          kind: '현재 위치',
+          lat: latitude,
+          lng: longitude,
+        },
+        false,
+      )
+    },
+    (message) => {
+      setLocationMessage(message)
+    },
+    `${searchTarget}-${mapMode ? 'map' : 'search'}`,
+  )
+  if (mapMode) {
+    return (
+      <MapPlacePicker
+        target={searchTarget}
+        onCancel={() => setMapMode(false)}
+        onSelect={(place) => {
+          const accepted = selectPlace(place)
+          if (accepted !== false) {
+            setMapMode(false)
+          }
+        }}
+      />
+    )
+  }
   return (
     <section className="search-screen">
       <header className="row">
-        <button className="icon-button" aria-label="홈으로 돌아가기" onClick={() => go('home')}>
+        <button className="icon-button" aria-label="이전 화면으로 돌아가기" onClick={cancelSearch}>
           <ArrowLeft />
         </button>
         <h2>{searchTarget === 'origin' ? '출발지' : '도착지'} 검색</h2>
@@ -46,6 +94,23 @@ export default function SearchPage({ searchTarget, go, choosePlace }: Props) {
           </button>
         )}
       </label>
+      {searchTarget === 'origin' && (
+        <>
+          <button className="secondary full search-action" disabled={locating} onClick={locate}>
+            {locating ? <span className="spinner" /> : <LocateFixed size={17} />}
+            현재 위치에서 출발
+          </button>
+          {locationMessage && (
+            <p role="alert" className="error">
+              {locationMessage}
+            </p>
+          )}
+        </>
+      )}
+      <button className="secondary full search-action" onClick={() => setMapMode(true)}>
+        <MapPin size={17} />
+        지도에서 선택
+      </button>
       <p className="section-label">
         {query.trim()
           ? '검색 결과'

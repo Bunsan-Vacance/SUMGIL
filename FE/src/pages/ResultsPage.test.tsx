@@ -26,6 +26,8 @@ function props(overrides: Partial<ComponentProps<typeof ResultsPage>> = {}) {
     openSearch: vi.fn(),
     go: vi.fn(),
     startGuide: vi.fn(),
+    canSwap: true,
+    swapPlaces: vi.fn(),
     ...overrides,
   }
 }
@@ -55,5 +57,34 @@ describe('경로 결과 상태', () => {
     fireEvent.click(screen.getByRole('button', { name: '조건 변경' }))
     expect(openFilter).toHaveBeenCalledOnce()
     expect(retry).not.toHaveBeenCalled()
+  })
+
+  it('출발지와 도착지 요약 칸을 각각 수정 검색으로 연다', () => {
+    const openSearch = vi.fn()
+    render(<ResultsPage {...props({ openSearch })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '출발지 수정' }))
+    fireEvent.click(screen.getByRole('button', { name: '도착지 수정' }))
+
+    expect(openSearch.mock.calls).toEqual([['origin'], ['destination']])
+  })
+
+  it('출발·도착 교환을 요청한다', () => {
+    const swapPlaces = vi.fn()
+    render(<ResultsPage {...props({ swapPlaces })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '출발지와 도착지 교환' }))
+
+    expect(swapPlaces).toHaveBeenCalledOnce()
+  })
+
+  it('도착지가 없으면 출발·도착 교환을 막는다', () => {
+    const swapPlaces = vi.fn()
+    render(<ResultsPage {...props({ canSwap: false, swapPlaces })} />)
+
+    expect(
+      (screen.getByRole('button', { name: '출발지와 도착지 교환' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(swapPlaces).not.toHaveBeenCalled()
   })
 })

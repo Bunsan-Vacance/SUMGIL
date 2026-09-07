@@ -29,6 +29,7 @@ export function useRoutePlanner(repository?: RouteRepository) {
   const screen = resolveScreen(navigation.screen, trip, guidance)
   const { message, setMessage } = useToast()
   const [searchTarget, setSearchTarget] = useState<'origin' | 'destination'>('destination')
+  const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
   useEffect(() => {
     if (screen !== navigation.screen) replace(screen)
@@ -39,8 +40,10 @@ export function useRoutePlanner(repository?: RouteRepository) {
   }, [screen, setMessage])
   const openSearch = (target: 'origin' | 'destination') => {
     setSearchTarget(target)
+    setSearchReturnScreen(screen === 'results' ? 'results' : 'home')
     go('search')
   }
+  const cancelSearch = () => go(searchReturnScreen)
   const findRoutes = (place?: Place) => {
     const destination = place || trip.destination
     if (!destination) {
@@ -61,11 +64,26 @@ export function useRoutePlanner(repository?: RouteRepository) {
         setMessage('출발지와 도착지는 다른 장소를 선택해 주세요.')
         return false
       }
+      if (searchReturnScreen === 'results' && trip.destination) {
+        void trip.search(trip.destination, place)
+        go('results')
+        return true
+      }
       trip.setOrigin(place)
       go('home')
       return true
     }
     return findRoutes(place)
+  }
+  const swapPlaces = () => {
+    if (!trip.destination) return false
+    if (screen === 'results') {
+      void trip.search(trip.origin, trip.destination)
+      go('results')
+    } else {
+      trip.swap()
+    }
+    return true
   }
   const selectRoute = (id: string) => {
     if (!trip.visible.some((route) => route.id === id)) return
@@ -120,11 +138,13 @@ export function useRoutePlanner(repository?: RouteRepository) {
     message,
     setMessage,
     searchTarget,
+    cancelSearch,
     modal,
     setModal,
     openSearch,
     findRoutes,
     choosePlace,
+    swapPlaces,
     selectRoute,
     startGuide,
     confirmReplacement,

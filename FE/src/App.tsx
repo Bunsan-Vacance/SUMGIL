@@ -60,13 +60,14 @@ export default function App() {
               destination={trip.destination}
               openSearch={planner.openSearch}
               findRoutes={planner.findRoutes}
+              swapPlaces={planner.swapPlaces}
             />
           )}
           {screen === 'search' && (
             <SearchPage
               key={planner.searchTarget}
               searchTarget={planner.searchTarget}
-              go={go}
+              cancelSearch={planner.cancelSearch}
               choosePlace={planner.choosePlace}
             />
           )}
@@ -87,6 +88,8 @@ export default function App() {
               openSearch={planner.openSearch}
               go={go}
               startGuide={planner.startGuide}
+              canSwap={!!trip.destination}
+              swapPlaces={planner.swapPlaces}
             />
           )}
           {screen === 'detail' && trip.selected && (
