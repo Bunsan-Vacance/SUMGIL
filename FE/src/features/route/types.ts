@@ -5,6 +5,9 @@ export interface Place {
   name: string
   address: string
   kind: string
+  lat?: number
+  lng?: number
+  placeUrl?: string
 }
 export interface Leg {
   mode: Mode

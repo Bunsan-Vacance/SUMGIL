@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { loadKakaoMaps, type KakaoMapInstance, type MapOverlay } from '../../lib/kakao/sdk'
+import {
+  loadKakaoMaps,
+  type KakaoMapInstance,
+  type MapOverlay,
+  type MapPoint,
+} from '../../lib/kakao/sdk'
 import type { Place } from '../route/types'
 export function useKakaoMap(
   origin: Place,
@@ -46,7 +51,18 @@ export function useKakaoMap(
         const search = new maps.services.Places()
         const targets = destination ? [origin, destination] : [origin]
         let resolved = 0
+        const addMarker = (place: Place, point: MapPoint) => {
+          markers.push(new maps.Marker({ map: instance, position: point, title: place.name }))
+          bounds.extend(point)
+          resolved++
+          if (targets.length === 1) instance.setCenter(point)
+          else if (resolved === targets.length) instance.setBounds(bounds, 40, 35, 35, 35)
+        }
         targets.forEach((place) => {
+          if (place.lat !== undefined && place.lng !== undefined) {
+            addMarker(place, new maps.LatLng(place.lat, place.lng))
+            return
+          }
           search.keywordSearch(`서울 ${place.name}`, (results, status) => {
             if (cancelled) return
             if (status !== maps.services.Status.OK || !results[0]) {
@@ -54,11 +70,7 @@ export function useKakaoMap(
               return
             }
             const point = new maps.LatLng(Number(results[0].y), Number(results[0].x))
-            markers.push(new maps.Marker({ map: instance, position: point, title: place.name }))
-            bounds.extend(point)
-            resolved++
-            if (targets.length === 1) instance.setCenter(point)
-            else if (resolved === targets.length) instance.setBounds(bounds, 40, 35, 35, 35)
+            addMarker(place, point)
           })
         })
         observer = new ResizeObserver(() => {
