@@ -608,6 +608,24 @@ small {
   padding: 20px 0;
   border-bottom: 1px solid #edf0f4;
 }
+.recent-place {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #edf0f4;
+}
+.recent-place > button:first-child {
+  border-bottom: 0;
+  flex: 1;
+}
+.recent-place > .icon-button {
+  width: 40px;
+  height: 40px;
+  color: #82909b;
+}
+.recent-clear {
+  display: block;
+  margin: 4px 0 0 auto;
+}
 .place-list button > span:nth-child(2) {
   flex: 1;
 }

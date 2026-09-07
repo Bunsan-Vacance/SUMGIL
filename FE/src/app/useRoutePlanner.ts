@@ -9,6 +9,18 @@ import type { GuidanceDialog } from '../features/guidance/GuidanceDialogs'
 import type { RouteRepository } from '../api/contracts'
 import type { Mode, Place } from '../features/route/types'
 
+function samePlace(first: Place, second: Place) {
+  return (
+    first.id === second.id ||
+    (first.lat !== undefined &&
+      first.lng !== undefined &&
+      second.lat !== undefined &&
+      second.lng !== undefined &&
+      first.lat === second.lat &&
+      first.lng === second.lng)
+  )
+}
+
 export function useRoutePlanner(repository?: RouteRepository) {
   const navigation = useNavigation()
   const { go, replace } = navigation
@@ -33,20 +45,27 @@ export function useRoutePlanner(repository?: RouteRepository) {
     const destination = place || trip.destination
     if (!destination) {
       openSearch('destination')
-      return
+      return false
     }
-    if (destination.id === trip.origin.id) {
+    if (samePlace(destination, trip.origin)) {
       setMessage('출발지와 다른 도착지를 선택해 주세요.')
-      return
+      return false
     }
     void trip.search(destination)
     go('results')
+    return true
   }
   const choosePlace = (place: Place) => {
     if (searchTarget === 'origin') {
+      if (trip.destination && samePlace(place, trip.destination)) {
+        setMessage('출발지와 도착지는 다른 장소를 선택해 주세요.')
+        return false
+      }
       trip.setOrigin(place)
       go('home')
-    } else findRoutes(place)
+      return true
+    }
+    return findRoutes(place)
   }
   const selectRoute = (id: string) => {
     if (!trip.visible.some((route) => route.id === id)) return

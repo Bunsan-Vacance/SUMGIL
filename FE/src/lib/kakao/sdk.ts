@@ -2,6 +2,26 @@ export interface MapPoint {
   getLat(): number
   getLng(): number
 }
+export interface KakaoPlaceSearchResult {
+  id: string
+  place_name: string
+  category_name?: string
+  category_group_code?: string
+  category_group_name?: string
+  phone?: string
+  address_name?: string
+  road_address_name?: string
+  x: string
+  y: string
+  place_url?: string
+  distance?: string
+}
+export interface KakaoAddressSearchResult {
+  address_name: string
+  address_type?: string
+  x: string
+  y: string
+}
 export interface MapBounds {
   extend(point: MapPoint): void
 }
@@ -36,10 +56,16 @@ export interface KakaoMaps {
     Places: new () => {
       keywordSearch(
         query: string,
-        callback: (results: { x: string; y: string }[], status: string) => void,
+        callback: (results: KakaoPlaceSearchResult[], status: string) => void,
       ): void
     }
-    Status: { OK: string }
+    Geocoder: new () => {
+      addressSearch(
+        query: string,
+        callback: (results: KakaoAddressSearchResult[], status: string) => void,
+      ): void
+    }
+    Status: { OK: string; ZERO_RESULT: string; ERROR: string }
   }
 }
 declare global {
