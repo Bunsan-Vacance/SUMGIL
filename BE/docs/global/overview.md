@@ -61,6 +61,16 @@
   인증이 없으므로 보안 항목을 포함하지 않습니다.
 - `JpaConfig`는 `@EnableJpaAuditing`을 활성화합니다.
   감사 컬럼을 사용하는 엔티티가 추가되면 `BaseTimeEntity`와 함께 동작합니다.
+- `RedisConfig`는 `RedisTemplate<String, Object>` 빈을 등록합니다.
+  키는 문자열, 값은 JSON(`GenericJacksonJsonRedisSerializer`)으로 직렬화합니다.
+  Spring Boot 기본 템플릿(JDK 직렬화)은 Spark/Python 등 다른 언어가 쓴 값을 못 읽어서 쓰지 않습니다.
+
+## cache
+
+- `CacheKeys`는 Redis 키 네이밍 규칙과 TTL 상수를 한곳에서 관리합니다.
+  새 캐시 종류가 필요하면 이 클래스와 [cache/strategy.md](../cache/strategy.md)에 함께 추가합니다.
+- 실제 캐시 채움(사전계산 결과 적재, 스트림 갱신)은 데이터 파이프라인 연동 후 구현합니다.
+  지금은 키·TTL 정책과 `RedisTemplate` 연동까지만 되어 있습니다.
 
 ## common
 

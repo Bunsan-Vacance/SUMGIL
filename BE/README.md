@@ -139,9 +139,10 @@ BE/src/main/java/com/ssafy/s15p21a104/
 │  ├─ congestion/  혼잡도
 │  └─ route/       경로 그래프 (엣지)
 ├─ global/
-│  ├─ config/      필터·Swagger·JPA·Flyway·CORS(미사용)
+│  ├─ config/      필터·Swagger·JPA·Flyway·Redis·CORS(미사용)
 │  ├─ exception/   전역 예외 처리
 │  ├─ response/    공통 응답 래퍼
+│  ├─ cache/       Redis 키 네이밍·TTL 정책
 │  └─ common/      감사 기반 엔티티
 └─ infrastructure/ 외부 연동 (향후)
 ```
