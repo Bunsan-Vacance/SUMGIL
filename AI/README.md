@@ -168,7 +168,8 @@ AI/
 │                           #   raw/ 밑에 출처별 서브폴더(raw/weather/asos, .../forecast, .../nowcast)
 ├─ models/                 # 학습된 모델 산출물      ← Git 추적 제외
 ├─ requirements.txt        # 프로덕션 런타임 의존성
-├─ requirements-dev.txt    # + ruff/black/pytest/httpx
+├─ requirements-dev.txt    # + ruff/black/pytest/httpx (로컬 개발용, requirements.txt 전체 포함)
+├─ requirements-ci.txt     # CI 전용 — 테스트가 실제 쓰는 것만 (AI/CLAUDE.md 참고)
 └─ pyproject.toml          # ruff/black/pytest 설정
 ```
 
