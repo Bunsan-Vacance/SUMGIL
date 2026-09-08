@@ -1,11 +1,11 @@
-"""파일형 원본(수동 다운로드) → data/BYC/interim/*.parquet 정규화 파서.
+"""파일형 원본(수동 다운로드) → data/BIKE/interim/*.parquet 정규화 파서.
 
 대상: 따릉이 대여이력(OA-15182), 대여소별 5분단위(OA-21229), 대여소 마스터
 (OA-21235/OA-13252). 다운로드 위치·안내는 reports/download_guide.md 참고.
 
 실행 예:
     cd AI
-    python -m DATA_ENGINE.eda.parsers rental_history data/BYC/raw/rental_history/2025년01월.csv
+    python -m DATA_ENGINE.eda.parsers rental_history data/BIKE/raw/rental_history/2025년01월.csv
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import yaml
 
 AI_ROOT = Path(__file__).resolve().parents[2]
 COLUMN_MAP_PATH = AI_ROOT / "DATA_ENGINE" / "conf" / "column_map.yaml"
-INTERIM_DIR = AI_ROOT / "data" / "BYC" / "interim"
+INTERIM_DIR = AI_ROOT / "data" / "BIKE" / "interim"
 
 logger = logging.getLogger("parsers")
 
