@@ -3,7 +3,7 @@ import type { GuidanceState } from '../features/guidance/guidanceReducer'
 import type { Screen } from './useNavigation'
 
 export function resolveScreen(requested: Screen, trip: TripState, guidance: GuidanceState): Screen {
-  if (requested === 'home' || requested === 'search') return requested
+  if (requested === 'home' || requested === 'browse' || requested === 'search') return requested
   if (requested === 'guide' || requested === 'arrival') {
     const hasSession =
       Boolean(guidance.route?.legs.length) &&

@@ -2,6 +2,15 @@ export interface MapPoint {
   getLat(): number
   getLng(): number
 }
+export interface MapPixelPoint {
+  x: number
+  y: number
+}
+export interface MapSize {
+  width: number
+  height: number
+}
+export interface MapMarkerImage {}
 export interface KakaoPlaceSearchResult {
   id: string
   place_name: string
@@ -36,12 +45,18 @@ export interface KakaoMapInstance {
   relayout(): void
   getCenter(): MapPoint
   setCenter(point: MapPoint): void
+  setLevel(level: number): void
   setBounds(bounds: MapBounds, top?: number, right?: number, bottom?: number, left?: number): void
   panTo(point: MapPoint): void
 }
 export interface MapOverlay {
   setMap(map: KakaoMapInstance | null): void
 }
+export interface KakaoMarker extends MapOverlay {
+  setImage(image: MapMarkerImage): void
+  setZIndex(zIndex: number): void
+}
+export type KakaoMapEventTarget = KakaoMapInstance | MapOverlay
 export interface KakaoMaps {
   load(callback: () => void): void
   LatLng: new (lat: number, lng: number) => MapPoint
@@ -50,7 +65,19 @@ export interface KakaoMaps {
     container: HTMLElement,
     options: { center: MapPoint; level: number },
   ) => KakaoMapInstance
-  Marker: new (options: { map: KakaoMapInstance; position: MapPoint; title?: string }) => MapOverlay
+  MarkerImage: new (
+    src: string,
+    size: MapSize,
+    options?: { offset?: MapPixelPoint },
+  ) => MapMarkerImage
+  Size: new (width: number, height: number) => MapSize
+  Point: new (x: number, y: number) => MapPixelPoint
+  Marker: new (options: {
+    map: KakaoMapInstance
+    position: MapPoint
+    title?: string
+    clickable?: boolean
+  }) => KakaoMarker
   Polyline: new (options: {
     map: KakaoMapInstance
     path: MapPoint[]
@@ -81,12 +108,12 @@ export interface KakaoMaps {
   }
   event: {
     addListener(
-      target: KakaoMapInstance,
+      target: KakaoMapEventTarget,
       type: string,
       handler: (event: KakaoMapClickEvent) => void,
     ): void
     removeListener(
-      target: KakaoMapInstance,
+      target: KakaoMapEventTarget,
       type: string,
       handler: (event: KakaoMapClickEvent) => void,
     ): void
