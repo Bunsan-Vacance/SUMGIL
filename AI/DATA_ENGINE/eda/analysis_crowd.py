@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import pandas as pd
+from sklearn.cluster import KMeans
 
 _PIVOT_INDEX = ["source", "line", "station_name", "direction", "day_type", "year", "train_type"]
 
@@ -91,3 +92,39 @@ def year_over_year_snapshot_reference(df_line9: pd.DataFrame) -> pd.DataFrame:
     pivot = pivot.reindex(sorted(pivot.columns), axis=1)
     pct_change = pivot.pct_change(axis=1)
     return pct_change.replace([float("inf"), float("-inf")], pd.NA)
+
+
+def cluster_station_profiles(
+    profile_wide: pd.DataFrame, n_clusters: int = 3, random_state: int = 42
+) -> pd.Series:
+    """역×시간대 혼잡도 프로파일을 시간대 축으로 K-means 군집화.
+
+    입력은 역(행) × time_slot(열) 형태의 wide pivot(예: 특정 line/day_type/direction/
+    train_type 조합의 `station_time_pivot` 슬라이스)을 기대한다.
+
+    행 단위 z-score 표준화 후 유클리드 거리로 K-means를 적용한다 — 절대 혼잡도 수준이 아니라
+    "하루 중 언제 피크가 오는가"라는 패턴의 모양만 남기기 위해서다. 이는 [장려상] 지하철
+    혼잡도 상관분석 논문의 "Correlation similarity 기반 K-means 클러스터링"(오후 혼잡 집중형
+    /좌측 피크 쌍봉형/우측 피크 쌍봉형 3군집)을 근사하는 표준 기법이다 — 행을 표준화하면
+    유클리드 거리 순위가 피어슨 상관 기반 순위와 일치한다.
+
+    결측이 있는 역은 표준화가 왜곡되므로 제외한다(채우지 않는다 원칙의 연장) — 표본 부족
+    역은 군집 배정 없이 데이터 부족으로 남는다.
+    """
+    complete = profile_wide.dropna()
+    if len(complete) < n_clusters:
+        raise ValueError(
+            f"결측 없는 역이 {len(complete)}개뿐이라 n_clusters={n_clusters}로 군집화할 수 없습니다."
+        )
+    row_mean = complete.mean(axis=1)
+    row_std = complete.std(axis=1)
+    constant_rows = row_std == 0
+    standardized = (
+        complete.loc[~constant_rows]
+        .sub(row_mean[~constant_rows], axis=0)
+        .div(row_std[~constant_rows], axis=0)
+    )
+
+    model = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    labels = model.fit_predict(standardized.to_numpy())
+    return pd.Series(labels, index=standardized.index, name="cluster")
