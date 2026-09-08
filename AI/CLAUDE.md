@@ -48,8 +48,8 @@
 ## 테스트 작성 — 무거운 의존성 가드
 
 torch·PySpark처럼 무거운 의존성이 필요한 테스트는 파일 최상단에서
-`pytest.importorskip(...)`으로 감싸, `requirements-dev.txt`만 설치된 환경(CI 포함)에서
-에러 없이 스킵되게 한다. 표준 라이브러리·numpy/pandas 순수 로직 테스트는 가드가 필요 없다.
+`pytest.importorskip(...)`으로 감싸, CI처럼 그 패키지가 안 깔린 환경에서 에러 없이
+스킵되게 한다. 표준 라이브러리·numpy/pandas 순수 로직 테스트는 가드가 필요 없다.
 
 ```python
 import pytest
@@ -58,6 +58,13 @@ torch = pytest.importorskip("torch")
 
 from my_module import Something  # noqa: E402
 ```
+
+CI(`ai-test`)는 `requirements-dev.txt` 전체(= `requirements.txt`의 torch·PySpark·geopandas
+등 프로덕션 의존성 전부, GB 단위)가 아니라 `requirements-ci.txt`(지금 테스트가 실제로
+import하는 것만 담은 목록)를 설치한다 — 안 그러면 매 파이프라인마다 수 분씩 걸린다.
+**새 테스트가 `requirements-ci.txt`에 없는 패키지를 import하면 CI에서
+`ModuleNotFoundError`가 난다** — 그 패키지가 위 가드로 스킵할 무거운 의존성이 아니라면
+`requirements-ci.txt`에 추가한다.
 
 ## 커밋 전 로컬 검증
 
