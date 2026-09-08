@@ -97,9 +97,7 @@ def run_once() -> None:
     df = fetch_snapshot()
     if df.empty:
         return
-    out_path = save_partitioned_parquet(
-        df, BYC_RAW / "realtime", df["collected_at"].iloc[0]
-    )
+    out_path = save_partitioned_parquet(df, BYC_RAW / "realtime", df["collected_at"].iloc[0])
     logger.info("저장 완료: %s (%d개소)", out_path, len(df))
 
 

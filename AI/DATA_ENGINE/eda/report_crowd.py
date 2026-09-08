@@ -15,7 +15,6 @@ from pathlib import Path
 
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
-import pandas as pd
 import seaborn as sns
 
 from DATA_ENGINE.eda import analysis_crowd, parsers_crowd
@@ -73,7 +72,9 @@ def generate() -> Path:
         else "중복 관측 셀 없음."
     )
     missing_block = (
-        f"```\n{missing.head(20).to_string(index=False)}\n```\n" if len(missing) else "결측 셀 없음.\n"
+        f"```\n{missing.head(20).to_string(index=False)}\n```\n"
+        if len(missing)
+        else "결측 셀 없음.\n"
     )
     outlier_block = (
         f"```\n{outliers['flag_reason'].value_counts().to_string()}\n```\n"

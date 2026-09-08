@@ -77,6 +77,10 @@ def year_over_year_snapshot_reference(df_line9: pd.DataFrame) -> pd.DataFrame:
 
     주의: 연 1회 대표주간 관측치이므로 일 단위 시계열이 아니고 통계적 유의성을 주장할 수
     없다 — 추세 참고용으로만 쓴다("추정 데이터는 절대값이 아니라 변화율로 쓴다" 원칙 적용).
+
+    이전 연도 값이 0%(무혼잡)였던 셀은 변화율이 무한대(inf)로 계산되는데, 이는 실제 변화
+    크기를 나타내지 못하는 계산상 허상이라 NaN으로 남긴다(원칙 1: 근거 없는 값을 채우지
+    않는다의 연장 — inf도 유효한 변화율이 아니므로 같은 취급).
     """
     pivot = df_line9.pivot_table(
         index=["station_name", "day_type", "direction", "train_type", "time_slot"],
@@ -85,4 +89,5 @@ def year_over_year_snapshot_reference(df_line9: pd.DataFrame) -> pd.DataFrame:
         aggfunc="mean",
     )
     pivot = pivot.reindex(sorted(pivot.columns), axis=1)
-    return pivot.pct_change(axis=1)
+    pct_change = pivot.pct_change(axis=1)
+    return pct_change.replace([float("inf"), float("-inf")], pd.NA)
