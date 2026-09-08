@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 export const screenTitles = {
   home: '숨길 지도 홈',
+  browse: '장소 탐색',
   search: '장소 검색',
   results: '추천 경로',
   detail: '선택 경로 상세',

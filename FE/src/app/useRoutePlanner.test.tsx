@@ -177,6 +177,18 @@ describe('경로와 안내 화면의 수명', () => {
     expect(result.current.screen).toBe('home')
   })
 
+  it('장소 탐색을 나갔다 돌아와도 기존 여행 상태를 보존한다', async () => {
+    const { result } = await renderLoadedPlanner()
+    const destination = result.current.trip.destination
+
+    act(() => result.current.openBrowse())
+    expect(result.current.screen).toBe('browse')
+    act(() => result.current.go('home'))
+
+    expect(result.current.trip.destination).toBe(destination)
+    expect(result.current.trip.status).toBe('success')
+  })
+
   it('결과 화면에서 교환하면 새 좌표로 재조회하고 안내 세션은 유지한다', async () => {
     const search = vi.fn(
       async (_request: Parameters<RouteRepository['search']>[0], _signal: AbortSignal) => routes,

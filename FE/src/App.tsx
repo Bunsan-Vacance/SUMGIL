@@ -7,6 +7,7 @@ import KakaoMap from './features/map/KakaoMap'
 import FilterDialog from './features/route/FilterDialog'
 import GuidanceDialogs from './features/guidance/GuidanceDialogs'
 import HomePage from './pages/HomePage'
+import BrowsePage from './pages/BrowsePage'
 import SearchPage from './pages/SearchPage'
 import ResultsPage from './pages/ResultsPage'
 import DetailPage from './pages/DetailPage'
@@ -20,7 +21,7 @@ export default function App() {
   const { screen, go, trip, guidance, destinationName, modal, setModal } = planner
   const title = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
-    if (screen !== 'search') title.current?.focus()
+    if (screen !== 'search' && screen !== 'browse') title.current?.focus()
   }, [screen])
   return (
     <div className="workspace">
@@ -40,7 +41,7 @@ export default function App() {
           <h1 ref={title} tabIndex={-1} className="sr-only">
             {screenTitles[screen]}
           </h1>
-          {screen !== 'search' && screen !== 'arrival' && (
+          {screen !== 'search' && screen !== 'arrival' && screen !== 'browse' && (
             <KakaoMap
               key={screen}
               origin={screen === 'guide' ? guidance.origin || trip.origin : trip.origin}
@@ -59,8 +60,20 @@ export default function App() {
               origin={trip.origin}
               destination={trip.destination}
               openSearch={planner.openSearch}
+              openBrowse={planner.openBrowse}
+              routePanelOpen={planner.routePanelOpen}
+              toggleRoutePanel={planner.toggleRoutePanel}
+              closeRoutePanel={planner.closeRoutePanel}
               findRoutes={planner.findRoutes}
               swapPlaces={planner.swapPlaces}
+            />
+          )}
+          {screen === 'browse' && (
+            <BrowsePage
+              onBack={() => planner.go('home')}
+              onMessage={planner.setMessage}
+              setOrigin={planner.setOriginFromBrowse}
+              findRoutes={planner.findRoutes}
             />
           )}
           {screen === 'search' && (

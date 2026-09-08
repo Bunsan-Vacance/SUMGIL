@@ -30,6 +30,7 @@ export function useRoutePlanner(repository?: RouteRepository) {
   const { message, setMessage } = useToast()
   const [searchTarget, setSearchTarget] = useState<'origin' | 'destination'>('destination')
   const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
+  const [routePanelOpen, setRoutePanelOpen] = useState(false)
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
   useEffect(() => {
     if (screen !== navigation.screen) replace(screen)
@@ -41,8 +42,12 @@ export function useRoutePlanner(repository?: RouteRepository) {
   const openSearch = (target: 'origin' | 'destination') => {
     setSearchTarget(target)
     setSearchReturnScreen(screen === 'results' ? 'results' : 'home')
+    if (screen === 'home') setRoutePanelOpen(true)
     go('search')
   }
+  const openBrowse = () => go('browse')
+  const toggleRoutePanel = () => setRoutePanelOpen((open) => !open)
+  const closeRoutePanel = () => setRoutePanelOpen(false)
   const cancelSearch = () => go(searchReturnScreen)
   const findRoutes = (place?: Place) => {
     const destination = place || trip.destination
@@ -74,6 +79,16 @@ export function useRoutePlanner(repository?: RouteRepository) {
       return true
     }
     return findRoutes(place)
+  }
+  const setOriginFromBrowse = (place: Place) => {
+    if (trip.destination && samePlace(place, trip.destination)) {
+      setMessage('출발지와 도착지는 다른 장소를 선택해 주세요.')
+      return false
+    }
+    trip.setOrigin(place)
+    setRoutePanelOpen(true)
+    go('home')
+    return true
   }
   const swapPlaces = () => {
     if (!trip.destination) return false
@@ -142,8 +157,13 @@ export function useRoutePlanner(repository?: RouteRepository) {
     modal,
     setModal,
     openSearch,
+    openBrowse,
+    routePanelOpen,
+    toggleRoutePanel,
+    closeRoutePanel,
     findRoutes,
     choosePlace,
+    setOriginFromBrowse,
     swapPlaces,
     selectRoute,
     startGuide,

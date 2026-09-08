@@ -1,22 +1,57 @@
-import { LocateFixed, RotateCw } from 'lucide-react'
+import { LocateFixed, RotateCw, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Place } from '../route/types'
 import { useKakaoMap } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
 export default function KakaoMap({
   origin,
   destination,
+  places,
   onMessage,
+  onPlaceSelect,
+  showPlaceInfo = true,
+  focusedPlace,
 }: {
-  origin: Place
-  destination: Place | null
+  origin?: Place | null
+  destination?: Place | null
+  places?: Place[]
   onMessage: (message: string) => void
+  onPlaceSelect?: (place: Place) => void
+  showPlaceInfo?: boolean
+  focusedPlace?: Place | null
 }) {
+  const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
+  const routePlaces = useMemo(
+    () => [origin, destination].filter((place): place is Place => Boolean(place)),
+    [origin, destination],
+  )
+  const mapPlaces = places ?? routePlaces
+  const mapFocus = focusedPlace === undefined ? selectedPlace : focusedPlace
+  const selectPlace = (place: Place) => {
+    setSelectedPlace(place)
+    onPlaceSelect?.(place)
+  }
   const { container, status, retry, showPosition, locationScope } = useKakaoMap(
-    origin,
-    destination,
+    origin ?? null,
+    destination ?? null,
     onMessage,
+    selectPlace,
+    mapPlaces,
+    mapFocus,
+    places === undefined ? null : mapFocus,
   )
   const { locating, locate } = useCurrentLocation(showPosition, onMessage, locationScope)
+  useEffect(() => {
+    setSelectedPlace(null)
+  }, [origin, destination, places])
+  useEffect(() => {
+    if (!selectedPlace) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedPlace(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [selectedPlace])
   return (
     <div className="kakao-map-wrap">
       <div ref={container} className="kakao-map-canvas" aria-label="카카오 지도" />
@@ -40,6 +75,42 @@ export default function KakaoMap({
         >
           {locating ? <span className="spinner" /> : <LocateFixed />}
         </button>
+      )}
+      {showPlaceInfo && (
+        <>
+          <div className="map-place-shortcuts" aria-label="지도 장소 정보">
+            {origin && (
+              <button type="button" onClick={() => selectPlace(origin)}>
+                출발 장소 정보
+              </button>
+            )}
+            {destination && (
+              <button type="button" onClick={() => selectPlace(destination)}>
+                도착 장소 정보
+              </button>
+            )}
+          </div>
+          {selectedPlace && (
+            <section
+              className="map-place-info"
+              role="region"
+              aria-label="선택한 장소 정보"
+              aria-live="polite"
+            >
+              <div>
+                <strong>{selectedPlace.name}</strong>
+                <p>{selectedPlace.address}</p>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="장소 정보 닫기"
+                onClick={() => setSelectedPlace(null)}
+              >
+                <X size={17} />
+              </button>
+            </section>
+          )}
+        </>
       )}
     </div>
   )

@@ -45,6 +45,9 @@ describe('브라우저 기록으로 요청한 화면 검증', () => {
   it('검색 전 상태에서 과거 결과 URL로 이동하면 홈으로 돌아간다', () => {
     expect(resolveScreen('results', previewTrip, initialGuidance)).toBe('home')
   })
+  it('장소 탐색 URL은 여행 목적지 없이도 탐색 화면을 유지한다', () => {
+    expect(resolveScreen('browse', previewTrip, initialGuidance)).toBe('browse')
+  })
   it('안내를 명시적으로 끝낸 뒤 과거 안내 URL로 돌아오면 현재 선택 경로의 상세로 보낸다', () => {
     expect(resolveScreen('guide', loadedTrip, initialGuidance)).toBe('detail')
   })

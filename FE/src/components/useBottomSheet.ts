@@ -1,12 +1,15 @@
-import { useRef, useState, type ButtonHTMLAttributes } from 'react'
+import { useEffect, useRef, useState, type ButtonHTMLAttributes } from 'react'
 
 type Snap = 'default' | 'expanded' | 'collapsed'
-export function useBottomSheet() {
-  const [snap, setSnap] = useState<Snap>('default')
+export function useBottomSheet(initialSnap: Snap = 'default', preferredSnap?: Snap) {
+  const [snap, setSnap] = useState<Snap>(initialSnap)
   const [dragHeight, setDragHeight] = useState<number | null>(null)
   const ref = useRef<HTMLElement>(null)
   const drag = useRef<{ y: number; height: number; moved: boolean } | null>(null)
   const suppressClick = useRef(false)
+  useEffect(() => {
+    if (preferredSnap !== undefined) setSnap(preferredSnap)
+  }, [preferredSnap])
   const finish = (cancelled: boolean, y: number) => {
     const current = drag.current
     if (!current) return
