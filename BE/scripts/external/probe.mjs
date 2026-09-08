@@ -204,7 +204,12 @@ async function main() {
     }
   }
 
-  process.exit(last ? 0 : 1);
+  // process.exit() 로 강제 종료하면 fetch 의 keep-alive 소켓이 정리되기 전에 끊겨
+  // Windows 에서 libuv 단언(UV_HANDLE_CLOSING)으로 죽고 종료 코드가 깨진다. exitCode 만 두고 자연 종료한다.
+  process.exitCode = last ? 0 : 1;
 }
 
-main().catch((err) => fail(`오류: ${err.message}`, 1));
+main().catch((err) => {
+  console.error(`오류: ${err.message}`);
+  process.exitCode = 1;
+});
