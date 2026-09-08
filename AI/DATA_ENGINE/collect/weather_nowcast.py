@@ -20,7 +20,13 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
-from DATA_ENGINE.collect.common import DATA_RAW, env, http_retry, now_kst, save_partitioned_parquet
+from DATA_ENGINE.collect.common import (
+    EXTERNAL_WEATHER_RAW,
+    env,
+    http_retry,
+    now_kst,
+    save_partitioned_parquet,
+)
 
 logger = logging.getLogger("weather_nowcast")
 
@@ -96,7 +102,7 @@ def run_once(nx: int = DEFAULT_NX, ny: int = DEFAULT_NY) -> None:
         logger.warning("초단기실황/예보 응답이 비어 있습니다")
         return
     out_path = save_partitioned_parquet(
-        df, DATA_RAW / "weather" / "nowcast", df["collected_at"].iloc[0]
+        df, EXTERNAL_WEATHER_RAW / "nowcast", df["collected_at"].iloc[0]
     )
     logger.info("저장 완료: %s (%d rows)", out_path, len(df))
 
