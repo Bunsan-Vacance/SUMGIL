@@ -1,5 +1,7 @@
 # API 명세 (S15P21A104-63 / S15P21A104-64) — FE 협의 반영본
 
+> **`GET /api/routes/search`(63) 구현 완료** — mock 데이터로 응답. 로컬에서 실제 요청까지 확인함(2026-09-08). `GET /api/bike-stations/nearby`(64)는 아직 구현 전.
+
 > 이 문서가 최종 기준이다. 이전 초안(`route-api-spec.md`, `mvp-api-overview.md`, `bike-station-api-spec.md`)은 논의 과정 기록으로 남겨두고, 앞으로는 이 문서를 갱신한다. 확정되면 Notion으로 옮긴다.
 
 FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
