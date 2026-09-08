@@ -17,6 +17,8 @@ workflow:
 mr-guard:
   stage: lint
   image: alpine:3.20
+  tags:
+    - CI
   rules:
     - changes:
         - "AI/**/*"
