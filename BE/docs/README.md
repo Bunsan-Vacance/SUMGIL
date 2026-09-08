@@ -30,7 +30,9 @@ BE/
 ├─ src/main/resources/
 │  ├─ application.yml         ← 커밋됨. 환경변수 참조만 있음 (비밀번호 없음)
 │  └─ application-local.yml   ← Git 제외. 로컬 실제 접속 정보
-├─ docs/                      ← 이 폴더. api/db/infra로 나눠서 정리
+├─ docs/                      ← 이 폴더. api/db/global/infra/external/perf 로 나눠서 정리
+│                                (external: 외부 데이터 소스 조사·샘플, perf: 성능 측정 기록)
+├─ scripts/external/          ← 외부 API 1회 호출 probe (node, 의존성 없음)
 └─ .claude/                   ← Git 제외 (Claude Code 로컬 설정, 팀 공유 안 됨)
 ```
 
