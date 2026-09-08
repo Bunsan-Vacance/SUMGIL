@@ -1,8 +1,28 @@
 // BE/.env 파일을 의존성 없이 읽는 파서의 규칙을 고정하는 테스트.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { parseDotenv } from '../lib/env.mjs';
+import { loadDotenv, parseDotenv } from '../lib/env.mjs';
+
+describe('loadDotenv', () => {
+  test('파일이 있으면 파싱해 돌려준다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'probe-env-'));
+    try {
+      const path = join(dir, '.env');
+      writeFileSync(path, 'A=1\n# 주석\nB="2"\n', 'utf8');
+      assert.deepEqual(loadDotenv(path), { A: '1', B: '2' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('파일이 없으면 빈 객체다 (키는 --key 나 환경변수로도 올 수 있다)', () => {
+    assert.deepEqual(loadDotenv(join(tmpdir(), 'probe-env-없는-디렉터리', '.env')), {});
+  });
+});
 
 describe('parseDotenv', () => {
   test('KEY=VALUE 줄을 객체로 읽는다', () => {
