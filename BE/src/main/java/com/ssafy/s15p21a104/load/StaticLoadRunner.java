@@ -96,7 +96,13 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         SubwayGraph graph = new SubwayGraphBuilder(disambiguation).build(segments, transfers, coords);
         ValidationReport report = LoadValidator.validate(graph);
-        logWarnings("검증", report.warnings());
+        // 좌표 없음은 코레일 역 전부에 해당해 수십 건이 나온다. 한 줄로 묶어 다른 경고가 묻히지 않게 한다.
+        List<String> noCoordWarnings = report.warnings().stream().filter(w -> w.startsWith("좌표 없음")).toList();
+        logWarnings("검증", report.warnings().stream().filter(w -> !w.startsWith("좌표 없음")).toList());
+        if (!noCoordWarnings.isEmpty()) {
+            log.warn("검증 경고: 좌표 없음 {}개 — {}", noCoordWarnings.size(),
+                    String.join(", ", noCoordWarnings.stream().map(w -> w.substring("좌표 없음: ".length())).toList()));
+        }
         long noCoords = graph.stations().stream().filter(s -> s.lat() == null).count();
         log.info("그래프: 노선 {} · 역 {} (좌표 없음 {}) · 환승 {} · 엣지 {} · edge_time 예정 {}",
                 graph.lines().size(), graph.stations().size(), noCoords, graph.transfers().size(),
