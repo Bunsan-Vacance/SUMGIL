@@ -71,4 +71,22 @@ class KorailSegmentParserTest {
 
         assertEquals(30, out.get(0).travelSec());
     }
+
+    @Test
+    @DisplayName("구간별 노선 예외 표가 있으면 코드 대신 그 노선(들)을 쓴다 — 경원선 코드 103 의 청량리→회기는 1호선·경의중앙선 둘 다")
+    void overridesByStationPair() {
+        var overriding = new KorailSegmentParser(new StationNameNormalizer(Map.of()), 9.2,
+                Map.of("청량리|회기", List.of("1001", "1063"), "외대앞|신이문", List.of("1001")));
+
+        List<Segment> out = overriding.parse(List.of(
+                row("1", "청량리(서울시립대입구)", "103", "2", "회기", "103", "1400"),
+                row("2", "외대앞", "103", "3", "신이문", "103", "800")));
+
+        assertEquals(3, out.size());
+        assertEquals(java.util.Set.of("1001", "1063"),
+                out.stream().filter(s -> s.fromName().equals("청량리")).map(Segment::lineId)
+                        .collect(java.util.stream.Collectors.toSet()));
+        assertEquals("1001", out.get(2).lineId());
+        assertEquals("신이문", out.get(2).toName());
+    }
 }

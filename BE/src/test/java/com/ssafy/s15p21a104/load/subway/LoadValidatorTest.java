@@ -69,6 +69,26 @@ class LoadValidatorTest {
     }
 
     @Test
+    @DisplayName("한 노선의 엣지가 서로 이어지지 않으면(연결 요소 2개 이상) 경고 — 원천 구간 누락을 드러낸다")
+    void disconnectedLineIsWarning() {
+        StationRow a = new StationRow("가", "가", 37.50, 127.00, Set.of("1001"));
+        StationRow b = new StationRow("나", "나", 37.51, 127.01, Set.of("1001"));
+        StationRow c = new StationRow("다", "다", 37.52, 127.02, Set.of("1001"));
+        StationRow d = new StationRow("라", "라", 37.53, 127.03, Set.of("1001"));
+
+        ValidationReport r = LoadValidator.validate(graph(List.of(a, b, c, d), List.of(
+                new EdgeRow("가", "나", "SUBWAY", "1001", 60, "avg"),
+                new EdgeRow("나", "가", "SUBWAY", "1001", 60, "avg"),
+                new EdgeRow("다", "라", "SUBWAY", "1001", 60, "avg"),
+                new EdgeRow("라", "다", "SUBWAY", "1001", 60, "avg"))));
+
+        assertTrue(r.errors().isEmpty());
+        assertEquals(1, r.warnings().size());
+        assertTrue(r.warnings().get(0).contains("1001"));
+        assertTrue(r.warnings().get(0).contains("2"));
+    }
+
+    @Test
     @DisplayName("수도권 밖 좌표는 오류, 좌표 없음은 경고")
     void coordinateRangeAndMissing() {
         StationRow far = new StationRow("부산", "부산", 35.1, 129.0, Set.of("1001"));
