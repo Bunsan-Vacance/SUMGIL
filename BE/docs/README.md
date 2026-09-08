@@ -34,7 +34,9 @@ BE/
 │  ├─ db/migration/           ← Flyway V1 스키마, V2 source 열 확대
 │  └─ data/subway/            ← 지하철 정적 적재 원천 CSV·설정 (출처는 그 폴더 README)
 ├─ src/main/java/.../load/    ← 정적 적재 로더 (load 프로파일, docs/db/load-subway.md)
-├─ docs/                      ← 이 폴더. api/db/infra로 나눠서 정리
+├─ docs/                      ← 이 폴더. api/db/global/infra/external/perf 로 나눠서 정리
+│                                (external: 외부 데이터 소스 조사·샘플, perf: 성능 측정 기록)
+├─ scripts/external/          ← 외부 API 1회 호출 probe (node, 의존성 없음)
 └─ .claude/                   ← Git 제외 (Claude Code 로컬 설정, 팀 공유 안 됨)
 ```
 
