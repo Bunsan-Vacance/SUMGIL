@@ -21,6 +21,9 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 | `dockCount` | 거치대 **총 개수**만 표시. 실시간 대여 가능 대수 아님 |
 | `source` 필드 | 유지 (mock/실제 구분 용도) |
 | 안내 종료·중단(F-02-10/11) | 서버 기록 요구사항 없으면 API 불필요, FE 처리 |
+| `priority`(쾌적/시간 우선) | 일단 지금 초안(`TIME`\|`COMFORT`) 그대로 둔다. 경로 추천 로직이 구체화되면 그때 같이 조정 |
+| 지도 표시용 좌표 | **MVP는 지점 좌표만 제공.** `legs`에 `fromLat`/`fromLng`/`toLat`/`toLng` 추가 (아래 예시 참고). 지점 사이 실제 이동 경로선(폴리라인)은 범위 밖 — 필요해지면 별도 Task |
+| 카카오 검색 ↔ 내부 ID 연결 | FE는 건물/장소를 카카오 API로 직접 불러온다. 우리 쪽 역·정류소·대여소 데이터를 만드는 건 별도 BE 작업이고, 필요하면 다른 BE 팀원이 그때 손본다 — 지금 이 명세를 막는 요소 아님 |
 
 ## 남은 논의사항
 
@@ -28,11 +31,8 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 | --- | --- | --- |
 | 1 | `routeType` 최종 목록 — 지금 실제로 만들 수 있는 건 `SHORTEST`, `SHORTEST_WITH_BIKE` 정도로 보임 (혼잡회피는 데이터(`S15P21A104-73`) 준비 전). 버스 포함 여부도 확인 필요 | 알고리즘(전우석)·FE |
 | 2 | 정렬 기준 — 단순 시간순인지 추천 점수(README 3절 λ 가중치)인지 | 알고리즘·기획 |
-| 3 | **쾌적/시간 우선(F-01-02/03) 파라미터** — `modes`(수단 on/off)와 별개로, "쾌적 우선"/"소요시간 우선" 선택을 위한 새 파라미터가 필요함. 아래 초안에 `priority` 추가해뒀으니 이름·값 확인 필요 | FE |
-| 4 | **지도 표시용 좌표/경로선** — `legs`의 `fromNodeId`/`toNodeId`는 각각 `station`/`bus_stop`/`bike_station` 테이블에 위경도가 있어 지점 좌표는 낼 수 있다. 근데 **두 지점 사이 실제 이동 경로(특히 도보·자전거 구간의 거리 위 경로 모양)는 지금 데이터로 못 만든다** — OSRM 같은 라우팅 엔진 연동이 필요할 수 있음. MVP에서 "구간 시작/끝 지점만 지도에 찍는 것"으로 충분한지, "실제 이동 경로선"까지 필요한지부터 정해야 범위가 나옴 | FE·기획, 필요시 새 Task |
-| 5 | 혼합 경로 추천 시 **실제 대여·반납 가능 여부 보장** — 지금 설계(cache-aside, `S15P21A104-61`)가 실시간 재고를 반영하는지, 아니면 거치대 존재만 보고 추천하는지 알고리즘 쪽과 확정 필요 | 알고리즘 |
-| 6 | 대여소 검색 **반경 최대값**(안: 3000m) 및 잘못된 반경·개수 값 처리(범위 밖이면 400인지 클램핑인지) | FE |
-| 7 | **지도 검색(카카오) 결과 ↔ 내부 `station_id` 연결.** 카카오 장소검색은 카카오 자체 ID/좌표만 주고 우리 `station_id`를 모른다. `search` 호출엔 우리 `station_id`가 필요한데 이걸 어떻게 얻을지 아직 안 정해짐. 후보: (a) BE가 자체 역 이름 검색/자동완성 API(`GET /api/stations/search?query=`)를 새로 제공 — 카카오 없이 우리 DB로 검색, (b) FE가 카카오로 좌표를 얻은 뒤 "가장 가까운 역"을 BE에 물어봄. **(a)가 더 안전해 보이지만 새 API/Task가 필요해서 결정 필요** | FE·기획, 새 Task 가능성 |
+| 3 | 혼합 경로 추천 시 **실제 대여·반납 가능 여부 보장** — 지금 설계(cache-aside, `S15P21A104-61`)가 실시간 재고를 반영하는지, 아니면 거치대 존재만 보고 추천하는지 알고리즘 쪽과 확정 필요 | 알고리즘 |
+| 4 | 대여소 검색 **반경 최대값**(안: 3000m) 및 잘못된 반경·개수 값 처리(범위 밖이면 400인지 클램핑인지) | FE |
 
 ---
 
@@ -49,7 +49,7 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 | `originStationId` | String | Y | 출발역 `station_id` |
 | `destStationId` | String | Y | 도착역 `station_id` |
 | `modes` | String (콤마 구분) | N | 허용 수단 집합. 생략 시 전체 허용. `WALK`/`TRANSFER`는 항상 허용(연결 구간이라 필터 대상 아님) |
-| `priority` | String (`TIME` \| `COMFORT`) | N | 정렬/계산 우선순위. **이름·값 확인 필요 — 열린 질문 3** |
+| `priority` | String (`TIME` \| `COMFORT`) | N | 정렬/계산 우선순위. 일단 이 값으로 두고 추천 로직 구체화되면 조정 |
 
 ### 응답 — 배열
 
@@ -65,14 +65,14 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
       "legs": [
         {
           "mode": "SUBWAY",
-          "fromNodeId": "0222", "fromNodeName": "한티",
-          "toNodeId": "0221", "toNodeName": "역삼",
+          "fromNodeId": "0222", "fromNodeName": "한티", "fromLat": 37.5049, "fromLng": 127.0530,
+          "toNodeId": "0221", "toNodeName": "역삼", "toLat": 37.5006, "toLng": 127.0364,
           "routeId": "2", "minutes": 5.0
         },
         {
           "mode": "BIKE",
-          "fromNodeId": "0221", "fromNodeName": "역삼",
-          "toNodeId": "ST-1577", "toNodeName": "역삼역 3번출구 대여소",
+          "fromNodeId": "0221", "fromNodeName": "역삼", "fromLat": 37.5006, "fromLng": 127.0364,
+          "toNodeId": "ST-1577", "toNodeName": "역삼역 3번출구 대여소", "toLat": 37.4998, "toLng": 127.0371,
           "routeId": null, "minutes": 7.4
         }
       ],
@@ -87,11 +87,12 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 | `routeType` | 경로 유형. 초기 제공값: `SHORTEST`, `SHORTEST_WITH_BIKE` (열린 질문 1) |
 | `legs[].mode` | `TravelMode`(`WALK`/`BIKE`/`BUS`/`SUBWAY`/`TRANSFER`) |
 | `legs[].fromNodeName`/`toNodeName` | 신규 추가 (FE 요청) |
+| `legs[].fromLat`/`fromLng`/`toLat`/`toLng` | 신규 추가. 구간 시작·끝 지점 좌표(`station`/`bus_stop`/`bike_station` 테이블 값) — 지도에 마커 찍는 용도 |
 | `legs[].routeId` | 지하철/버스 노선 ID. 도보·환승·따릉이 구간은 `null` |
 | `source` | `"MOCK"` \| `"ALGORITHM"` |
 
 - 결과 0개면 `data: []` (에러 아님).
-- 지도 좌표/경로선은 이 응답에 없음 — 열린 질문 4.
+- **지점 좌표까지만 제공한다.** 두 지점 사이 실제 이동 경로선(도로를 따라가는 폴리라인)은 이 응답에 없음 — MVP 범위 밖.
 
 ### 실패
 
