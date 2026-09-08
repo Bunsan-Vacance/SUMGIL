@@ -1,7 +1,7 @@
 # DATA_ENGINE/
 
 원천 데이터 수집과 EDA 전용 — `app/`(서빙)도 `validation/`(모델 PoC)도 아니다. 현재 따릉이·
-날씨(BYC/EXTERNAL)와 지하철 혼잡도(CROWD) 두 갈래가 있다. `app/`은 이 폴더를 import하지
+날씨(BIKE/EXTERNAL)와 지하철 혼잡도(CROWD) 두 갈래가 있다. `app/`은 이 폴더를 import하지
 않는다(단방향).
 
 ## 구조
@@ -10,7 +10,7 @@
   (초단기실황/예보, 10min 폴링), `weather_asos_backfill.py`(과거 백필, 기본 dry-run),
   `common.py`(재시도·시각·parquet 저장 공용). CROWD 원본은 API 폴링이 아니라 수동 다운로드
   파일이라 이 폴더에 수집 스크립트가 없다.
-- `eda/` (따릉이·날씨) — `parsers.py`(파일형 원본 → `data/BYC/interim`), `analysis.py`
+- `eda/` (따릉이·날씨) — `parsers.py`(파일형 원본 → `data/BIKE/interim`), `analysis.py`
   (재고·날씨 분석 함수), `report.py`(`reports/bike_weather_eda.md` 생성).
 - `eda/` (CROWD, 1단계 정적 프로파일) — `parsers_crowd.py`(서울시 CSV + 9호선 xlsx →
   `data/CROWD/interim`, 두 원천의 시간대 표기·요일유형/방향 체계 차이를 정규화 없이 그대로
@@ -32,22 +32,29 @@
 ## `data/` 하위 각 디렉터리가 뭔지
 
 `AI/data/`는 이 폴더와 이름이 비슷해 보이지만 별개 위치다(`.gitignore`가 `AI/data/**` 기준으로
-걸려 있어 옮기지 않았다). 도메인(JIRA 에픽 prefix) 우선 구조라 따릉이는 `data/BYC/`, 지하철
-혼잡도는 `data/CROWD/`, 여러 도메인이 공유하는 날씨는 `data/EXTERNAL/`에 있다. 전부 원본·가공
-데이터라 커밋되지 않는다.
+걸려 있어 옮기지 않았다). 도메인(JIRA 에픽 prefix) 우선 구조라 따릉이는 `data/BIKE/`, 지하철
+혼잡도는 `data/CROWD/`, 역전 판정(경로 시간 비교)은 `data/ROUTE/`, 여러 도메인이 공유하는
+외부 요인은 `data/EXTERNAL/`에 있다. `EXTERNAL/`은 다른 도메인과 달리 출처(`weather/`,
+`station/`, `population/`)가 최상위이고 그 밑에 각각 `raw/interim/processed`를 둔다 — 여러
+출처의 가공 산출물이 한 폴더에 섞이지 않게 하기 위해서다. 전부 원본·가공 데이터라 커밋되지
+않는다.
 
 | 경로 | 내용 | 출처 | 시간 해상도 | 쓰이는 곳 |
 | --- | --- | --- | --- | --- |
-| `data/BYC/raw/realtime/` | 대여소별 실시간 재고 스냅샷 | `bike_realtime.py` 폴링 (소급 불가, 지금부터 쌓는 것만 존재) | 60초 | 재고 분포·시간패턴·공간구조 (1·2·4번 섹션) |
-| `data/BYC/raw/rental_history/` | 대여소별 이용정보 **월별 집계** (OA-15182) | 수동 다운로드 | 월 단위 | 정류소/자치구 월간 총량 참고용 — **날씨 분석엔 미사용** |
-| `data/BYC/raw/station_5min/` | 대여소별 5분단위 이용현황 O-D (OA-21229) | 수동 다운로드 | 5분(집계 시 시간 단위로 묶음) | **날씨-수요 핵심 분석 (3번 섹션)** |
-| `data/BYC/raw/station_master/` | 대여소 좌표 (OA-21235) | 수동 다운로드 | - | 공간분석 좌표 조인 (4번 섹션) |
-| `data/EXTERNAL/raw/weather/asos/` | 종관기상관측 시간자료 2년 백필 (지점 108) | `weather_asos_backfill.py` | 시간 | 날씨-수요 핵심 분석 (3번 섹션) |
-| `data/EXTERNAL/raw/weather/nowcast/` | 초단기실황/예보 스냅샷 | `weather_nowcast.py` 폴링 | 10분 | 재고 쪽 보조 분석(향후, 데이터 쌓이는 대로) |
-| `data/BYC/interim/` | `eda/parsers.py` 정규화 결과 (parquet) | 파서 실행 | 원본 그대로 | `report.py`가 직접 읽는 소스 |
-| `data/BYC/processed/`, `data/EXTERNAL/processed/` | (아직 미사용) 도메인별 가공·피처 산출물 자리 | - | - | - |
+| `data/BIKE/raw/realtime/` | 대여소별 실시간 재고 스냅샷 | `bike_realtime.py` 폴링 (소급 불가, 지금부터 쌓는 것만 존재) | 60초 | 재고 분포·시간패턴·공간구조 (1·2·4번 섹션) |
+| `data/BIKE/raw/rental_history/` | 대여소별 이용정보 **월별 집계** (OA-15182) | 수동 다운로드 | 월 단위 | 정류소/자치구 월간 총량 참고용 — **날씨 분석엔 미사용** |
+| `data/BIKE/raw/station_5min/` | 대여소별 5분단위 이용현황 O-D (OA-21229) | 수동 다운로드 | 5분(집계 시 시간 단위로 묶음) | **날씨-수요 핵심 분석 (3번 섹션)** |
+| `data/BIKE/raw/station_master/` | 대여소 좌표 (OA-21235) | 수동 다운로드 | - | 공간분석 좌표 조인 (4번 섹션) |
+| `data/EXTERNAL/weather/raw/asos/` | 종관기상관측 시간자료 2년 백필 (지점 108) | `weather_asos_backfill.py` | 시간 | 날씨-수요 핵심 분석 (3번 섹션) |
+| `data/EXTERNAL/weather/raw/nowcast/` | 초단기실황/예보 스냅샷 | `weather_nowcast.py` 폴링 | 10분 | 재고 쪽 보조 분석(향후, 데이터 쌓이는 대로) |
+| `data/EXTERNAL/station/raw/` | 서울시 역사마스터(역사_ID·역사명·호선·위경도, 지하철 전 노선) | 수동 다운로드 | - | CROWD 역 군집화·ROUTE 라우팅·BIKE 역-대여소 거리 등 여러 도메인이 참조 |
+| `data/EXTERNAL/population/raw/` | 서울 생활인구 250M 격자, 일별 zip(시간대·연령·성별) | 수동 다운로드 | 시간 | 역 반경 집계 후 CROWD/BIKE 수요 보조 피처 (아직 집계 코드 없음) |
+| `data/EXTERNAL/holiday/raw/` | 사립학교교직원연금공단 공휴일 관리 정보 | 수동 다운로드 | 일 단위 | 공휴일 파생변수(is_holiday) — CROWD/BIKE 이벤트 피처 |
+| `data/BIKE/interim/` | `eda/parsers.py` 정규화 결과 (parquet) | 파서 실행 | 원본 그대로 | `report.py`가 직접 읽는 소스 |
+| `data/BIKE/processed/`, `data/EXTERNAL/*/processed/` | (아직 미사용) 도메인·출처별 가공·피처 산출물 자리 | - | - | - |
 | `data/CROWD/raw/` | 서울시 지하철혼잡도정보 CSV(1~8호선) + 9호선 xlsx 6개년 | 수동 다운로드 | "대표 1주" 스냅샷(날짜 아님) | 정적 프로파일 EDA |
 | `data/CROWD/interim/crowd_congestion_long.parquet` | `parsers_crowd.py` tidy long-format 결과 | 파서 실행 | 원본 그대로 | `report_crowd.py`가 직접 읽는 소스 |
+| `data/ROUTE/raw/transfer_info/` | 서울교통공사 환승정보(환승역 간 도보 소요시간) | 수동 다운로드 | - | A안(지하철) 경로 시간 계산 — 혼잡도 예측 피처 아님 |
 
 ## 하드 룰
 

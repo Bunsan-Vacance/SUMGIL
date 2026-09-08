@@ -231,7 +231,7 @@ def generate() -> Path:
             "확인 후 수집 | 최우선 |\n"
             "| 기상 8종(기온·강수량·습도·풍속·체감온도·일사량·풍향 등) | 장려상 상관분석, "
             "기상 요소 예측모델 | 기상청 ASOS/단기예보(README ⑪, ★ URL 미확인) | **미확보** "
-            "— `data/EXTERNAL/raw/weather/{asos,forecast,nowcast}/` 폴더만 존재, 실 데이터 "
+            "— `data/EXTERNAL/weather/raw/{asos,forecast,nowcast}/` 폴더만 존재, 실 데이터 "
             "없음 | 높음 |\n"
             "| 공휴일·대체공휴일 특일정보 | 기상 요소 예측모델(RMSE 36%↓ 근거) | 한국천문연구원 "
             "특일 API | **미확보** | 높음 |\n"

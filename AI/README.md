@@ -22,12 +22,13 @@ B안 (내려서 따릉이) = 출구→대여소 도보 + 대여 1분 + 주행 + 
 | --- | --- | --- | --- |
 | **착석 기회 지수** | 혼잡도 → 앉을 확률 변환. 역·시간대·요일별 | BE 조회 API | `CROWD` |
 | **자리 회전 예측** | "몇 정거장 뒤에 자리가 나는가" — 하차 피크 기반 | BE 조회 API | `CROWD` |
-| **대여소 쌍별 실측 소요시간** | 대여이력 `반납시각 − 대여시각` 분포 | 역전 판정 | `BYC` |
-| **따릉이 고갈 예측** | "20분 후 예상 잔여 대수" | 재고 검증 | `BYC` |
-| **역전 테이블** | 역 × 목적지 × 시간대 × 요일 사전계산 | BE 조회 API | `RVSL` |
+| **대여소 쌍별 실측 소요시간** | 대여이력 `반납시각 − 대여시각` 분포 | 역전 판정 | `BIKE` |
+| **따릉이 고갈 예측** | "20분 후 예상 잔여 대수" | 재고 검증 | `BIKE` |
+| **역전 테이블** | 역 × 목적지 × 시간대 × 요일 사전계산 | BE 조회 API | `ROUTE` |
 
-`RVSL`(역전 판정)은 `CROWD`·`BYC`의 산출물을 조합해서 만드는 결과물이라 별도 도메인으로 둔다.
-JIRA 에픽이 확정되면 위 도메인명(대문자)을 에픽 키에 맞춰 조정한다.
+`ROUTE`(역전 판정)은 `CROWD`·`BIKE`의 산출물을 조합해서 만드는 결과물이라 별도 도메인으로 둔다.
+위 도메인명(대문자)은 확정된 JIRA 에픽 prefix와 일치한다(`CROWD`=[CROWD] 혼잡도,
+`BIKE`=[BIKE] 따릉이, `ROUTE`=[ROUTE] 경로 추천).
 
 ## 2. 모델 계획
 
@@ -157,15 +158,21 @@ AI/
 │  │  ├─ service.py        #     비즈니스 로직
 │  │  ├─ schemas.py        #     요청/응답 pydantic 모델
 │  │  └─ pipeline/         #     오프라인 배치(피처 집계 등)
-│  ├─ BYC/                 #   대여소 쌍별 소요시간 · 따릉이 고갈 예측 (구조는 CROWD와 동일)
-│  └─ RVSL/                #   역전 테이블 — CROWD·BYC 산출물을 조합 (구조는 CROWD와 동일)
-├─ test/                   # app/<도메인>/ 구조를 그대로 미러 (test/CROWD/, test/BYC/, ...)
+│  ├─ BIKE/                #   대여소 쌍별 소요시간 · 따릉이 고갈 예측 (구조는 CROWD와 동일)
+│  └─ ROUTE/               #   역전 테이블 — CROWD·BIKE 산출물을 조합 (구조는 CROWD와 동일)
+├─ test/                   # app/<도메인>/ 구조를 그대로 미러 (test/CROWD/, test/BIKE/, ...)
 ├─ validation/             # PoC · 스파이크 코드 — 프로덕션 아님 (관례는 validation/README.md)
 ├─ data/                   # 도메인(JIRA 에픽 prefix)별로 나눔      ← Git 추적 제외
 │  ├─ CROWD/               #   raw/(원본) → interim/(중간 산출물) → processed/(최종 데이터)
-│  ├─ BYC/                 #   CROWD와 동일하게 raw/interim/processed
-│  └─ EXTERNAL/            #   여러 도메인이 공유하는 외부 요인(날씨 등) — 동일 구조,
-│                           #   raw/ 밑에 출처별 서브폴더(raw/weather/asos, .../forecast, .../nowcast)
+│  ├─ BIKE/                #   CROWD와 동일하게 raw/interim/processed
+│  ├─ ROUTE/               #   CROWD·BIKE와 동일 구조. raw/transfer_info/ — 환승역 간 도보
+│  │                        #   소요시간(A안 경로 시간 계산 전용, 혼잡도 예측용 아님)
+│  └─ EXTERNAL/            #   여러 도메인이 공유하는 외부 요인 — 다른 도메인과 달리
+│                           #   출처(weather/, station/, population/, holiday/)가 최상위이고
+│                           #   그 밑에 각각 raw/interim/processed를 둔다(예: weather/raw/
+│                           #   {asos,forecast,nowcast}, station/raw/ — 역사 위경도, 여러
+│                           #   도메인이 참조, population/raw/ — 서울 생활인구 250m 격자,
+│                           #   holiday/raw/ — 공휴일 관리 정보)
 ├─ models/                 # 학습된 모델 산출물      ← Git 추적 제외
 ├─ requirements.txt        # 프로덕션 런타임 의존성
 ├─ requirements-dev.txt    # + ruff/black/pytest/httpx (로컬 개발용, requirements.txt 전체 포함)
