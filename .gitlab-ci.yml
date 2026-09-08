@@ -9,19 +9,22 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
-# ai-lint/ai-test는 changes:로 걸러지므로 AI/를 건드리지 않는 MR(문서·기획 등)은 잡이
-# 하나도 안 생긴다. GitLab은 잡 0개 파이프라인을 "No stages / jobs for this pipeline"로
-# 거부해 MR이 실패로 표시되므로, 그 경우에만 대신 실행돼 파이프라인을 비지 않게 한다.
+# ai-lint/ai-test·be-test는 changes:로 걸러지므로 AI/·BE/ 어느 쪽도 건드리지 않는
+# MR(FE만 고치거나 루트 문서만 고친 경우 등)은 잡이 하나도 안 생긴다. GitLab은 잡 0개
+# 파이프라인을 "No stages / jobs for this pipeline"로 거부해 MR이 실패로 표시되므로,
+# 그 경우에만 대신 실행돼 파이프라인을 비지 않게 한다.
+# ⚠️ AI만 체크하면 BE만 바꾼 MR에서 be-test와 이 잡이 같이 돌아버린다 — 반드시 둘 다 본다.
 mr-guard:
   stage: lint
   image: alpine:3.20
   rules:
     - changes:
         - "AI/**/*"
+        - "BE/**/*"
       when: never
     - when: on_success
   script:
-    - echo "AI 변경 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
+    - echo "AI/BE 변경 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
 
 .ai_job:
   image: python:3.11-slim
