@@ -161,9 +161,11 @@ AI/
 │  └─ RVSL/                #   역전 테이블 — CROWD·BYC 산출물을 조합 (구조는 CROWD와 동일)
 ├─ test/                   # app/<도메인>/ 구조를 그대로 미러 (test/CROWD/, test/BYC/, ...)
 ├─ validation/             # PoC · 스파이크 코드 — 프로덕션 아님 (관례는 validation/README.md)
-├─ data/
-│  ├─ raw/                 # 원본 수집 데이터        ← Git 추적 제외
-│  └─ processed/           # 정제·가공 데이터        ← Git 추적 제외
+├─ data/                   # 도메인(JIRA 에픽 prefix)별로 나눔      ← Git 추적 제외
+│  ├─ CROWD/               #   raw/(원본) → interim/(중간 산출물) → processed/(최종 데이터)
+│  ├─ BYC/                 #   CROWD와 동일하게 raw/interim/processed
+│  └─ EXTERNAL/            #   여러 도메인이 공유하는 외부 요인(날씨 등) — 동일 구조,
+│                           #   raw/ 밑에 출처별 서브폴더(raw/weather/asos, .../forecast, .../nowcast)
 ├─ models/                 # 학습된 모델 산출물      ← Git 추적 제외
 ├─ requirements.txt        # 프로덕션 런타임 의존성
 ├─ requirements-dev.txt    # + ruff/black/pytest/httpx
@@ -176,7 +178,9 @@ AI/
   **`test/` 아래에는 `__init__.py`를 만들지 않는다** — 표준 라이브러리 `test` 패키지와 충돌한다.
   대신 테스트 파일명이 리포 전체에서 유일해야 한다(`test_<도메인>_<대상>.py`).
 - **`data/`와 `models/`는 Git에 올리지 않는다.** 용량이 크고 재생성이 가능하기 때문이며 루트
-  `.gitignore`에서 제외 처리돼 있다. 공유가 필요하면 별도 스토리지를 쓰고 경로만 문서로 남긴다.
+  `.gitignore`에서 제외 처리돼 있다. 실제 데이터 파일은 팀 공유 Google
+  Drive([SUMGIL](https://drive.google.com/drive/folders/1C_x37kCT3wfeLqqw1aApt_ODWNks8THw))의 `data/`에
+  같은 도메인·경로 구조로 올린다.
 
 ## 8. 작업 규칙
 

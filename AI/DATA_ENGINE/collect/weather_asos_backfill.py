@@ -24,7 +24,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import requests
 
-from DATA_ENGINE.collect.common import DATA_RAW, env, http_retry, now_kst
+from DATA_ENGINE.collect.common import EXTERNAL_WEATHER_RAW, env, http_retry, now_kst
 
 logger = logging.getLogger("weather_asos_backfill")
 
@@ -116,7 +116,7 @@ def _parse_asos_text(raw_text: str) -> pd.DataFrame:
 
 
 def backfill(start: date, end: date, chunk_days: int = 30) -> None:
-    out_dir = DATA_RAW / "weather" / "asos"
+    out_dir = EXTERNAL_WEATHER_RAW / "asos"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cursor = start

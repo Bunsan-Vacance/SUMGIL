@@ -1,7 +1,7 @@
 """따릉이 실시간 대여소 재고 폴링.
 
 60초 간격으로 bikeList 전체(약 2,700개소, 1회 최대 1000건)를 3번 나눠 호출해 합치고,
-data/raw/bike/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet 로 저장한다.
+data/BYC/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet 로 저장한다.
 
 실행:
     cd AI
@@ -17,7 +17,7 @@ import pandas as pd
 import requests
 
 from DATA_ENGINE.collect.common import (
-    DATA_RAW,
+    BYC_RAW,
     env,
     http_retry,
     now_kst,
@@ -97,9 +97,7 @@ def run_once() -> None:
     df = fetch_snapshot()
     if df.empty:
         return
-    out_path = save_partitioned_parquet(
-        df, DATA_RAW / "bike" / "realtime", df["collected_at"].iloc[0]
-    )
+    out_path = save_partitioned_parquet(df, BYC_RAW / "realtime", df["collected_at"].iloc[0])
     logger.info("저장 완료: %s (%d개소)", out_path, len(df))
 
 

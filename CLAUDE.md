@@ -46,6 +46,11 @@ Docs/
 **시크릿을 커밋하지 않는다.** `.env`, `*.pem`, `*.key`는 `.gitignore`에 등록돼 있다. 공공데이터 API 키, DB 접속 정보, EC2 키페어가 여기 해당한다.
 
 **데이터·모델 산출물을 커밋하지 않는다.** `AI/data/`, `AI/models/`는 추적 제외다. 용량이 크고 재생성이 가능하다.
+실제 데이터 파일은 대신 팀 공유 Google Drive([SUMGIL](https://drive.google.com/drive/folders/1C_x37kCT3wfeLqqw1aApt_ODWNks8THw))의
+`data/` 폴더에 올린다 — `AI/data/`는 도메인(JIRA 에픽 prefix) 우선 구조다: `CROWD/`, `BYC/`처럼 도메인마다
+`raw/`(원본) → `interim/`(중간 산출물) → `processed/`(분석·모델링용 최종본) 3단계를 갖고, 여러 도메인이 공유하는
+외부 요인(날씨 등)은 `EXTERNAL/`에 같은 3단계로 둔다. Drive에도 이 구조를 그대로 미러링하고,
+새 도메인·서브폴더를 로컬에 추가하면 Drive에도 동일한 경로로 폴더를 만든다.
 
 **문서는 한국어로 쓴다.** 기존 문서가 전부 한국어이며, 코드 주석도 한국어를 쓴다.
 
