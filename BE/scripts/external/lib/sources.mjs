@@ -23,6 +23,9 @@ export const SOURCES = {
 
 const OK_CODE = { subway: 'INFO-000', bike: 'INFO-000', bus: '0' };
 
+// 열린데이터광장 공통 1회 요청 한도. 넘기면 서버가 ERROR-336 을 돌려주므로 호출 전에 막는다.
+const MAX_ROWS_PER_CALL = 1000;
+
 export function spec(source) {
   const s = SOURCES[source];
   if (!s) {
@@ -40,11 +43,26 @@ export function buildUrl(source, key, opts = {}) {
         const count = opts.count ?? 5;
         return `${base}/0/${count}/${encodeURIComponent(opts.station)}`;
       }
-      return `${base}/ALL`;
+      // 일괄 조회는 /{start}/{end}/ALL 형식. 인덱스 없는 /ALL 은 별도 승인 서비스(ERROR-340)라 쓰지 않는다.
+      // 서버 규칙: end - start 가 1000 을 넘으면 ERROR-336. 전체(약 2,970행)는 0/1000, 1000/2000, 2000/3000 세 번.
+      const start = opts.start ?? 0;
+      const end = opts.end ?? MAX_ROWS_PER_CALL;
+      if (end - start > MAX_ROWS_PER_CALL) {
+        throw new Error(
+          `subway 일괄은 한 번에 최대 ${MAX_ROWS_PER_CALL}행이다 (end-start ≤ ${MAX_ROWS_PER_CALL}). 요청: ${start}~${end}`,
+        );
+      }
+      return `${base}/${start}/${end}/ALL`;
     }
     case 'bike': {
+      // 서버 규칙: 1회 최대 1000건 (start~end 포함). 대여소 약 2,700개소는 1/1000, 1001/2000, 2001/3000 세 번.
       const start = opts.start ?? 1;
-      const end = opts.end ?? 1000;
+      const end = opts.end ?? MAX_ROWS_PER_CALL;
+      if (end - start + 1 > MAX_ROWS_PER_CALL) {
+        throw new Error(
+          `bike 는 한 번에 최대 ${MAX_ROWS_PER_CALL}건이다 (end-start+1 ≤ ${MAX_ROWS_PER_CALL}). 요청: ${start}~${end}`,
+        );
+      }
       return `http://openapi.seoul.go.kr:8088/${key}/json/bikeList/${start}/${end}/`;
     }
     case 'bus': {

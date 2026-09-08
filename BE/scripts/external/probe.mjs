@@ -5,7 +5,8 @@
 // 반복 폴링용이 아니다. --repeat 는 응답 시간 분포를 보기 위한 소량 반복이다 (호출 사이 1초 대기).
 //
 // 실행 (저장소 루트에서):
-//   node BE/scripts/external/probe.mjs subway                                  # 전체 역 일괄
+//   node BE/scripts/external/probe.mjs subway                                  # 전체 역 일괄 첫 페이지 (0~1000)
+//   node BE/scripts/external/probe.mjs subway --start 1000 --end 2000          # 두 번째 페이지 (전체는 3회)
 //   node BE/scripts/external/probe.mjs subway --key sample --station 서울      # 승인 전 샘플키 검증
 //   node BE/scripts/external/probe.mjs bike --start 1 --end 1000 --save
 //   node BE/scripts/external/probe.mjs bus --st-id 123000001 --save
@@ -32,7 +33,7 @@ const USAGE = `사용법: node BE/scripts/external/probe.mjs <${Object.keys(SOUR
 옵션
   --key <키>        인증키 직접 지정 (.env 보다 우선). 지하철은 'sample' 로 서울역만 조회 가능
   --station <역명>  subway: 전체 일괄 대신 역명 조회 (--count 기본 5)
-  --start/--end     bike: 페이지 범위 (기본 1~1000)
+  --start/--end     페이지 범위. subway 일괄 기본 0~1000, bike 기본 1~1000 (둘 다 1회 최대 1000행)
   --st-id <ID>      bus: 정류소 ID (필수)
   --repeat <N>      N회 반복 호출해 응답 시간 분포를 본다 (기본 1, 호출 사이 1초 대기)
   --timeout <ms>    호출 타임아웃 (기본 10000)
