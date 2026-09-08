@@ -7,11 +7,27 @@ import assert from 'node:assert/strict';
 import { SOURCES, buildUrl, parseResponse, redactKey, resolveKey } from '../lib/sources.mjs';
 
 describe('buildUrl', () => {
-  test('subway 기본은 전체 역 일괄(ALL) 엔드포인트다', () => {
+  test('subway 기본은 전체 역 일괄(ALL) 첫 페이지(0~1000)다', () => {
+    // 인덱스 없는 /ALL 은 별도 승인 서비스(ERROR-340). 인덱스를 붙인 형식이 일반 전용키로 동작한다.
     assert.equal(
       buildUrl('subway', 'K1'),
-      'http://swopenapi.seoul.go.kr/api/subway/K1/json/realtimeStationArrival/ALL',
+      'http://swopenapi.seoul.go.kr/api/subway/K1/json/realtimeStationArrival/0/1000/ALL',
     );
+  });
+
+  test('subway 일괄은 start/end 인덱스로 분할 조회한다', () => {
+    assert.equal(
+      buildUrl('subway', 'K1', { start: 1000, end: 2000 }),
+      'http://swopenapi.seoul.go.kr/api/subway/K1/json/realtimeStationArrival/1000/2000/ALL',
+    );
+  });
+
+  test('subway 일괄은 end-start 가 1000을 넘으면 서버가 ERROR-336 을 내므로 미리 막는다', () => {
+    assert.throws(() => buildUrl('subway', 'K1', { start: 0, end: 1001 }), /1000/);
+  });
+
+  test('bike 는 한 번에 1000건(end-start+1)을 넘으면 미리 막는다', () => {
+    assert.throws(() => buildUrl('bike', 'K2', { start: 1, end: 1001 }), /1000/);
   });
 
   test('subway에 station을 주면 역명 조회 경로로 바뀌고 한글은 인코딩된다', () => {
