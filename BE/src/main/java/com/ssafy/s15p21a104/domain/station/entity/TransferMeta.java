@@ -29,6 +29,6 @@ public class TransferMeta {
     @Column(name = "outdoor", nullable = false)
     private Boolean outdoor;
 
-    @Column(name = "source", length = 8, nullable = false)
+    @Column(name = "source", length = 16, nullable = false)
     private String source;
 }
