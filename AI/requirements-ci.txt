@@ -15,6 +15,7 @@ pandas
 numpy
 scipy
 pyarrow
+scikit-learn
 fastapi
 pydantic-settings
 python-dotenv

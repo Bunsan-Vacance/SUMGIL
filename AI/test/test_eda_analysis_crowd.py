@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from DATA_ENGINE.eda.analysis_crowd import (
+    cluster_station_profiles,
     day_type_direction_coverage,
     missing_cell_inventory,
     outlier_flags,
@@ -80,3 +81,48 @@ def test_day_type_direction_coverage_keeps_asymmetry():
     assert direction_ct.loc[("line9", "9호선"), "상선"] == 1
     # 2호선(내선)이 1호선/9호선(상선)과 같은 칸으로 합쳐지지 않았는지 확인
     assert direction_ct.loc[("seoul_1_8", "1호선"), "내선"] == 0
+
+
+def test_cluster_station_profiles_groups_by_shape_not_level():
+    # 역A/역C는 오전 피크, 역B/역D는 오후 피크 — 절대 수준(역C·역D는 역A·역B의 2배)이 달라도
+    # 패턴 모양이 같으면 같은 군집으로 묶여야 한다(행 단위 표준화 검증).
+    profile = pd.DataFrame(
+        {
+            "06:00": [80.0, 20.0, 160.0, 40.0],
+            "12:00": [40.0, 40.0, 80.0, 80.0],
+            "18:00": [20.0, 80.0, 40.0, 160.0],
+        },
+        index=pd.Index(["역A", "역B", "역C", "역D"], name="station_name"),
+    )
+
+    result = cluster_station_profiles(profile, n_clusters=2)
+
+    assert set(result.index) == {"역A", "역B", "역C", "역D"}
+    assert result["역A"] == result["역C"]
+    assert result["역B"] == result["역D"]
+    assert result["역A"] != result["역B"]
+
+
+def test_cluster_station_profiles_excludes_missing_and_constant_rows():
+    profile = pd.DataFrame(
+        {
+            "06:00": [80.0, 20.0, None, 50.0],
+            "18:00": [20.0, 80.0, 40.0, 50.0],
+        },
+        index=pd.Index(["역A", "역B", "역결측", "역균일"], name="station_name"),
+    )
+
+    result = cluster_station_profiles(profile, n_clusters=2)
+
+    # 결측 행(역결측)과 표준편차 0인 행(역균일)은 군집 배정 없이 제외된다.
+    assert set(result.index) == {"역A", "역B"}
+
+
+def test_cluster_station_profiles_raises_when_too_few_complete_rows():
+    profile = pd.DataFrame(
+        {"06:00": [80.0, None], "18:00": [20.0, 40.0]},
+        index=pd.Index(["역A", "역B"], name="station_name"),
+    )
+
+    with pytest.raises(ValueError, match="군집화할 수 없습니다"):
+        cluster_station_profiles(profile, n_clusters=3)
