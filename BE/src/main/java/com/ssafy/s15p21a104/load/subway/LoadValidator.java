@@ -1,7 +1,13 @@
 package com.ssafy.s15p21a104.load.subway;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -64,6 +70,56 @@ public final class LoadValidator {
             }
         }
 
+        warnings.addAll(disconnectedLines(graph));
         return new ValidationReport(errors, warnings);
+    }
+
+    /**
+     * 노선별로 엣지가 하나의 연결 요소를 이루는지 본다. 둘 이상이면 원천에 구간이 빠진 것이다.
+     * 오류가 아니라 경고인 이유: 부분 데이터라도 이어진 구간 안에서는 탐색이 가능하고, 없는 구간을 만들어 넣지는 않기 때문이다.
+     */
+    private static List<String> disconnectedLines(SubwayGraph graph) {
+        Map<String, Map<String, Set<String>>> adjacencyByLine = new LinkedHashMap<>();
+        for (EdgeRow e : graph.edges()) {
+            if (e.fromNode().equals(e.toNode())) {
+                continue;
+            }
+            Map<String, Set<String>> adjacency = adjacencyByLine.computeIfAbsent(e.routeId(), k -> new LinkedHashMap<>());
+            adjacency.computeIfAbsent(e.fromNode(), k -> new LinkedHashSet<>()).add(e.toNode());
+            adjacency.computeIfAbsent(e.toNode(), k -> new LinkedHashSet<>()).add(e.fromNode());
+        }
+
+        List<String> warnings = new ArrayList<>();
+        for (Map.Entry<String, Map<String, Set<String>>> entry : adjacencyByLine.entrySet()) {
+            List<Integer> componentSizes = componentSizes(entry.getValue());
+            if (componentSizes.size() > 1) {
+                warnings.add("노선 " + entry.getKey() + " 의 구간이 " + componentSizes.size() + "개 조각으로 끊겨 있음 (역 수: "
+                        + componentSizes + ") — 원천에 구간 누락");
+            }
+        }
+        return warnings;
+    }
+
+    private static List<Integer> componentSizes(Map<String, Set<String>> adjacency) {
+        Set<String> visited = new HashSet<>();
+        List<Integer> sizes = new ArrayList<>();
+        for (String start : adjacency.keySet()) {
+            if (!visited.add(start)) {
+                continue;
+            }
+            int size = 0;
+            Deque<String> stack = new ArrayDeque<>(List.of(start));
+            while (!stack.isEmpty()) {
+                String node = stack.pop();
+                size++;
+                for (String next : adjacency.getOrDefault(node, Set.of())) {
+                    if (visited.add(next)) {
+                        stack.push(next);
+                    }
+                }
+            }
+            sizes.add(size);
+        }
+        return sizes;
     }
 }
