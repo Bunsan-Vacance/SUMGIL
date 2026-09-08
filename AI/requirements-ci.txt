@@ -1,0 +1,27 @@
+# CI 전용 — 지금 test/*.py가 실제로 import하는 것만 넣는다.
+# requirements-dev.txt는 requirements.txt(torch·pyspark·geopandas·jupyterlab 등 프로덕션
+# 전체, GB 단위)를 통째로 끌어오는데, CI의 ruff/black/pytest는 그중 일부만 써서
+# 매 파이프라인마다 수 분씩 낭비하고 있었다. 로컬 개발은 계속 requirements-dev.txt
+# 전체를 쓰고, 이 파일은 .gitlab-ci.yml의 ai-lint/ai-test 잡에서만 쓴다.
+#
+# ⚠️ 새 테스트가 여기 없는 패키지를 import하면 CI에서 ModuleNotFoundError가 난다 —
+#    그때 원인 패키지를 여기 추가한다(전체 requirements.txt를 다시 끌어오지 말 것).
+#    pandas.to_parquet/read_parquet처럼 코드에 `import pyarrow`가 안 보여도 호출 시점에
+#    엔진을 지연 import하는 경우가 있다 — 정적 grep만으로는 못 잡으니 실제 pytest 실패로
+#    드러나면 그것도 추가한다.
+
+# ── 테스트 대상 코드가 쓰는 것 ──
+pandas
+numpy
+scipy
+pyarrow
+fastapi
+pydantic-settings
+python-dotenv
+tenacity
+
+# ── 테스트 도구 ──
+ruff
+black
+pytest
+httpx

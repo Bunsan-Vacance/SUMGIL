@@ -35,6 +35,7 @@ mr-guard:
         - "AI/pyproject.toml"
         - "AI/requirements.txt"
         - "AI/requirements-dev.txt"
+        - "AI/requirements-ci.txt"
   variables:
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   cache:
@@ -43,7 +44,10 @@ mr-guard:
       - .cache/pip
   before_script:
     - cd AI
-    - pip install -r requirements-dev.txt
+    # requirements-dev.txt는 requirements.txt(torch·pyspark·geopandas 등 프로덕션 전체)를
+    # 통째로 끌어와 GB 단위라 매번 오래 걸린다. CI는 실제 테스트가 쓰는 것만 담은
+    # requirements-ci.txt를 쓴다 — 갱신 기준은 그 파일 상단 주석 참고.
+    - pip install -r requirements-ci.txt
 
 ai-lint:
   extends: .ai_job
