@@ -12,7 +12,9 @@
 
 ## 1. `GET /api/routes/search` (S15P21A104-63)
 
-출발역·도착역을 받아 경로 탐색 결과를 반환한다. **역전구간(지하철 vs 따릉이) 비교는 포함하지 않는다** — 그건 2번 엔드포인트다.
+출발역·도착역을 받아 **경로 후보 목록**을 우선순위 순으로 반환한다. 혼합 경로(지하철 타다가 중간에 따릉이로 갈아타는 것도 그래프상 하나의 경로라 후보에 포함될 수 있다 — `EdgeTime.mode`가 애초에 `SUBWAY`/`BIKE`/`BUS`/`WALK`/`TRANSFER`를 다 표현하게 설계돼 있다).
+
+**역전구간(2번 엔드포인트, `reversal`)과의 차이**: 이 엔드포인트는 사전계산된 평균 소요시간(`edge_time` 등, 정적) 기준으로 후보를 계산한다. `reversal`은 여기서 나온 경로 중 하나를 사용자가 실제로 타고 있다고 가정하고, **지금 이 순간의 실시간 따릉이 재고**까지 반영해 "지금 갈아타는 게 나은지"를 별도로 판단한다 — 정적 계산과 실시간 보정을 분리한 것. (이 구분이 맞는지는 알고리즘 파트 확인 필요 — 아래 "열린 질문" 참고.)
 
 ### 요청
 
@@ -20,31 +22,43 @@
 | --- | --- | --- | --- |
 | `originStationId` | String | Y | 출발역 `station_id` |
 | `destStationId` | String | Y | 도착역 `station_id` |
+| `modes` | String (콤마 구분, 예: `SUBWAY,BIKE`) | N | 교통수단 필터. **복수 선택 가능.** `TravelMode` 값 중 골라서 넘긴다. 생략하면 전체 조합 다 봄 |
 
-### 응답 (`RouteSearchResponse`)
+### 응답 (`RouteSearchResponse`) — 배열이다
 
 ```json
 {
   "success": true,
   "timestamp": "2026-09-08T10:00:00+09:00",
   "traceId": "550e8400-e29b-41d4-a716-446655440000",
-  "data": {
-    "originStationId": "0222",
-    "destStationId": "0221",
-    "totalMinutes": 15.6,
-    "legs": [
-      { "mode": "SUBWAY", "fromNodeId": "0222", "toNodeId": "0221", "routeId": "2", "minutes": 8.2 },
-      { "mode": "TRANSFER", "fromNodeId": "0221", "toNodeId": "0221", "routeId": null, "minutes": 3.0 },
-      { "mode": "WALK", "fromNodeId": "0221", "toNodeId": "0221-EXIT4", "routeId": null, "minutes": 4.4 }
-    ],
-    "source": "MOCK"
-  }
+  "data": [
+    {
+      "totalMinutes": 13.2,
+      "legs": [
+        { "mode": "SUBWAY", "fromNodeId": "0222", "toNodeId": "0221", "routeId": "2", "minutes": 5.0 },
+        { "mode": "BIKE", "fromNodeId": "0221", "toNodeId": "0220", "routeId": null, "minutes": 7.4 },
+        { "mode": "WALK", "fromNodeId": "0220", "toNodeId": "0220-EXIT2", "routeId": null, "minutes": 0.8 }
+      ],
+      "source": "MOCK"
+    },
+    {
+      "totalMinutes": 15.6,
+      "legs": [
+        { "mode": "SUBWAY", "fromNodeId": "0222", "toNodeId": "0221", "routeId": "2", "minutes": 8.2 },
+        { "mode": "TRANSFER", "fromNodeId": "0221", "toNodeId": "0221", "routeId": null, "minutes": 3.0 },
+        { "mode": "WALK", "fromNodeId": "0221", "toNodeId": "0221-EXIT4", "routeId": null, "minutes": 4.4 }
+      ],
+      "source": "MOCK"
+    }
+  ]
 }
 ```
 
+- 배열 순서 = 우선순위 순. **정렬 기준은 아직 미정** — 단순 `totalMinutes` 오름차순인지, README 3절의 "구간 점수 = 소요시간 + λ × 혼잡 페널티" 가중치 순인지는 추후 논의.
 - `legs[].mode` — `TravelMode` enum(`WALK`/`BIKE`/`BUS`/`SUBWAY`/`TRANSFER`) 그대로 노출. `EdgeTime.mode`와 동일한 값이라 FE가 아이콘 매핑하기 쉽다.
 - `source` — `"MOCK"` | `"ALGORITHM"`. 알고리즘 파트 연동 전까지는 `MOCK` 고정, 연동되면 `ALGORITHM`. 완료 기준의 "mock으로 대체 후 이슈에 명시"를 응답 자체에서도 드러내기 위한 필드 — **논의 필요, FE가 이 필드를 안 써도 되면 빼도 됨.**
 - **미정**: 착석 기회 지수·혼잡도(`congestionRate`)를 이 엔드포인트에 넣을지, 아니면 별도 엔드포인트(README 2절의 `seat-chance`)로 뺄지는 아직 안 정함.
+- **미정**: 후보가 하나도 없을 때(필터 조건에 맞는 경로가 없음)는 빈 배열(`[]`)인지 `ROUTE_NOT_FOUND` 에러인지.
 
 ### 실패
 
@@ -102,9 +116,17 @@
 - TTL: 30분 (같은 클래스에 상수로 있음)
 - 이 엔드포인트는 **읽기 전용**이다 — 캐시를 채우는 로직(배치 적재 또는 cache-aside)은 포함하지 않는다. `BE/docs/cache/strategy.md` "다음 Task에서 할 일" 1번 참고.
 
-## 열린 질문 (FE 리뷰 시 같이 확인)
+## 결정된 것 (팀 논의 반영, 2026-09-08)
 
-1. 경로 두 개(`/api/routes/search`, `/api/routes/reversal`)로 나눈 게 맞나, 아니면 README 초안처럼 `POST /api/v1/escape` 하나로 합쳐서 지하철/따릉이 비교까지 한 번에 내려주는 게 나은가?
-2. `GET /api/routes/search` 응답에 `source: MOCK|ALGORITHM` 필드를 넣을지.
-3. 캐시 미스 시 에러로 볼지 정상 응답(`data: null`)으로 볼지.
-4. `BE/README.md` 2절의 `/api/v1/` 프리픽스를 없애는 쪽으로 문서를 갱신할지 (이 문서는 없앤 쪽으로 초안 작성함).
+- `search`는 경로 후보를 **여러 개, 배열로** 우선순위 순 반환한다 (하나만 주는 게 아님).
+- `modes` 필터는 **복수 선택 가능** (예: 지하철+따릉이 조합만 보기).
+- 위 두 가지 때문에, 혼합 경로(지하철+따릉이)는 `search`의 후보 중 하나로 자연스럽게 나올 수 있다 — `reversal`과 역할이 완전히 겹치진 않지만 경계가 흐려질 여지가 있음 (아래 열린 질문 1).
+
+## 열린 질문 (알고리즘 파트·FE와 같이 확인)
+
+1. **`search`가 만드는 혼합 경로(정적 계산)와 `reversal`(실시간 재고 반영)의 역할 구분이 이 설계로 맞는지** — 알고리즘 파트(`전우석`, 그래프/다익스트라 담당)가 실시간 재고를 그래프 계산에 아예 안 넣는다는 전제가 맞아야 지금 구분이 성립한다. 만약 넣는다면 `reversal`은 `search` 결과의 부분집합이 되어 역할이 겹친다.
+2. **우선순위(정렬) 기준** — 단순 `totalMinutes` 순인지, README 3절 λ 가중 점수인지. 추후 논의하기로 함.
+3. `GET /api/routes/search` 응답에 `source: MOCK|ALGORITHM` 필드를 넣을지.
+4. 캐시 미스(`reversal`) 시 에러로 볼지 정상 응답(`data: null`)으로 볼지.
+5. 후보가 하나도 없을 때(`search`) 빈 배열인지 에러인지.
+6. `BE/README.md` 2절의 `/api/v1/` 프리픽스를 없애는 쪽으로 문서를 갱신할지 (이 문서는 없앤 쪽으로 초안 작성함).
