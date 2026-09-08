@@ -28,7 +28,7 @@ public class BikeStockPred {
     @Column(name = "p_full", precision = 4, scale = 3, nullable = false)
     private BigDecimal pFull;
 
-    @Column(name = "source", length = 8, nullable = false)
+    @Column(name = "source", length = 16, nullable = false)
     private String source;
 
     @Column(name = "updated_at", nullable = false)

@@ -3,6 +3,7 @@
 > 초기 구축 시점의 설계다. 변경될 수 있다.
 
 마이그레이션은 `src/main/resources/db/migration/V1__init.sql`에 있다.
+**V2 `widen_source_columns`**: `source` 열(edge_time·congestion·bike_stock_pred·transfer_meta)을 VARCHAR(16)으로 확대 — V1의 VARCHAR(8)에는 값 규약의 `timetable`(9자)이 들어가지 않았다 (S15P21A104-69).
 테이블 9종 (마스터 5종, 산출 4종)이며 파일 내 순서는 의존성 순이다.
 
 ## 용어
