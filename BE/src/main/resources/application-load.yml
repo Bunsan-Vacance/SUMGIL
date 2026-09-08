@@ -1,0 +1,15 @@
+# 정적 데이터 적재 프로파일. API 서버를 띄우지 않고 StaticLoadRunner 만 실행한 뒤 종료한다.
+# 실행: SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --args='--load.dry-run=true'
+# DB 접속은 local 프로파일(application-local.yml) 또는 DB_URL 등 환경변수로 받는다.
+spring:
+  main:
+    web-application-type: none
+  jpa:
+    show-sql: false
+
+load:
+  sources: subway
+  dry-run: false
+  write-mode: BATCH      # ROW 는 성능 비교용 baseline (BE/docs/perf)
+  region: []             # 비어 있으면 전 노선. 예: --load.region=1002,1005
+  avg-speed-mps: 9.2     # 소요시간 없는 구간 추정용 표정속도 (1.1 km ≈ 2분)

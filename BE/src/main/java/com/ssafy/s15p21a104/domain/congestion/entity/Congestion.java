@@ -22,7 +22,7 @@ public class Congestion {
     @Column(name = "level", precision = 4, scale = 1, nullable = false)
     private BigDecimal level;
 
-    @Column(name = "source", length = 8, nullable = false)
+    @Column(name = "source", length = 16, nullable = false)
     private String source;
 
     @Column(name = "updated_at", nullable = false)

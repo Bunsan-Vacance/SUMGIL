@@ -24,7 +24,7 @@ public class EdgeTime {
     @Column(name = "wait_sec", nullable = false)
     private Integer waitSec;
 
-    @Column(name = "source", length = 8, nullable = false)
+    @Column(name = "source", length = 16, nullable = false)
     private String source;
 
     @Column(name = "updated_at", nullable = false)

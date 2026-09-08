@@ -8,7 +8,7 @@
 
 | 종류 | 원천 | 갱신 주체 | 성격 |
 | --- | --- | --- | --- |
-| 사전계산 결과 캐시 (예: 역전구간 판정) | AI 배치 산출물 (PostgreSQL이 원본) | BE가 조회 시 최초 적재(cache-aside) 또는 배치가 직접 채움 — 방식은 파이프라인 연동 시 결정 | 같은 역 쌍·시간대 요청이 반복되므로 캐시로 DB 부하를 줄인다. 원본(Postgres)이 있으므로 만료돼도 다시 채울 수 있다 |
+| 사전계산 결과 캐시 (예: 역전구간 판정) | **BE 경로 알고리즘**(전우석, `ROUTE-002`)이 요청 시 계산. `edge_time` 등 원본 데이터는 AI 배치 산출물(PostgreSQL)이지만, "역전구간인지" 판정 자체는 AI가 아니라 BE 코드가 한다 | BE가 조회 시 최초 계산해서 적재(cache-aside) — `S15P21A104-63` `search`가 이 흐름을 그대로 씀 (`BE/docs/api/route-api-spec.md` 참고) | 같은 역 쌍·시간대 요청이 반복되므로 캐시로 재계산 부하를 줄인다. 원본 데이터(Postgres)가 있으므로 만료돼도 다시 계산할 수 있다 |
 | 실시간 값 (재고, 도착정보) | Spark Streaming | 스트림이 직접 씀. BE는 read-only | **Redis가 유일한 저장소다.** 원본이 없어 만료되면 그 값은 "모름" 상태가 된다. `BE/README.md` 4절: "Redis가 죽으면 실시간 재고를 못 읽는다 → 자전거 추천 차단" |
 
 ## 키 네이밍 규칙
@@ -35,7 +35,7 @@
 
 ## 다음 Task에서 할 일
 
-1. 역전구간 판정 로직(escape 도메인)이 생기면 `CacheKeys.reversal(...)`로 조회하고, 없으면 Postgres에서 읽어 캐시에 채우는 cache-aside 서비스를 추가한다.
+1. ~~역전구간 판정 로직이 생기면 `CacheKeys.reversal(...)`로 조회하고, 없으면 계산해서 캐시에 채우는 cache-aside 서비스를 추가한다.~~ → `S15P21A104-63`에서 별도 `escape` 도메인이 아니라 `search`의 혼합 경로 후보 계산으로 흡수하기로 확정됨. `BE/docs/api/route-api-spec.md` 참고.
 2. Spark Streaming 쪽에서 `bike:stock:{rentalId}` 키로 실시간 재고를 쓰도록 연동한다 (BE는 읽기만 한다 — `BE/README.md` 9절 "외부 API를 BE가 직접 폴링하지 않는다").
 3. `bike:stock:{rentalId}` 조회 로직(자전거 추천 비교 로직)을 만들 때는 **키가 없는 경우를 "재고 0대"가 아니라 "알 수 없음"으로 처리**하고, 그 경우 자전거를 추천하지 않고 `blockedReason`으로 사유를 내려야 한다 — 위 TTL 근거 참고.
 4. Notion 캐싱 전략 문서를 이 파일 기준으로 갱신한다 (Jira `S15P21A104-61` 완료 기준 항목).
