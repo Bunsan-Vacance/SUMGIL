@@ -3,6 +3,9 @@ package com.ssafy.s15p21a104.load;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import com.ssafy.s15p21a104.load.bike.BikeStationRow;
+import com.ssafy.s15p21a104.load.bus.BusRouteRow;
+import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.subway.EdgeRow;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeExpander;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
@@ -35,6 +38,9 @@ class UpsertWriterIT {
     private static final String L = "IT_L1";
     private static final String A = "IT_A";
     private static final String B = "IT_B";
+    private static final String STOP = "IT_STOP";
+    private static final String ROUTE = "IT_ROUTE";
+    private static final String RENT = "IT_ST-1";
 
     @BeforeEach
     void setUp() {
@@ -44,6 +50,9 @@ class UpsertWriterIT {
 
     @AfterEach
     void cleanUp() {
+        jdbc.update("DELETE FROM bus_stop WHERE stop_id IN (?, ?)", STOP, STOP + "2");
+        jdbc.update("DELETE FROM bus_route WHERE route_id = ?", ROUTE);
+        jdbc.update("DELETE FROM bike_station WHERE rental_id IN (?, ?)", RENT, RENT + "2");
         jdbc.update("DELETE FROM edge_time WHERE route_id = ?", L);
         jdbc.update("DELETE FROM transfer_meta WHERE station_id IN (?, ?)", A, B);
         jdbc.update("DELETE FROM station WHERE station_id IN (?, ?)", A, B);
@@ -109,6 +118,49 @@ class UpsertWriterIT {
                 "SELECT travel_sec FROM edge_time WHERE route_id = ? AND dow_type = 0 AND time_slot = 0", Integer.class, L));
         assertEquals("timetable", jdbc.queryForObject(
                 "SELECT source FROM edge_time WHERE route_id = ? AND dow_type = 0 AND time_slot = 0", String.class, L));
+    }
+
+    @Test
+    @DisplayName("bus_stop·bus_route·bike_station 을 넣고 다시 넣어도 건수가 같다 — 좌표·거치대수 null 도 그대로")
+    void busAndBikeMastersAreIdempotent() {
+        List<BusStopRow> stops = List.of(
+                new BusStopRow(STOP, "IT 정류소", 37.5, 127.0),
+                new BusStopRow(STOP + "2", "IT 좌표없음", null, null));
+        List<BusRouteRow> routes = List.of(new BusRouteRow(ROUTE, "IT 147"));
+        List<BikeStationRow> bikes = List.of(
+                new BikeStationRow(RENT, "IT 대여소", 37.5, 127.0, 15),
+                new BikeStationRow(RENT + "2", "IT 거치대없음", 37.5, 127.0, null));
+
+        assertEquals(2, writer.upsertBusStops(stops));
+        assertEquals(1, writer.upsertBusRoutes(routes));
+        assertEquals(2, writer.upsertBikeStations(bikes));
+        writer.upsertBusStops(stops);
+        writer.upsertBusRoutes(routes);
+        writer.upsertBikeStations(bikes);
+
+        assertEquals(2, count("bus_stop", "stop_id IN (?, ?)", STOP, STOP + "2"));
+        assertEquals(1, count("bus_route", "route_id = ?", ROUTE));
+        assertEquals(2, count("bike_station", "rental_id IN (?, ?)", RENT, RENT + "2"));
+        assertEquals(null, jdbc.queryForObject("SELECT lat FROM bus_stop WHERE stop_id = ?", Double.class, STOP + "2"));
+        assertEquals(null, jdbc.queryForObject("SELECT dock_count FROM bike_station WHERE rental_id = ?", Integer.class, RENT + "2"));
+        assertNotNull(jdbc.queryForObject("SELECT updated_at FROM bus_stop WHERE stop_id = ?", Object.class, STOP));
+    }
+
+    @Test
+    @DisplayName("마스터 3종은 같은 키에 새 값이 오면 이름·좌표·거치대수를 덮어쓴다")
+    void mastersOverwriteExistingKey() {
+        writer.upsertBusStops(List.of(new BusStopRow(STOP, "옛 이름", 37.5, 127.0)));
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "옛 147")));
+        writer.upsertBikeStations(List.of(new BikeStationRow(RENT, "옛 대여소", 37.5, 127.0, 10)));
+
+        writer.upsertBusStops(List.of(new BusStopRow(STOP, "새 이름", 37.6, 127.1)));
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "새 147")));
+        writer.upsertBikeStations(List.of(new BikeStationRow(RENT, "새 대여소", 37.6, 127.1, 20)));
+
+        assertEquals("새 이름", jdbc.queryForObject("SELECT name FROM bus_stop WHERE stop_id = ?", String.class, STOP));
+        assertEquals(37.6, jdbc.queryForObject("SELECT lat FROM bus_stop WHERE stop_id = ?", Double.class, STOP), 1e-9);
+        assertEquals("새 147", jdbc.queryForObject("SELECT name FROM bus_route WHERE route_id = ?", String.class, ROUTE));
+        assertEquals(20, jdbc.queryForObject("SELECT dock_count FROM bike_station WHERE rental_id = ?", Integer.class, RENT));
     }
 
     private int count(String table, String where, Object... args) {
