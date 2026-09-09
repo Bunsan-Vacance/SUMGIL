@@ -163,6 +163,20 @@ cells.append(
     )
 )
 
+cells.append(nbf.v4.new_markdown_cell("""### 4.2 + 관중수 규모(`game_attendance`)
+
+`game_count`는 경기 유무만 담아 "관중 1만 명"과 "관중 3만 명"을 구분 못 한다.
+`game_attendance`(연속값)를 더하면 규모까지 반영되지만, 경기가 없는 날과 "경기는
+있었는데 관중수를 못 구한 날"이 둘 다 NaN이라 `game_attendance_missing`을 같이 넣어야
+구분된다(`features.py` 참고). RandomForest는 NaN을 못 받아 0으로 채우는데, 그러면
+"경기 없음"과 "관중수 결측"이 다시 섞인다 — `models.py`가 그 절충을 문서화해뒀다."""))
+cells.append(
+    nbf.v4.new_code_cell(
+        'events_attendance_result = compare("events_station_time_attendance")\n'
+        "events_attendance_result.round(2)"
+    )
+)
+
 cells.append(nbf.v4.new_markdown_cell("""## 5. 정리
 
 - **원본 범주형 직접 예측(2절)**: 세 모델 다 베이스라인보다 나빴다(RMSE -11~-47%p) — 트리
@@ -178,8 +192,12 @@ cells.append(nbf.v4.new_markdown_cell("""## 5. 정리
 - **이벤트 × 역 × 시간대(4.1절)**: LightGBM·XGBoost가 +1.2~1.5%로 더 개선됐다 — 종합운동장·
   잠실·월드컵경기장(성산) 쏠림이 실제로 "이벤트가 특정 역·특정 시간대에 크게 작동한다"는
   상호작용이었다는 뜻이다. 남은 4% 중 약 1.5%p(전체의 30%대)를 이 상호작용만으로 회수했다.
-- **다음 후보**: `game_attendance`(결측 많은 연속값)를 이진 유무 대신 규모로 반영하면 더
-  줄어들지 확인. RandomForest는 서수 인코딩 한계가 뚜렷해 후보에서 제외를 고려할 만하다."""))
+- **관중수 규모까지(4.2절)**: 혼재된 결과다 — LightGBM은 +1.5~1.6%로 소폭 더 좋아졌지만,
+  XGBoost는 오히려 +0.9~1.2%로 후퇴했다(NaN 처리 방식 차이로 추정). RandomForest는
+  -0.25%대로 계속 열세다. 관중수 규모는 "확실한 개선"이라기보다 LightGBM에서만 미세하게
+  더 이기는 정도라, 굳이 넣을지는 복잡도 대비 이득을 보고 판단할 문제다.
+- **후보 순위**: LightGBM ≈ XGBoost가 유효한 후보(이벤트×역×시간대 조합에서 +1.2~1.6%),
+  RandomForest는 범주형 인코딩 한계로 세 후보 중 가장 약하다."""))
 
 nb["cells"] = cells
 nb["metadata"] = {

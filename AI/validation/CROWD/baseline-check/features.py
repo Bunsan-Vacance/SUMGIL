@@ -23,6 +23,11 @@ day_type·time_slot은 잔차 자체가 이미 그 축의 평균을 뺀 값이�
 월드컵경기장(성산) 같은 소수 역만 game_count>0에서 갈라지면 되므로, 통으로 외워야 하는
 2만 개 조합과는 학습 난이도가 다르다. 그래도 트리가 역 자체의 잡음(이벤트와 무관한 역별
 평균 차이)을 다시 외우는 방향으로 새는지는 결과로 확인해야 한다.
+
+**`ATTENDANCE_COLS`**: `game_count`는 경기 유무만 담아 "관중 1만 명"과 "관중 3만 명"을
+구분 못 한다. `game_attendance`(연속값)를 대신 넣으면 규모까지 반영된다. 단 이 컬럼은
+경기가 없는 날과 "경기는 있었는데 관중수를 못 구한 날" 둘 다 NaN이라(`dataset.py`가 일부러
+채우지 않음), 그 둘을 구분하려면 `game_attendance_missing`을 같이 넣어야 한다.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ import pandas as pd
 
 WEATHER_COLS = ["temp_c", "precip_mm", "wind_ms", "humidity_pct", "snow_cm"]
 EVENT_COLS = ["game_count", "festival_count"]
+ATTENDANCE_COLS = ["game_attendance", "game_attendance_missing"]
 CATEGORICAL_COLS = ["station_no", "time_slot"]
 
 FEATURE_SETS: dict[str, list[str]] = {
@@ -39,6 +45,7 @@ FEATURE_SETS: dict[str, list[str]] = {
     "weather_events": WEATHER_COLS + EVENT_COLS,
     "events_station": EVENT_COLS + ["station_no"],
     "events_station_time": EVENT_COLS + ["station_no", "time_slot"],
+    "events_station_time_attendance": EVENT_COLS + ["station_no", "time_slot"] + ATTENDANCE_COLS,
 }
 
 
