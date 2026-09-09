@@ -96,7 +96,7 @@ public final class BikeStationParser {
             }
         }
         int matched = 0;
-        int mismatch = 0;
+        List<String> mismatches = new ArrayList<>();
         List<String> onlyInSnapshot = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Map.Entry<String, String> e : numberById.entrySet()) {
@@ -112,12 +112,15 @@ public final class BikeStationParser {
             Integer fileDock = lcdPlusQr(file);
             Integer dock = stations.get(id).dockCount();
             if (fileDock != null && dock != null && !fileDock.equals(dock)) {
-                mismatch++;
-                warnings.add("거치대수 불일치: " + number + " " + stations.get(id).name()
-                        + " — 스냅샷 rackTotCnt " + dock + ", 파일 LCD+QR " + fileDock);
+                mismatches.add(number + " " + stations.get(id).name() + " " + dock + "≠" + fileDock);
             }
         }
         List<String> onlyInFile = fileByNumber.keySet().stream().filter(n -> !seen.contains(n)).toList();
+        int mismatch = mismatches.size();
+        // 파일은 반기 갱신이라 스냅샷과 수백 건이 어긋난다. 건마다 찍으면 다른 경고가 묻히므로 한 줄로 묶는다.
+        if (mismatch > 0) {
+            warnings.add("거치대수 불일치 " + mismatch + "건 (스냅샷 rackTotCnt ≠ 파일 LCD+QR, 스냅샷 값을 쓴다): " + head(mismatches));
+        }
         if (!onlyInSnapshot.isEmpty()) {
             warnings.add("파일에 없는 대여소 " + onlyInSnapshot.size() + "개 (스냅샷에만 있음, 신설 가능): " + head(onlyInSnapshot));
         }

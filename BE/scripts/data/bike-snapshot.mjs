@@ -93,9 +93,11 @@ async function main() {
     if (parsed.rows.length < PAGE_SIZE) break;
   }
 
+  // list_total_count 는 전체 대여소 수가 아니라 요청 페이지의 건수다 (api-survey.md 실측). 전체 끝은 마지막 페이지 행 수 < 1000 으로 판단한다.
   const rows = mergePages(collected);
-  if (total != null && rows.length !== Number(total)) {
-    console.warn(`  경고: 합친 행 ${rows.length} ≠ list_total_count ${total}. 페이지 수(--pages)가 모자라거나 호출 사이에 목록이 바뀌었다`);
+  const last = collected.at(-1);
+  if (last && last.length === PAGE_SIZE) {
+    console.warn(`  경고: 마지막 페이지가 ${PAGE_SIZE}행으로 꽉 찼다. 대여소가 더 있을 수 있으니 --pages 를 늘려 다시 받는다`);
   }
   const csv = toCsv(SNAPSHOT_FIELDS, rows);
   mkdirSync(dirname(out), { recursive: true });
