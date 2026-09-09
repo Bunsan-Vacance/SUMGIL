@@ -111,6 +111,22 @@ class BikeStationParserTest {
     }
 
     @Test
+    @DisplayName("거치대수 불일치는 건마다 찍지 않고 한 줄로 묶는다 — 파일(반기 갱신)과 스냅샷 사이에 수백 건이 나오기 때문")
+    void dockMismatchIsAggregated() {
+        parser.parse(
+                List.of(live("ST-4", "102. 가", "37.5", "127.0", "15"),
+                        live("ST-5", "103. 나", "37.5", "127.0", "14"),
+                        live("ST-6", "104. 다", "37.5", "127.0", "13")),
+                List.of(file("102", "가", "", "14"), file("103", "나", "", "10"), file("104", "다", "", "13")));
+
+        List<String> dockWarnings = parser.warnings().stream().filter(w -> w.contains("거치대수")).toList();
+        assertEquals(1, dockWarnings.size());
+        assertTrue(dockWarnings.get(0).contains("2건"));
+        assertTrue(dockWarnings.get(0).contains("102") && dockWarnings.get(0).contains("103"));
+        assertEquals(2, parser.crossCheck().dockMismatch());
+    }
+
+    @Test
     @DisplayName("LCD·QR 거치대수를 합쳐 파일 값으로 본다 — 둘 다 비어 있으면 대조하지 않는다")
     void fileDockCountIsLcdPlusQr() {
         parser.parse(
