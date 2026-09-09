@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
+import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.MultiLineStringResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
@@ -86,7 +87,9 @@ public class RouteSearchService {
                     new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
                     graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM,
                     transferSecs);
-            return response.map(this::withGeometry).map(List::of).orElseGet(List::of);
+            return response.map(this::withGeometry)
+                    .filter(r -> BikeStockGate.passes(r.legs(), graphRegistry.bikeStock()))
+                    .map(List::of).orElseGet(List::of);
         } catch (DomainException exception) {
             if (exception.getErrorType() == ErrorType.ROUTE_NOT_FOUND) {
                 return List.of();
