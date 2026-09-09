@@ -11,6 +11,8 @@ pyarrow
 
 # ── ML / DL ──
 scikit-learn
+lightgbm
+xgboost
 torch
 
 # ── 지리 공간 (격자·공간 조인) ──

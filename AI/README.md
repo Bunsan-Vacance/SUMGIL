@@ -121,6 +121,10 @@ B안 (내려서 따릉이) = 출구→대여소 도보 + 대여 1분 + 주행 + 
 
 Windows 기준 [python.org](https://www.python.org/downloads/) 설치 시 **"Add python.exe to PATH"** 를 반드시 체크한다.
 
+macOS에서 `lightgbm`은 OpenMP 런타임(`libomp`)이 없으면 import 시점에
+`Library not loaded: @rpath/libomp.dylib`로 실패한다 — `brew install libomp`로 먼저 설치한다
+(Linux·Windows는 해당 없음).
+
 ## 6. 시작하기
 
 ```bash
