@@ -128,4 +128,12 @@ public class RouteGraphRegistry {
     public Map<TransferRule.TransferKey, Integer> transferTimes() {
         return transferTimes;
     }
+
+    /**
+     * @return 대여소별 예상 재고. 원천 없음으로 항상 빈 맵(게이트 기본 허용).
+     * AI 산출물 연동 시 bike_stock_pred 조회로 교체한다.
+     */
+    public Map<String, Integer> bikeStock() {
+        return Map.of();
+    }
 }
