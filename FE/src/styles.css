@@ -808,8 +808,28 @@ small {
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.28s ease;
   padding: 0 18px 16px;
+}
+.sheet-body::-webkit-scrollbar {
+  width: 8px;
+}
+.sheet-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sheet-body::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  transition: background-color 0.28s ease;
+}
+.sheet-body.scrollbar-visible {
+  scrollbar-color: #b4bfce transparent;
+}
+.sheet-body.scrollbar-visible::-webkit-scrollbar-thumb {
+  background: #b4bfce;
 }
 .sheet-footer {
   flex-shrink: 0;
@@ -862,18 +882,6 @@ small {
   background: white;
   box-shadow: 0 2px 7px #2b3c5110;
   color: #46567d;
-}
-.comparison {
-  background: #edf8f2;
-  border-radius: 11px;
-  padding: 10px 12px;
-  font-size: 12px;
-  color: #315f4d;
-  margin-bottom: 12px;
-  line-height: 1.6;
-}
-.comparison strong {
-  display: block;
 }
 .route-list {
   display: grid;

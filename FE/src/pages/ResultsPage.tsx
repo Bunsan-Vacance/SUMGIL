@@ -44,10 +44,6 @@ export default function ResultsPage({
   canSwap,
   swapPlaces,
 }: Props) {
-  const fastRoute = visible.find((route) => route.id === 'fast')
-  const calmRoute = visible.find((route) => route.id === 'calm')
-  const congestionDelta =
-    fastRoute && calmRoute ? fastRoute.congestionPercent - calmRoute.congestionPercent : null
   return (
     <>
       <div className="trip-summary">
@@ -123,7 +119,6 @@ export default function ResultsPage({
               <div>
                 <h2>추천 경로</h2>
                 <p>{visible.length}개 경로 · 09:41 출발 기준</p>
-                <p className="sample-note">경로·소요시간은 예시입니다.</p>
               </div>
               <button className="secondary filter-button" onClick={openFilter}>
                 <SlidersHorizontal size={16} />
@@ -138,18 +133,6 @@ export default function ResultsPage({
                 덜 붐빔 우선
               </button>
             </div>
-            {visible.some((r) => r.id === 'fast') && visible.some((r) => r.id === 'calm') && (
-              <p className="comparison">
-                덜 붐비는 길은{' '}
-                <strong>
-                  {congestionDelta !== null && congestionDelta > 0
-                    ? `혼잡도 ${congestionDelta}%p 낮음`
-                    : congestionDelta === 0
-                      ? '혼잡도 같음'
-                      : `혼잡도 ${Math.abs(congestionDelta ?? 0)}%p 높음`}
-                </strong>
-              </p>
-            )}
             <div className="route-list">
               {visible.map((route) => (
                 <RouteCard

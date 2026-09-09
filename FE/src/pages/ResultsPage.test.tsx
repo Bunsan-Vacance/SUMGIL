@@ -79,12 +79,11 @@ describe('경로 결과 상태', () => {
     expect(onBackToInput).toHaveBeenCalledOnce()
   })
 
-  it('혼잡도를 퍼센트로 표시하고 대표 경로 간 차이를 퍼센트포인트로 비교한다', () => {
+  it('경로 카드에 혼잡도를 퍼센트로 표시한다', () => {
     render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
 
     expect(screen.getByText(/혼잡도 68%/)).toBeTruthy()
     expect(screen.getByText(/혼잡도 42%/)).toBeTruthy()
-    expect(screen.getByText('혼잡도 26%p 낮음')).toBeTruthy()
     expect(screen.queryByText(/혼잡 \d+구간/)).toBeNull()
   })
 
