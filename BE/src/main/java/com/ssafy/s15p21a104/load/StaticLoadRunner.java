@@ -7,6 +7,7 @@ import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopParser;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.csv.CsvTable;
+import com.ssafy.s15p21a104.load.railgeometry.RailGeometryParser;
 import com.ssafy.s15p21a104.load.subway.DirectedSegment;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeExpander;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
@@ -47,7 +48,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 정적 데이터 적재 실행기. 실행: SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --args='--load.dry-run=true'
- * 대상은 --load.sources (기본 application-load.yml: subway,bus,bike) 순서대로 처리한다.
+ * 대상은 --load.sources (기본 application-load.yml: subway,bus,bike,railgeometry) 순서대로 처리한다.
  * 순서: 원천 CSV 읽기 → 파싱 → (그래프 구성) → 검증(오류 있으면 중단) → upsert → (지하철) prune. 각 단계 소요시간과 건수를 로그로 남긴다.
  */
 @Slf4j
@@ -59,6 +60,7 @@ public class StaticLoadRunner implements ApplicationRunner {
     private static final String SUBWAY_DIR = "data/subway/";
     private static final String BUS_DIR = "data/bus/";
     private static final String BIKE_DIR = "data/bike/";
+    private static final String RAILGEOMETRY_DIR = "data/railgeometry/";
 
     // 원천 파일명 (출처·갱신일은 각 폴더 README). 새 배포분을 받으면 여기와 README 를 함께 바꾼다.
     static final String TIMETABLE_FILE = "seoul-train-timetable_20260616.csv.gz";
@@ -82,7 +84,8 @@ public class StaticLoadRunner implements ApplicationRunner {
                 case "subway" -> loadSubway();
                 case "bus" -> loadBus();
                 case "bike" -> loadBike();
-                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike)", source);
+                case "railgeometry" -> loadRailGeometry();
+                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry)", source);
             }
         }
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
@@ -232,6 +235,27 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         timed("bike_station", () -> writer.upsertBikeStations(stations));
         log.info("따릉이 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * KTDB 철도망 geometry. 원천은 이미 정제된 CSV(BE/scripts/railgeometry/convert_ktdb.py 산출물)라
+     * 좌표 변환·인코딩 처리가 필요 없다 — line_id 매칭만 한다. 매칭 안 되는 노선(수도권 밖 등)도
+     * 그대로 적재한다 — 조회 시 자연히 unavailable로 빠지므로 위험 없다(--load.region 미적용).
+     */
+    private void loadRailGeometry() throws IOException {
+        long started = System.nanoTime();
+        var parser = new RailGeometryParser();
+        var nodes = parser.parseNodes(csv(RAILGEOMETRY_DIR, "ktdb-rail-node_2024.csv").rows());
+        var links = parser.parseLinks(csv(RAILGEOMETRY_DIR, "ktdb-rail-link_2024.csv").rows());
+        logWarningsGrouped("KTDB geometry 파싱", parser.warnings());
+        log.info("KTDB geometry: node {} · link {}", nodes.size(), links.size());
+        if (dryRun("KTDB geometry", started)) {
+            return;
+        }
+
+        timed("rail_node", () -> writer.upsertRailNodes(nodes));
+        timed("rail_link_geometry", () -> writer.upsertRailLinkGeometry(links));
+        log.info("KTDB geometry 적재 완료 ({} ms)", elapsedMs(started));
     }
 
     private List<StationCoord> readCoords(StationNameNormalizer normalizer) throws IOException {

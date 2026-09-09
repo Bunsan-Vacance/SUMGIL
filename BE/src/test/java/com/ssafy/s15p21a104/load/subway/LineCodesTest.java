@@ -63,4 +63,22 @@ class LineCodesTest {
         assertEquals("경의중앙선", LineCodes.nameOf("1063"));
         assertEquals("수인분당선", LineCodes.nameOf("1075"));
     }
+
+    @Test
+    @DisplayName("KTDB RAILLINEN3 표기 → subwayId (서울/서울지하철 접두어, 괄호 설명 제거)")
+    void ktdbServiceNames() {
+        assertEquals(Optional.of("1002"), LineCodes.fromKtdbServiceName("서울2호선"));
+        assertEquals(Optional.of("1009"), LineCodes.fromKtdbServiceName("서울9호선"));
+        assertEquals(Optional.of("1009"), LineCodes.fromKtdbServiceName("서울지하철9호선"));
+        assertEquals(Optional.of("1067"), LineCodes.fromKtdbServiceName("경춘선(수도권전철)"));
+        assertEquals(Optional.of("1063"), LineCodes.fromKtdbServiceName("경의중앙선(수도권전철)"));
+    }
+
+    @Test
+    @DisplayName("KTDB 수도권 밖 노선은 접두어가 달라 매칭 실패한다 — 우리 노선표 밖이라 의도된 동작")
+    void ktdbServiceNamesOutsideRegionAreUnmatched() {
+        assertTrue(LineCodes.fromKtdbServiceName("부산1호선").isEmpty());
+        assertTrue(LineCodes.fromKtdbServiceName("대구1호선").isEmpty());
+        assertTrue(LineCodes.fromKtdbServiceName("인천도시철도1호선").isEmpty());
+    }
 }

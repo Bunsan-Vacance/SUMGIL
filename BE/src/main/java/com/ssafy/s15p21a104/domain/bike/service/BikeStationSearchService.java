@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.domain.bike.service;
 import com.ssafy.s15p21a104.domain.bike.dto.response.BikeStationResponse;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStation;
 import com.ssafy.s15p21a104.domain.bike.repository.BikeStationRepository;
+import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +22,6 @@ public class BikeStationSearchService {
     private static final int MAX_RADIUS_METERS = 3000;
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
-    private static final double EARTH_RADIUS_METERS = 6_371_000;
 
     private final BikeStationRepository bikeStationRepository;
 
@@ -37,7 +37,8 @@ public class BikeStationSearchService {
                 lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta);
 
         return candidates.stream()
-                .map(station -> toResponse(station, distanceMeters(lat, lng, station.getLat(), station.getLng())))
+                .map(station -> toResponse(station,
+                        GeoDistance.haversineMeters(lat, lng, station.getLat(), station.getLng())))
                 .filter(response -> response.distanceMeters() <= radius)
                 .sorted(Comparator.comparing(BikeStationResponse::distanceMeters))
                 .limit(resolvedLimit)
@@ -79,16 +80,5 @@ public class BikeStationSearchService {
                 station.getDockCount(),
                 distanceMeters
         );
-    }
-
-    /** 하버사인 공식으로 두 좌표 사이 거리를 계산한다. */
-    private double distanceMeters(double lat1, double lng1, double lat2, double lng2) {
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLng = Math.toRadians(lng2 - lng1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return EARTH_RADIUS_METERS * c;
     }
 }
