@@ -58,7 +58,8 @@ public final class ShortestPathFinder {
 
         // 출발 직후 첫 엣지는 환승 아님(현재 노선 없음).
         for (Edge edge : graph.outgoingEdges(originStationId)) {
-            long cost = transferRule.cost(edge.travelSec(), null, edge.routeId());
+            long cost = transferRule.costWithStation(
+                    edge.travelSec(), originStationId, null, edge.routeId());
             if (cost < costOf(dist, edge.toNode(), edge.routeId())) {
                 setCost(dist, edge.toNode(), edge.routeId(), cost);
                 prev.computeIfAbsent(edge.toNode(), key -> new HashMap<>())
@@ -76,8 +77,9 @@ public final class ShortestPathFinder {
                 return buildPath(prev, originStationId, current);
             }
             for (Edge edge : graph.outgoingEdges(current.node())) {
-                long nextCost = current.cost()
-                        + transferRule.cost(edge.travelSec(), current.line(), edge.routeId());
+                // 환승은 현재 서 있는 역에서 일어난다. 실측 없으면 상수로 폴백한다.
+                long nextCost = current.cost() + transferRule.costWithStation(
+                        edge.travelSec(), current.node(), current.line(), edge.routeId());
                 if (nextCost < costOf(dist, edge.toNode(), edge.routeId())) {
                     setCost(dist, edge.toNode(), edge.routeId(), nextCost);
                     prev.computeIfAbsent(edge.toNode(), key -> new HashMap<>())

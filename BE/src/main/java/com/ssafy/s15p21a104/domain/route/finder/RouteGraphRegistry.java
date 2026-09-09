@@ -7,9 +7,12 @@ import com.ssafy.s15p21a104.domain.route.loader.RouteGraphRawData;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteEdgeTimeRepository;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
+import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.station.entity.Line;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
+import com.ssafy.s15p21a104.domain.station.entity.TransferMeta;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
+import com.ssafy.s15p21a104.domain.station.repository.TransferMetaRepository;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import jakarta.annotation.PostConstruct;
 import java.util.HashMap;
@@ -31,16 +34,20 @@ public class RouteGraphRegistry {
     private final RouteEdgeTimeRepository edgeTimeRepository;
     private final StationRepository stationRepository;
     private final RouteLineRepository lineRepository;
+    private final TransferMetaRepository transferMetaRepository;
 
     private RouteGraph graph;
     private Map<String, RouteMapper.StationInfo> stationInfos = Map.of();
+    private Map<TransferRule.TransferKey, Integer> transferTimes = Map.of();
 
     public RouteGraphRegistry(RouteEdgeTimeRepository edgeTimeRepository,
                               StationRepository stationRepository,
-                              RouteLineRepository lineRepository) {
+                              RouteLineRepository lineRepository,
+                              TransferMetaRepository transferMetaRepository) {
         this.edgeTimeRepository = edgeTimeRepository;
         this.stationRepository = stationRepository;
         this.lineRepository = lineRepository;
+        this.transferMetaRepository = transferMetaRepository;
     }
 
     @PostConstruct
@@ -62,7 +69,16 @@ public class RouteGraphRegistry {
                     RouteGraphLoader.load(new RouteGraphRawData(rows, stationNames, lineNames));
             this.graph = result.graph();
             this.stationInfos = Map.copyOf(infos);
-            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개", graph.nodeCount(), graph.edgeCount());
+            Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
+            for (TransferMeta meta : transferMetaRepository.findAll()) {
+                times.put(new TransferRule.TransferKey(
+                        meta.getId().getStationId(),
+                        meta.getId().getFromLine(),
+                        meta.getId().getToLine()), meta.getWalkSec());
+            }
+            this.transferTimes = Map.copyOf(times);
+            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건",
+                    graph.nodeCount(), graph.edgeCount(), transferTimes.size());
         } catch (DomainException e) {
             log.warn("탐색 그래프 없음(미적재). 그래프 로드 후 재기동하면 알고리즘 경로로 동작한다: {}",
                     e.getMessage());
@@ -81,5 +97,12 @@ public class RouteGraphRegistry {
      */
     public Map<String, RouteMapper.StationInfo> stationInfos() {
         return stationInfos;
+    }
+
+    /**
+     * @return 환승 실측표(역·이전 노선·다음 노선 기준). 미적재 시 빈 맵(호출 측은 상수 폴백)
+     */
+    public Map<TransferRule.TransferKey, Integer> transferTimes() {
+        return transferTimes;
     }
 }
