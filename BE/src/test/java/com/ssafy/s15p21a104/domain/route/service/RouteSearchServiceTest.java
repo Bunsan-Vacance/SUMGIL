@@ -11,6 +11,7 @@ import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
@@ -53,7 +54,7 @@ class RouteSearchServiceTest {
         lenient().when(stationRepository.findById("0221")).thenReturn(Optional.of(dest));
         lenient().when(stationRepository.findById("9999")).thenReturn(Optional.empty());
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
-                new Edge("0222", "0221", "2", 300, 0)));
+                new Edge("0222", "0221", "2", 300, 0, TravelMode.SUBWAY)));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null));
     }

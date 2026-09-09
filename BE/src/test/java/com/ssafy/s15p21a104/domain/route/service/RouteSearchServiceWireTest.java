@@ -54,10 +54,10 @@ class RouteSearchServiceWireTest {
         lenient().when(stationRepository.findById("C")).thenReturn(Optional.of(stationC));
         lenient().when(stationRepository.findById("X")).thenReturn(Optional.of(stationX));
         RouteGraph graph = graphOf(
-                new Edge("A", "B", "L1", 100, 0),
-                new Edge("B", "C", "L2", 50, 0),
+                new Edge("A", "B", "L1", 100, 0, TravelMode.SUBWAY),
+                new Edge("B", "C", "L2", 50, 0, TravelMode.SUBWAY),
                 // X는 고립 정점(A에서 도달 불가). 자기 루프로 정점만 등록한다.
-                new Edge("X", "X", "L9", 10, 0));
+                new Edge("X", "X", "L9", 10, 0, TravelMode.SUBWAY));
         lenient().when(graphRegistry.graph()).thenReturn(graph);
         Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
         infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
