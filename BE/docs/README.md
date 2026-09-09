@@ -32,11 +32,14 @@ BE/
 │  ├─ application-local.yml   ← Git 제외. 로컬 실제 접속 정보
 │  ├─ application-load.yml    ← 정적 적재 프로파일 (local,load 로 실행)
 │  ├─ db/migration/           ← Flyway V1 스키마, V2 source 열 확대
-│  └─ data/subway/            ← 지하철 정적 적재 원천 CSV·설정 (출처는 그 폴더 README)
-├─ src/main/java/.../load/    ← 정적 적재 로더 (load 프로파일, docs/db/load-subway.md)
+│  ├─ data/subway/            ← 지하철 정적 적재 원천 CSV·설정 (출처는 그 폴더 README)
+│  ├─ data/bus/               ← 버스 정류소·노선 원천 CSV (OA-15067 · OA-1095)
+│  └─ data/bike/              ← 따릉이 대여소 스냅샷(bikeList)·파일(OA-13252)
+├─ src/main/java/.../load/    ← 정적 적재 로더 (load 프로파일, docs/db/load-subway.md · load-bus-bike.md)
 ├─ docs/                      ← 이 폴더. api/db/global/infra/external/perf 로 나눠서 정리
 │                                (external: 외부 데이터 소스 조사·샘플, perf: 성능 측정 기록)
 ├─ scripts/external/          ← 외부 API 1회 호출 probe (node, 의존성 없음)
+├─ scripts/data/              ← 원천 변환: xlsx→CSV, bikeList 스냅샷 (node, 의존성 없음)
 └─ .claude/                   ← Git 제외 (Claude Code 로컬 설정, 팀 공유 안 됨)
 ```
 
