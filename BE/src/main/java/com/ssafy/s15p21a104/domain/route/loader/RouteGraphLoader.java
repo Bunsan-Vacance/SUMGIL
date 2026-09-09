@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.domain.route.loader;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.graph.RouteNameMapper;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
 import java.util.ArrayList;
@@ -82,8 +83,9 @@ public final class RouteGraphLoader {
     }
 
     private static Edge toEdge(RouteEdgeRow row) {
+        // SUBWAY 행만 다루므로 수단을 고정 주입한다. 비용·분기에는 쓰지 않는다.
         return new Edge(row.fromNode(), row.toNode(), row.routeId(),
-                row.travelSec(), row.waitSec());
+                row.travelSec(), row.waitSec(), TravelMode.SUBWAY);
     }
 
     /**
