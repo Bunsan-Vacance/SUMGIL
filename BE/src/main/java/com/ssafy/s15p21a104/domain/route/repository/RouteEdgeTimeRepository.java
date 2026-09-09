@@ -47,4 +47,13 @@ public interface RouteEdgeTimeRepository extends JpaRepository<EdgeTime, EdgeTim
     default List<RouteEdgeRow> findSubwayEdgesForDefaultSlot() {
         return findSubwayEdgesBySlot(0, 0);
     }
+
+    /** 역이 속한 SUBWAY 노선 ID 목록(환승역이면 여러 개). 역 검색(stations/search) 결과에 노선 정보를 붙일 때 쓴다. */
+    @Query("""
+            select distinct e.id.routeId
+            from EdgeTime e
+            where e.id.mode = com.ssafy.s15p21a104.domain.route.entity.TravelMode.SUBWAY
+              and (e.id.fromNode = :stationId or e.id.toNode = :stationId)
+            """)
+    List<String> findDistinctSubwayRouteIdsByStationId(@Param("stationId") String stationId);
 }

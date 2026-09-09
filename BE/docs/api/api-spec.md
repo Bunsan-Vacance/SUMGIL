@@ -156,3 +156,37 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 | --- | --- | --- |
 | `lat`/`lng` 범위 밖 | `BAD_REQUEST` | 400 |
 | `radiusMeters`/`limit`이 허용 범위 밖 | `BAD_REQUEST` (범위: 열린 질문 6) | 400 |
+
+---
+
+## 3. `GET /api/stations/search` — [미승인, FE 제안]
+
+`station_id`가 역번호(숫자)로 바뀌면서(`S15P21A104-103`), FE가 Kakao 검색 결과의 역명을 임의로 정규화해 `routes/search`에 넘기던 방식이 더 이상 안전하지 않다(`FE-역검색-API-개발요청.md`, 2026-09-09). 역 이름으로 검색해 정식 `station_id`를 찾는 용도.
+
+### 요청
+
+| 파라미터 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `query` | String | Y | 검색어. 부분 검색, 끝의 "역" 표기 허용(`강변`=`강변역`) |
+
+### 응답 — 배열
+
+```json
+{
+  "success": true,
+  "data": [
+    { "stationId": "208", "stationName": "왕십리", "lineId": "1002", "lineName": "2호선", "lat": 37.561159, "lng": 127.035505 },
+    { "stationId": "208", "stationName": "왕십리", "lineId": "1005", "lineName": "5호선", "lat": 37.561159, "lng": 127.035505 },
+    { "stationId": "208", "stationName": "왕십리", "lineId": "1063", "lineName": "경의중앙선", "lat": 37.561159, "lng": 127.035505 }
+  ]
+}
+```
+
+| 필드 | 설명 |
+| --- | --- |
+| `stationId` | `routes/search`의 `originStationId`/`destStationId`에 그대로 쓰는 값 |
+| `lineId`/`lineName` | **환승역은 소속 노선 수만큼 행이 나뉜다** — `stationId`는 같고 `lineId`만 다름. 노선 정보를 못 찾으면(그래프 미포함 등) 행 1개, `lineId`/`lineName`은 `null` |
+
+- 정렬: 정확 일치 → 접두 일치 → 부분 일치 순, 동순위는 역명 가나다순. 최대 20행(환승역 행 분리 포함).
+- 검색어가 빈 문자열이거나 결과 없음 → `200` + `data: []` (에러 아님). `query` 파라미터 자체가 없으면 `BAD_REQUEST`.
+- `stationId`가 물리적 역 하나를 가리키는지 노선별로 나뉘는지, `lineId`가 표시용 메타데이터인지 경로 검색 제약으로도 쓰이는지는 FE 요청 문서의 열린 질문이었다 — 현재 구현은 **`stationId`는 물리적 역 하나(현재 `station` 테이블 구조 그대로), `lineId`는 표시용 메타데이터일 뿐 `routes/search`에 별도로 전달하지 않는다**(경로 계산은 최단경로 알고리즘이 자동으로 정함)로 정했다. 다른 계약을 원하면 알려달라.
