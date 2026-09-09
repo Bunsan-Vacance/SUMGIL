@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 /**
  * S15P21A104-96 환승 상수 규칙 단위 테스트. 순수 값 기반이라 DB·Redis가 필요 없다.
  */
@@ -63,5 +65,34 @@ class TransferRuleTest {
         assertEquals(300, changed.getDefaultSec());
         assertEquals(400, changed.cost(100, "1002", "1005"));
         assertEquals(100, changed.cost(100, "1002", "1002"));
+    }
+
+    @Test
+    @DisplayName("실측 있으면 역별 시간으로 가산한다")
+    void t_실측있으면_실측가산() {
+        TransferRule rule = new TransferRule(180).withTable(Map.of(
+                new TransferRule.TransferKey("시청", "1001", "1002"), 84));
+
+        assertEquals(184, rule.costWithStation(100, "시청", "1001", "1002"));
+    }
+
+    @Test
+    @DisplayName("실측 없으면 상수로 폴백한다")
+    void t_실측없으면_상수폴백() {
+        TransferRule rule = new TransferRule(180).withTable(Map.of(
+                new TransferRule.TransferKey("시청", "1001", "1002"), 84));
+
+        assertEquals(280, rule.costWithStation(100, "시청", "1001", "1005"));
+        assertEquals(280, rule.costWithStation(100, null, "1001", "1002"));
+    }
+
+    @Test
+    @DisplayName("같은 노선·첫 엣지는 실측표와 무관하게 가산 없다")
+    void t_같은노선_첫엣지_가산없음() {
+        TransferRule rule = new TransferRule(180).withTable(Map.of(
+                new TransferRule.TransferKey("시청", "1001", "1001"), 999));
+
+        assertEquals(100, rule.costWithStation(100, "시청", "1001", "1001"));
+        assertEquals(100, rule.costWithStation(100, null, null, "1002"));
     }
 }

@@ -150,6 +150,22 @@ class ShortestPathFinderTest {
         assertEquals(List.of("L1", "L2", "L3"), path.edges().stream().map(Edge::routeId).toList());
     }
 
+    @Test
+    @DisplayName("역별 실측이 있으면 그 역 환승에 실측을 쓴다")
+    void t_역별실측_환승적용() {
+        ShortestPathFinder measured = new ShortestPathFinder(
+                new TransferRule(180).withTable(Map.of(
+                        new TransferRule.TransferKey("B", "L1", "L2"), 60)));
+        RouteGraph graph = graphOf(
+                edge("A", "B", "L1", 100),
+                edge("B", "C", "L2", 50));
+
+        FoundPath path = measured.find(graph, "A", "C");
+
+        assertEquals(100 + 50 + 60, path.totalSec());
+        assertEquals(1, path.transferCount());
+    }
+
     private static Edge edge(String from, String to, String routeId, int travelSec) {
         return new Edge(from, to, routeId, travelSec, 0);
     }

@@ -63,7 +63,8 @@ public class RouteSearchService {
             RouteGraph graph, String originStationId, String destStationId) {
         try {
             FoundPath found =
-                    new ShortestPathFinder(transferRule).find(graph, originStationId, destStationId);
+                    new ShortestPathFinder(transferRule.withTable(
+                            graphRegistry.transferTimes())).find(graph, originStationId, destStationId);
             List<RouteMapper.EngineSegment> segments = found.edges().stream()
                     .map(edge -> new RouteMapper.EngineSegment(
                             edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec()))
