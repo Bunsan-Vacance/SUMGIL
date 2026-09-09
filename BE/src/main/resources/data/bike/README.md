@@ -6,7 +6,7 @@
 
 | 파일 | 제공처 · 데이터셋 | 기준 | 행 | 채우는 것 |
 | --- | --- | --- | --- | --- |
-| `seoul-bike-stations-live_20260909.csv` | 서울 열린데이터광장 [OA-15493 서울시 공공자전거 실시간 대여정보(bikeList)](https://data.seoul.go.kr/dataList/OA-15493/A/1/datasetView.do) 를 `BE/scripts/data/bike-snapshot.mjs` 로 3페이지(1~3000) 호출해 합친 스냅샷 | 2026-09-09 호출 시각은 `BE/docs/db/load-bus-bike.md` | (적재 문서 참고) | **`bike_station` 정본.** `stationId` → `rental_id`, `stationName` 의 번호 접두어를 뗀 것 → `name`, `stationLatitude/Longitude` → `lat/lng`, `rackTotCnt` → `dock_count` |
+| `seoul-bike-stations-live_20260909.csv` | 서울 열린데이터광장 [OA-15493 서울시 공공자전거 실시간 대여정보(bikeList)](https://data.seoul.go.kr/dataList/OA-15493/A/1/datasetView.do) 를 `BE/scripts/data/bike-snapshot.mjs` 로 3페이지(1~3000) 호출해 합친 스냅샷 | 2026-09-09 11:09 KST 호출 (3회: 1~1000 · 1001~2000 · 2001~3000) | 2,731 | **`bike_station` 정본.** `stationId` → `rental_id`, `stationName` 의 번호 접두어를 뗀 것 → `name`, `stationLatitude/Longitude` → `lat/lng`, `rackTotCnt` → `dock_count` |
 | `seoul-bike-stations_202606.csv` | 서울 열린데이터광장 [OA-13252 서울시 공공자전거 따릉이 대여소 정보](https://data.seoul.go.kr/dataList/OA-13252/F/1/datasetView.do) (원본 `공공자전거 대여소 정보(26.6월 기준).xlsx`, 머리글 4행 병합) | 2026-06 (반기 갱신) | 2,789 | 적재하지 않는다. 대여소번호로 스냅샷과 대조해 누락·거치대수(LCD+QR) 차이를 경고로 남긴다 |
 
 ## 왜 스냅샷이 정본인가
