@@ -2,6 +2,7 @@ import pandas as pd
 
 from DATA_ENGINE.eda.join_kbo_attendance import (
     duplicate_group_inventory,
+    filter_seoul_metro_games,
     join_kbo_attendance,
     report_team_order,
 )
@@ -87,6 +88,22 @@ def test_report_team_order_counts_matches():
 
     assert "team_left==home_team: 1건" in report
     assert "team_left==away_team: 1건" in report
+
+
+def test_filter_seoul_metro_games_keeps_only_target_stadiums_regardless_of_home_away():
+    merged = pd.DataFrame(
+        [
+            # 원정 팀(삼성)이 잠실로 온 경기 — 서울 교통량과 관련 있으니 남아야 한다.
+            _games_row("2024-04-02", "잠실", "LG", "삼성"),
+            # 서울권 팀(두산)이 지방(대구)으로 원정 간 경기 — 무관하니 빠져야 한다.
+            _games_row("2024-04-03", "대구", "두산", "삼성"),
+        ]
+    )
+
+    result = filter_seoul_metro_games(merged)
+
+    assert len(result) == 1
+    assert result.iloc[0]["stadium"] == "잠실"
 
 
 def test_duplicate_group_inventory_flags_more_than_two_same_matchup():
