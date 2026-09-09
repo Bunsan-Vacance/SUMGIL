@@ -1,7 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
-import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -20,13 +19,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
 /**
- * 경로 검색. 그래프가 로드되어 있으면 알고리즘 경로, 미적재 시 기존 mock 경로로 응답한다.
+ * 경로 검색. 그래프 미적재 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,17 +44,15 @@ public class RouteSearchService {
             throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
         }
 
-        Station origin = findStation(originStationId);
-        Station dest = findStation(destStationId);
-
-        // 그래프 미로드(미적재·단위 테스트) 시 기존 mock 경로로 응답한다.
+        // 그래프 미로드(미적재) 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
         RouteGraph graph = graphRegistry == null ? null : graphRegistry.graph();
-        if (graph != null) {
-            return filterByModes(algorithmCandidates(graph, originStationId, destStationId), modes);
+        if (graph == null) {
+            return List.of();
         }
 
-        List<RouteSearchResponse> candidates = mockCandidates(origin, dest);
-        return filterByModes(candidates, modes);
+        findStation(originStationId);
+        findStation(destStationId);
+        return filterByModes(algorithmCandidates(graph, originStationId, destStationId), modes);
     }
 
     private List<RouteSearchResponse> algorithmCandidates(
@@ -84,27 +79,6 @@ public class RouteSearchService {
     private Station findStation(String stationId) {
         return stationRepository.findById(stationId)
                 .orElseThrow(() -> new DomainException(ErrorType.STATION_NOT_FOUND));
-    }
-
-    private List<RouteSearchResponse> mockCandidates(Station origin, Station dest) {
-        RouteLegResponse subwayLeg = new RouteLegResponse(
-                TravelMode.SUBWAY,
-                origin.getStationId(), origin.getName(), origin.getLat(), origin.getLng(),
-                dest.getStationId(), dest.getName(), dest.getLat(), dest.getLng(),
-                null, 15.6
-        );
-        RouteLegResponse bikeLeg = new RouteLegResponse(
-                TravelMode.BIKE,
-                origin.getStationId(), origin.getName(), origin.getLat(), origin.getLng(),
-                dest.getStationId(), dest.getName(), dest.getLat(), dest.getLng(),
-                null, 13.2
-        );
-
-        List<RouteSearchResponse> candidates = new ArrayList<>();
-        candidates.add(new RouteSearchResponse(RouteType.SHORTEST_WITH_BIKE, 13.2, List.of(bikeLeg), RouteSource.MOCK));
-        candidates.add(new RouteSearchResponse(RouteType.SHORTEST, 15.6, List.of(subwayLeg), RouteSource.MOCK));
-        candidates.sort(Comparator.comparing(RouteSearchResponse::totalMinutes));
-        return candidates;
     }
 
     private List<RouteSearchResponse> filterByModes(List<RouteSearchResponse> candidates, List<TravelMode> modes) {
