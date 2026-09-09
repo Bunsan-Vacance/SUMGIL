@@ -36,3 +36,11 @@
 
 - 별도 작업이 필요 없습니다. 필터가 traceId를 설정하고 로그·응답에 자동 포함됩니다.
 - 수동 로그는 `log.info/warn/error`만 사용합니다.
+
+## CORS (S15P21A104-67)
+
+- `/api/**`만 CORS를 허용합니다(`CorsConfig`). 허용 출처는 `app.cors.allowed-origins`
+  (기본값 `http://localhost:5173`, `http://127.0.0.1:5173` — Vite 기본 포트).
+- 로컬 FE 포트가 다르거나 팀원 PC의 LAN IP로 접속해야 하면 코드를 고치지 말고
+  `APP_CORS_ALLOWED_ORIGINS=http://localhost:5173,http://192.168.0.10:5173` 환경변수로 덮어씁니다.
+- 와일드카드(`*`)는 쓰지 않습니다 — 허용 출처를 정확히 나열합니다.
