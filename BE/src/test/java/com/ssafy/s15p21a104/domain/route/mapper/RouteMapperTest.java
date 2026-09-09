@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.mapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
@@ -143,5 +144,71 @@ class RouteMapperTest {
         Optional<RouteSearchResponse> nullPath =
                 RouteMapper.toResponse(null, stations, RouteType.SHORTEST, RouteSource.MOCK);
         assertTrue(nullPath.isEmpty());
+    }
+
+    @Test
+    @DisplayName("105-T1: 환승 1회면 TRANSFER leg가 가운데 낀다")
+    void t105_환승1회_TRANSFER_leg관통() {
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 300),
+                new EngineSegment("1002", "1003", "7", 420)
+        ), 900, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stations,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L))
+                .orElseThrow();
+
+        assertEquals(3, response.legs().size());
+        assertEquals(TravelMode.SUBWAY, response.legs().get(0).mode());
+        assertEquals(TravelMode.TRANSFER, response.legs().get(1).mode());
+        assertEquals(TravelMode.SUBWAY, response.legs().get(2).mode());
+        assertEquals("1002", response.legs().get(1).fromNodeId());
+        assertEquals("1002", response.legs().get(1).toNodeId());
+        assertEquals(null, response.legs().get(1).routeId());
+        assertEquals(180 / 60.0, response.legs().get(1).minutes(), TOLERANCE);
+        assertEquals(900 / 60.0, response.totalMinutes(), TOLERANCE);
+    }
+
+    @Test
+    @DisplayName("105-T2: 환승 없으면 기존과 같은 1개 leg이다")
+    void t105_환승없음_기존동일() {
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 300)
+        ), 300, 0);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stations,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of())
+                .orElseThrow();
+
+        assertEquals(1, response.legs().size());
+        assertEquals(TravelMode.SUBWAY, response.legs().get(0).mode());
+    }
+
+    @Test
+    @DisplayName("105-T3: 환승 횟수와 시간 개수가 다르면 오류이다")
+    void t105_횟수개수_불일치_오류() {
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 300),
+                new EngineSegment("1002", "1003", "7", 420)
+        ), 900, 1);
+
+        assertThrows(IllegalArgumentException.class, () -> RouteMapper
+                .toResponseWithTransfers(enginePath, stations,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L, 180L)));
+    }
+
+    @Test
+    @DisplayName("105-T4: 환승 시간이 음수이면 오류이다")
+    void t105_환승시간음수_오류() {
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 300),
+                new EngineSegment("1002", "1003", "7", 420)
+        ), 900, 1);
+
+        assertThrows(IllegalArgumentException.class, () -> RouteMapper
+                .toResponseWithTransfers(enginePath, stations,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(-1L)));
     }
 }

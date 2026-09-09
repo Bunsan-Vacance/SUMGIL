@@ -77,7 +77,11 @@ class RouteSearchServiceWireTest {
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
         assertEquals(RouteSource.ALGORITHM, result.get(0).source());
         assertEquals((100 + 50 + 180) / 60.0, result.get(0).totalMinutes());
-        assertEquals(2, result.get(0).legs().size());
+        assertEquals(3, result.get(0).legs().size());
+        assertEquals(TravelMode.SUBWAY, result.get(0).legs().get(0).mode());
+        assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(1).mode());
+        assertEquals(TravelMode.SUBWAY, result.get(0).legs().get(2).mode());
+        assertEquals(180 / 60.0, result.get(0).legs().get(1).minutes(), 1e-9);
     }
 
     @Test
