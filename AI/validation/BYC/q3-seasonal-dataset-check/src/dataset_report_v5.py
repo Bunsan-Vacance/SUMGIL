@@ -91,13 +91,18 @@ def parse_args() -> argparse.Namespace:
     default_output_dir = script_dir.parents[1] / "outputs"
     parser.add_argument("--dataset-dir", default=str(default_dataset_dir))
     parser.add_argument("--output-dir", default=str(default_output_dir))
+    parser.add_argument(
+        "--file-tag",
+        default="top300",
+        help="파일명 접미사 (예: top300, stratified300) — {split}_netflow_q3_mapped_{tag}.csv.gz",
+    )
     return parser.parse_args()
 
 
-def load_splits(dataset_dir: Path) -> dict[str, pd.DataFrame]:
+def load_splits(dataset_dir: Path, file_tag: str = "top300") -> dict[str, pd.DataFrame]:
     splits = {}
     for split_name, _start, _end in SPLIT_DEFS:
-        path = dataset_dir / f"{split_name}_netflow_q3_mapped_top300.csv.gz"
+        path = dataset_dir / f"{split_name}_netflow_q3_mapped_{file_tag}.csv.gz"
         df = pd.read_csv(path)
         df["base_time"] = pd.to_datetime(df["base_time"])
         df["od_station_id"] = df["od_station_id"].astype(str)
@@ -334,7 +339,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("split 로드...")
-    splits = load_splits(dataset_dir)
+    splits = load_splits(dataset_dir, args.file_tag)
 
     schema_df = check_schema(splits)
     boundary_df = check_split_boundaries(splits)
