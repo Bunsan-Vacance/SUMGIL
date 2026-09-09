@@ -84,7 +84,7 @@ conf/station-aliases ─▶ StationNameNormalizer (모든 역명에 적용)
 - `transfer_meta.walk_sec` 는 서울교통공사 환승거리 ÷ 1.2 m/s 값 그대로. 9호선·코레일 환승은 원천 없어 없다.
 - 원천에 없는 값(코레일 역 좌표, 9호선 환승, 급행)은 **채워 넣지 않는다.**
 
-## 읽는 쪽에 미치는 영향 (A 파트)
+## 읽는 쪽에 미치는 영향 (경로 탐색)
 
 - `RouteEdgeTimeRepository.findSubwayEdgesForDefaultSlot()` 은 대표 슬롯 (dow 0, slot 0) 하나만 읽는다. 이제 슬롯마다 `wait_sec` 이 다르고 0번 슬롯(00:00~00:30)은 배차가 길다. **요청 시각의 (dow_type, time_slot) 로 조회해야 한다.** 행은 지우지 않으므로 "행 없음"으로 깨지지는 않는다.
 - 역 ID 변경: 당고개 → 불암산, 지제 → 평택지제. 1호선 서울~구로 등 엣지 224개·역 79개 추가. 6호선 응암순환은 단방향.
