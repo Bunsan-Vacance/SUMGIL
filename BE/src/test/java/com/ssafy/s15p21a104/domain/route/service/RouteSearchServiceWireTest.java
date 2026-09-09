@@ -64,24 +64,26 @@ class RouteSearchServiceWireTest {
         infos.put("B", new RouteMapper.StationInfo("B", "비역", 37.5, 127.0));
         infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
+        lenient().when(graphRegistry.transferTimes()).thenReturn(Map.of(
+                new TransferRule.TransferKey("B", "L1", "L2"), 60));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null));
     }
 
     @Test
-    @DisplayName("그래프가 있으면 알고리즘 경로(ALGORITHM)로 응답한다")
-    void 그래프있으면_알고리즘응답() {
+    @DisplayName("106-T1: TRANSFER leg에 실측 환승 시간이 들어간다")
+    void t106_TRANSFER_leg_실측값() {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
 
         assertEquals(1, result.size());
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
         assertEquals(RouteSource.ALGORITHM, result.get(0).source());
-        assertEquals((100 + 50 + 180) / 60.0, result.get(0).totalMinutes());
+        assertEquals((100 + 50 + 60) / 60.0, result.get(0).totalMinutes());
         assertEquals(3, result.get(0).legs().size());
         assertEquals(TravelMode.SUBWAY, result.get(0).legs().get(0).mode());
         assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(1).mode());
         assertEquals(TravelMode.SUBWAY, result.get(0).legs().get(2).mode());
-        assertEquals(180 / 60.0, result.get(0).legs().get(1).minutes(), 1e-9);
+        assertEquals(60 / 60.0, result.get(0).legs().get(1).minutes(), 1e-9);
     }
 
     @Test
