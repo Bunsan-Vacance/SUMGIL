@@ -134,6 +134,22 @@ class ShortestPathFinderTest {
         assertTrue(path.stations().stream().distinct().count() == path.stations().size());
     }
 
+    @Test
+    @DisplayName("97-T2 노선 3개 경유 OD는 3구간 경로·환승 2회 (AC1)")
+    void t9_세노선_환승2회() {
+        RouteGraph graph = graphOf(
+                edge("A", "B", "L1", 100),
+                edge("B", "C", "L2", 50),
+                edge("C", "D", "L3", 60));
+
+        FoundPath path = finder.find(graph, "A", "D");
+
+        assertEquals(List.of("A", "B", "C", "D"), path.stations());
+        assertEquals(100 + 50 + 60 + 180 * 2, path.totalSec());
+        assertEquals(2, path.transferCount());
+        assertEquals(List.of("L1", "L2", "L3"), path.edges().stream().map(Edge::routeId).toList());
+    }
+
     private static Edge edge(String from, String to, String routeId, int travelSec) {
         return new Edge(from, to, routeId, travelSec, 0);
     }
