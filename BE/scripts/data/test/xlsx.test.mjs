@@ -41,6 +41,15 @@ describe('sheetRows', () => {
     assert.deepEqual(sheetRows(sheet, SHARED), [['A&B <C>']]);
   });
 
+  test('셀 안의 줄바꿈은 CRLF·CR 을 LF 로 정규화한다 — 저장소 규칙(LF)과 맞추고 Git 경고를 막는다', () => {
+    // 따릉이 대여소 정보의 상세주소 10건이 셀 안에 CRLF 줄바꿈을 갖는다 ("강남구 개포동 182-4\r\n(개포동역 4번출구)")
+    const sheet = `<worksheet><sheetData>
+      <row r="1"><c r="A1" t="inlineStr"><is><t>강남구 개포동 182-4&#13;&#10;(개포동역 4번출구)</t></is></c><c r="B1" t="inlineStr"><is><t>가\r나</t></is></c></row>
+    </sheetData></worksheet>`;
+
+    assert.deepEqual(sheetRows(sheet, SHARED), [['강남구 개포동 182-4\n(개포동역 4번출구)', '가\n나']]);
+  });
+
   test('공유 문자열 XML 이 없어도 인라인·숫자 셀은 읽는다', () => {
     const sheet = `<worksheet><sheetData>
       <row r="1"><c r="A1"><v>7</v></c></row>

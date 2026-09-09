@@ -4,8 +4,12 @@ import { readZip } from './zip.mjs';
 
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
 
+// 엔티티를 되돌린 뒤 셀 안 줄바꿈(CRLF·CR)은 LF 로 정규화한다 — 저장소 규칙(.gitattributes eol=lf)과 맞추기 위한 형식 변환이며 값은 바뀌지 않는다.
 function decode(text) {
-  return text.replace(/&(amp|lt|gt|quot|apos);/g, (m) => ENTITIES[m]).replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
+  return text
+    .replace(/&(amp|lt|gt|quot|apos);/g, (m) => ENTITIES[m])
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/\r\n?/g, '\n');
 }
 
 // "A" → 0, "Z" → 25, "AA" → 26
