@@ -1,4 +1,4 @@
-import { ArrowLeft, MapPin, Search, X } from 'lucide-react'
+import { ArrowLeft, Bike, MapPin, Search, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import BottomSheet from '../components/BottomSheet'
 import KakaoMap from '../features/map/KakaoMap'
@@ -177,7 +177,7 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
                     onClick={() => setSelectedPlace(place)}
                   >
                     <span className="place-icon">
-                      <MapPin size={20} />
+                      {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
                     </span>
                     <span>
                       <strong>{place.name}</strong>

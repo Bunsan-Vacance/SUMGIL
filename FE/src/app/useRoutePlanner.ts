@@ -48,6 +48,10 @@ export function useRoutePlanner(repository?: RouteRepository) {
   const openBrowse = () => go('browse')
   const toggleRoutePanel = () => setRoutePanelOpen((open) => !open)
   const closeRoutePanel = () => setRoutePanelOpen(false)
+  const returnToRouteInput = () => {
+    setRoutePanelOpen(true)
+    go('home')
+  }
   const cancelSearch = () => go(searchReturnScreen)
   const findRoutes = (place?: Place) => {
     const destination = place || trip.destination
@@ -161,6 +165,7 @@ export function useRoutePlanner(repository?: RouteRepository) {
     routePanelOpen,
     toggleRoutePanel,
     closeRoutePanel,
+    returnToRouteInput,
     findRoutes,
     choosePlace,
     setOriginFromBrowse,

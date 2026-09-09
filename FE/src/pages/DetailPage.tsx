@@ -39,7 +39,7 @@ export default function DetailPage({ origin, destinationName, selected, go, star
             <small>분</small>
           </h2>
           <span>{arrival(selected.minutes)} 도착 예상</span>
-          <b className={selected.crowd === 1 ? 'calm-text' : 'fast-text'}>{selected.label}</b>
+          <b className={selected.id === 'calm' ? 'calm-text' : 'fast-text'}>{selected.label}</b>
         </div>
         <div className="stats">
           <div>
@@ -51,8 +51,8 @@ export default function DetailPage({ origin, destinationName, selected, go, star
             <small>도보</small>
           </div>
           <div>
-            <strong>{selected.crowd}구간</strong>
-            <small>혼잡 예상 · 09:41</small>
+            <strong>{selected.congestionPercent}%</strong>
+            <small>혼잡도 예상 · 09:41</small>
           </div>
         </div>
         <section className="route-legs" aria-label="구간별 이동 안내">

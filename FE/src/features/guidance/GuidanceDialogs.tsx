@@ -54,7 +54,7 @@ export default function GuidanceDialogs({
   return (
     <Modal title="따릉이 경로로 바꿀까요?" onClose={onClose}>
       <p className="proposal-title">
-        혼잡 {proposal.crowd}구간 · {proposal.minutes}분
+        혼잡도 {proposal.congestionPercent}% · {proposal.minutes}분
       </p>
       <p className="section-label">가까운 대여소 → 한티역 → 수인분당선</p>
       <div className="modal-actions">

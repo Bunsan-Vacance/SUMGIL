@@ -36,8 +36,21 @@ function fakeMaps(): KakaoMaps {
   }
   class Map {
     relayout() {}
+    getLevel() {
+      return 5
+    }
+    getProjection() {
+      return { containerPointFromCoords: () => ({ x: 0, y: 0 }) }
+    }
+    getBounds() {
+      return { contain: () => false }
+    }
   }
   class Marker {
+    setMap() {}
+  }
+  class CustomOverlay {
+    constructor(_options: unknown) {}
     setMap() {}
   }
   class Geocoder {
@@ -53,13 +66,16 @@ function fakeMaps(): KakaoMaps {
     LatLng,
     Map,
     Marker,
+    CustomOverlay,
     services: { Geocoder, Status: { OK: 'OK', ZERO_RESULT: 'ZERO_RESULT', ERROR: 'ERROR' } },
     event: {
       addListener: (
         _target: KakaoMapInstance,
-        _type: string,
+        type: string,
         handler: (event: KakaoMapClickEvent) => void,
-      ) => clickHandlers.push(handler),
+      ) => {
+        if (type === 'click') clickHandlers.push(handler)
+      },
       removeListener: () => undefined,
     },
   } as unknown as KakaoMaps

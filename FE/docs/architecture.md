@@ -20,7 +20,7 @@ src/
   features/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
-  map/                    지도 컴포넌트, 지도 위치 선택, SDK 수명 관리, 현재 위치 훅
+  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅
   api/
     contracts.ts            데이터 접근 인터페이스
     repositories.ts         실제로 사용할 구현 선택
@@ -39,6 +39,7 @@ src/
 - `selectors`와 reducer는 React·DOM·네트워크 없이 동작하는 함수다.
 - `components`는 특정 경로 데이터나 화면 이름을 알지 않는다.
 - 카카오 SDK 사용은 `features/map`과 `lib/kakao` 안으로 제한한다. 일반 지도와 장소 탐색 지도는 `useKakaoMap`, 지도 위치 선택은 `MapPlacePicker`, 현재 위치 조회는 `useCurrentLocation`이 맡는다. `KakaoMap`은 경로 장소 또는 탐색 결과 배열을 받아 마커를 관리한다.
+- 따릉이 정적 데이터 변환과 선택용 `Place` 변환은 `features/map/bikeStations`, viewport 내 자전거 아이콘 오버레이는 `features/map/bikeStationMarkers`가 맡는다. 선택 결과는 기존 장소 선택 흐름으로 전달한다.
 - 미리보기 시나리오용 제안 경로는 `app/preview`에서 주입한다. 초기 후보·선택 경로를 기능 훅 내부에 숨겨 넣지 않는다.
 
 타입을 참조하는 의존성은 `import type`으로 명시한다. 페이지의 `Navigate` 타입 참조는 화면 이동 계약이며, 페이지에서 앱 상태를 직접 조회하는 것은 아니다.

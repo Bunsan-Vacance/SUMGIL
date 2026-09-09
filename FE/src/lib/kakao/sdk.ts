@@ -6,6 +6,9 @@ export interface MapPixelPoint {
   x: number
   y: number
 }
+export interface MapProjection {
+  containerPointFromCoords(point: MapPoint): MapPixelPoint
+}
 export interface MapSize {
   width: number
   height: number
@@ -40,12 +43,16 @@ export interface KakaoMapClickEvent {
 }
 export interface MapBounds {
   extend(point: MapPoint): void
+  contain(point: MapPoint): boolean
 }
 export interface KakaoMapInstance {
   relayout(): void
   getCenter(): MapPoint
+  getBounds(): MapBounds
+  getLevel(): number
+  getProjection(): MapProjection
   setCenter(point: MapPoint): void
-  setLevel(level: number): void
+  setLevel(level: number, options?: { anchor?: MapPoint }): void
   setBounds(bounds: MapBounds, top?: number, right?: number, bottom?: number, left?: number): void
   panTo(point: MapPoint): void
 }
@@ -78,6 +85,12 @@ export interface KakaoMaps {
     title?: string
     clickable?: boolean
   }) => KakaoMarker
+  CustomOverlay: new (options: {
+    map: KakaoMapInstance
+    position: MapPoint
+    content: Node
+    clickable?: boolean
+  }) => MapOverlay
   Polyline: new (options: {
     map: KakaoMapInstance
     path: MapPoint[]

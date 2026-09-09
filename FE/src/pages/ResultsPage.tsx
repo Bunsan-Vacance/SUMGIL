@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Navigation, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, Navigation, SlidersHorizontal } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
@@ -18,6 +18,7 @@ interface Props {
   setPriority: (value: Priority) => void
   openFilter: () => void
   openSearch: (target: 'origin' | 'destination') => void
+  onBackToInput: () => void
   go: Navigate
   startGuide: () => void
   canSwap: boolean
@@ -37,6 +38,7 @@ export default function ResultsPage({
   setPriority,
   openFilter,
   openSearch,
+  onBackToInput,
   go,
   startGuide,
   canSwap,
@@ -45,6 +47,14 @@ export default function ResultsPage({
   return (
     <>
       <div className="trip-summary">
+        <button
+          type="button"
+          className="icon-button summary-back"
+          aria-label="경로 입력으로 돌아가기"
+          onClick={onBackToInput}
+        >
+          <ArrowLeft size={17} />
+        </button>
         <div>
           <button
             type="button"
@@ -109,7 +119,6 @@ export default function ResultsPage({
               <div>
                 <h2>추천 경로</h2>
                 <p>{visible.length}개 경로 · 09:41 출발 기준</p>
-                <p className="sample-note">경로·소요시간은 예시입니다.</p>
               </div>
               <button className="secondary filter-button" onClick={openFilter}>
                 <SlidersHorizontal size={16} />
@@ -124,11 +133,6 @@ export default function ResultsPage({
                 덜 붐빔 우선
               </button>
             </div>
-            {visible.some((r) => r.id === 'fast') && visible.some((r) => r.id === 'calm') && (
-              <p className="comparison">
-                덜 붐비는 길은 <strong>4분 더 걸리고 · 혼잡 2구간 감소</strong>
-              </p>
-            )}
             <div className="route-list">
               {visible.map((route) => (
                 <RouteCard

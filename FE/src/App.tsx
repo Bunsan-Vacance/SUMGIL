@@ -99,6 +99,7 @@ export default function App() {
               setPriority={trip.setPriority}
               openFilter={() => setModal('filter')}
               openSearch={planner.openSearch}
+              onBackToInput={planner.returnToRouteInput}
               go={go}
               startGuide={planner.startGuide}
               canSwap={!!trip.destination}

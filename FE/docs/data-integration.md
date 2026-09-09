@@ -2,15 +2,26 @@
 
 ## 현재 연결 상태
 
-| 영역                         | 실제 구현                                            | 연결 위치                                         |
-| ---------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
-| 지도 타일·장소 마커          | 카카오 JavaScript SDK + 장소 검색                    | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts` |
-| 현재 위치                    | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회 | `features/map/useCurrentLocation.ts`              |
-| 지도 위치 선택               | 카카오 지도 클릭 + 좌표 역지오코딩                   | `features/map/MapPlacePicker.tsx`                 |
-| 검색 화면의 장소 후보        | 카카오 JavaScript SDK 장소·주소 검색                 | `lib/kakao/sdk.ts`, `api/repositories.ts`         |
-| 추천 경로                    | 역삼 → 도곡 고정 샘플, 비동기 응답                   | `mockRouteRepository`                             |
-| 정렬·이동수단 필터           | 클라이언트 계산                                      | `features/route/selectors.ts`                     |
-| 경로선·실제 길찾기·혼잡 추정 | 미구현                                               | 백엔드 계약 합의 필요                             |
+| 영역                           | 실제 구현                                            | 연결 위치                                         |
+| ------------------------------ | ---------------------------------------------------- | ------------------------------------------------- |
+| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                    | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts` |
+| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회 | `features/map/useCurrentLocation.ts`              |
+| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                   | `features/map/MapPlacePicker.tsx`                 |
+| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                 | `lib/kakao/sdk.ts`, `api/repositories.ts`         |
+| 추천 경로                      | 역삼 → 도곡 고정 샘플, 비동기 응답                   | `mockRouteRepository`                             |
+| 정렬·이동수단 필터             | 클라이언트 계산                                      | `features/route/selectors.ts`                     |
+| 경로선·실제 길찾기·혼잡 추정   | 미구현                                               | 백엔드 계약 합의 필요                             |
+| 따릉이 대여소 데이터·지도 마커 | 생성 시점 정적 JSON, viewport 내 CustomOverlay       | `features/map/bikeStations.ts`                    |
+
+### 따릉이 대여소 정적 데이터
+
+지도 대여소 마커와 기존 장소 선택 흐름은 `src/data/bike-stations.json`을 사용한다. 원본은 작업공간의
+`서울시 공공자전거 따릉이 대여소 마스터 정보.json`이며, `DATA` 3,430건 중 위도·경도가
+모두 0인 77건을 제외한 3,353건을 생성 시점에 추출했다. 원본에는 알려진 갱신일이 없어
+최신성은 보장하지 않으며, 실시간 대여 가능 자전거 수량은 포함하지 않는다. 대여소명은
+`addr2`를 사용하고 비어 있으면 화면에는 `따릉이 대여소`를 표시한다. 주소는 `addr1`과
+`addr2`를 합친 값이며, 내부 대여소 ID는 선택 장소 식별에만 사용하고 화면에는 노출하지 않는다.
+지도를 축소하면 화면 기준으로 가까운 대여소를 숫자 그룹으로 묶고, 그룹 버튼을 누르면 해당 지역을 확대한다.
 
 장소 검색은 카카오 JavaScript SDK의 키워드 검색을 사용하며 결과가 없으면 지오코더 주소 검색으로 재시도한다. 화면 장소로 변환할 때 이름·주소·좌표를 검증하고 유효한 좌표가 없는 외부 결과는 제외한다. 선택한 장소는 검색 화면의 최근 목록에 최대 10개까지 저장하며 현재 위치는 저장하지 않는다. 지도 선택은 `coord2Address(lng, lat)`으로 도로명·지번 주소를 표시하고, 주소를 찾지 못해도 좌표를 선택할 수 있다. SDK 콜백은 `AbortSignal`을 확인해 취소된 요청의 늦은 응답을 반영하지 않는다. 경로 조회는 현재 샘플 저장소를 유지한다.
 
@@ -20,6 +31,7 @@
 
 - `PlaceRepository.search(query, signal): Promise<Place[]>`
 - `RouteRepository.search({ origin, destination }, signal): Promise<Route[]>`
+- `Route.congestionPercent`는 화면용 0~100 혼잡도 퍼센트이며, 현재 값은 샘플이다. 집계 방식·기준 시각·서버 DTO 매핑은 백엔드 계약 합의 전까지 확정하지 않는다.
 
 `api/repositories.ts`에서 사용할 구현을 선택한다. 페이지에서는 `fixtures`를 import하지 않는다. `app/preview.ts`는 초기 후보를 만들지 않고 미리보기 시나리오의 제안 경로만 주입한다.
 
@@ -39,7 +51,7 @@
 - 출발/도착의 장소 ID 및 위도·경도, 좌표 순서와 좌표계.
 - 출발 시각과 시간대, 시간·거리의 단위(현재 화면 모델은 분·m).
 - 전체 경로와 구간별 ID, 이동수단, 환승, 구간 안내, 경로선 좌표 배열.
-- 대표 경로 분류(빠름/쾌적), 혼잡도 의미와 기준 시각, 설명 근거.
+- 대표 경로 분류(빠름/쾌적), `Route.congestionPercent`의 0~100 혼잡도 의미와 기준 시각, 설명 근거.
 - 결과 없음·조회 실패·지원하지 않는 구간·데이터 지연 처리.
 - 안내 중 제안 경로가 전체 경로인지 현재 위치 이후의 잔여 경로인지.
 

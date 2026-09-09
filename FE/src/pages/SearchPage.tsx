@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Bike, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-react'
 import type { Place } from '../features/route/types'
 import MapPlacePicker from '../features/map/MapPlacePicker'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
@@ -122,7 +122,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
         {places.map((place) => (
           <button key={place.id} onClick={() => selectPlace(place)}>
             <span className="place-icon">
-              <MapPin size={20} />
+              {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
             </span>
             <span>
               <strong>{place.name}</strong>
@@ -136,7 +136,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
             <div className="recent-place" key={place.id}>
               <button onClick={() => selectPlace(place)}>
                 <span className="place-icon">
-                  <MapPin size={20} />
+                  {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
                 </span>
                 <span>
                   <strong>{place.name}</strong>

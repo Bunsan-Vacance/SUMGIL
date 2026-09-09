@@ -7,6 +7,15 @@ import {
   type MapOverlay,
 } from '../../lib/kakao/sdk'
 import type { Place } from '../route/types'
+import {
+  createBikeStationClusterOverlay,
+  createBikeStationOverlay,
+  groupVisibleBikeStations,
+  type BikeStationOverlay,
+  type BikeStationClusterOverlay,
+  zoomToBikeStationCluster,
+} from './bikeStationMarkers'
+import { stationToPlace, type BikeStation } from './bikeStations'
 
 interface Props {
   target: 'origin' | 'destination'
@@ -22,6 +31,9 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
   const canvas = useRef<HTMLDivElement>(null)
   const map = useRef<KakaoMapInstance | null>(null)
   const marker = useRef<MapOverlay | null>(null)
+  const stationMarkers = useRef(new Map<string, BikeStationOverlay>())
+  const stationClusterMarkers = useRef(new Map<string, BikeStationClusterOverlay>())
+  const selectedStationId = useRef<string | null>(null)
   const requestId = useRef(0)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [attempt, setAttempt] = useState(0)
@@ -33,6 +45,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
     let cancelled = false
     let maps: Awaited<ReturnType<typeof loadKakaoMaps>> | null = null
     let clickHandler: ((event: KakaoMapClickEvent) => void) | null = null
+    let idleHandler: (() => void) | null = null
     let resizeObserver: ResizeObserver | null = null
     const element = canvas.current
     if (!element) return
@@ -48,6 +61,61 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
         })
         map.current = instance
         const geocoder = new loaded.services.Geocoder()
+        const selectStation = (station: BikeStation) => {
+          requestId.current++
+          marker.current?.setMap(null)
+          marker.current = null
+          selectedStationId.current = station.id
+          setSelected(stationToPlace(station))
+          setMessage('')
+          setGeocoding(false)
+          stationMarkers.current.forEach((stationMarker, id) =>
+            stationMarker.setSelected(id === station.id),
+          )
+        }
+        const syncStationMarkers = () => {
+          const groups = groupVisibleBikeStations(loaded, instance)
+          const individualGroups = groups.filter((group) => group.stations.length === 1)
+          const visibleIds = new Set(individualGroups.map((group) => group.stations[0].id))
+          stationMarkers.current.forEach((stationMarker, id) => {
+            if (!visibleIds.has(id)) {
+              stationMarker.destroy()
+              stationMarkers.current.delete(id)
+            }
+          })
+          individualGroups.forEach((group) => {
+            const station = group.stations[0]
+            if (stationMarkers.current.has(station.id)) return
+            stationMarkers.current.set(
+              station.id,
+              createBikeStationOverlay(
+                loaded,
+                instance,
+                station,
+                selectedStationId.current === station.id,
+                () => selectStation(station),
+              ),
+            )
+          })
+          stationClusterMarkers.current.forEach((stationClusterMarker) =>
+            stationClusterMarker.destroy(),
+          )
+          stationClusterMarkers.current.clear()
+          groups
+            .filter((group) => group.stations.length > 1)
+            .forEach((group) => {
+              const key = group.stations.map((station) => station.id).join('|')
+              stationClusterMarkers.current.set(
+                key,
+                createBikeStationClusterOverlay(loaded, instance, group, () =>
+                  zoomToBikeStationCluster(loaded, instance, group),
+                ),
+              )
+            })
+        }
+        syncStationMarkers()
+        idleHandler = () => syncStationMarkers()
+        loaded.event.addListener(instance, 'idle', idleHandler)
         clickHandler = (event) => {
           const lat = event.latLng.getLat()
           const lng = event.latLng.getLng()
@@ -74,6 +142,8 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
             lat,
             lng,
           }
+          selectedStationId.current = null
+          stationMarkers.current.forEach((stationMarker) => stationMarker.setSelected(false))
           marker.current?.setMap(null)
           marker.current = new loaded.Marker({
             map: instance,
@@ -104,7 +174,10 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
           }
         }
         loaded.event.addListener(instance, 'click', clickHandler)
-        resizeObserver = new ResizeObserver(() => instance.relayout())
+        resizeObserver = new ResizeObserver(() => {
+          instance.relayout()
+          syncStationMarkers()
+        })
         resizeObserver.observe(element)
         setStatus('ready')
       })
@@ -114,9 +187,18 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
     return () => {
       cancelled = true
       requestId.current++
-      if (maps && map.current && clickHandler)
-        maps.event.removeListener(map.current, 'click', clickHandler)
+      if (maps && map.current) {
+        if (clickHandler) maps.event.removeListener(map.current, 'click', clickHandler)
+        if (idleHandler) maps.event.removeListener(map.current, 'idle', idleHandler)
+      }
       resizeObserver?.disconnect()
+      stationMarkers.current.forEach((stationMarker) => stationMarker.destroy())
+      stationMarkers.current.clear()
+      stationClusterMarkers.current.forEach((stationClusterMarker) =>
+        stationClusterMarker.destroy(),
+      )
+      stationClusterMarkers.current.clear()
+      selectedStationId.current = null
       marker.current?.setMap(null)
       marker.current = null
       map.current = null

@@ -21,7 +21,7 @@ export interface Route {
   minutes: number
   walk: number
   transfers: number
-  crowd: number
+  congestionPercent: number
   modes: Mode[]
   line: string
   legs: Leg[]
