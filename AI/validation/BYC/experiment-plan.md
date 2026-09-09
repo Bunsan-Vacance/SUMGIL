@@ -284,7 +284,68 @@ AI/validation/BYC/q3-seasonal-dataset-check/
                              feature_importance.csv, metrics.json, best_model.pkl)
 ```
 
-## 8. 작업 현황
+## 8. Phase 2 상세
+
+### 프로파일 정의
+
+Naive_Profile(Phase 1)과 같은 그룹 기준으로 train 데이터에서 통계를 뽑아 feature로 만든다.
+
+```text
+group by: od_station_id × day_of_week × hour × horizon_min
+
+historical_net_flow_mean   : 그룹의 target_net_flow 평균
+historical_net_flow_std    : 그룹의 target_net_flow 표준편차
+historical_rent_mean       : 그룹의 target_rent_count 평균
+historical_return_mean     : 그룹의 target_return_count 평균
+historical_profile_fallback_level : 0=정확한 조합, 1=(station,horizon) 대체, 2=전체 평균 대체
+```
+
+`fallback_level`은 표본 부족 구간을 모델이 덜 신뢰할 근거로 구분할 수 있게 하는 신규 feature다.
+
+### Feature 구성
+
+```text
+Phase 1 최소셋 (그대로 유지) + 위 5개 historical_* feature
+```
+
+여전히 제외: `rack_count`/`lat_stock`/`lon_stock`/`district`(Phase 3), 날씨(Phase 4), recent OD(A안)
+
+### Leakage 방지
+
+```text
+프로파일은 train 기간 데이터로만 계산(fit)
+valid/test에는 station×dow×hour×horizon 키로 조인만(재계산 없음)
+fallback 순서: (station,dow,hour,horizon) → (station,horizon) → (horizon 전체)
+```
+
+### 모델 후보 — Phase 1과 동일 4개
+
+Naive_Profile, RandomForest, XGBoost, LightGBM. Naive_Profile은 비교 기준선으로 계속 유지해
+Phase가 진행될수록 격차가 좁혀지는지 추적한다.
+
+### 평가 지표 — Phase 1과 동일
+
+MAE/RMSE/WAPE/R², Direction Accuracy/Macro-F1, Decrease Precision/Recall/F1, 서비스 시뮬레이션,
+운영지표. horizon별 집계.
+
+### 완료 판정 기준 (Phase 1보다 강화)
+
+```text
+Phase 1: MAE만 근소 우위 → 애매한 결과였음
+Phase 2: 트리 모델이 Naive_Profile 대비 MAE와 R² 둘 다에서 명확히 앞서야 통과
+         (historical profile을 직접 줬는데도 못 이기면 원인 재분석 필요)
+```
+
+### 구현 위치
+
+```text
+AI/validation/BYC/q3-seasonal-dataset-check/
+  src/phase2_historical_profile.py   (신규)
+  outputs/phase2/                    (top300)
+  outputs/stratified/phase2/         (stratified300)
+```
+
+## 9. 작업 현황
 
 ```text
 데이터 위치:
@@ -310,7 +371,7 @@ AI/validation/BYC/q3-seasonal-dataset-check/
                               0.269→0.155). Phase 2 필요성이 top300보다 더 명확히 드러남
 ```
 
-## 9. 참고 진단 실험 — Sequence 모델 상한 성능 (Phase 순서 밖, A안)
+## 10. 참고 진단 실험 — Sequence 모델 상한 성능 (Phase 순서 밖, A안)
 
 정식 Phase 0~7 순서와 별개로, 참고용으로 먼저 해볼 수 있는 진단 실험이다. Phase 7(Sequence
 모델)의 정식 진입 조건(Phase 1~6 완료 + tree 모델 부족 확인)을 기다리지 않고, "recent OD를
@@ -338,7 +399,7 @@ target: target_net_flow (동일)
    분리해서 둔다.
 ```
 
-## 10. 원칙 요약
+## 11. 원칙 요약
 
 ```text
 A안은 상한 성능과 진단용으로만 사용한다.
