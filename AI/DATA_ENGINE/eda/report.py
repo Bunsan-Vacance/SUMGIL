@@ -1,7 +1,7 @@
 """reports/bike_weather_eda.md 생성.
 
-전제: data/BYC/raw/realtime 스냅샷, station_5min 파싱 결과(data/BYC/interim), ASOS 백필
-(data/EXTERNAL/raw/weather/asos)이 있어야 한다. 날씨 영향(3번 섹션)은 station_5min × ASOS로,
+전제: data/BIKE/raw/realtime 스냅샷, station_5min 파싱 결과(data/BIKE/interim), ASOS 백필
+(data/EXTERNAL/weather/raw/asos)이 있어야 한다. 날씨 영향(3번 섹션)은 station_5min × ASOS로,
 재고 분포·공간구조(1·2·4번)는 실시간 스냅샷 누적량만큼만 반영된다.
 
 실행:
@@ -29,9 +29,9 @@ if _font:
 plt.rcParams["axes.unicode_minus"] = False
 
 AI_ROOT = Path(__file__).resolve().parents[2]
-BIKE_RAW = AI_ROOT / "data" / "BYC" / "raw"
-WEATHER_RAW = AI_ROOT / "data" / "EXTERNAL" / "raw" / "weather"
-DATA_INTERIM = AI_ROOT / "data" / "BYC" / "interim"
+BIKE_RAW = AI_ROOT / "data" / "BIKE" / "raw"
+WEATHER_RAW = AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw"
+DATA_INTERIM = AI_ROOT / "data" / "BIKE" / "interim"
 REPORTS_DIR = AI_ROOT / "DATA_ENGINE" / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 
@@ -40,7 +40,7 @@ def _load_snapshots() -> pd.DataFrame:
     files = sorted((BIKE_RAW / "realtime").glob("dt=*/hh=*/snapshot_*.parquet"))
     if not files:
         raise FileNotFoundError(
-            "data/BYC/raw/realtime 에 스냅샷이 없습니다. "
+            "data/BIKE/raw/realtime 에 스냅샷이 없습니다. "
             "scripts/start_bike_poller.sh 로 폴러를 먼저 돌려서 데이터를 쌓으세요."
         )
     return pd.concat((pd.read_parquet(f) for f in files), ignore_index=True)
@@ -52,7 +52,7 @@ def _load_rental_hourly() -> pd.DataFrame:
     files = sorted(DATA_INTERIM.glob("station_5min_*.parquet"))
     if not files:
         raise FileNotFoundError(
-            "data/BYC/interim 에 station_5min 파싱 결과가 없습니다. "
+            "data/BIKE/interim 에 station_5min 파싱 결과가 없습니다. "
             "DATA_ENGINE/reports/download_guide.md 안내대로 원본을 받아 DATA_ENGINE/eda/parsers.py로 파싱하세요."
         )
     df = pd.concat((pd.read_parquet(f) for f in files), ignore_index=True)
@@ -70,7 +70,7 @@ def _load_weather_hourly() -> pd.DataFrame:
     files = sorted((WEATHER_RAW / "asos").glob("*.parquet"))
     if not files:
         raise FileNotFoundError(
-            "data/EXTERNAL/raw/weather/asos 에 데이터가 없습니다. 백필을 먼저 실행하세요."
+            "data/EXTERNAL/weather/raw/asos 에 데이터가 없습니다. 백필을 먼저 실행하세요."
         )
     df = pd.concat((pd.read_parquet(f) for f in files), ignore_index=True)
     weather = df.rename(columns={"tm": "dt_hour", "ta": "temp_c"})[

@@ -18,7 +18,7 @@
 
 - `app/` — 프로덕션 서빙 계층(도메인 우선 구조). 진입점은 `app/main.py`
   (`uvicorn app.main:app`), 앱 전역 공통은 `app/core/`, 도메인 공용 유틸은 `app/shared/`.
-- 도메인 패키지는 **대문자**로 쓰고 JIRA 에픽 prefix에 맞춘다(`CROWD/`, `BYC/`, `RVSL/`).
+- 도메인 패키지는 **대문자**로 쓰고 JIRA 에픽 prefix에 맞춘다(`CROWD/`, `BIKE/`, `ROUTE/`).
   새 도메인을 추가할 때도 이 규칙을 따른다. 내부 파일 규약:
   - `router.py` — `APIRouter`. 요청 검증·응답 변환만 하고 로직은 `service.py`로 위임한다.
   - `service.py` — 도메인 비즈니스 로직.
@@ -27,9 +27,9 @@
 - **서빙 경로(`router.py`/`service.py`)는 가벼운 의존성만 두고**, torch·PySpark 같은 무거운
   의존성은 `pipeline/` 함수 내부에서 지연 import한다 — 모듈 최상단 import로 서빙 계층까지
   로딩 지연이 번지는 것을 막기 위해서다.
-- `RVSL`은 `CROWD`·`BYC`의 산출물을 조합하는 결과물이라 그 두 도메인을 import할 수 있다.
-  반대 방향(도메인이 `RVSL`을 import)은 만들지 않는다.
-- `test/` — `app/<도메인>/` 구조를 그대로 미러한다(`test/CROWD/`, `test/BYC/`, ...).
+- `ROUTE`는 `CROWD`·`BIKE`의 산출물을 조합하는 결과물이라 그 두 도메인을 import할 수 있다.
+  반대 방향(도메인이 `ROUTE`를 import)은 만들지 않는다.
+- `test/` — `app/<도메인>/` 구조를 그대로 미러한다(`test/CROWD/`, `test/BIKE/`, ...).
   **`test/` 아래에 `__init__.py`를 만들지 않는다** — 표준 라이브러리 `test` 패키지와
   충돌해서 pytest가 파일 경로가 아니라 basename으로 모듈을 식별하게 된다. 그래서
   **테스트 파일명은 리포 전체에서 유일해야 한다**(`test_<도메인>_<대상>.py`).
@@ -38,7 +38,7 @@
 - `DATA_ENGINE/` — 원천 데이터 수집·EDA 계층. `app/`(서빙)·`validation/`(모델 PoC) 어디에도
   속하지 않는 별도 생애주기라 분리했다 — `collect/`(API 폴링·백필)와 `eda/`(파서·분석·리포트
   생성)로 나뉜다. `app/`은 `DATA_ENGINE/`을 import하지 않는다(단방향). 대문자인 이유는
-  `CROWD/`·`BYC/`·`RVSL`과 같은 시각적 구분 규칙을 따른 것 — 최상위 패키지라 ruff N999가
+  `CROWD/`·`BIKE/`·`ROUTE`과 같은 시각적 구분 규칙을 따른 것 — 최상위 패키지라 ruff N999가
   중첩 도메인 패키지와 달리 이것만 잡아내서 `pyproject.toml`에 예외 처리해뒀다.
   - `conf/`, `reports/`, `scripts/`도 `DATA_ENGINE/` 전용이라 그 안에 같이 둔다
     (`conf/column_map.yaml` 설정, `reports/` 산출물, `scripts/` nohup·systemd 배포 템플릿).

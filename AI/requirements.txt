@@ -25,6 +25,7 @@ seaborn
 
 # ── 데이터 수집 ──
 requests
+beautifulsoup4
 python-dotenv
 tenacity
 pyyaml

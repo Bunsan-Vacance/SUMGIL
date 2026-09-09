@@ -16,8 +16,8 @@ load_dotenv()
 
 KST = ZoneInfo("Asia/Seoul")
 AI_ROOT = Path(__file__).resolve().parents[2]
-BYC_RAW = AI_ROOT / "data" / "BYC" / "raw"
-EXTERNAL_WEATHER_RAW = AI_ROOT / "data" / "EXTERNAL" / "raw" / "weather"
+BIKE_RAW = AI_ROOT / "data" / "BIKE" / "raw"
+EXTERNAL_WEATHER_RAW = AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw"
 
 logging.basicConfig(
     level=logging.INFO,
