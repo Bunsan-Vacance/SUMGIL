@@ -9,17 +9,19 @@ import java.util.Set;
 
 /**
  * 구간·환승·좌표를 합쳐 적재용 그래프를 만든다.
- * station_id 는 정규화 역명이다 (물리 역 1행). 동명이역은 (역명|노선) 예외 표로 별도 ID 를 받는다.
+ * station_id 는 StationIdTable(conf/station-ids.csv)이 정한다 — 서울교통공사 역번호, 물리 역 1행. 역명은 표시용 name 으로만 남는다.
+ * 표에 없는 역이 나오면 build 가 IllegalStateException 으로 멈춘다 (유령 ID 방지).
  * 좌표는 소속 노선의 좌표를 우선 쓰고, 없으면 같은 이름의 다른 노선 좌표, 그것도 없으면 null 이다.
  * 시각표에서 온 방향 있는 구간({@link DirectedSegment})은 그 방향 엣지 하나만, 거리 기반 무방향 구간({@link Segment})은 양방향 엣지를 만든다.
  */
 public final class SubwayGraphBuilder {
 
-    private final Map<String, String> disambiguation;
+    private final StationIdTable ids;
+    private final Set<String> unknown = new LinkedHashSet<>();
 
-    /** @param disambiguation "역명|lineId" → station_id. 예: "신촌|1063" → "신촌_경의중앙" */
-    public SubwayGraphBuilder(Map<String, String> disambiguation) {
-        this.disambiguation = Map.copyOf(disambiguation);
+    /** @param ids (정규화 역명, 노선) → station_id 표. 테스트에서는 {@link StationIdTable#identity()} */
+    public SubwayGraphBuilder(StationIdTable ids) {
+        this.ids = ids;
     }
 
     public SubwayGraph build(List<Segment> segments, List<TransferRecord> transfers, List<StationCoord> coords) {
@@ -33,6 +35,7 @@ public final class SubwayGraphBuilder {
      */
     public SubwayGraph build(List<DirectedSegment> directed, List<Segment> undirected, List<TransferRecord> transfers,
                              List<StationCoord> coords, Map<String, SlotWaits> waitsByName) {
+        unknown.clear();
         Map<String, StationAcc> stations = new LinkedHashMap<>();
         Set<String> lineIds = new LinkedHashSet<>();
         for (DirectedSegment s : directed) {
@@ -100,6 +103,10 @@ public final class SubwayGraphBuilder {
             String[] k = e.getKey().split("\\|", 3);
             slotWaits.put(stationId(k[1], k[0]) + "|" + stationId(k[2], k[0]) + "|" + k[0], e.getValue());
         }
+        if (!unknown.isEmpty()) {
+            throw new IllegalStateException("역 ID 표(conf/station-ids.csv)에 없는 역 " + unknown.size() + "개 — 행을 추가한 뒤 다시 적재: "
+                    + String.join(", ", unknown));
+        }
         return new SubwayGraph(lineRows, stationRows, transferRows, new ArrayList<>(edges.values()), slotWaits);
     }
 
@@ -109,7 +116,10 @@ public final class SubwayGraphBuilder {
     }
 
     private String stationId(String name, String lineId) {
-        return disambiguation.getOrDefault(name + "|" + lineId, name);
+        return ids.idOf(name, lineId).orElseGet(() -> {
+            unknown.add(name + " (" + lineId + ")");
+            return name;
+        });
     }
 
     private static final class StationAcc {

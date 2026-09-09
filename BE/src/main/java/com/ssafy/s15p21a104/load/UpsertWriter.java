@@ -151,17 +151,20 @@ public class UpsertWriter {
     /**
      * prune 결과. dry-run 이면 deletedEdgeRows·deletedStationIds 는 비어 있고 staleEdges 만 의미가 있다.
      *
-     * @param staleEdges        덮는 노선에서 이번 실행에 없는 (from, to, route) 수
-     * @param deletedEdgeRows   실제 지운 edge_time 행 수
-     * @param deletedStationIds 실제 지운 고아 역 (엣지·환승 어디에도 안 쓰이고 이번 실행에도 없는 역)
+     * @param staleEdges          덮는 노선에서 이번 실행에 없는 (from, to, route) 수
+     * @param deletedEdgeRows     실제 지운 edge_time 행 수
+     * @param deletedTransferRows 실제 지운 transfer_meta 행 수 (덮는 노선의 환승 중 이번 실행에 없는 역의 것)
+     * @param deletedStationIds   실제 지운 고아 역 (엣지·환승 어디에도 안 쓰이고 이번 실행에도 없는 역)
      */
-    public record PruneResult(int staleEdges, int deletedEdgeRows, List<String> staleEdgeKeys, List<String> deletedStationIds) {
+    public record PruneResult(int staleEdges, int deletedEdgeRows, int deletedTransferRows, List<String> staleEdgeKeys,
+                              List<String> deletedStationIds) {
     }
 
     /**
      * 시각표가 정본이 된 뒤 남는 옛 행을 지운다. upsert 만으로는 사라진 구간(6호선 응암순환 역방향, 개명 전 역)이 남기 때문이다.
-     * 엣지는 coveredLines 의 SUBWAY 행 중 keptEdgeKeys("from|to|route")에 없는 것만, 역은 어느 edge_time·transfer_meta 에도
-     * 참조되지 않고 keptStationIds 에도 없는 것만 지운다. dry-run 은 세기만 한다 (엣지 삭제 뒤 고아가 될 역은 세지 못한다).
+     * 엣지는 coveredLines 의 SUBWAY 행 중 keptEdgeKeys("from|to|route")에 없는 것만, 환승은 coveredLines 에 걸린 행 중 station_id 가
+     * keptStationIds 에 없는 것만(개명 전 ID 등), 역은 어느 edge_time·transfer_meta 에도 참조되지 않고 keptStationIds 에도 없는 것만 지운다.
+     * dry-run 은 세기만 한다 (엣지 삭제 뒤 고아가 될 역은 세지 못한다).
      */
     public PruneResult pruneSubway(Set<String> coveredLines, Set<String> keptEdgeKeys, Set<String> keptStationIds, boolean dryRun) {
         List<String[]> stale = new ArrayList<>();
@@ -179,12 +182,22 @@ public class UpsertWriter {
         }
         List<String> staleKeys = stale.stream().map(e -> e[0] + "|" + e[1] + "|" + e[2]).sorted().toList();
         if (dryRun) {
-            return new PruneResult(stale.size(), 0, staleKeys, List.of());
+            return new PruneResult(stale.size(), 0, 0, staleKeys, List.of());
         }
         int deletedRows = 0;
         for (String[] e : stale) {
             deletedRows += jdbc.update("DELETE FROM edge_time WHERE mode = 'SUBWAY' AND from_node = ? AND to_node = ? AND route_id = ?",
                     e[0], e[1], e[2]);
+        }
+        int deletedTransfers = 0;
+        if (!coveredLines.isEmpty() && !keptStationIds.isEmpty()) {
+            String linePh = String.join(",", Collections.nCopies(coveredLines.size(), "?"));
+            String stationPh = String.join(",", Collections.nCopies(keptStationIds.size(), "?"));
+            List<Object> args = new ArrayList<>(coveredLines);
+            args.addAll(coveredLines);
+            args.addAll(keptStationIds);
+            deletedTransfers = jdbc.update("DELETE FROM transfer_meta WHERE (from_line IN (" + linePh + ") OR to_line IN (" + linePh
+                    + ")) AND station_id NOT IN (" + stationPh + ")", args.toArray());
         }
         List<String> orphans = jdbc.queryForList("""
                 SELECT s.station_id FROM station s
@@ -195,7 +208,7 @@ public class UpsertWriter {
         for (String id : orphans) {
             jdbc.update("DELETE FROM station WHERE station_id = ?", id);
         }
-        return new PruneResult(stale.size(), deletedRows, staleKeys, orphans);
+        return new PruneResult(stale.size(), deletedRows, deletedTransfers, staleKeys, orphans);
     }
 
     public int upsertRailNodes(List<RailNodeRow> rows) {
