@@ -1,7 +1,8 @@
-# 지하철 정적 적재 (S15P21A104-69)
+# 지하철 정적 적재 (S15P21A104-69 · 70)
 
 > `line` · `station` · `transfer_meta` · `edge_time`(SUBWAY) 을 공공데이터 파일에서 채우는 로더.
-> 코드는 `com.ssafy.s15p21a104.load`, 원천과 설정은 `src/main/resources/data/subway/` (출처는 그 폴더의 README).
+> 69 에서 골격(`load` 프로파일 · CsvTable · 그래프 빌더 · 검증 · JdbcTemplate upsert)을 만들고, 70 에서 **열차운행시각표를 1~9호선 엣지의 정본**으로 바꿨다 —
+> 방향 있는 구간 + 요일×30분 슬롯별 `wait_sec`. 코드는 `com.ssafy.s15p21a104.load`, 원천과 설정은 `src/main/resources/data/subway/` (출처·열·규칙은 그 폴더 README).
 
 ## 실행
 
@@ -11,69 +12,105 @@ docker compose -f Infra/docker/docker-compose.yml up -d postgres
 
 # 2) 적재 (BE 폴더). local 프로파일이 없으면 DB_URL·DB_USERNAME·DB_PASSWORD 환경변수로 대신한다
 cd BE
-SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --args='--load.dry-run=true'   # 파싱·검증·건수만
-SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun                                 # 실제 적재 (BATCH)
+SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --args='--load.sources=subway --load.dry-run=true'   # 파싱·검증·건수·prune 예정만
+SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --args='--load.sources=subway'                        # 실제 적재 + prune
+SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun                                                        # 지하철·버스·따릉이 전부
 ```
 
 | 옵션 | 기본 | 뜻 |
 | --- | --- | --- |
-| `--load.dry-run` | false | DB 에 쓰지 않고 그래프 건수·검증 결과만 출력 |
+| `--load.dry-run` | false | DB 에 쓰지 않고 그래프 건수·검증 결과·prune 예정 엣지만 출력 |
 | `--load.write-mode` | BATCH | `edge_time` 쓰기 방식. ROW 는 성능 비교용 baseline |
+| `--load.prune` | true | 시각표가 덮는 노선(1001~1009)에서 이번 실행에 없는 `edge_time` 행과, 어느 엣지·환승에도 안 쓰이는 역을 지운다 |
 | `--load.region` | (전부) | 포함할 line_id. 예 `--load.region=1002,1005`. 서비스 권역 확정 시 사용 |
-| `--load.avg-speed-mps` | 9.2 | 소요시간 없는 구간의 추정 표정속도 |
+| `--load.avg-speed-mps` | 9.2 | 시각표 밖 노선(경의중앙·수인분당) 거리 구간의 추정 표정속도 |
 
 - 프로파일은 **`local,load` 두 개**를 함께 준다. `logback-spring.xml` 이 `local`·`default`·`prod` 에만 콘솔 출력을 붙여 두어 `load` 만 주면 로그가 나오지 않는다.
-- 몇 번 실행해도 결과가 같다 (자연키 `ON CONFLICT DO UPDATE`, `updated_at` 은 실행 시각).
-- 검증 오류가 하나라도 있으면 아무것도 쓰지 않고 종료 코드 1 로 끝난다. 경고는 로그로만 남긴다.
+- 몇 번 실행해도 결과가 같다 (자연키 `ON CONFLICT DO UPDATE` + prune, `updated_at` 은 실행 시각). 두 번째 실행의 prune 은 0건이다.
+- 검증 오류가 하나라도 있으면 아무것도 쓰지 않고 예외로 끝난다. 경고는 로그로만 남긴다.
+- 시각표 42만 행은 gzip 을 스트리밍으로 읽어(`CsvTable.forEachRow`) 행을 메모리에 쌓지 않는다. 파싱 약 7초.
 
-## 2026-09-08 적재 결과 (로컬 postgres:16)
+## 2026-09-09 적재 결과 (로컬 postgres:16)
 
 | 테이블 | 행 | 비고 |
 | --- | --- | --- |
-| `line` | 17 | 1~8호선 + 코레일 서비스 노선(1063, 1075) + 환승 상대 노선(1009, 1065, 1067, 1077, 1092, 1093, 1094) |
-| `station` | 340 | 좌표 있음 239 (1~8호선), 없음 101 (코레일 역, 원천 없음) |
-| `transfer_meta` | 199 | 1~8호선 환승역 74개, 양방향, `source=extract` |
-| `edge_time` | 107,136 | 엣지 744 × 144. `timetable` 78,048 (1~8호선) + `avg` 29,088 (코레일 구간) |
+| `line` | 17 | 1~9호선 + 경의중앙(1063)·수인분당(1075) + 환승 상대 노선(1065, 1067, 1077, 1092, 1093, 1094) |
+| `station` | 416 | 좌표 있음 268 (1~8호선 서울교통공사 역 + 9호선 38), 없음 148 (코레일 운영 역, 원천 없음). 69 대비 +76 |
+| `transfer_meta` | 199 | 1~8호선 환승역 74개, 양방향, `source=extract` (변화 없음) |
+| `edge_time` | 137,376 | 엣지 954 × 144. `timetable` 131,616 (방향 구간 914, 1~9호선) + `avg` 5,760 (코레일 거리 구간 40, 1063·1075) |
 
-검증 경고 (오류 아님):
-- 노선 1001 이 10개 조각, 1004 가 3개, 1075 가 3개로 끊겨 있음 — 코레일 구간 파일이 100행짜리 부분 데이터라서다. 서울교통공사 1~8호선 구간은 모두 이어진다.
-- 환승 상대 노선 "김포골드라인" 은 서울시 실시간 API 에 코드가 없어 건너뜀 (김포공항 1건).
+시각표 파싱: 424,264행 · 완행 열차 11,342대(급행 1,273대 제외) · 이상치 27건 제외 · 7.1초.
+처리량(BATCH 1회): `edge_time` 137,376행 8.5초 ≈ 16,000 행/초. 69 의 12회 측정(약 40배, `BE/docs/perf/2026-09-08-edge-time-load.md`)은 107,136행 기준이며 재측정은 후속.
+
+첫 실행의 prune: 엣지 14개(2,016행)와 고아 역 2개를 지웠다.
+
+| 지운 것 | 이유 |
+| --- | --- |
+| 6호선 응암→구산→연신내→독바위→불광→역촌→응암 의 **역방향 6개** | 응암순환은 실제 단방향. 69 는 거리 구간을 양방향으로 만들었다 |
+| 1호선 금정↔산본 2개 | 4호선(과천안산선) 구간이 코레일 파일에서 1호선으로 잡혀 있었다 |
+| 4호선 상계↔당고개 2개, 역 당고개 | 2024년 개명 **당고개 → 불암산**. 시각표 이름으로 대체 |
+| 1호선 서정리↔지제·지제↔평택 4개, 역 지제 | 개명 **지제 → 평택지제** |
+
+새로 들어온 것: 1호선 서울~남영~용산~노량진~영등포~신도림~구로(69 코레일 파일에 없던 한복판)와 인천·신창·연천 방면, 3호선 일산선, 4호선 진접선, 5호선 하남, 7호선 부천·석남, 8호선 별내, 9호선 전체 — 엣지 224개·역 79개.
+
+검증 경고 (오류 아님): 좌표 없음 148개(한 줄 집계), 수인분당선(1075) 3조각(코레일 파일 부분 데이터), 김포골드라인 코드 없음(김포공항 환승 1건). 69 에 있던 "1호선 10조각 · 4호선 3조각" 경고는 시각표로 이어져 사라졌다.
+
+표본 — 강남→역삼(2호선) 평일 `wait_sec`:
+
+| 슬롯 | 02:00 | 06:00 | 07:00 | 08:00 | 08:30 | 12:00 | 23:30 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 초 | 12,570 (첫차까지) | 193 | 152 | 82 | 78 | 176 | 249 |
 
 ## 데이터 흐름
 
 ```
-seoulmetro-station-time (운행 순서·소요시간) ─┐
-korail-segments (거리)                        ├─▶ Segment ─┐
-conf/branch-anchors, korail-line-overrides ──┘            │
-seoulmetro-transfer ─────────────▶ TransferRecord ────────┼─▶ SubwayGraphBuilder ─▶ LoadValidator ─▶ UpsertWriter
-seoulmetro-station-coords, kric-line9 ─▶ StationCoord ────┘        (station_id 결정)      (오류면 중단)
+seoul-train-timetable.csv.gz ─(스트리밍)─▶ TrainTimetableParser ─▶ DirectedSegment(914, travel 중앙값) ─┐
+                                              └─▶ SlotWaits ("line|from|to" → 3×48 기대 대기) ─────────┤
+korail-segments (거리, 시각표 밖 노선 1063·1075 만) ──▶ KorailSegmentParser ─▶ Segment(20, 양방향) ────┼─▶ SubwayGraphBuilder ─▶ LoadValidator ─▶ EdgeTimeExpander(waits) ─▶ UpsertWriter ─▶ pruneSubway
+seoulmetro-transfer ──────────────▶ TransferRecord ────────────────────────────────────────────────┤        (station_id 결정)      (오류면 중단)
+seoulmetro-station-coords, kric-line9 ─▶ StationCoord ────────────────────────────────────────────┘
 conf/station-aliases ─▶ StationNameNormalizer (모든 역명에 적용)
 ```
 
 ## 식별자·값 규칙
 
-- `station.station_id` = 정규화 역명 (괄호 부기 제거 → 별칭 표). 물리 역 1행. 노선별 승강장은 `edge_time.route_id` 로 표현.
+- `station.station_id` = 정규화 역명 (괄호 부기 제거 → 별칭 표). 물리 역 1행. 시각표의 최신 공식명이 정본이라 개명이 반영된다.
 - `line.line_id` = 실시간 지하철 API `subwayId`. 수집기가 변환 없이 route_id 로 쓴다.
-- `edge_time`: 구간마다 양방향 2행 × (요일 3 × 슬롯 48). 시간대별 원천이 없어 같은 값을 복제하고, `source` 로 등급을 표시한다. `timetable` 은 서울교통공사 시간표 실측, `avg` 는 거리 ÷ 9.2 m/s (1.1 km ≈ 2분 보정) 추정, 최소 30초.
-- `transfer_meta.walk_sec` 는 서울교통공사 환승거리 ÷ 1.2 m/s 값 그대로. `stair_count`·`has_elevator` 는 원천 없어 null.
-- 원천에 없는 값(코레일 역 좌표, 9호선 구간, 1~8호선 밖 환승)은 **채워 넣지 않는다.** 검증기가 경고로 드러낸다.
+- **엣지는 방향이 있다.** 시각표 구간은 그 방향 열차가 있을 때만 생긴다(2호선 순환·6호선 응암순환). 코레일 거리 구간만 양방향이다.
+- `edge_time.travel_sec`: 시각표 구간은 열차별 소요의 중앙값(`source=timetable`, 편차 60초 초과 엣지 23개뿐), 코레일 구간은 거리 ÷ 9.2 m/s(`source=avg`, 최소 30초).
+- **`edge_time.wait_sec` = 슬롯 안 임의 시각 도착 시 다음 열차 출발까지의 기대 대기(초).** 배차가 고르면 배차간격 ÷ 2 와 같고, 열차가 없는 슬롯은 첫차까지의 대기가 된다. 막차 뒤는 같은 요일 유형의 첫차 + 24시간으로 잇는다. 하루 운행이 없는 (엣지, 요일)은 **86,400** 표식(1.3%). 코레일 `avg` 구간은 0(원천 없음).
+- 요일: 시각표 DAY/SAT/END = `dow_type` 0/1/2. 자정 넘는 24:xx 표기는 24시간으로 접어 0~2번 슬롯에 들어간다.
+- 급행(1호선·9호선 1,273대)은 제외한다. 도착 ≤ 출발인 이상치 27건은 표본에서 뺀다.
+- `transfer_meta.walk_sec` 는 서울교통공사 환승거리 ÷ 1.2 m/s 값 그대로. 9호선·코레일 환승은 원천 없어 없다.
+- 원천에 없는 값(코레일 역 좌표, 9호선 환승, 급행)은 **채워 넣지 않는다.**
+
+## 읽는 쪽에 미치는 영향 (A 파트)
+
+- `RouteEdgeTimeRepository.findSubwayEdgesForDefaultSlot()` 은 대표 슬롯 (dow 0, slot 0) 하나만 읽는다. 이제 슬롯마다 `wait_sec` 이 다르고 0번 슬롯(00:00~00:30)은 배차가 길다. **요청 시각의 (dow_type, time_slot) 로 조회해야 한다.** 행은 지우지 않으므로 "행 없음"으로 깨지지는 않는다.
+- 역 ID 변경: 당고개 → 불암산, 지제 → 평택지제. 1호선 서울~구로 등 엣지 224개·역 79개 추가. 6호선 응암순환은 단방향.
+- `wait_sec = 86400` 은 그 요일에 운행이 없다는 뜻이다. 비용으로 그대로 더하면 자연히 피해 간다.
 
 ## 스키마 변경
 
-- **V2 `widen_source_columns`**: V1 이 `source` 를 VARCHAR(8) 로 두고 값을 `timetable|avg|model` 로 정의했지만 `timetable` 은 9자다. 통합 테스트에서 발견해 `edge_time`·`congestion`·`bike_stock_pred`·`transfer_meta` 의 `source` 를 16자로 늘렸다. 엔티티 `@Column(length)` 도 함께 16 이다.
+- 없음. V2(`source` VARCHAR(16), 69)까지가 최신이다.
 
 ## 테스트
 
 ```bash
 cd BE
-./gradlew test --tests 'com.ssafy.s15p21a104.load.*'    # 단위 46 + 통합 3 (postgres 필요)
+./gradlew test --tests 'com.ssafy.s15p21a104.load.*'    # 단위 94 + 통합 7 (postgres 필요) = 99 (지하철·버스·따릉이 로더 전체)
 ```
 
-단위 테스트는 픽스처 행으로 파서·빌더·검증기 규칙을 고정한다. `UpsertWriterIT` 는 실제 DB 에 두 번 써서 멱등성과 덮어쓰기를 확인한다 (`IT_` 접두어로 격리).
+- `TrainTimetableParserTest`(10): 시각순 정렬 → 인접 구간, 방향은 열차에서만, 중앙값, 급행 제외, 이상치 제외+경고, 별칭, DAY/SAT/END, 24:xx, 모르는 표기 건너뜀, 통계
+- `SlotWaitsTest`(8): 10분 간격 → 300초, 빈 슬롯 → 첫차까지, 막차 뒤 wrap, 슬롯 경계 적분, 24:xx 접기, 운행 없음 86,400, 3×48 표, 범위 검사
+- `SubwayGraphBuilderDirectedTest`(6) · `EdgeTimeExpanderWaitsTest`(2) · `CsvTableStreamTest`(2) · `TransferParserTest.parsesMmSs`
+- `UpsertWriterIT`: prune 이 옛 엣지·고아 역만 지우고 환승 역은 남김, dry-run 은 세기만 (`IT_` 접두어 격리)
 
 ## 남은 일 (후속 티켓)
 
-- 70: 시간대별 소요시간·대기시간 (`wait_sec`) 이 있는 원천이 생기면 슬롯별로 덮어쓰기. 현재 1~8호선 `travel_sec` 은 이미 `timetable` 로 들어가 있다.
-- 코레일 역 좌표: 열린데이터광장 역사마스터 API(`subwayStationMaster`, 8088) 로 채우기. 실습실 망에서는 불가.
-- 9호선 구간: 운행 순서 원천 확보 후 추가.
+- 급행(1호선 경인·경부, 9호선) 구간을 별도 route 로 적재. 시각표에 있다.
+- 코레일 역 좌표 148개: 열린데이터광장 역사마스터 API(`subwayStationMaster`, 8088) — EC2/핫스팟에서 1회.
+- 9호선·코레일 환승 도보 초 원천 조사.
+- 수인분당선 3조각·경의중앙선: 코레일 시각표(별도 데이터셋) 확보 시 같은 방식으로 대체.
+- `edge_time` 137k행 처리량 12회 재측정(perf 규약).
 - 실시간 `statnId` ↔ `station_id` 매핑 표 (수집기 티켓).
