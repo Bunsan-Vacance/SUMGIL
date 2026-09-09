@@ -6,7 +6,7 @@
 
 ## 구조
 
-- `collect/` — 외부 API 수집 스크립트. `bike_realtime.py`(60s 폴링), `weather_nowcast.py`
+- `collect/` — 외부 API 수집 스크립트. `bike_realtime.py`(5min 폴링), `weather_nowcast.py`
   (초단기실황/예보, 10min 폴링), `weather_asos_backfill.py`(과거 백필, 기본 dry-run),
   `common.py`(재시도·시각·parquet 저장 공용). CROWD 원본은 API 폴링이 아니라 수동 다운로드
   파일이라 이 폴더에 수집 스크립트가 없다.
@@ -41,7 +41,7 @@
 
 | 경로 | 내용 | 출처 | 시간 해상도 | 쓰이는 곳 |
 | --- | --- | --- | --- | --- |
-| `data/BIKE/raw/realtime/` | 대여소별 실시간 재고 스냅샷 | `bike_realtime.py` 폴링 (소급 불가, 지금부터 쌓는 것만 존재) | 60초 | 재고 분포·시간패턴·공간구조 (1·2·4번 섹션) |
+| `data/BIKE/raw/realtime/` | 대여소별 실시간 재고 스냅샷 | `bike_realtime.py` 폴링 (소급 불가, 지금부터 쌓는 것만 존재) | 5분 | 재고 분포·시간패턴·공간구조 (1·2·4번 섹션) |
 | `data/BIKE/raw/rental_history/` | 대여소별 이용정보 **월별 집계** (OA-15182) | 수동 다운로드 | 월 단위 | 정류소/자치구 월간 총량 참고용 — **날씨 분석엔 미사용** |
 | `data/BIKE/raw/station_5min/` | 대여소별 5분단위 이용현황 O-D (OA-21229) | 수동 다운로드 | 5분(집계 시 시간 단위로 묶음) | **날씨-수요 핵심 분석 (3번 섹션)** |
 | `data/BIKE/raw/station_master/` | 대여소 좌표 (OA-21235) | 수동 다운로드 | - | 공간분석 좌표 조인 (4번 섹션) |

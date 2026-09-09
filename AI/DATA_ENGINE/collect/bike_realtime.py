@@ -1,7 +1,9 @@
 """따릉이 실시간 대여소 재고 폴링.
 
-60초 간격으로 bikeList 전체(약 2,700개소, 1회 최대 1000건)를 3번 나눠 호출해 합치고,
+5분 간격으로 bikeList 전체(약 2,700개소, 1회 최대 1000건)를 3번 나눠 호출해 합치고,
 data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet 로 저장한다.
+5분 간격(3분할 × 288회/일 = 864회/일)은 인증키 일일 호출 한도(1,000회) 안에서 하루 전체를
+커버하기 위한 값이다 — 더 촘촘히 돌리면 한도를 초과한다.
 
 실행:
     cd AI
@@ -29,7 +31,7 @@ logger = logging.getLogger("bike_realtime")
 BASE_URL = "http://openapi.seoul.go.kr:8088"
 PAGE_SIZE = 1000
 TOTAL_PAGES = 3  # 1-1000, 1001-2000, 2001-3000 (대여소 약 2,700개소 커버)
-POLL_INTERVAL_SEC = 60
+POLL_INTERVAL_SEC = 300
 
 FIELDS = [
     "stationId",
@@ -90,6 +92,7 @@ def fetch_snapshot() -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df["collected_at"] = collected_at
+    df["source"] = "direct_poll"
     return df
 
 
