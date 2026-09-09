@@ -20,6 +20,7 @@ fastapi
 pydantic-settings
 python-dotenv
 tenacity
+requests
 
 # ── 테스트 도구 ──
 ruff
