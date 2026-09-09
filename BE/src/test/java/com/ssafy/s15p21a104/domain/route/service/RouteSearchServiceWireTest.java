@@ -109,6 +109,27 @@ class RouteSearchServiceWireTest {
         result.get(0).legs().forEach(leg -> assertEquals("unavailable", leg.geometryStatus()));
     }
 
+    @Test
+    @DisplayName("109-T8: 자전거 지름길이 이기면 BIKE leg로 응답한다")
+    void t109_자전거지름길_BIKEleg() {
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                new Edge("A", "C", "L1", 900, 0, TravelMode.SUBWAY),
+                new Edge("A", "R1", "BIKE", 120, 0, TravelMode.BIKE),
+                new Edge("R1", "C", "BIKE", 120, 0, TravelMode.BIKE)));
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
+        infos.put("R1", new RouteMapper.StationInfo("R1", "대여소", 37.5, 127.0));
+        infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
+        lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+
+        assertEquals(1, result.size());
+        assertEquals(1, result.get(0).legs().size());
+        assertEquals(TravelMode.BIKE, result.get(0).legs().get(0).mode());
+        assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes());
+    }
+
     private Station mockStation(String id, String name) {
         Station station = mock(Station.class);
         lenient().when(station.getStationId()).thenReturn(id);

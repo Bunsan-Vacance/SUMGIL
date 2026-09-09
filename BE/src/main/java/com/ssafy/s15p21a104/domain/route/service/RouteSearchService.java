@@ -69,7 +69,8 @@ public class RouteSearchService {
             FoundPath found = new ShortestPathFinder(rule).find(graph, originStationId, destStationId);
             List<RouteMapper.EngineSegment> segments = found.edges().stream()
                     .map(edge -> new RouteMapper.EngineSegment(
-                            edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec()))
+                            edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec(),
+                            edge.mode()))
                     .toList();
             // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다.
             List<Long> transferSecs = new ArrayList<>();

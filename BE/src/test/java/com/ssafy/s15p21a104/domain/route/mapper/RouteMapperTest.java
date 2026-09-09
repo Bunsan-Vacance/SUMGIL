@@ -42,8 +42,8 @@ class RouteMapperTest {
     @DisplayName("98-T1: 환승 1회 경로는 노선 경계로 2개 구간으로 나뉜다")
     void 환승_1회_경로는_2개_구간으로_나뉜다() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 300),
-                new EngineSegment("1002", "1003", "7", 420)
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY),
+                new EngineSegment("1002", "1003", "7", 420, TravelMode.SUBWAY)
         ), 720, 1);
 
         RouteSearchResponse response = RouteMapper
@@ -66,8 +66,8 @@ class RouteMapperTest {
     @DisplayName("98-T2: 구간 분 합이 전체 분과 허용 오차 안에서 같다")
     void 구간_분_합이_전체_분과_같다() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 200),
-                new EngineSegment("1002", "1003", "7", 520)
+                new EngineSegment("1001", "1002", "2", 200, TravelMode.SUBWAY),
+                new EngineSegment("1002", "1003", "7", 520, TravelMode.SUBWAY)
         ), 720, 1);
 
         RouteSearchResponse response = RouteMapper
@@ -83,9 +83,9 @@ class RouteMapperTest {
     @DisplayName("98-T3: 환승 2회 경로는 3개 구간으로 나뉜다")
     void 환승_2회_경로는_3개_구간으로_나뉜다() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 180),
-                new EngineSegment("1002", "1004", "7", 240),
-                new EngineSegment("1004", "1003", "5", 300)
+                new EngineSegment("1001", "1002", "2", 180, TravelMode.SUBWAY),
+                new EngineSegment("1002", "1004", "7", 240, TravelMode.SUBWAY),
+                new EngineSegment("1004", "1003", "5", 300, TravelMode.SUBWAY)
         ), 720, 2);
 
         // 출처가 고정값이 아니라 주입값 그대로 반영되는지 함께 확인한다.
@@ -110,8 +110,8 @@ class RouteMapperTest {
     @DisplayName("98-T4: 역 이름·좌표와 노선 ID가 정확히 매핑된다")
     void 역_이름_좌표_노선_ID가_정확하다() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 300),
-                new EngineSegment("1002", "1003", "7", 420)
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY),
+                new EngineSegment("1002", "1003", "7", 420, TravelMode.SUBWAY)
         ), 720, 1);
 
         RouteSearchResponse response = RouteMapper
@@ -150,8 +150,8 @@ class RouteMapperTest {
     @DisplayName("105-T1: 환승 1회면 TRANSFER leg가 가운데 낀다")
     void t105_환승1회_TRANSFER_leg관통() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 300),
-                new EngineSegment("1002", "1003", "7", 420)
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY),
+                new EngineSegment("1002", "1003", "7", 420, TravelMode.SUBWAY)
         ), 900, 1);
 
         RouteSearchResponse response = RouteMapper
@@ -174,7 +174,7 @@ class RouteMapperTest {
     @DisplayName("105-T2: 환승 없으면 기존과 같은 1개 leg이다")
     void t105_환승없음_기존동일() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 300)
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY)
         ), 300, 0);
 
         RouteSearchResponse response = RouteMapper
@@ -190,8 +190,8 @@ class RouteMapperTest {
     @DisplayName("105-T3: 환승 횟수와 시간 개수가 다르면 오류이다")
     void t105_횟수개수_불일치_오류() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 300),
-                new EngineSegment("1002", "1003", "7", 420)
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY),
+                new EngineSegment("1002", "1003", "7", 420, TravelMode.SUBWAY)
         ), 900, 1);
 
         assertThrows(IllegalArgumentException.class, () -> RouteMapper
@@ -203,12 +203,32 @@ class RouteMapperTest {
     @DisplayName("105-T4: 환승 시간이 음수이면 오류이다")
     void t105_환승시간음수_오류() {
         EnginePath enginePath = new EnginePath(List.of(
-                new EngineSegment("1001", "1002", "2", 300),
-                new EngineSegment("1002", "1003", "7", 420)
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY),
+                new EngineSegment("1002", "1003", "7", 420, TravelMode.SUBWAY)
         ), 900, 1);
 
         assertThrows(IllegalArgumentException.class, () -> RouteMapper
                 .toResponseWithTransfers(enginePath, stations,
                         RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(-1L)));
+    }
+
+    @Test
+    @DisplayName("109-T7: BIKE 묶음은 BIKE leg 1개이다")
+    void t109_BIKE묶음_BIKEleg() {
+        Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
+        mixed.put("R1", new StationInfo("R1", "대여소", 37.5000, 127.0045));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "R1", "BIKE", 240, TravelMode.BIKE),
+                new EngineSegment("R1", "1003", "BIKE", 240, TravelMode.BIKE)
+        ), 480, 0);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponse(enginePath, mixed, RouteType.SHORTEST, RouteSource.ALGORITHM)
+                .orElseThrow();
+
+        assertEquals(1, response.legs().size());
+        assertEquals(TravelMode.BIKE, response.legs().get(0).mode());
+        assertEquals("1001", response.legs().get(0).fromNodeId());
+        assertEquals("1003", response.legs().get(0).toNodeId());
     }
 }
