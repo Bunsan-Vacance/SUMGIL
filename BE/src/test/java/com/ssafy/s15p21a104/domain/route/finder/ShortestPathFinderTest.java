@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
@@ -167,7 +168,7 @@ class ShortestPathFinderTest {
     }
 
     private static Edge edge(String from, String to, String routeId, int travelSec) {
-        return new Edge(from, to, routeId, travelSec, 0);
+        return new Edge(from, to, routeId, travelSec, 0, TravelMode.SUBWAY);
     }
 
     private static RouteGraph graphOf(Edge... edges) {

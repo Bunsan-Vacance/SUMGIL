@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import java.util.List;
 import java.util.Map;
@@ -120,12 +121,14 @@ class RouteGraphLoaderTest {
                 () -> graph.adjacency().put("st_X", List.of()));
         assertThrows(UnsupportedOperationException.class,
                 () -> graph.outgoingEdges("st_A").add(
-                        new com.ssafy.s15p21a104.domain.route.graph.Edge("st_A", "st_X", "L2", 1, 0)));
+                        new com.ssafy.s15p21a104.domain.route.graph.Edge("st_A", "st_X", "L2", 1, 0,
+                                TravelMode.SUBWAY)));
         assertThrows(UnsupportedOperationException.class,
                 () -> graph.linesOfStation("st_B").add("L1"));
         assertThrows(UnsupportedOperationException.class,
                 () -> graph.edges().add(
-                        new com.ssafy.s15p21a104.domain.route.graph.Edge("st_A", "st_X", "L2", 1, 0)));
+                        new com.ssafy.s15p21a104.domain.route.graph.Edge("st_A", "st_X", "L2", 1, 0,
+                                TravelMode.SUBWAY)));
     }
 
     @Test
