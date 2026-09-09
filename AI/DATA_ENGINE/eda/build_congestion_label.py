@@ -59,7 +59,10 @@ OUTPUT_NAME = "crowd_congestion_label_2024_2025.parquet"
 #
 # 2호선 순환선도 같은 방향으로 뒤집힌다 — 번호 증가(시청→을지로입구→…)가 외선순환이다.
 ASCENDING, DESCENDING = "하선", "상선"
-CIRCULAR_LABELS = {ASCENDING: "외선", DESCENDING: "내선"}
+# 순환선은 선형 노선과 방향이 반대로 대응한다 — 오름차순(시청→을지로입구→…→강남→신도림)이
+# 시계방향이고 우측통행이라 안쪽 선로, 즉 `내선`이다. 선형 쪽을 뒤집을 때 여기까지 같이
+# 뒤집었다가 2호선 상관이 0.26에 머물러 되돌렸다(되돌린 뒤 0.81, 음수 상관 19→0).
+CIRCULAR_LABELS = {ASCENDING: "내선", DESCENDING: "외선"}
 
 
 def load_capacity() -> dict:
@@ -111,6 +114,10 @@ def directional_loads(boarding: np.ndarray, alighting: np.ndarray) -> tuple[np.n
     OD(i,j) = 승차(i) × 하차(j) / (총하차 − 하차(i))  로 두면
     상행 통과량(n) = Σ_{i≤n} 승차(i) × [Σ_{j>n} 하차(j)] / (총하차 − 하차(i)) 이고,
     이는 누적합만으로 벡터화된다.
+
+    **양쪽 방향 모두 출발역에서 탄 사람을 포함한다.** 오름차순은 `i ≤ n`(n에서 탄 사람이
+    n을 떠나는 열차에 있다), 내림차순은 `i ≥ n`이다. 내림차순 쪽을 `i > n`으로 두면 그 역에서
+    타고 역방향으로 가는 인원이 통째로 빠져 한쪽만 과소 집계된다.
     """
     total_alight = alighting.sum()
     if total_alight <= 0:
@@ -126,11 +133,59 @@ def directional_loads(boarding: np.ndarray, alighting: np.ndarray) -> tuple[np.n
     alight_before = cum_alight - alighting  # n보다 앞쪽 역들의 하차 합
 
     cum_weight = np.cumsum(weight)  # i ≤ n
-    weight_after = cum_weight[-1] - cum_weight  # i > n
+    weight_from = cum_weight[-1] - cum_weight + weight  # i ≥ n
 
     up = cum_weight * alight_after
-    down = weight_after * alight_before
+    down = weight_from * alight_before
     return up, down
+
+
+def circular_path_masks(n: int) -> tuple[np.ndarray, np.ndarray]:
+    """순환선에서 OD (i,j)가 각 링크를 지나는지의 마스크를 만든다.
+
+    선형 구간과 달리 순환선은 i에서 j로 가는 길이 두 개다. 승객은 **역 수가 적은 쪽**을
+    택한다고 본다(같으면 오름차순). 링크 k는 역 k와 그 다음 역 사이를 뜻한다.
+
+    반환값은 `(오름차순 마스크, 내림차순 마스크)`이고 모양은 둘 다 (링크, i, j)다.
+    """
+    idx = np.arange(n)
+    i = idx[None, :, None]
+    j = idx[None, None, :]
+    k = idx[:, None, None]
+
+    dist_asc = (j - i) % n  # i에서 j까지 오름차순으로 가는 거리
+    dist_desc = (i - j) % n
+    use_asc = (dist_asc <= dist_desc) & (dist_asc > 0)
+    use_desc = (dist_desc < dist_asc) & (dist_desc > 0)
+
+    # 오름차순 경로는 링크 i, i+1, ..., j-1을 지난다 → (k-i) mod n < dist_asc
+    on_asc = ((k - i) % n) < dist_asc
+    # 내림차순 경로는 링크 i-1, i-2, ..., j를 지난다 → (i-1-k) mod n < dist_desc
+    on_desc = ((i - 1 - k) % n) < dist_desc
+
+    return (on_asc & use_asc), (on_desc & use_desc)
+
+
+def circular_loads(
+    boarding: np.ndarray, alighting: np.ndarray, masks: tuple[np.ndarray, np.ndarray]
+) -> tuple[np.ndarray, np.ndarray]:
+    """순환선의 링크별 오름차순·내림차순 통과량.
+
+    선형 구간(`directional_loads`)은 경로가 하나뿐이라 누적합으로 끝나지만, 순환선은
+    OD별로 경로 방향이 갈려 OD 행렬을 실제로 만들어야 한다. 2호선 본선은 43역이라
+    43×43 행렬이 시간대마다 하나 생기는 정도로 감당된다.
+    """
+    total_alight = alighting.sum()
+    if total_alight <= 0:
+        return np.zeros_like(boarding), np.zeros_like(boarding)
+
+    denom = total_alight - alighting
+    weight = np.divide(boarding, denom, out=np.zeros_like(boarding), where=denom > 0)
+    od = np.outer(weight, alighting)
+    np.fill_diagonal(od, 0.0)
+
+    asc_mask, desc_mask = masks
+    return (asc_mask * od).sum(axis=(1, 2)), (desc_mask * od).sum(axis=(1, 2))
 
 
 def _segment_frame(panel: pd.DataFrame, seg: dict, capacity: dict) -> pd.DataFrame | None:
@@ -167,8 +222,12 @@ def _segment_frame(panel: pd.DataFrame, seg: dict, capacity: dict) -> pd.DataFra
     a = alight.to_numpy()
     up = np.empty_like(b)
     down = np.empty_like(b)
+    masks = circular_path_masks(n) if seg.get("circular") else None
     for i in range(b.shape[0]):
-        up[i], down[i] = directional_loads(b[i], a[i])
+        if masks is None:
+            up[i], down[i] = directional_loads(b[i], a[i])
+        else:
+            up[i], down[i] = circular_loads(b[i], a[i], masks)
 
     cars = seg.get("cars_per_train") or capacity["cars_per_train"][seg["line"]]
     train_capacity = cars * capacity["car_capacity"]
