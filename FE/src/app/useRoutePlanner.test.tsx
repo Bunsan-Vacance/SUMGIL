@@ -167,6 +167,19 @@ describe('경로와 안내 화면의 수명', () => {
     expect(result.current.trip.visible.length).toBeGreaterThan(0)
   })
 
+  it('결과 화면에서 경로 입력으로 돌아가면 위치와 입력 패널을 유지한다', async () => {
+    const { result } = await renderLoadedPlanner()
+    const origin = result.current.trip.origin
+    const destination = result.current.trip.destination
+
+    act(() => result.current.returnToRouteInput())
+
+    expect(result.current.screen).toBe('home')
+    expect(result.current.routePanelOpen).toBe(true)
+    expect(result.current.trip.origin).toBe(origin)
+    expect(result.current.trip.destination).toBe(destination)
+  })
+
   it('홈에서 검색을 취소하면 홈으로 돌아간다', async () => {
     const { result } = await renderLoadedPlanner()
 

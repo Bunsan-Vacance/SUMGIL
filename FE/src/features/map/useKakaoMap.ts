@@ -8,6 +8,15 @@ import {
   type MapPoint,
 } from '../../lib/kakao/sdk'
 import type { Place } from '../route/types'
+import {
+  createBikeStationClusterOverlay,
+  createBikeStationOverlay,
+  groupVisibleBikeStations,
+  type BikeStationOverlay,
+  type BikeStationClusterOverlay,
+  zoomToBikeStationCluster,
+} from './bikeStationMarkers'
+import { stationToPlace } from './bikeStations'
 
 const NORMAL_MARKER_SRC = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36"><path fill="#6379bd" d="M14 0C6.3 0 0 6.1 0 13.6 0 23.6 14 36 14 36s14-12.4 14-22.4C28 6.1 21.7 0 14 0Z"/><circle cx="14" cy="13" r="5" fill="#fff"/></svg>',
@@ -29,6 +38,8 @@ export function useKakaoMap(
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [attempt, setAttempt] = useState(0)
   const ownMarker = useRef<MapOverlay | null>(null)
+  const stationMarkers = useRef(new Map<string, BikeStationOverlay>())
+  const stationClusterMarkers = useRef(new Map<string, BikeStationClusterOverlay>())
   const messageRef = useRef(onMessage)
   const placeRef = useRef(onPlaceSelect)
   const focusedRef = useRef(focusedPlace)
@@ -41,6 +52,15 @@ export function useKakaoMap(
   placeRef.current = onPlaceSelect
   focusedRef.current = focusedPlace
   highlightedRef.current = highlightedPlace
+
+  useEffect(() => {
+    stationMarkers.current.forEach((marker, id) =>
+      marker.setSelected(
+        focusedRef.current?.id === `bike-station:${id}` ||
+          highlightedRef.current?.id === `bike-station:${id}`,
+      ),
+    )
+  }, [focusedPlace, highlightedPlace])
 
   const updateMarkerSelection = () => {
     const selected = highlightedRef.current
@@ -84,6 +104,7 @@ export function useKakaoMap(
     let cancelled = false
     let loadedMaps: Awaited<ReturnType<typeof loadKakaoMaps>> | null = null
     let observer: ResizeObserver | null = null
+    let idleHandler: (() => void) | null = null
     const markers: MapOverlay[] = []
     const markerListeners: Array<{ marker: MapOverlay; handler: () => void }> = []
     const canvas = container.current!
@@ -97,6 +118,50 @@ export function useKakaoMap(
           level: 5,
         })
         map.current = instance
+        const syncStationMarkers = () => {
+          const groups = groupVisibleBikeStations(maps, instance)
+          const individualGroups = groups.filter((group) => group.stations.length === 1)
+          const visibleIds = new Set(individualGroups.map((group) => group.stations[0].id))
+          stationMarkers.current.forEach((marker, id) => {
+            if (!visibleIds.has(id)) {
+              marker.destroy()
+              stationMarkers.current.delete(id)
+            }
+          })
+          individualGroups.forEach((group) => {
+            const station = group.stations[0]
+            if (stationMarkers.current.has(station.id)) return
+            stationMarkers.current.set(
+              station.id,
+              createBikeStationOverlay(
+                maps,
+                instance,
+                station,
+                focusedRef.current?.id === `bike-station:${station.id}` ||
+                  highlightedRef.current?.id === `bike-station:${station.id}`,
+                () => {
+                  placeRef.current?.(stationToPlace(station))
+                },
+              ),
+            )
+          })
+          stationClusterMarkers.current.forEach((marker) => marker.destroy())
+          stationClusterMarkers.current.clear()
+          groups
+            .filter((group) => group.stations.length > 1)
+            .forEach((group) => {
+              const key = group.stations.map((station) => station.id).join('|')
+              stationClusterMarkers.current.set(
+                key,
+                createBikeStationClusterOverlay(maps, instance, group, () =>
+                  zoomToBikeStationCluster(maps, instance, group),
+                ),
+              )
+            })
+        }
+        syncStationMarkers()
+        idleHandler = () => syncStationMarkers()
+        maps.event.addListener(instance, 'idle', idleHandler)
         const bounds = new maps.LatLngBounds()
         normalMarkerImageRef.current = new maps.MarkerImage(
           NORMAL_MARKER_SRC,
@@ -116,21 +181,23 @@ export function useKakaoMap(
         const targets = places
         let resolved = 0
         const addMarker = (place: Place, point: MapPoint) => {
-          const marker = new maps.Marker({
-            map: instance,
-            position: point,
-            title: place.name,
-            clickable: true,
-          })
-          marker.setImage(normalMarkerImageRef.current!)
-          marker.setZIndex(1)
-          markers.push(marker)
-          markersRef.current.set(place.id, marker)
-          const markerClick = () => {
-            if (!cancelled) placeRef.current?.(place)
+          if (place.kind !== '따릉이 대여소') {
+            const marker = new maps.Marker({
+              map: instance,
+              position: point,
+              title: place.name,
+              clickable: true,
+            })
+            marker.setImage(normalMarkerImageRef.current!)
+            marker.setZIndex(1)
+            markers.push(marker)
+            markersRef.current.set(place.id, marker)
+            const markerClick = () => {
+              if (!cancelled) placeRef.current?.(place)
+            }
+            maps.event.addListener(marker, 'click', markerClick)
+            markerListeners.push({ marker, handler: markerClick })
           }
-          maps.event.addListener(marker, 'click', markerClick)
-          markerListeners.push({ marker, handler: markerClick })
           bounds.extend(point)
           resolved++
           if (targets.length === 1) instance.setCenter(point)
@@ -166,6 +233,7 @@ export function useKakaoMap(
           } else {
             instance.setCenter(center)
           }
+          syncStationMarkers()
         })
         observer.observe(canvas)
         setStatus('ready')
@@ -186,6 +254,12 @@ export function useKakaoMap(
       selectedMarkerRef.current = null
       normalMarkerImageRef.current = null
       selectedMarkerImageRef.current = null
+      if (idleHandler && map.current && loadedMaps)
+        loadedMaps.event.removeListener(map.current, 'idle', idleHandler)
+      stationMarkers.current.forEach((marker) => marker.destroy())
+      stationMarkers.current.clear()
+      stationClusterMarkers.current.forEach((marker) => marker.destroy())
+      stationClusterMarkers.current.clear()
       ownMarker.current?.setMap(null)
       ownMarker.current = null
       map.current = null

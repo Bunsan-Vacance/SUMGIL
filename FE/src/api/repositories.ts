@@ -7,6 +7,7 @@ import {
 } from '../lib/kakao/sdk'
 import type { PlaceRepository } from './contracts'
 import type { Place } from '../features/route/types'
+import { searchBikeStations } from '../features/map/bikeStations'
 
 const abortError = () => new DOMException('Aborted', 'AbortError')
 
@@ -134,3 +135,9 @@ export function createKakaoPlaceRepository(loadMaps: MapsLoader = loadKakaoMaps)
 // Replace these adapters when the backend contract is agreed. UI imports only ports.
 export const routeRepository = mockRouteRepository
 export const placeRepository = createKakaoPlaceRepository()
+export const bikeStationRepository: PlaceRepository = {
+  search(query, signal) {
+    if (signal.aborted) return Promise.reject(abortError())
+    return Promise.resolve(searchBikeStations(query))
+  },
+}

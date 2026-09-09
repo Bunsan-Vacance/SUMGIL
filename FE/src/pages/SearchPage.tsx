@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { ArrowLeft, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Bike, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-react'
 import type { Place } from '../features/route/types'
 import MapPlacePicker from '../features/map/MapPlacePicker'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
+import { bikeStationRepository, placeRepository } from '../api/repositories'
 import {
   clearRecentPlaces,
   loadRecentPlaces,
@@ -19,8 +20,10 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
   const [query, setQuery] = useState('')
   const [recentPlaces, setRecentPlaces] = useState<Place[]>(loadRecentPlaces)
   const [mapMode, setMapMode] = useState(false)
+  const [searchMode, setSearchMode] = useState<'place' | 'bike-station'>('place')
   const [locationMessage, setLocationMessage] = useState('')
-  const { places, loading, error } = usePlaceSearch(mapMode ? '' : query)
+  const repository = searchMode === 'bike-station' ? bikeStationRepository : placeRepository
+  const { places, loading, error } = usePlaceSearch(mapMode ? '' : query, repository)
   const selectPlace = (place: Place, save = true) => {
     const accepted = choosePlace(place)
     if (accepted !== false && save) setRecentPlaces(saveRecentPlace(place))
@@ -85,7 +88,9 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="장소, 역, 주소 검색"
+          placeholder={
+            searchMode === 'bike-station' ? '대여소명, ID, 주소 검색' : '장소, 역, 주소 검색'
+          }
           aria-label="장소 검색어"
         />
         {query && (
@@ -94,6 +99,28 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           </button>
         )}
       </label>
+      <div className="search-modes" role="group" aria-label="검색 대상">
+        <button
+          className="search-mode"
+          aria-pressed={searchMode === 'place'}
+          onClick={() => {
+            setSearchMode('place')
+            setQuery('')
+          }}
+        >
+          장소 검색
+        </button>
+        <button
+          className="search-mode"
+          aria-pressed={searchMode === 'bike-station'}
+          onClick={() => {
+            setSearchMode('bike-station')
+            setQuery('')
+          }}
+        >
+          따릉이 대여소
+        </button>
+      </div>
       {searchTarget === 'origin' && (
         <>
           <button className="secondary full search-action" disabled={locating} onClick={locate}>
@@ -113,7 +140,9 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
       </button>
       <p className="section-label">
         {query.trim()
-          ? '검색 결과'
+          ? searchMode === 'bike-station'
+            ? '따릉이 대여소 검색 결과'
+            : '검색 결과'
           : recentPlaces.length
             ? '최근 검색'
             : '검색어를 입력해 장소를 찾아보세요'}
@@ -122,13 +151,16 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
         {places.map((place) => (
           <button key={place.id} onClick={() => selectPlace(place)}>
             <span className="place-icon">
-              <MapPin size={20} />
+              {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
             </span>
             <span>
               <strong>{place.name}</strong>
               <small>{place.address}</small>
             </span>
-            <small>{place.kind}</small>
+            <small>
+              {place.kind}
+              {searchMode === 'bike-station' && ` · ${place.id.replace('bike-station:', '')}`}
+            </small>
           </button>
         ))}
         {!query.trim() &&
@@ -136,7 +168,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
             <div className="recent-place" key={place.id}>
               <button onClick={() => selectPlace(place)}>
                 <span className="place-icon">
-                  <MapPin size={20} />
+                  {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
                 </span>
                 <span>
                   <strong>{place.name}</strong>
@@ -166,14 +198,22 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
         <div className="empty">
           <Search />
           <h3>검색어를 입력해 주세요</h3>
-          <p>장소 이름이나 도로명 주소로 검색할 수 있어요.</p>
+          <p>
+            {searchMode === 'bike-station'
+              ? '대여소명, ID, 주소로 검색할 수 있어요.'
+              : '장소 이름이나 도로명 주소로 검색할 수 있어요.'}
+          </p>
         </div>
       )}
       {query.trim() && !loading && !error && !places.length && (
         <div className="empty">
           <Search />
           <h3>검색 결과가 없어요</h3>
-          <p>다른 장소 이름으로 검색해 주세요.</p>
+          <p>
+            {searchMode === 'bike-station'
+              ? '대여소명, ID, 주소를 다시 입력해 주세요.'
+              : '다른 장소 이름으로 검색해 주세요.'}
+          </p>
         </div>
       )}
       {loading && (

@@ -1,4 +1,4 @@
-import { LocateFixed, RotateCw, X } from 'lucide-react'
+import { Bike, LocateFixed, RotateCw, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Place } from '../route/types'
 import { useKakaoMap } from './useKakaoMap'
@@ -98,8 +98,18 @@ export default function KakaoMap({
               aria-live="polite"
             >
               <div>
-                <strong>{selectedPlace.name}</strong>
+                <div className="map-place-info-title">
+                  {selectedPlace.kind === '따릉이 대여소' && (
+                    <span className="bike-station-info-icon">
+                      <Bike size={15} />
+                    </span>
+                  )}
+                  <strong>{selectedPlace.name}</strong>
+                </div>
                 <p>{selectedPlace.address}</p>
+                {selectedPlace.kind === '따릉이 대여소' && (
+                  <small>대여소 ID · {selectedPlace.id.replace('bike-station:', '')}</small>
+                )}
               </div>
               <button
                 className="icon-button"

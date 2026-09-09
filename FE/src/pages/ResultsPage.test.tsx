@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { places } from '../api/mock/fixtures'
+import { places, routes } from '../api/mock/fixtures'
 import type { ComponentProps } from 'react'
 import type { Mode } from '../features/route/types'
 import ResultsPage from './ResultsPage'
@@ -24,6 +24,7 @@ function props(overrides: Partial<ComponentProps<typeof ResultsPage>> = {}) {
     setPriority: vi.fn(),
     openFilter: vi.fn(),
     openSearch: vi.fn(),
+    onBackToInput: vi.fn(),
     go: vi.fn(),
     startGuide: vi.fn(),
     canSwap: true,
@@ -67,6 +68,24 @@ describe('경로 결과 상태', () => {
     fireEvent.click(screen.getByRole('button', { name: '도착지 수정' }))
 
     expect(openSearch.mock.calls).toEqual([['origin'], ['destination']])
+  })
+
+  it('경로 입력으로 돌아가기를 요청한다', () => {
+    const onBackToInput = vi.fn()
+    render(<ResultsPage {...props({ onBackToInput })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '경로 입력으로 돌아가기' }))
+
+    expect(onBackToInput).toHaveBeenCalledOnce()
+  })
+
+  it('혼잡도를 퍼센트로 표시하고 대표 경로 간 차이를 퍼센트포인트로 비교한다', () => {
+    render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
+
+    expect(screen.getByText(/혼잡도 68%/)).toBeTruthy()
+    expect(screen.getByText(/혼잡도 42%/)).toBeTruthy()
+    expect(screen.getByText('혼잡도 26%p 낮음')).toBeTruthy()
+    expect(screen.queryByText(/혼잡 \d+구간/)).toBeNull()
   })
 
   it('출발·도착 교환을 요청한다', () => {

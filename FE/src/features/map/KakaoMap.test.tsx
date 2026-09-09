@@ -51,15 +51,19 @@ class FakeMap {
   }
 
   getCenter = vi.fn(() => new FakeLatLng(37.5, 127) as never)
+  getLevel = vi.fn(() => 5)
+  getProjection = vi.fn(() => ({ containerPointFromCoords: () => ({ x: 0, y: 0 }) }))
   setCenter = vi.fn()
   setLevel = vi.fn()
   setBounds = vi.fn()
   panTo = vi.fn()
   relayout = vi.fn()
+  getBounds = vi.fn(() => new FakeBounds())
 }
 
 class FakeBounds {
   extend = vi.fn()
+  contain = vi.fn(() => false)
 }
 
 class FakeMarker {
@@ -68,6 +72,12 @@ class FakeMarker {
   setZIndex = vi.fn()
 
   constructor(readonly options: { title?: string }) {}
+}
+
+class FakeCustomOverlay {
+  setMap = vi.fn()
+
+  constructor(readonly options: unknown) {}
 }
 
 function fakeMaps(
@@ -109,6 +119,7 @@ function fakeMaps(
         markers.push(this)
       }
     } as unknown as KakaoMaps['Marker'],
+    CustomOverlay: FakeCustomOverlay as unknown as KakaoMaps['CustomOverlay'],
     Polyline: class {} as unknown as KakaoMaps['Polyline'],
     services: {
       Places: class {
@@ -213,7 +224,7 @@ describe('일반 지도 장소 마커', () => {
 
     expect(markers).toHaveLength(2)
     unmount()
-    expect(removeListener).toHaveBeenCalledTimes(2)
+    expect(removeListener).toHaveBeenCalledTimes(3)
     markers.forEach((marker) => expect(marker.setMap).toHaveBeenCalledWith(null))
   })
 

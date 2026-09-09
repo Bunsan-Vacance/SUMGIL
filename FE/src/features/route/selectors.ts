@@ -1,7 +1,9 @@
 import type { Mode, Priority, Route } from './types'
 export function getRoutes(routes: Route[], enabled: Mode[], priority: Priority) {
   const compare = (a: Route, b: Route) =>
-    priority === 'calm' ? a.crowd - b.crowd || a.minutes - b.minutes : a.minutes - b.minutes
+    priority === 'calm'
+      ? a.congestionPercent - b.congestionPercent || a.minutes - b.minutes
+      : a.minutes - b.minutes
   const visible = routes.filter((route) => route.modes.every((mode) => enabled.includes(mode)))
   return [
     ...visible.filter((r) => r.id === 'fast' || r.id === 'calm').sort(compare),

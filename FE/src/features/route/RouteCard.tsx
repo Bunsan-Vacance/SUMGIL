@@ -38,8 +38,8 @@ export default function RouteCard({
       </span>
       <span className="route-lines">{route.line}</span>
       <span className="route-facts">
-        도보 {route.walk}m <i /> 환승 {route.transfers ? `${route.transfers}회` : '없음'} <i /> 혼잡{' '}
-        {route.crowd}구간
+        도보 {route.walk}m <i /> 환승 {route.transfers ? `${route.transfers}회` : '없음'} <i />{' '}
+        혼잡도 {route.congestionPercent}%
       </span>
     </button>
   )
