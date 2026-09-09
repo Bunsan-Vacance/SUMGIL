@@ -7,27 +7,36 @@ import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopParser;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.csv.CsvTable;
+import com.ssafy.s15p21a104.load.subway.DirectedSegment;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeExpander;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
 import com.ssafy.s15p21a104.load.subway.KorailSegmentParser;
 import com.ssafy.s15p21a104.load.subway.LineCodes;
 import com.ssafy.s15p21a104.load.subway.LoadValidator;
 import com.ssafy.s15p21a104.load.subway.Segment;
-import com.ssafy.s15p21a104.load.subway.SeoulMetroTimetableParser;
+import com.ssafy.s15p21a104.load.subway.SlotWaits;
 import com.ssafy.s15p21a104.load.subway.StationCoord;
 import com.ssafy.s15p21a104.load.subway.StationNameNormalizer;
+import com.ssafy.s15p21a104.load.subway.StationRow;
 import com.ssafy.s15p21a104.load.subway.SubwayGraph;
 import com.ssafy.s15p21a104.load.subway.SubwayGraphBuilder;
+import com.ssafy.s15p21a104.load.subway.TrainTimetableParser;
 import com.ssafy.s15p21a104.load.subway.TransferParser;
 import com.ssafy.s15p21a104.load.subway.TransferRecord;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.zip.GZIPInputStream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -39,7 +48,7 @@ import org.springframework.stereotype.Component;
 /**
  * 정적 데이터 적재 실행기. 실행: SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --args='--load.dry-run=true'
  * 대상은 --load.sources (기본 application-load.yml: subway,bus,bike) 순서대로 처리한다.
- * 순서: 원천 CSV 읽기 → 파싱 → (그래프 구성) → 검증(오류 있으면 중단) → upsert. 각 단계 소요시간과 건수를 로그로 남긴다.
+ * 순서: 원천 CSV 읽기 → 파싱 → (그래프 구성) → 검증(오류 있으면 중단) → upsert → (지하철) prune. 각 단계 소요시간과 건수를 로그로 남긴다.
  */
 @Slf4j
 @Component
@@ -52,6 +61,11 @@ public class StaticLoadRunner implements ApplicationRunner {
     private static final String BIKE_DIR = "data/bike/";
 
     // 원천 파일명 (출처·갱신일은 각 폴더 README). 새 배포분을 받으면 여기와 README 를 함께 바꾼다.
+    static final String TIMETABLE_FILE = "seoul-train-timetable_20260616.csv.gz";
+    static final String KORAIL_SEGMENTS_FILE = "korail-segments_20240826.csv";
+    static final String TRANSFER_FILE = "seoulmetro-transfer_20250331.csv";
+    static final String SEOULMETRO_COORDS_FILE = "seoulmetro-station-coords_20250814.csv";
+    static final String LINE9_COORDS_FILE = "kric-line9-station-coords_20250630.csv";
     static final String BUS_STOPS_FILE = "seoul-bus-stops_20260902.csv";
     static final String BUS_ROUTE_STOPS_FILE = "seoul-bus-route-stops_20260902.csv";
     static final String BIKE_SNAPSHOT_FILE = "seoul-bike-stations-live_20260909.csv";
@@ -74,17 +88,15 @@ public class StaticLoadRunner implements ApplicationRunner {
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
     }
 
+    /**
+     * 지하철. 열차운행시각표가 1~9호선 엣지의 정본이고(방향 있는 구간 + 슬롯별 기대 대기), 시각표에 없는 노선(경의중앙·수인분당)만
+     * 코레일 거리 구간(avg)으로 보충한다. 적재 뒤 시각표가 덮는 노선의 옛 행을 prune 한다.
+     */
     private void loadSubway() throws IOException {
         long started = System.nanoTime();
 
         Map<String, String> aliases = readPairs("conf/station-aliases.csv", "원천표기", "정본표기");
         StationNameNormalizer normalizer = new StationNameNormalizer(aliases);
-
-        Map<String, Map<String, String>> anchors = new HashMap<>();
-        for (Map<String, String> row : csv(SUBWAY_DIR, "conf/branch-anchors.csv").rows()) {
-            anchors.computeIfAbsent(row.get("line_id"), k -> new HashMap<>())
-                    .put(normalizer.normalize(row.get("지선첫역")), normalizer.normalize(row.get("분기역")));
-        }
         Map<String, List<String>> korailOverrides = new HashMap<>();
         for (Map<String, String> row : csv(SUBWAY_DIR, "conf/korail-line-overrides.csv").rows()) {
             korailOverrides.put(normalizer.normalize(row.get("출발역")) + "|" + normalizer.normalize(row.get("도착역")),
@@ -95,40 +107,76 @@ public class StaticLoadRunner implements ApplicationRunner {
             disambiguation.put(normalizer.normalize(row.get("역명")) + "|" + row.get("line_id"), row.get("station_id"));
         }
 
-        var timetable = new SeoulMetroTimetableParser(normalizer, anchors);
-        var korail = new KorailSegmentParser(normalizer, props.avgSpeedMps(), korailOverrides);
-        var transferParser = new TransferParser(normalizer);
+        // 1) 시각표 (42만 행, 스트리밍)
+        long parseStarted = System.nanoTime();
+        var timetable = new TrainTimetableParser(normalizer);
+        try (Reader reader = gzipReader(SUBWAY_DIR + TIMETABLE_FILE)) {
+            CsvTable.forEachRow(reader, timetable::accept);
+        }
+        TrainTimetableParser.Result tt = timetable.finish();
+        var st = tt.stats();
+        log.info("시각표: {} 행 · 완행 열차 {} (급행 {} 제외) · 방향 구간 {} · 이상치 {} · 건너뜀 {} · 노선 {} ({} ms)",
+                st.rows(), st.trains(), st.expressTrains(), tt.segments().size(), st.anomalies(), st.skippedRows(),
+                tt.lineIds(), elapsedMs(parseStarted));
+        logWarnings("시각표 파싱", timetable.warnings());
 
-        List<Segment> segments = new ArrayList<>(timetable.parse(csv(SUBWAY_DIR, "seoulmetro-station-time_20240810.csv").rows()));
-        segments.addAll(korail.parse(csv(SUBWAY_DIR, "korail-segments_20240826.csv").rows()));
-        List<TransferRecord> transfers = transferParser.parse(csv(SUBWAY_DIR, "seoulmetro-transfer_20250331.csv").rows());
-        List<StationCoord> coords = readCoords(normalizer);
-        logWarnings("역간거리 파싱", timetable.warnings());
+        // 2) 코레일 거리 구간 — 시각표가 덮는 노선은 제외 (1호선·4호선 코레일 구간도 시각표에 있다)
+        var korail = new KorailSegmentParser(normalizer, props.avgSpeedMps(), korailOverrides);
+        List<Segment> korailAll = korail.parse(csv(SUBWAY_DIR, KORAIL_SEGMENTS_FILE).rows());
+        List<Segment> korailSegments = korailAll.stream().filter(s -> !tt.lineIds().contains(s.lineId())).toList();
         logWarnings("코레일 구간 파싱", korail.warnings());
+        log.info("코레일 거리 구간: {} 중 시각표 밖 노선만 {} 유지 ({})", korailAll.size(), korailSegments.size(),
+                korailSegments.stream().map(Segment::lineId).distinct().sorted().toList());
+
+        // 3) 환승·좌표
+        var transferParser = new TransferParser(normalizer);
+        List<TransferRecord> transfers = transferParser.parse(csv(SUBWAY_DIR, TRANSFER_FILE).rows());
+        List<StationCoord> coords = readCoords(normalizer);
         logWarnings("환승 파싱", transferParser.warnings());
 
+        List<DirectedSegment> directed = tt.segments();
+        Map<String, SlotWaits> waits = tt.slotWaits();
         if (!props.region().isEmpty()) {
-            segments = segments.stream().filter(s -> props.region().contains(s.lineId())).toList();
+            directed = directed.stream().filter(s -> props.region().contains(s.lineId())).toList();
+            waits = waits.entrySet().stream().filter(e -> props.region().contains(e.getKey().substring(0, e.getKey().indexOf('|'))))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a, LinkedHashMap::new));
+            korailSegments = korailSegments.stream().filter(s -> props.region().contains(s.lineId())).toList();
             transfers = transfers.stream().filter(t -> props.region().contains(t.fromLineId())).toList();
             log.info("권역 필터 적용: {}", props.region());
         }
 
-        SubwayGraph graph = new SubwayGraphBuilder(disambiguation).build(segments, transfers, coords);
+        SubwayGraph graph = new SubwayGraphBuilder(disambiguation).build(directed, korailSegments, transfers, coords, waits);
         ValidationReport report = LoadValidator.validate(graph);
         logWarningsGrouped("검증", report.warnings());
         long noCoords = graph.stations().stream().filter(s -> s.lat() == null).count();
-        log.info("그래프: 노선 {} · 역 {} (좌표 없음 {}) · 환승 {} · 엣지 {} · edge_time 예정 {}",
+        log.info("그래프: 노선 {} · 역 {} (좌표 없음 {}) · 환승 {} · 엣지 {} (슬롯 대기 있음 {}) · edge_time 예정 {}",
                 graph.lines().size(), graph.stations().size(), noCoords, graph.transfers().size(),
-                graph.edges().size(), graph.edges().size() * 144);
-        if (!abortIfErrors("지하철", report) || dryRun("지하철", started)) {
+                graph.edges().size(), graph.slotWaits().size(), graph.edges().size() * 144);
+        if (!abortIfErrors("지하철", report)) {
+            return;
+        }
+
+        Set<String> keptEdgeKeys = graph.edges().stream().map(EdgeTimeExpander::edgeKey).collect(Collectors.toSet());
+        Set<String> keptStationIds = graph.stations().stream().map(StationRow::stationId).collect(Collectors.toSet());
+        if (props.dryRun()) {
+            if (props.prune()) {
+                var preview = writer.pruneSubway(tt.lineIds(), keptEdgeKeys, keptStationIds, true);
+                log.info("prune 예정: 시각표 노선에서 사라지는 엣지 {}개 — {}", preview.staleEdges(), head(preview.staleEdgeKeys()));
+            }
+            dryRun("지하철", started);
             return;
         }
 
         timed("line", () -> writer.upsertLines(graph.lines()));
         timed("station", () -> writer.upsertStations(graph.stations()));
         timed("transfer_meta", () -> writer.upsertTransfers(graph.transfers()));
-        List<EdgeTimeRow> edgeTimes = EdgeTimeExpander.expandAll(graph.edges());
+        List<EdgeTimeRow> edgeTimes = EdgeTimeExpander.expandAll(graph.edges(), graph.slotWaits());
         timed("edge_time[" + props.writeMode() + "]", () -> writer.upsertEdgeTimes(edgeTimes, props.writeMode()));
+        if (props.prune()) {
+            var pruned = writer.pruneSubway(tt.lineIds(), keptEdgeKeys, keptStationIds, false);
+            log.info("prune: 엣지 {}개 ({} 행) · 고아 역 {}개 삭제 — 엣지 {} · 역 {}", pruned.staleEdges(), pruned.deletedEdgeRows(),
+                    pruned.deletedStationIds().size(), head(pruned.staleEdgeKeys()), head(pruned.deletedStationIds()));
+        }
         log.info("지하철 적재 완료 ({} ms)", elapsedMs(started));
     }
 
@@ -188,13 +236,13 @@ public class StaticLoadRunner implements ApplicationRunner {
 
     private List<StationCoord> readCoords(StationNameNormalizer normalizer) throws IOException {
         List<StationCoord> coords = new ArrayList<>();
-        for (Map<String, String> row : csv(SUBWAY_DIR, "seoulmetro-station-coords_20250814.csv").rows()) {
+        for (Map<String, String> row : csv(SUBWAY_DIR, SEOULMETRO_COORDS_FILE).rows()) {
             LineCodes.fromSeoulMetroLine(row.get("호선")).ifPresent(lineId -> coords.add(new StationCoord(
                     lineId, normalizer.normalize(row.get("역명")),
                     Double.parseDouble(row.get("위도")), Double.parseDouble(row.get("경도")),
                     row.get("고유역번호(외부역코드)"))));
         }
-        for (Map<String, String> row : csv(SUBWAY_DIR, "kric-line9-station-coords_20250630.csv").rows()) {
+        for (Map<String, String> row : csv(SUBWAY_DIR, LINE9_COORDS_FILE).rows()) {
             coords.add(new StationCoord("1009", normalizer.normalize(row.get("역명")),
                     Double.parseDouble(row.get("위도")), Double.parseDouble(row.get("경도")), null));
         }
@@ -230,6 +278,11 @@ public class StaticLoadRunner implements ApplicationRunner {
         return CsvTable.parse(new ClassPathResource(dir + file).getContentAsString(StandardCharsets.UTF_8));
     }
 
+    private static Reader gzipReader(String path) throws IOException {
+        return new BufferedReader(new InputStreamReader(new GZIPInputStream(new ClassPathResource(path).getInputStream()),
+                StandardCharsets.UTF_8));
+    }
+
     private static void logWarnings(String stage, List<String> warnings) {
         warnings.forEach(w -> log.warn("{} 경고: {}", stage, w));
     }
@@ -242,6 +295,12 @@ public class StaticLoadRunner implements ApplicationRunner {
             log.warn("{} 경고: 좌표 없음 {}개 — {}", stage, noCoord.size(),
                     String.join(", ", noCoord.stream().map(w -> w.substring("좌표 없음: ".length())).toList()));
         }
+    }
+
+    private static String head(List<String> items) {
+        int limit = 20;
+        String joined = String.join(", ", items.subList(0, Math.min(limit, items.size())));
+        return items.size() > limit ? joined + ", …(" + items.size() + ")" : joined;
     }
 
     private static void timed(String label, Supplier<Integer> work) {

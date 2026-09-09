@@ -13,3 +13,4 @@ load:
   write-mode: BATCH      # ROW 는 성능 비교용 baseline (BE/docs/perf)
   region: []             # 비어 있으면 전 노선. 예: --load.region=1002,1005
   avg-speed-mps: 9.2     # 소요시간 없는 구간 추정용 표정속도 (1.1 km ≈ 2분)
+  prune: true            # 시각표가 덮는 노선에서 이번 실행에 없는 edge_time 행·고아 역 삭제. dry-run 은 건수만 출력

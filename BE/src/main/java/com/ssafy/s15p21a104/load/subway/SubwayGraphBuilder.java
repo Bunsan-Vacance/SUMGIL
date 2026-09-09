@@ -11,6 +11,7 @@ import java.util.Set;
  * 구간·환승·좌표를 합쳐 적재용 그래프를 만든다.
  * station_id 는 정규화 역명이다 (물리 역 1행). 동명이역은 (역명|노선) 예외 표로 별도 ID 를 받는다.
  * 좌표는 소속 노선의 좌표를 우선 쓰고, 없으면 같은 이름의 다른 노선 좌표, 그것도 없으면 null 이다.
+ * 시각표에서 온 방향 있는 구간({@link DirectedSegment})은 그 방향 엣지 하나만, 거리 기반 무방향 구간({@link Segment})은 양방향 엣지를 만든다.
  */
 public final class SubwayGraphBuilder {
 
@@ -22,10 +23,24 @@ public final class SubwayGraphBuilder {
     }
 
     public SubwayGraph build(List<Segment> segments, List<TransferRecord> transfers, List<StationCoord> coords) {
+        return build(List.of(), segments, transfers, coords, Map.of());
+    }
+
+    /**
+     * @param directed    시각표 구간 (방향 있음, 역방향을 만들지 않음)
+     * @param undirected  거리 기반 구간 (양방향 엣지)
+     * @param waitsByName "lineId|출발역명|도착역명" → 슬롯별 대기. station_id 기준 엣지 키("from|to|route")로 바꿔 그래프에 싣는다
+     */
+    public SubwayGraph build(List<DirectedSegment> directed, List<Segment> undirected, List<TransferRecord> transfers,
+                             List<StationCoord> coords, Map<String, SlotWaits> waitsByName) {
         Map<String, StationAcc> stations = new LinkedHashMap<>();
         Set<String> lineIds = new LinkedHashSet<>();
-
-        for (Segment s : segments) {
+        for (DirectedSegment s : directed) {
+            lineIds.add(s.lineId());
+            accumulate(stations, s.fromName(), s.lineId());
+            accumulate(stations, s.toName(), s.lineId());
+        }
+        for (Segment s : undirected) {
             lineIds.add(s.lineId());
             accumulate(stations, s.fromName(), s.lineId());
             accumulate(stations, s.toName(), s.lineId());
@@ -60,23 +75,32 @@ public final class SubwayGraphBuilder {
         }
 
         List<LineRow> lineRows = lineIds.stream().map(id -> new LineRow(id, LineCodes.nameOf(id))).toList();
-
         List<TransferMetaRow> transferRows = transfers.stream()
                 .map(t -> new TransferMetaRow(stationId(t.stationName(), t.fromLineId()),
                         t.fromLineId(), t.toLineId(), t.walkSec(), "extract"))
                 .toList();
 
         Map<String, EdgeRow> edges = new LinkedHashMap<>();
-        for (Segment s : segments) {
+        for (DirectedSegment s : directed) {
+            EdgeRow forward = new EdgeRow(stationId(s.fromName(), s.lineId()), stationId(s.toName(), s.lineId()),
+                    "SUBWAY", s.lineId(), s.travelSec(), s.source());
+            edges.putIfAbsent(EdgeTimeExpander.edgeKey(forward), forward);
+        }
+        for (Segment s : undirected) {
             String from = stationId(s.fromName(), s.lineId());
             String to = stationId(s.toName(), s.lineId());
             EdgeRow forward = new EdgeRow(from, to, "SUBWAY", s.lineId(), s.travelSec(), s.source());
             EdgeRow backward = new EdgeRow(to, from, "SUBWAY", s.lineId(), s.travelSec(), s.source());
-            edges.putIfAbsent(edgeKey(forward), forward);
-            edges.putIfAbsent(edgeKey(backward), backward);
+            edges.putIfAbsent(EdgeTimeExpander.edgeKey(forward), forward);
+            edges.putIfAbsent(EdgeTimeExpander.edgeKey(backward), backward);
         }
 
-        return new SubwayGraph(lineRows, stationRows, transferRows, new ArrayList<>(edges.values()));
+        Map<String, SlotWaits> slotWaits = new LinkedHashMap<>();
+        for (Map.Entry<String, SlotWaits> e : waitsByName.entrySet()) {
+            String[] k = e.getKey().split("\\|", 3);
+            slotWaits.put(stationId(k[1], k[0]) + "|" + stationId(k[2], k[0]) + "|" + k[0], e.getValue());
+        }
+        return new SubwayGraph(lineRows, stationRows, transferRows, new ArrayList<>(edges.values()), slotWaits);
     }
 
     private void accumulate(Map<String, StationAcc> stations, String name, String lineId) {
@@ -86,10 +110,6 @@ public final class SubwayGraphBuilder {
 
     private String stationId(String name, String lineId) {
         return disambiguation.getOrDefault(name + "|" + lineId, name);
-    }
-
-    private static String edgeKey(EdgeRow e) {
-        return e.fromNode() + "|" + e.toNode() + "|" + e.routeId();
     }
 
     private static final class StationAcc {

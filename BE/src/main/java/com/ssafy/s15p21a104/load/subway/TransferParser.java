@@ -29,7 +29,7 @@ public final class TransferParser {
                 warnings.add("노선 표기를 모름: " + station + " " + row.get("호선") + "호선 → " + row.get("환승노선"));
                 continue;
             }
-            int walkSec = SeoulMetroTimetableParser.parseMmSs(row.get("환승소요시간"));
+            int walkSec = parseMmSs(row.get("환승소요시간"));
             byKey.putIfAbsent(key(station, fromLine, toLine), new TransferRecord(station, fromLine, toLine, walkSec));
         }
 
@@ -51,5 +51,17 @@ public final class TransferParser {
 
     private static String key(String station, String from, String to) {
         return station + "|" + from + "|" + to;
+    }
+
+    /** "02:13" → 133. 빈 값은 0. (역간거리 파서가 시각표로 대체되면서 여기로 옮겼다) */
+    public static int parseMmSs(String text) {
+        if (text == null || text.isBlank()) {
+            return 0;
+        }
+        String[] parts = text.trim().split(":");
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("mm:ss 형식이 아님: " + text);
+        }
+        return Integer.parseInt(parts[0]) * 60 + Integer.parseInt(parts[1]);
     }
 }
