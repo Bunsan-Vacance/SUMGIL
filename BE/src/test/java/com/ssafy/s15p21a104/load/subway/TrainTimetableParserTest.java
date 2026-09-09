@@ -1,8 +1,10 @@
 package com.ssafy.s15p21a104.load.subway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +48,7 @@ class TrainTimetableParserTest {
     private final TrainTimetableParser parser = new TrainTimetableParser(new StationNameNormalizer(Map.of()));
 
     @Test
-    @DisplayName("열차의 정차 행이 뒤섞여 있어도 시각순으로 정렬해 인접 역 쌍을 만든다 — 소요 = 다음 역 도착 − 이 역 출발")
+    @DisplayName("열차의 정차 행이 뒤섞여 있어도 시각순으로 정렬해 인접 역 쌍을 만든다 — 소요 = 다음 역 출발 − 이 역 출발 (도착역 정차시간 포함)")
     void sortsStopsByTimeAndBuildsSegments() {
         TrainTimetableParser.Result r = parse(parser, List.of(
                 stop("2", "까치산", "DAY", "UP", "0", "5902", "05:26:00", ""),
@@ -55,8 +57,8 @@ class TrainTimetableParserTest {
                 stop("2", "양천구청", "DAY", "UP", "0", "5902", "05:19:30", "05:20:00")));
 
         assertEquals(3, r.segments().size());
-        assertEquals(150, seg(r.segments(), "도림천", "양천구청").travelSec());
-        assertEquals(180, seg(r.segments(), "양천구청", "신정네거리").travelSec());
+        assertEquals(180, seg(r.segments(), "도림천", "양천구청").travelSec());
+        assertEquals(210, seg(r.segments(), "양천구청", "신정네거리").travelSec());
         assertEquals(150, seg(r.segments(), "신정네거리", "까치산").travelSec());
         assertEquals("1002", seg(r.segments(), "도림천", "양천구청").lineId());
         assertEquals("timetable", seg(r.segments(), "도림천", "양천구청").source());
@@ -112,6 +114,60 @@ class TrainTimetableParserTest {
         assertEquals("월계", r.segments().get(0).fromName());
         assertEquals(1, r.stats().anomalies());
         assertTrue(parser.warnings().stream().anyMatch(w -> w.contains("이상치") && w.contains("K1602")));
+    }
+
+    @Test
+    @DisplayName("종착역은 출발 시각이 없으니 도착 시각으로 잰다 — 그 구간만 정차시간이 붙지 않는다")
+    void terminalStopIsMeasuredToArrival() {
+        TrainTimetableParser.Result r = parse(parser, List.of(
+                stop("3", "고속터미널", "DAY", "UP", "0", "3305", "", "21:06:00"),
+                stop("3", "교대", "DAY", "UP", "0", "3305", "21:08:00", "21:08:30"),
+                stop("3", "남부터미널", "DAY", "UP", "0", "3305", "21:10:30", "")));
+
+        assertEquals(150, seg(r.segments(), "고속터미널", "교대").travelSec());
+        assertEquals(120, seg(r.segments(), "교대", "남부터미널").travelSec());
+    }
+
+    @Test
+    @DisplayName("출발 시각이 도착보다 이른 자리표시(00:00:00) 행은 출발이 없는 것으로 보고 도착 시각으로 정렬한다 — 중간 역을 건너뛴 유령 구간을 만들지 않는다")
+    void placeholderDepartureDoesNotReorderStops() {
+        TrainTimetableParser.Result r = parse(parser, List.of(
+                stop("4", "오이도", "DAY", "UP", "0", "4422K", "", "06:42:00"),
+                stop("4", "정왕", "DAY", "UP", "0", "4422K", "06:44:30", "06:45:00"),
+                stop("4", "신길온천", "DAY", "UP", "0", "4422K", "06:47:00", "00:00:00"),
+                stop("4", "안산", "DAY", "UP", "0", "4422K", "06:49:00", "06:49:30")));
+
+        assertTrue(r.segments().stream().noneMatch(s -> s.fromName().equals("정왕") && s.toName().equals("안산")),
+                "신길온천을 건너뛴 정왕→안산 구간이 생기면 안 된다");
+        assertEquals(180, seg(r.segments(), "오이도", "정왕").travelSec());
+        assertEquals(120, seg(r.segments(), "정왕", "신길온천").travelSec());
+        assertEquals(2, r.segments().size());
+        assertTrue(parser.warnings().stream().anyMatch(w -> w.contains("출발 시각") && w.contains("신길온천")));
+    }
+
+    @Test
+    @DisplayName("표본이 그 노선 중앙값의 10% 도 안 되는 구간은 회송 열차가 중간 역 없이 남긴 유령 구간으로 보고 버리고 경고한다")
+    void lowSupportEdgesAreDropped() {
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            String code = "L" + i;
+            String hour = String.format("%02d", 6 + i);
+            rows.add(stop("5", "방화", "DAY", "UP", "0", code, "", hour + ":00:00"));
+            rows.add(stop("5", "개화산", "DAY", "UP", "0", code, hour + ":02:00", hour + ":02:30"));
+            rows.add(stop("5", "김포공항", "DAY", "UP", "0", code, hour + ":05:00", ""));
+        }
+        rows.add(stop("5", "방화", "DAY", "UP", "0", "5901", "", "05:24:30"));
+        rows.add(stop("5", "김포공항", "DAY", "UP", "0", "5901", "05:35:30", ""));
+
+        TrainTimetableParser.Result r = parse(parser, rows);
+
+        assertEquals(2, r.segments().size());
+        assertEquals(150, seg(r.segments(), "방화", "개화산").travelSec());
+        assertEquals(150, seg(r.segments(), "개화산", "김포공항").travelSec());
+        assertTrue(r.segments().stream().noneMatch(s -> s.fromName().equals("방화") && s.toName().equals("김포공항")));
+        assertFalse(r.slotWaits().containsKey("1005|방화|김포공항"));
+        assertEquals(1, r.stats().droppedEdges());
+        assertTrue(parser.warnings().stream().anyMatch(w -> w.contains("표본") && w.contains("김포공항")));
     }
 
     @Test
