@@ -1,20 +1,21 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
-import com.ssafy.s15p21a104.global.exception.DomainException;
-import com.ssafy.s15p21a104.global.exception.ErrorType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,11 +31,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * 경로 검색 오류·미적재 계약 검증. 가짜 후보를 만들지 않으므로 mock 후보 테스트는 없다.
- * 알고리즘 정상계는 RouteSearchServiceWireTest가 담당한다.
+ * 알고리즘 연동 경로 검증. 그래프·역 정보를 직접 조립해 주입하며 DB·Redis가 필요 없다.
  */
 @ExtendWith(MockitoExtension.class)
-class RouteSearchServiceTest {
+class RouteSearchServiceWireTest {
 
     @Mock
     private StationRepository stationRepository;
@@ -46,42 +46,42 @@ class RouteSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        Station origin = mockStation("0222", "한티");
-        Station dest = mockStation("0221", "역삼");
-        lenient().when(stationRepository.findById("0222")).thenReturn(Optional.of(origin));
-        lenient().when(stationRepository.findById("0221")).thenReturn(Optional.of(dest));
-        lenient().when(stationRepository.findById("9999")).thenReturn(Optional.empty());
-        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
-                new Edge("0222", "0221", "2", 300, 0)));
-        routeSearchService =
-                new RouteSearchService(stationRepository, graphRegistry, new TransferRule(180));
+        Station stationA = mockStation("A", "에이역");
+        Station stationC = mockStation("C", "씨역");
+        Station stationX = mockStation("X", "엑스역");
+        lenient().when(stationRepository.findById("A")).thenReturn(Optional.of(stationA));
+        lenient().when(stationRepository.findById("C")).thenReturn(Optional.of(stationC));
+        lenient().when(stationRepository.findById("X")).thenReturn(Optional.of(stationX));
+        RouteGraph graph = graphOf(
+                new Edge("A", "B", "L1", 100, 0),
+                new Edge("B", "C", "L2", 50, 0),
+                // X는 고립 정점(A에서 도달 불가). 자기 루프로 정점만 등록한다.
+                new Edge("X", "X", "L9", 10, 0));
+        lenient().when(graphRegistry.graph()).thenReturn(graph);
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
+        infos.put("B", new RouteMapper.StationInfo("B", "비역", 37.5, 127.0));
+        infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
+        lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
+        routeSearchService = new RouteSearchService(stationRepository, graphRegistry, new TransferRule(180));
     }
 
     @Test
-    @DisplayName("출발지와 도착지가 같으면 SAME_ORIGIN_DEST")
-    void 출발지와_도착지가_같으면_SAME_ORIGIN_DEST() {
-        DomainException exception = assertThrows(DomainException.class,
-                () -> routeSearchService.search("0222", "0222", null, null));
+    @DisplayName("그래프가 있으면 알고리즘 경로(ALGORITHM)로 응답한다")
+    void 그래프있으면_알고리즘응답() {
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
 
-        assertEquals(ErrorType.SAME_ORIGIN_DEST, exception.getErrorType());
+        assertEquals(1, result.size());
+        assertEquals(RouteType.SHORTEST, result.get(0).routeType());
+        assertEquals(RouteSource.ALGORITHM, result.get(0).source());
+        assertEquals((100 + 50 + 180) / 60.0, result.get(0).totalMinutes());
+        assertEquals(2, result.get(0).legs().size());
     }
 
     @Test
-    @DisplayName("존재하지 않는 역이면 STATION_NOT_FOUND")
-    void 존재하지_않는_역이면_STATION_NOT_FOUND() {
-        DomainException exception = assertThrows(DomainException.class,
-                () -> routeSearchService.search("9999", "0221", null, null));
-
-        assertEquals(ErrorType.STATION_NOT_FOUND, exception.getErrorType());
-    }
-
-    @Test
-    @DisplayName("그래프 미적재 시 빈 배열로 응답한다(가짜 후보 없음)")
-    void 미적재시_빈배열() {
-        RouteSearchService unloaded =
-                new RouteSearchService(stationRepository, null, new TransferRule(180));
-
-        List<RouteSearchResponse> result = unloaded.search("0222", "0221", null, null);
+    @DisplayName("연결 불가면 빈 배열로 응답한다(에러 아님)")
+    void 연결불가_빈배열() {
+        List<RouteSearchResponse> result = routeSearchService.search("A", "X", null, null);
 
         assertTrue(result.isEmpty());
     }
