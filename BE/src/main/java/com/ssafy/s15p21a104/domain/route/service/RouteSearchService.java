@@ -1,6 +1,8 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
+import com.ssafy.s15p21a104.domain.route.dto.response.MultiLineStringResponse;
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -8,6 +10,7 @@ import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.finder.ShortestPathFinder;
+import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
@@ -33,6 +36,7 @@ public class RouteSearchService {
     private final StationRepository stationRepository;
     private final RouteGraphRegistry graphRegistry;
     private final TransferRule transferRule;
+    private final RailGeometryRegistry railGeometryRegistry;
 
     public List<RouteSearchResponse> search(
             String originStationId,
@@ -67,13 +71,39 @@ public class RouteSearchService {
             Optional<RouteSearchResponse> response = RouteMapper.toResponse(
                     new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
                     graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM);
-            return response.map(List::of).orElseGet(List::of);
+            return response.map(this::withGeometry).map(List::of).orElseGet(List::of);
         } catch (DomainException exception) {
             if (exception.getErrorType() == ErrorType.ROUTE_NOT_FOUND) {
                 return List.of();
             }
             throw exception;
         }
+    }
+
+    /**
+     * KTDB 실선로 geometry를 구간(leg)마다 붙인다. RouteMapper는 DB에 의존하지 않으므로
+     * (순수 함수 유지) geometry 부착은 여기서 후처리로 한다 — 미승인 필드, README 참고.
+     */
+    private RouteSearchResponse withGeometry(RouteSearchResponse response) {
+        List<RouteLegResponse> legs = response.legs().stream()
+                .map(this::withGeometry)
+                .toList();
+        return new RouteSearchResponse(response.routeType(), response.totalMinutes(), legs, response.source());
+    }
+
+    private RouteLegResponse withGeometry(RouteLegResponse leg) {
+        Optional<MultiLineStringResponse> geometry = railGeometryRegistry.geometryForLeg(
+                leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        if (geometry.isEmpty()) {
+            return leg;
+        }
+        return new RouteLegResponse(
+                leg.mode(),
+                leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
+                leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
+                leg.routeId(), leg.minutes(),
+                geometry.get(), "available"
+        );
     }
 
     private Station findStation(String stationId) {

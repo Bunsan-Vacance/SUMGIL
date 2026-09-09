@@ -89,4 +89,28 @@ public final class LineCodes {
     public static String nameOf(String lineId) {
         return NAMES.getOrDefault(lineId, lineId);
     }
+
+    /**
+     * KTDB 철도망(RAILLINEN3) 표기. "서울"/"서울지하철" 접두어와 괄호 설명을 뗀 뒤
+     * {@link #fromName(String)}으로 조회한다.
+     * 예: "서울2호선"→"2호선", "서울지하철9호선"→"9호선", "경춘선(수도권전철)"→"경춘선".
+     * 수도권 밖 노선(부산1호선·대구1호선 등)은 접두어 자체가 달라 조회에 실패한다 —
+     * 우리 노선표(line 테이블)에 없는 노선이라 의도된 동작이다.
+     */
+    public static Optional<String> fromKtdbServiceName(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Optional.empty();
+        }
+        String n = raw.strip();
+        int paren = n.indexOf('(');
+        if (paren >= 0) {
+            n = n.substring(0, paren).strip();
+        }
+        if (n.startsWith("서울지하철")) {
+            n = n.substring("서울지하철".length());
+        } else if (n.startsWith("서울")) {
+            n = n.substring("서울".length());
+        }
+        return fromName(n);
+    }
 }

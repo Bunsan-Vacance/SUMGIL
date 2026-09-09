@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
+import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
@@ -53,8 +54,8 @@ class RouteSearchServiceTest {
         lenient().when(stationRepository.findById("9999")).thenReturn(Optional.empty());
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 new Edge("0222", "0221", "2", 300, 0)));
-        routeSearchService =
-                new RouteSearchService(stationRepository, graphRegistry, new TransferRule(180));
+        routeSearchService = new RouteSearchService(
+                stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null));
     }
 
     @Test
@@ -78,8 +79,8 @@ class RouteSearchServiceTest {
     @Test
     @DisplayName("그래프 미적재 시 빈 배열로 응답한다(가짜 후보 없음)")
     void 미적재시_빈배열() {
-        RouteSearchService unloaded =
-                new RouteSearchService(stationRepository, null, new TransferRule(180));
+        RouteSearchService unloaded = new RouteSearchService(
+                stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null));
 
         List<RouteSearchResponse> result = unloaded.search("0222", "0221", null, null);
 

@@ -69,7 +69,12 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
           "mode": "SUBWAY",
           "fromNodeId": "0222", "fromNodeName": "한티", "fromLat": 37.5049, "fromLng": 127.0530,
           "toNodeId": "0221", "toNodeName": "역삼", "toLat": 37.5006, "toLng": 127.0364,
-          "routeId": "2", "minutes": 5.0
+          "routeId": "2", "minutes": 5.0,
+          "geometry": {
+            "type": "MultiLineString",
+            "coordinates": [[[127.0530, 37.5049], [127.0480, 37.5030]], [[127.0480, 37.5030], [127.0364, 37.5006]]]
+          },
+          "geometryStatus": "available"
         },
         {
           "mode": "BIKE",
@@ -91,10 +96,12 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 | `legs[].fromNodeName`/`toNodeName` | 신규 추가 (FE 요청) |
 | `legs[].fromLat`/`fromLng`/`toLat`/`toLng` | 신규 추가. 구간 시작·끝 지점 좌표(`station`/`bus_stop`/`bike_station` 테이블 값) — 지도에 마커 찍는 용도 |
 | `legs[].routeId` | 지하철/버스 노선 ID. 도보·환승·따릉이 구간은 `null` |
+| `legs[].geometry` | **[미승인, FE 제안]** SUBWAY 구간 실선로 좌표. GeoJSON `MultiLineString` — KTDB link 여러 개를 이어붙인 것이며 하나의 연속선으로 합치지 않고 link 단위 좌표 배열을 그대로 담는다. 매칭 안 되면 `null` |
+| `legs[].geometryStatus` | **[미승인, FE 제안]** `"available"` \| `"unavailable"`. SUBWAY 이외 구간(WALK/BIKE/BUS/TRANSFER)은 항상 `"unavailable"`(KTDB는 철도망 데이터라 대상 아님) |
 | `source` | `"MOCK"` \| `"ALGORITHM"` |
 
 - 결과 0개면 `data: []` (에러 아님).
-- **지점 좌표까지만 제공한다.** 두 지점 사이 실제 이동 경로선(도로를 따라가는 폴리라인)은 이 응답에 없음 — MVP 범위 밖.
+- **지점 좌표까지만 제공한다.** 두 지점 사이 실제 이동 경로선(도로를 따라가는 폴리라인)은 이 응답에 없음 — MVP 범위 밖. (단, SUBWAY 구간의 KTDB `geometry`는 예외 — FE 요청으로 위 필드에서 별도 제공, S15P21A104-63 확장)
 
 ### 실패
 

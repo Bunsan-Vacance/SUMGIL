@@ -13,6 +13,10 @@ public record RouteLegResponse(
         Double toLat,
         Double toLng,
         String routeId,
-        Double minutes
+        Double minutes,
+        /** KTDB 실선로 좌표(미승인 필드). 매칭 안 되면 null — {@link #geometryStatus} 참고. */
+        MultiLineStringResponse geometry,
+        /** "available" | "unavailable". */
+        String geometryStatus
 ) {
 }

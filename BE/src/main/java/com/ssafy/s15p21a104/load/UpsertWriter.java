@@ -3,6 +3,8 @@ package com.ssafy.s15p21a104.load;
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
+import com.ssafy.s15p21a104.load.railgeometry.RailLinkGeometryRow;
+import com.ssafy.s15p21a104.load.railgeometry.RailNodeRow;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
 import com.ssafy.s15p21a104.load.subway.LineRow;
 import com.ssafy.s15p21a104.load.subway.StationRow;
@@ -61,6 +63,22 @@ public class UpsertWriter {
             INSERT INTO bike_station (rental_id, name, lat, lng, dock_count, updated_at) VALUES (?, ?, ?, ?, ?, now())
             ON CONFLICT (rental_id) DO UPDATE
               SET name = EXCLUDED.name, lat = EXCLUDED.lat, lng = EXCLUDED.lng, dock_count = EXCLUDED.dock_count, updated_at = now()
+            """;
+
+    private static final String UPSERT_RAIL_NODE = """
+            INSERT INTO rail_node (node_id, lat, lng, station_name_raw, updated_at) VALUES (?, ?, ?, ?, now())
+            ON CONFLICT (node_id) DO UPDATE
+              SET lat = EXCLUDED.lat, lng = EXCLUDED.lng, station_name_raw = EXCLUDED.station_name_raw, updated_at = now()
+            """;
+
+    private static final String UPSERT_RAIL_LINK_GEOMETRY = """
+            INSERT INTO rail_link_geometry
+              (link_id, from_node_id, to_node_id, line_name_raw, physical_line_name_raw, line_id, length_km, geometry, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, now())
+            ON CONFLICT (link_id) DO UPDATE
+              SET from_node_id = EXCLUDED.from_node_id, to_node_id = EXCLUDED.to_node_id,
+                  line_name_raw = EXCLUDED.line_name_raw, physical_line_name_raw = EXCLUDED.physical_line_name_raw,
+                  line_id = EXCLUDED.line_id, length_km = EXCLUDED.length_km, geometry = EXCLUDED.geometry, updated_at = now()
             """;
 
     private final JdbcTemplate jdbc;
@@ -123,6 +141,30 @@ public class UpsertWriter {
             ps.setString(3, r.toLine());
             ps.setInt(4, r.walkSec());
             ps.setString(5, r.source());
+        });
+        return rows.size();
+    }
+
+    public int upsertRailNodes(List<RailNodeRow> rows) {
+        jdbc.batchUpdate(UPSERT_RAIL_NODE, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setString(1, r.nodeId());
+            ps.setDouble(2, r.lat());
+            ps.setDouble(3, r.lng());
+            ps.setString(4, r.stationNameRaw());
+        });
+        return rows.size();
+    }
+
+    public int upsertRailLinkGeometry(List<RailLinkGeometryRow> rows) {
+        jdbc.batchUpdate(UPSERT_RAIL_LINK_GEOMETRY, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setString(1, r.linkId());
+            ps.setString(2, r.fromNodeId());
+            ps.setString(3, r.toNodeId());
+            ps.setString(4, r.lineNameRaw());
+            ps.setString(5, r.physicalLineNameRaw());
+            ps.setString(6, r.lineId());
+            ps.setObject(7, r.lengthKm(), Types.DOUBLE);
+            ps.setString(8, r.geometryGeojson());
         });
         return rows.size();
     }

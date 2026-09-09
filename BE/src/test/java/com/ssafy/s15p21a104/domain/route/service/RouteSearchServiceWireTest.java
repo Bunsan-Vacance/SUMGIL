@@ -10,6 +10,7 @@ import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
+import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
@@ -63,7 +64,8 @@ class RouteSearchServiceWireTest {
         infos.put("B", new RouteMapper.StationInfo("B", "비역", 37.5, 127.0));
         infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
-        routeSearchService = new RouteSearchService(stationRepository, graphRegistry, new TransferRule(180));
+        routeSearchService = new RouteSearchService(
+                stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null));
     }
 
     @Test
