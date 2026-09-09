@@ -21,6 +21,15 @@ NaN으로 남는다. 취소된 경기(일정에는 있지만 실제로 안 열�
 (`kbo_games.parquet`)은 그대로 두고 `kbo_games_seoul_metro.parquet`로 별도 저장한다 —
 원본을 지우면 스코프가 넓어질 때 재수집해야 하니 발췌만 한다.
 
+**더블헤더 제외(선택적 산출물)**: 더블헤더 경기는 티켓이 경기별로 독립이어도 실제로는
+1경기 관람 후 안 나가고 2경기까지 이어보는 인원이 섞여 있어, "관중수 = 그 시간대 유출입"
+가정이 두 경기 모두에서 깨진다. 이걸 정확히 보정하려면 구장 인근 생활인구(250m 격자)
+실측 대조가 필요한데 아직 구장↔격자 매핑이 없다(README 미해결 사항 참고). 비중이 작아서
+(11일/약 350~400 게임데이, 약 3%) 정밀 보정 없이 통째로 빼는 쪽을 택했다 —
+`kbo_games_seoul_metro_no_doubleheader.parquet`로 별도 저장하고, 더블헤더를 포함한
+`kbo_games_seoul_metro.parquet`도 그대로 남겨둔다(나중에 생활인구 검증이 되면 되살릴 수
+있게).
+
 실행:
     cd AI
     python -m DATA_ENGINE.eda.join_kbo_attendance
@@ -102,6 +111,26 @@ def filter_seoul_metro_games(merged: pd.DataFrame) -> pd.DataFrame:
     return merged[merged["stadium"].isin(SEOUL_METRO_STADIUMS)].reset_index(drop=True)
 
 
+def identify_doubleheader_keys(crowd: pd.DataFrame) -> pd.MultiIndex:
+    """더블헤더가 열린 (date, stadium) 조합을 식별한다.
+
+    팀 조합이 아니라 (date, stadium)만 본다 — 같은 구장에서 하루에 두 팀이 다른 대진으로
+    두 번 뛰는 일은 없으니, 그 구장에 그 날 경기가 2건 이상이면 더블헤더로 본다.
+    """
+    counts = crowd.groupby(["date", "stadium"]).size()
+    return counts[counts > 1].index
+
+
+def drop_doubleheader_days(games: pd.DataFrame, doubleheader_keys: pd.MultiIndex) -> pd.DataFrame:
+    """더블헤더가 열린 날은 그 구장의 그 날짜 경기를 두 경기 다 제외한다.
+
+    한쪽 경기만 남기면 "그날 게임 있었음/없었음" 신호가 반쪽짜리로 왜곡되니 날짜 전체를
+    뺀다 — README 미해결 사항 참고(생활인구 검증 전까지 정밀 보정 대신 택한 절충안).
+    """
+    key = pd.MultiIndex.from_frame(games[["date", "stadium"]])
+    return games[~key.isin(doubleheader_keys)].reset_index(drop=True)
+
+
 def save_parquet(df: pd.DataFrame, filename: str) -> Path:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     out_path = PROCESSED_DIR / filename
@@ -131,6 +160,15 @@ def main() -> None:
         f"저장 완료: {seoul_metro_path} ({len(seoul_metro):,}경기, "
         f"관중수 매칭 {seoul_metro_matched:,}건, "
         f"전국 대비 {len(seoul_metro) / len(merged):.1%})"
+    )
+
+    dh_keys = identify_doubleheader_keys(crowd)
+    no_dh = drop_doubleheader_days(seoul_metro, dh_keys)
+    no_dh_path = save_parquet(no_dh, "kbo_games_seoul_metro_no_doubleheader.parquet")
+    dropped = len(seoul_metro) - len(no_dh)
+    print(
+        f"저장 완료: {no_dh_path} ({len(no_dh):,}경기, "
+        f"더블헤더 {len(dh_keys)}일치 {dropped}경기 제외)"
     )
 
 

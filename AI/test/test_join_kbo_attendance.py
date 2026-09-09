@@ -1,8 +1,10 @@
 import pandas as pd
 
 from DATA_ENGINE.eda.join_kbo_attendance import (
+    drop_doubleheader_days,
     duplicate_group_inventory,
     filter_seoul_metro_games,
+    identify_doubleheader_keys,
     join_kbo_attendance,
     report_team_order,
 )
@@ -104,6 +106,45 @@ def test_filter_seoul_metro_games_keeps_only_target_stadiums_regardless_of_home_
 
     assert len(result) == 1
     assert result.iloc[0]["stadium"] == "잠실"
+
+
+def test_identify_doubleheader_keys_finds_multi_game_days():
+    crowd = pd.DataFrame(
+        [
+            _crowd_row("2024-04-21", "잠실", "두산", "키움", 13745),
+            _crowd_row("2024-04-21", "잠실", "두산", "키움", 6197),
+            _crowd_row("2024-04-02", "잠실", "LG", "한화", 15000),
+        ]
+    )
+
+    keys = identify_doubleheader_keys(crowd)
+
+    assert list(keys) == [("2024-04-21", "잠실")]
+
+
+def test_drop_doubleheader_days_removes_both_games_of_flagged_dates():
+    games = pd.DataFrame(
+        [
+            _games_row("2024-04-21", "잠실", "키움", "두산"),
+            _games_row("2024-04-21", "잠실", "키움", "두산"),
+            _games_row("2024-04-02", "잠실", "한화", "LG"),
+        ]
+    )
+    dh_keys = pd.MultiIndex.from_tuples([("2024-04-21", "잠실")])
+
+    result = drop_doubleheader_days(games, dh_keys)
+
+    assert len(result) == 1
+    assert result.iloc[0]["date"] == "2024-04-02"
+
+
+def test_drop_doubleheader_days_keeps_everything_when_no_doubleheaders():
+    games = pd.DataFrame([_games_row("2024-04-02", "잠실", "한화", "LG")])
+    dh_keys = pd.MultiIndex.from_tuples([], names=["date", "stadium"])
+
+    result = drop_doubleheader_days(games, dh_keys)
+
+    assert len(result) == 1
 
 
 def test_duplicate_group_inventory_flags_more_than_two_same_matchup():
