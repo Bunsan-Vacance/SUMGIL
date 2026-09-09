@@ -27,7 +27,8 @@ public final class RouteMapper {
             String fromStationId,
             String toStationId,
             String routeId,
-            long seconds
+            long seconds,
+            TravelMode mode
     ) {
     }
 
@@ -168,6 +169,9 @@ public final class RouteMapper {
             if (segment == null || segment.fromStationId() == null || segment.toStationId() == null) {
                 throw new IllegalArgumentException("이동의 역 ID가 비어 있다");
             }
+            if (segment.mode() == null) {
+                throw new IllegalArgumentException("이동의 수단이 비어 있다");
+            }
             if (segment.seconds() < 0) {
                 throw new IllegalArgumentException("이동의 소요 시간이 음수이다");
             }
@@ -208,10 +212,13 @@ public final class RouteMapper {
         StationInfo to = requireStation(stationsById, last.toStationId());
         long sum = 0;
         for (EngineSegment segment : group) {
+            if (segment.mode() == null || segment.mode() != first.mode()) {
+                throw new IllegalArgumentException("묶음 안의 수단이 다르다");
+            }
             sum += segment.seconds();
         }
         return new RouteLegResponse(
-                TravelMode.SUBWAY,
+                first.mode(),
                 from.stationId(), from.name(), from.lat(), from.lng(),
                 to.stationId(), to.name(), to.lat(), to.lng(),
                 first.routeId(),
