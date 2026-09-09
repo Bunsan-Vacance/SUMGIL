@@ -16,7 +16,14 @@ import org.junit.jupiter.api.Test;
  */
 class SubwayGraphBuilderDirectedTest {
 
-    private final SubwayGraphBuilder builder = new SubwayGraphBuilder(Map.of("신촌|1063", "신촌_경의중앙"));
+    // 동명이역 신촌: 2호선은 이름 그대로, 경의중앙선은 별도 ID 로 가르는 표 (나머지는 이름 = ID)
+    private final SubwayGraphBuilder builder = new SubwayGraphBuilder(StationIdTable.from(List.of(
+            idRow("응암", "1006:"), idRow("역촌", "1006:"), idRow("불광", "1006:"), idRow("강남", "1002:"), idRow("역삼", "1002:"),
+            idRow("서강대", "1063:"), idRow("신촌", "1002:"), Map.of("station_id", "신촌_경의중앙", "name", "신촌", "codes", "1063:", "source", "assigned"))));
+
+    private static Map<String, String> idRow(String name, String codes) {
+        return Map.of("station_id", name, "name", name, "codes", codes, "source", "timetable");
+    }
 
     private final List<DirectedSegment> directed = List.of(
             new DirectedSegment("1006", "응암", "역촌", 120, "timetable"),

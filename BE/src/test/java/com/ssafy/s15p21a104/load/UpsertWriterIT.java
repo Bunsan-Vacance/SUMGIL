@@ -40,6 +40,7 @@ class UpsertWriterIT {
     private static final String B = "IT_B";
     private static final String C = "IT_C";
     private static final String D = "IT_D";
+    private static final String E = "IT_E";
     private static final String STOP = "IT_STOP";
     private static final String ROUTE = "IT_ROUTE";
     private static final String RENT = "IT_ST-1";
@@ -56,8 +57,8 @@ class UpsertWriterIT {
         jdbc.update("DELETE FROM bus_route WHERE route_id = ?", ROUTE);
         jdbc.update("DELETE FROM bike_station WHERE rental_id IN (?, ?)", RENT, RENT + "2");
         jdbc.update("DELETE FROM edge_time WHERE route_id = ?", L);
-        jdbc.update("DELETE FROM transfer_meta WHERE station_id IN (?, ?, ?, ?)", A, B, C, D);
-        jdbc.update("DELETE FROM station WHERE station_id IN (?, ?, ?, ?)", A, B, C, D);
+        jdbc.update("DELETE FROM transfer_meta WHERE station_id IN (?, ?, ?, ?, ?)", A, B, C, D, E);
+        jdbc.update("DELETE FROM station WHERE station_id IN (?, ?, ?, ?, ?)", A, B, C, D, E);
         jdbc.update("DELETE FROM line WHERE line_id = ?", L);
     }
 
@@ -123,15 +124,19 @@ class UpsertWriterIT {
     }
 
     @Test
-    @DisplayName("prune: 덮는 노선에서 이번 실행에 없는 엣지 행과 고아 역만 지우고, 환승에 걸린 역은 남긴다")
-    void pruneRemovesStaleEdgesAndOrphanStations() {
+    @DisplayName("prune: 덮는 노선에서 이번 실행에 없는 엣지 행, 이번 실행에 없는 역의 환승 행, 고아 역을 지우고 — 이번 실행에 있는 역의 환승은 남긴다")
+    void pruneRemovesStaleEdgesTransfersAndOrphanStations() {
         writer.upsertLines(List.of(new LineRow(L, "IT 노선")));
         writer.upsertStations(List.of(
                 new StationRow(A, "가", null, null, Set.of(L)),
                 new StationRow(B, "나", null, null, Set.of(L)),
                 new StationRow(C, "고아", null, null, Set.of(L)),
-                new StationRow(D, "환승만", null, null, Set.of(L))));
-        writer.upsertTransfers(List.of(new TransferMetaRow(D, L, "IT_L2", 90, "extract")));
+                new StationRow(D, "환승만", null, null, Set.of(L)),
+                new StationRow(E, "옛이름", null, null, Set.of(L))));
+        // D 는 이번 실행에도 있는 역(kept) → 환승 유지. E 는 개명 전 ID 처럼 이번 실행에 없는 역 → 환승·역 모두 삭제
+        writer.upsertTransfers(List.of(
+                new TransferMetaRow(D, L, "IT_L2", 90, "extract"),
+                new TransferMetaRow(E, L, "IT_L2", 90, "extract")));
         writer.upsertEdgeTimes(EdgeTimeExpander.expandAll(List.of(
                 new EdgeRow(A, B, "SUBWAY", L, 100, "timetable"),
                 new EdgeRow(B, A, "SUBWAY", L, 100, "timetable"))), UpsertWriter.WriteMode.BATCH);
@@ -140,11 +145,14 @@ class UpsertWriterIT {
 
         assertEquals(1, result.staleEdges());
         assertEquals(144, result.deletedEdgeRows());
-        assertEquals(List.of(C), result.deletedStationIds());
+        assertEquals(1, result.deletedTransferRows());
+        assertEquals(List.of(C, E), result.deletedStationIds());
         assertEquals(144, count("edge_time", "route_id = ?", L));
         assertEquals(0, count("edge_time", "route_id = ? AND from_node = ?", L, B));
-        assertEquals(0, count("station", "station_id = ?", C));
+        assertEquals(0, count("station", "station_id IN (?, ?)", C, E));
+        assertEquals(0, count("transfer_meta", "station_id = ?", E));
         assertEquals(1, count("station", "station_id = ?", D));
+        assertEquals(1, count("transfer_meta", "station_id = ?", D));
     }
 
     @Test
