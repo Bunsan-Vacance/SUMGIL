@@ -132,9 +132,9 @@ public class StaticLoadRunner implements ApplicationRunner {
         }
         TrainTimetableParser.Result tt = timetable.finish();
         var st = tt.stats();
-        log.info("시각표: {} 행 · 완행 열차 {} (급행 {} 제외) · 방향 구간 {} · 이상치 {} · 건너뜀 {} · 노선 {} ({} ms)",
-                st.rows(), st.trains(), st.expressTrains(), tt.segments().size(), st.anomalies(), st.skippedRows(),
-                tt.lineIds(), elapsedMs(parseStarted));
+        log.info("시각표: {} 행 · 완행 열차 {} (급행 {} 제외) · 방향 구간 {} · 이상치 {} · 표본 부족 제외 {} · 건너뜀 {} · 노선 {} ({} ms)",
+                st.rows(), st.trains(), st.expressTrains(), tt.segments().size(), st.anomalies(), st.droppedEdges(),
+                st.skippedRows(), tt.lineIds(), elapsedMs(parseStarted));
         logWarnings("시각표 파싱", timetable.warnings());
 
         // 2) 코레일 거리 구간 — 시각표가 덮는 노선은 제외 (1호선·4호선 코레일 구간도 시각표에 있다)
