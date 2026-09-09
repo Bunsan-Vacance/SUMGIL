@@ -11,6 +11,7 @@ import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.finder.ShortestPathFinder;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
+import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
@@ -22,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -68,9 +70,19 @@ public class RouteSearchService {
                     .map(edge -> new RouteMapper.EngineSegment(
                             edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec()))
                     .toList();
-            Optional<RouteSearchResponse> response = RouteMapper.toResponse(
+            // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다 (104 머지 후 실측으로 교체).
+            List<Long> transferSecs = new ArrayList<>();
+            String currentLine = null;
+            for (Edge edge : found.edges()) {
+                if (currentLine != null && !currentLine.equals(edge.routeId())) {
+                    transferSecs.add(transferRule.cost(0, currentLine, edge.routeId()));
+                }
+                currentLine = edge.routeId();
+            }
+            Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
                     new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
-                    graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM);
+                    graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM,
+                    transferSecs);
             return response.map(this::withGeometry).map(List::of).orElseGet(List::of);
         } catch (DomainException exception) {
             if (exception.getErrorType() == ErrorType.ROUTE_NOT_FOUND) {
