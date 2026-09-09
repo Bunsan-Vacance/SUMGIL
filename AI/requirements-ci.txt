@@ -21,6 +21,7 @@ pydantic-settings
 python-dotenv
 tenacity
 requests
+beautifulsoup4
 
 # ── 테스트 도구 ──
 ruff
