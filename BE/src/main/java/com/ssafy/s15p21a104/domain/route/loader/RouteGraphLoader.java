@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 
@@ -46,6 +47,21 @@ public final class RouteGraphLoader {
      * @throws DomainException SUBWAY 행이 0개일 때
      */
     public static LoadResult load(RouteGraphRawData rawData) {
+        return load(rawData, List.of());
+    }
+
+    /**
+     * 원시 SUBWAY 행·이름 데이터에 추가 엣지(예: BIKE)를 합쳐 조립한다.
+     *
+     * <p>추가 엣지도 같은 규칙(행 1개 = 유향 엣지 1개, 소속 노선 파생)으로 합쳐진다.
+     * SUBWAY 행 검증(0개면 실패)은 그대로 적용된다.
+     *
+     * @param rawData SUBWAY 행(대표 슬롯 필터 후)·역·노선 이름
+     * @param extraEdges 합칠 추가 엣지. null·빈 목록 허용
+     * @return 로드 결과(조립된 불변 그래프와 이름 매핑)
+     * @throws DomainException SUBWAY 행이 0개일 때
+     */
+    public static LoadResult load(RouteGraphRawData rawData, List<Edge> extraEdges) {
         List<RouteEdgeRow> rows = rawData == null ? null : rawData.subwayEdges();
         if (rows == null || rows.isEmpty()) {
             log.error("지하철 메모리 그래프 로드 실패: SUBWAY 행이 0개이다.");
@@ -57,21 +73,13 @@ public final class RouteGraphLoader {
         Map<String, Set<String>> stationLines = new LinkedHashMap<>();
 
         for (RouteEdgeRow row : rows) {
-            Edge edge = toEdge(row);
-
-            // 정점: 출발·도착 역 ID를 각각 정점으로 등록(중복은 집합이 흡수).
-            nodes.add(edge.fromNode());
-            nodes.add(edge.toNode());
-
-            // 인접 리스트: 출발 역의 나가는 엣지 목록.
-            adjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>())
-                    .add(edge);
-
-            // 역 소속 노선 파생: 해당 구간을 잇는 엣지의 routeId.
-            stationLines.computeIfAbsent(edge.fromNode(), key -> new LinkedHashSet<>())
-                    .add(edge.routeId());
-            stationLines.computeIfAbsent(edge.toNode(), key -> new LinkedHashSet<>())
-                    .add(edge.routeId());
+            addEdge(toEdge(row), nodes, adjacency, stationLines);
+        }
+        if (extraEdges != null) {
+            for (Edge edge : extraEdges) {
+                Objects.requireNonNull(edge, "extraEdge");
+                addEdge(edge, nodes, adjacency, stationLines);
+            }
         }
 
         RouteGraph graph = RouteGraph.of(nodes, adjacency, stationLines);
@@ -80,6 +88,24 @@ public final class RouteGraphLoader {
         log.info("지하철 메모리 그래프 로드 완료: 역 {}개, 엣지 {}개", graph.nodeCount(), graph.edgeCount());
 
         return new LoadResult(graph, nameMapper);
+    }
+
+    private static void addEdge(Edge edge, Set<String> nodes,
+                                Map<String, List<Edge>> adjacency,
+                                Map<String, Set<String>> stationLines) {
+        // 정점: 출발·도착 ID를 각각 정점으로 등록(중복은 집합이 흡수).
+        nodes.add(edge.fromNode());
+        nodes.add(edge.toNode());
+
+        // 인접 리스트: 출발 정점의 나가는 엣지 목록.
+        adjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>())
+                .add(edge);
+
+        // 소속 노선 파생: 해당 구간을 잇는 엣지의 routeId.
+        stationLines.computeIfAbsent(edge.fromNode(), key -> new LinkedHashSet<>())
+                .add(edge.routeId());
+        stationLines.computeIfAbsent(edge.toNode(), key -> new LinkedHashSet<>())
+                .add(edge.routeId());
     }
 
     private static Edge toEdge(RouteEdgeRow row) {

@@ -1,5 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
+import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.loader.RouteEdgeRow;
 import com.ssafy.s15p21a104.domain.route.loader.RouteGraphLoader;
@@ -8,6 +10,8 @@ import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteEdgeTimeRepository;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import com.ssafy.s15p21a104.domain.bike.entity.BikeStation;
+import com.ssafy.s15p21a104.domain.bike.repository.BikeStationRepository;
 import com.ssafy.s15p21a104.domain.station.entity.Line;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.entity.TransferMeta;
@@ -35,6 +39,7 @@ public class RouteGraphRegistry {
     private final StationRepository stationRepository;
     private final RouteLineRepository lineRepository;
     private final TransferMetaRepository transferMetaRepository;
+    private final BikeStationRepository bikeStationRepository;
 
     private RouteGraph graph;
     private Map<String, RouteMapper.StationInfo> stationInfos = Map.of();
@@ -43,11 +48,13 @@ public class RouteGraphRegistry {
     public RouteGraphRegistry(RouteEdgeTimeRepository edgeTimeRepository,
                               StationRepository stationRepository,
                               RouteLineRepository lineRepository,
-                              TransferMetaRepository transferMetaRepository) {
+                              TransferMetaRepository transferMetaRepository,
+                              BikeStationRepository bikeStationRepository) {
         this.edgeTimeRepository = edgeTimeRepository;
         this.stationRepository = stationRepository;
         this.lineRepository = lineRepository;
         this.transferMetaRepository = transferMetaRepository;
+        this.bikeStationRepository = bikeStationRepository;
     }
 
     @PostConstruct
@@ -65,8 +72,23 @@ public class RouteGraphRegistry {
             for (Line line : lineRepository.findAll()) {
                 lineNames.put(line.getLineId(), line.getName());
             }
-            RouteGraphLoader.LoadResult result =
-                    RouteGraphLoader.load(new RouteGraphRawData(rows, stationNames, lineNames));
+            Map<String, BikeEdgeBuilder.Stop> stops = new HashMap<>();
+            Map<String, BikeEdgeBuilder.Stop> rentals = new HashMap<>();
+            for (Station station : stationRepository.findAll()) {
+                stops.put(station.getStationId(), new BikeEdgeBuilder.Stop(
+                        station.getStationId(), station.getLat(), station.getLng()));
+            }
+            int rentalTotal = 0;
+            for (BikeStation rental : bikeStationRepository.findAll()) {
+                rentalTotal++;
+                rentals.put(rental.getRentalId(), new BikeEdgeBuilder.Stop(
+                        rental.getRentalId(), rental.getLat(), rental.getLng()));
+                infos.put(rental.getRentalId(), new RouteMapper.StationInfo(
+                        rental.getRentalId(), rental.getName(), rental.getLat(), rental.getLng()));
+            }
+            List<Edge> bikeEdges = BikeEdgeBuilder.build(stops, rentals);
+            RouteGraphLoader.LoadResult result = RouteGraphLoader.load(
+                    new RouteGraphRawData(rows, stationNames, lineNames), bikeEdges);
             this.graph = result.graph();
             this.stationInfos = Map.copyOf(infos);
             Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
@@ -77,8 +99,9 @@ public class RouteGraphRegistry {
                         meta.getId().getToLine()), meta.getWalkSec());
             }
             this.transferTimes = Map.copyOf(times);
-            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건",
-                    graph.nodeCount(), graph.edgeCount(), transferTimes.size());
+            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건, 대여소 {}곳·자전거 엣지 {}개",
+                    graph.nodeCount(), graph.edgeCount(), transferTimes.size(),
+                    rentalTotal, bikeEdges.size());
         } catch (DomainException e) {
             log.warn("탐색 그래프 없음(미적재). 그래프 로드 후 재기동하면 알고리즘 경로로 동작한다: {}",
                     e.getMessage());
