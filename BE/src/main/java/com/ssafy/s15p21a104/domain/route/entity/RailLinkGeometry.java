@@ -52,4 +52,13 @@ public class RailLinkGeometry {
 
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
+
+    /** 테스트 전용 — BFS 경로 탐색 로직을 실제 JPA/DB 없이 검증하기 위함. */
+    public RailLinkGeometry(String linkId, String fromNodeId, String toNodeId, String lineId, String geometry) {
+        this.linkId = linkId;
+        this.fromNodeId = fromNodeId;
+        this.toNodeId = toNodeId;
+        this.lineId = lineId;
+        this.geometry = geometry;
+    }
 }

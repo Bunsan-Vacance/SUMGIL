@@ -131,7 +131,9 @@ public final class RouteMapper {
                 from.stationId(), from.name(), from.lat(), from.lng(),
                 to.stationId(), to.name(), to.lat(), to.lng(),
                 first.routeId(),
-                sum / 60.0
+                sum / 60.0,
+                // KTDB geometry는 RouteMapper가 모른다(DB 비의존 순수 함수) — RouteSearchService가 후처리로 채운다.
+                null, "unavailable"
         );
     }
 
