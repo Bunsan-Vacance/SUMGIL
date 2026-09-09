@@ -63,8 +63,98 @@ public final class RouteMapper {
             RouteType routeType,
             RouteSource source
     ) {
-        if (enginePath == null || enginePath.segments() == null || enginePath.segments().isEmpty()) {
+        List<EngineSegment> segments = validate(enginePath, stationsById, routeType, source);
+        if (segments == null) {
             return Optional.empty();
+        }
+
+        List<RouteLegResponse> legs = splitLegs(segments, stationsById);
+        if (legs.size() - 1 != enginePath.transferCount()) {
+            throw new IllegalArgumentException("환승 횟수와 노선 전환 경계가 일치하지 않는다");
+        }
+
+        double totalMinutes = enginePath.totalSeconds() / 60.0;
+        return Optional.of(new RouteSearchResponse(routeType, totalMinutes, List.copyOf(legs), source));
+    }
+
+    /**
+     * 엔진 경로 하나를 최종 응답 하나로 바꾼다. 노선 전환 경계마다 환승 도보 leg를 끼운다.
+     *
+     * <p>기존 {@link #toResponse}는 바꾸지 않는다. 환승 1회 경로는 legs 3개
+     * (SUBWAY·TRANSFER·SUBWAY)로 나온다. TRANSFER leg의 출발·도착은 환승역 자신이다.
+     *
+     * @param enginePath 엔진 탐색 결과(가짜 결과 주입 가능)
+     * @param stationsById 역 표시 정보(역 ID 기준)
+     * @param routeType 응답에 적을 경로 유형(호출자가 정한다)
+     * @param source 응답에 적을 출처(호출자가 주입한다)
+     * @param transferSeconds 경계 순서대로 환승 소요 초. 크기는 환승 횟수와 같아야 한다
+     * @return 경로가 없으면 비어 있음(상위 계층에서 빈 배열 응답으로 구분)
+     */
+    public static Optional<RouteSearchResponse> toResponseWithTransfers(
+            EnginePath enginePath,
+            Map<String, StationInfo> stationsById,
+            RouteType routeType,
+            RouteSource source,
+            List<Long> transferSeconds
+    ) {
+        List<EngineSegment> segments = validate(enginePath, stationsById, routeType, source);
+        if (segments == null) {
+            return Optional.empty();
+        }
+        Objects.requireNonNull(transferSeconds, "transferSeconds");
+        if (transferSeconds.size() != enginePath.transferCount()) {
+            throw new IllegalArgumentException("환승 횟수와 환승 시간 개수가 일치하지 않는다");
+        }
+        for (Long seconds : transferSeconds) {
+            if (seconds == null || seconds < 0) {
+                throw new IllegalArgumentException("환승 소요 시간이 음수이다");
+            }
+        }
+
+        List<RouteLegResponse> legs = new ArrayList<>();
+        int start = 0;
+        int boundary = 0;
+        for (int i = 1; i <= segments.size(); i++) {
+            boolean changed = i == segments.size()
+                    || !Objects.equals(segments.get(i).routeId(), segments.get(start).routeId());
+            if (!changed) {
+                continue;
+            }
+            legs.add(toLeg(segments.subList(start, i), stationsById));
+            if (i < segments.size()) {
+                legs.add(transferLeg(segments.get(i).fromStationId(), stationsById,
+                        transferSeconds.get(boundary)));
+                boundary++;
+            }
+            start = i;
+        }
+        if (boundary != enginePath.transferCount()) {
+            throw new IllegalArgumentException("환승 횟수와 노선 전환 경계가 일치하지 않는다");
+        }
+
+        double totalMinutes = enginePath.totalSeconds() / 60.0;
+        return Optional.of(new RouteSearchResponse(routeType, totalMinutes, List.copyOf(legs), source));
+    }
+
+    /** 환승역 자신의 출발·도착으로 환승 도보 leg를 만든다. */
+    private static RouteLegResponse transferLeg(
+            String stationId, Map<String, StationInfo> stationsById, long seconds) {
+        StationInfo info = requireStation(stationsById, stationId);
+        return new RouteLegResponse(
+                TravelMode.TRANSFER,
+                info.stationId(), info.name(), info.lat(), info.lng(),
+                info.stationId(), info.name(), info.lat(), info.lng(),
+                null, seconds / 60.0,
+                null, "unavailable");
+    }
+
+    private static List<EngineSegment> validate(
+            EnginePath enginePath,
+            Map<String, StationInfo> stationsById,
+            RouteType routeType,
+            RouteSource source) {
+        if (enginePath == null || enginePath.segments() == null || enginePath.segments().isEmpty()) {
+            return null;
         }
         Objects.requireNonNull(stationsById, "stationsById");
         Objects.requireNonNull(routeType, "routeType");
@@ -90,13 +180,7 @@ public final class RouteMapper {
             }
         }
 
-        List<RouteLegResponse> legs = splitLegs(segments, stationsById);
-        if (legs.size() - 1 != enginePath.transferCount()) {
-            throw new IllegalArgumentException("환승 횟수와 노선 전환 경계가 일치하지 않는다");
-        }
-
-        double totalMinutes = enginePath.totalSeconds() / 60.0;
-        return Optional.of(new RouteSearchResponse(routeType, totalMinutes, List.copyOf(legs), source));
+        return segments;
     }
 
     /** 노선 전환 지점을 경계로 이동들을 묶어 구간 응답으로 바꾼다. */
