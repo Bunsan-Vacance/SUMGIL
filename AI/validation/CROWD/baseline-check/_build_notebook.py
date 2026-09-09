@@ -139,18 +139,47 @@ cells.append(
     )
 )
 
-cells.append(nbf.v4.new_markdown_cell("""## 4. 정리
+cells.append(nbf.v4.new_markdown_cell("""## 4. 이벤트 × 역 · 시간대 상호작용
+
+이벤트 컬럼만으로는 개선이 미미했다(3.1절) — `game_count`가 희소한 이진성 변수라 트리가
+배울 수 있는 조건부 평균이 몇 종류 안 됐기 때문이다. `diagnose_residuals.py`가 종합운동장·
+잠실·월드컵경기장(성산) 같은 소수 역에 잔차가 몰려 있다고 짚었으니, `station_no`(그리고
+`time_slot`)를 이벤트 컬럼과 같이 넣어 "어느 역·어느 시간대의 이벤트가 크게 작동하는지"를
+모델이 직접 가르게 한다.
+
+**2절과 무엇이 다른가**: 2절은 `station_no`를 유일한 정보원으로 삼아 요일유형×역×시간대
+전체(약 2만 개 조합)를 트리가 재현하려다 실패했다. 여기서는 잔차(이미 그 큰 구조를 뺀 값)에
+대해 `station_no`를 이벤트 컬럼과만 결합하므로, 외워야 할 조합의 종류가 훨씬 적다."""))
+cells.append(
+    nbf.v4.new_code_cell(
+        'events_station_result = compare("events_station")\nevents_station_result.round(2)'
+    )
+)
+cells.append(nbf.v4.new_markdown_cell("### 4.1 + `time_slot`까지"))
+cells.append(
+    nbf.v4.new_code_cell(
+        'events_station_time_result = compare("events_station_time")\n'
+        "events_station_time_result.round(2)"
+    )
+)
+
+cells.append(nbf.v4.new_markdown_cell("""## 5. 정리
 
 - **원본 범주형 직접 예측(2절)**: 세 모델 다 베이스라인보다 나빴다(RMSE -11~-47%p) — 트리
   모델의 근사 범주형 분할이 lookup 테이블만큼 정확하지 않다는 뜻이라 폐기했다.
-- **이벤트만**: 세 모델 다 베이스라인 대비 RMSE 소폭 개선(+0.1%대) — 방향은 맞지만 절대
-  개선폭은 미미하다. `game_count`·`festival_count`가 극히 희소한 이진성 변수라(연 10,200건/
-  123,360건 vs 전체 199만건) 트리가 학습할 수 있는 조건부 평균이 몇 종류 안 되기 때문이다.
-- **기상까지 추가**: 오히려 악화(-0.3~4%p). 잔차와 상관이 없던 변수를 더하면 모델이 노이즈에
-  과적합한다는 뜻 — `run_baseline.py`의 상관 분석 결과와 일관된다.
-- **다음 후보**: 이벤트 자체보다 "이벤트 × 역"·"이벤트 × 시간대" 같은 상호작용을 명시적으로
-  만들어주거나(`diagnose_residuals.py`가 짚은 종합운동장·잠실·월드컵경기장 쏠림), 관중수
-  (`game_attendance`, 결측 많음)를 이진 유무 대신 크기로 반영하는 쪽이 더 유망하다."""))
+- **이벤트만(3.1절)**: 세 모델 다 베이스라인 대비 RMSE 소폭 개선(+0.1%대) — 방향은 맞지만
+  절대 개선폭은 미미하다. `game_count`·`festival_count`가 극히 희소한 이진성 변수라(연
+  10,200건/123,360건 vs 전체 199만건) 트리가 학습할 수 있는 조건부 평균이 몇 종류 안 된다.
+- **기상까지 추가(3.2절)**: 오히려 악화(-0.3~4%p). 잔차와 상관이 없던 변수를 더하면 모델이
+  노이즈에 과적합한다는 뜻 — `run_baseline.py`의 상관 분석 결과와 일관된다.
+- **이벤트 × 역(4절)**: LightGBM·XGBoost가 +0.45~0.50%로 개선폭이 커졌다(RandomForest는
+  -0.4%대로 오히려 나빠짐 — station_no를 서수 인코딩하는 방식이 고카디널리티에서 불리하기
+  때문으로 보인다).
+- **이벤트 × 역 × 시간대(4.1절)**: LightGBM·XGBoost가 +1.2~1.5%로 더 개선됐다 — 종합운동장·
+  잠실·월드컵경기장(성산) 쏠림이 실제로 "이벤트가 특정 역·특정 시간대에 크게 작동한다"는
+  상호작용이었다는 뜻이다. 남은 4% 중 약 1.5%p(전체의 30%대)를 이 상호작용만으로 회수했다.
+- **다음 후보**: `game_attendance`(결측 많은 연속값)를 이진 유무 대신 규모로 반영하면 더
+  줄어들지 확인. RandomForest는 서수 인코딩 한계가 뚜렷해 후보에서 제외를 고려할 만하다."""))
 
 nb["cells"] = cells
 nb["metadata"] = {

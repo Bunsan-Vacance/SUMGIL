@@ -16,6 +16,13 @@ day_type·time_slot은 잔차 자체가 이미 그 축의 평균을 뺀 값이�
 
 `FEATURE_SETS`는 키 하나만 바꾸면 피처 조합을 스왑할 수 있게 하는 중앙 레지스트리다
 (`validation/README.md` 관례).
+
+**`events_station*` 세트는 왜 `station_no`를 다시 넣어도 안전한가**: 위에서 뺀 이유는
+"day_type×station_no×time_slot 조합 전체를 모델이 다시 외우려다 실패해서"였다. 여기서는
+`station_no`를 이벤트 컬럼과만 결합한다 — `diagnose_residuals.py`가 짚은 종합운동장·잠실·
+월드컵경기장(성산) 같은 소수 역만 game_count>0에서 갈라지면 되므로, 통으로 외워야 하는
+2만 개 조합과는 학습 난이도가 다르다. 그래도 트리가 역 자체의 잡음(이벤트와 무관한 역별
+평균 차이)을 다시 외우는 방향으로 새는지는 결과로 확인해야 한다.
 """
 
 from __future__ import annotations
@@ -24,14 +31,26 @@ import pandas as pd
 
 WEATHER_COLS = ["temp_c", "precip_mm", "wind_ms", "humidity_pct", "snow_cm"]
 EVENT_COLS = ["game_count", "festival_count"]
+CATEGORICAL_COLS = ["station_no", "time_slot"]
 
 FEATURE_SETS: dict[str, list[str]] = {
     "weather": WEATHER_COLS,
     "events": EVENT_COLS,
     "weather_events": WEATHER_COLS + EVENT_COLS,
+    "events_station": EVENT_COLS + ["station_no"],
+    "events_station_time": EVENT_COLS + ["station_no", "time_slot"],
 }
 
 
 def build_matrix(panel: pd.DataFrame, feature_set: str) -> pd.DataFrame:
-    """`feature_set`에 해당하는 컬럼만 골라 돌려준다. 전부 수치형이라 인코딩이 필요 없다."""
-    return panel[FEATURE_SETS[feature_set]].copy()
+    """`feature_set`에 해당하는 컬럼만 골라 돌려준다.
+
+    `station_no`·`time_slot`이 포함된 세트는 category dtype으로 캐스팅한다(`models.py`가
+    모델별로 처리). 기상·이벤트 원본 컬럼은 전부 수치형이라 그대로 둔다.
+    """
+    cols = FEATURE_SETS[feature_set]
+    X = panel[cols].copy()
+    for col in CATEGORICAL_COLS:
+        if col in X.columns:
+            X[col] = X[col].astype("category")
+    return X
