@@ -26,8 +26,11 @@ public final class TrainTimetableParser {
     private static final int EXAMPLE_LIMIT = 10;
     private static final Pattern HMS = Pattern.compile("^(\\d{1,2}):(\\d{2}):(\\d{2})$");
 
-    /** @param rows 받은 행 수, trains 완행 열차 수, expressTrains 제외한 급행 열차 수, anomalies 버린 구간 쌍 수, skippedRows 호선·요일·시각 표기 문제로 건너뛴 행 수 */
-    public record Stats(int rows, int trains, int expressTrains, int anomalies, int skippedRows) {
+    /**
+     * @param rows 받은 행 수, trains 완행 열차 수, expressTrains 제외한 급행 열차 수, anomalies 버린 구간 쌍 수,
+     *             skippedRows 호선·요일·시각 표기 문제로 건너뛴 행 수, droppedEdges 표본이 모자라 버린 구간 수
+     */
+    public record Stats(int rows, int trains, int expressTrains, int anomalies, int skippedRows, int droppedEdges) {
     }
 
     /** @param slotWaits "lineId|출발역|도착역"(정규화 역명) → 요일×슬롯 기대 대기, lineIds 시각표가 덮는 노선 */
@@ -140,7 +143,7 @@ public final class TrainTimetableParser {
             slotWaits.put(e.getKey(), SlotWaits.fromDepartures(e.getValue().departuresByDow));
         }
         return new Result(segments, slotWaits, lineIds,
-                new Stats(rows, trains.size(), expressTrains.size(), anomalies, skippedRows));
+                new Stats(rows, trains.size(), expressTrains.size(), anomalies, skippedRows, 0));
     }
 
     public List<String> warnings() {
