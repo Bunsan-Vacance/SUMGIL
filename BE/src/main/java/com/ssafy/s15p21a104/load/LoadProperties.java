@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * 로더 실행 옵션. 기본값은 application-load.yml 에 있고 명령행 --load.* 로 덮어쓴다.
  *
- * @param sources     적재할 원천 묶음. 현재 "subway" 만 있다
+ * @param sources     적재할 원천 묶음. subway · bus · bike 중 골라 쓴다 (application-load.yml 기본값은 셋 다, 코드 기본값은 subway)
  * @param dryRun      true 면 파싱·검증·건수 출력까지만 하고 DB 에 쓰지 않는다
  * @param writeMode   edge_time 쓰기 방식. ROW 는 성능 비교용 baseline
  * @param region      포함할 line_id 목록. 비어 있으면 전부 (서비스 권역 확정 전 기본값)

@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.load.subway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.load.ValidationReport;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
