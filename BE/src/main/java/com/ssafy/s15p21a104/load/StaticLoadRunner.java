@@ -12,7 +12,12 @@ import com.ssafy.s15p21a104.load.subway.DirectedSegment;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeExpander;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
 import com.ssafy.s15p21a104.load.subway.KorailSegmentParser;
+import com.ssafy.s15p21a104.load.subway.KricStationCoordParser;
+import com.ssafy.s15p21a104.load.subway.KtdbNodeCoordParser;
+import com.ssafy.s15p21a104.load.subway.StationCoordCrossCheck;
+import com.ssafy.s15p21a104.load.subway.StationIdTable;
 import com.ssafy.s15p21a104.load.subway.LineCodes;
+import com.ssafy.s15p21a104.load.subway.LineRow;
 import com.ssafy.s15p21a104.load.subway.LoadValidator;
 import com.ssafy.s15p21a104.load.subway.Segment;
 import com.ssafy.s15p21a104.load.subway.SlotWaits;
@@ -67,7 +72,18 @@ public class StaticLoadRunner implements ApplicationRunner {
     static final String KORAIL_SEGMENTS_FILE = "korail-segments_20240826.csv";
     static final String TRANSFER_FILE = "seoulmetro-transfer_20250331.csv";
     static final String SEOULMETRO_COORDS_FILE = "seoulmetro-station-coords_20250814.csv";
-    static final String LINE9_COORDS_FILE = "kric-line9-station-coords_20250630.csv";
+    /** 국가철도공단 노선별 역위치 (data/subway/kric/). 서울교통공사 좌표가 없는 코레일·연장 구간 역을 채운다. */
+    static final List<String> KRIC_COORD_FILES = List.of(
+            "kric/kric-line1-station-coords_20250630.csv", "kric/kric-line2-station-coords_20251230.csv",
+            "kric/kric-line3-station-coords_20250630.csv", "kric/kric-line4-station-coords_20250630.csv",
+            "kric/kric-line5-station-coords_20250630.csv", "kric/kric-line6-station-coords_20240930.csv",
+            "kric/kric-line7-station-coords_20240930.csv", "kric/kric-line8-station-coords_20250630.csv",
+            "kric/kric-line9-station-coords_20250630.csv", "kric/kric-suin-bundang-station-coords_20250630.csv",
+            "kric/kric-gyeongui-jungang-station-coords_20250630.csv");
+    /** KTDB 철도망 노드(63 에서 도입한 railgeometry 원천을 읽기만 한다). 역위치 파일이 무효인 역의 마지막 보완 원천. */
+    static final String KTDB_NODE_FILE = "data/railgeometry/ktdb-rail-node_2024.csv";
+    static final double COORD_CROSSCHECK_METERS = 500;
+    static final double COORD_REPLACE_METERS = 5000;
     static final String BUS_STOPS_FILE = "seoul-bus-stops_20260902.csv";
     static final String BUS_ROUTE_STOPS_FILE = "seoul-bus-route-stops_20260902.csv";
     static final String BIKE_SNAPSHOT_FILE = "seoul-bike-stations-live_20260909.csv";
@@ -105,10 +121,8 @@ public class StaticLoadRunner implements ApplicationRunner {
             korailOverrides.put(normalizer.normalize(row.get("출발역")) + "|" + normalizer.normalize(row.get("도착역")),
                     List.of(row.get("line_ids").split(";")));
         }
-        Map<String, String> disambiguation = new HashMap<>();
-        for (Map<String, String> row : csv(SUBWAY_DIR, "conf/station-disambiguation.csv").rows()) {
-            disambiguation.put(normalizer.normalize(row.get("역명")) + "|" + row.get("line_id"), row.get("station_id"));
-        }
+        StationIdTable idTable = StationIdTable.from(csv(SUBWAY_DIR, "conf/station-ids.csv").rows());
+        log.info("역 ID 표: {} 역 (conf/station-ids.csv — 서울교통공사 역번호, 코레일 전용 역은 9001~)", idTable.size());
 
         // 1) 시각표 (42만 행, 스트리밍)
         long parseStarted = System.nanoTime();
@@ -148,22 +162,25 @@ public class StaticLoadRunner implements ApplicationRunner {
             log.info("권역 필터 적용: {}", props.region());
         }
 
-        SubwayGraph graph = new SubwayGraphBuilder(disambiguation).build(directed, korailSegments, transfers, coords, waits);
+        SubwayGraph graph = new SubwayGraphBuilder(idTable).build(directed, korailSegments, transfers, coords, waits);
         ValidationReport report = LoadValidator.validate(graph);
         logWarningsGrouped("검증", report.warnings());
         long noCoords = graph.stations().stream().filter(s -> s.lat() == null).count();
         log.info("그래프: 노선 {} · 역 {} (좌표 없음 {}) · 환승 {} · 엣지 {} (슬롯 대기 있음 {}) · edge_time 예정 {}",
                 graph.lines().size(), graph.stations().size(), noCoords, graph.transfers().size(),
                 graph.edges().size(), graph.slotWaits().size(), graph.edges().size() * 144);
+        logCoordSourceSummary(graph);
         if (!abortIfErrors("지하철", report)) {
             return;
         }
 
         Set<String> keptEdgeKeys = graph.edges().stream().map(EdgeTimeExpander::edgeKey).collect(Collectors.toSet());
         Set<String> keptStationIds = graph.stations().stream().map(StationRow::stationId).collect(Collectors.toSet());
+        // prune 범위는 이번 그래프의 모든 노선 — 시각표 노선뿐 아니라 코레일 거리 구간(1063·1075)의 옛 행도 정리한다
+        Set<String> coveredLines = graph.lines().stream().map(LineRow::lineId).collect(Collectors.toSet());
         if (props.dryRun()) {
             if (props.prune()) {
-                var preview = writer.pruneSubway(tt.lineIds(), keptEdgeKeys, keptStationIds, true);
+                var preview = writer.pruneSubway(coveredLines, keptEdgeKeys, keptStationIds, true);
                 log.info("prune 예정: 시각표 노선에서 사라지는 엣지 {}개 — {}", preview.staleEdges(), head(preview.staleEdgeKeys()));
             }
             dryRun("지하철", started);
@@ -176,9 +193,9 @@ public class StaticLoadRunner implements ApplicationRunner {
         List<EdgeTimeRow> edgeTimes = EdgeTimeExpander.expandAll(graph.edges(), graph.slotWaits());
         timed("edge_time[" + props.writeMode() + "]", () -> writer.upsertEdgeTimes(edgeTimes, props.writeMode()));
         if (props.prune()) {
-            var pruned = writer.pruneSubway(tt.lineIds(), keptEdgeKeys, keptStationIds, false);
-            log.info("prune: 엣지 {}개 ({} 행) · 고아 역 {}개 삭제 — 엣지 {} · 역 {}", pruned.staleEdges(), pruned.deletedEdgeRows(),
-                    pruned.deletedStationIds().size(), head(pruned.staleEdgeKeys()), head(pruned.deletedStationIds()));
+            var pruned = writer.pruneSubway(coveredLines, keptEdgeKeys, keptStationIds, false);
+            log.info("prune: 엣지 {}개 ({} 행) · 환승 {} 행 · 고아 역 {}개 삭제 — 엣지 {} · 역 {}", pruned.staleEdges(), pruned.deletedEdgeRows(),
+                    pruned.deletedTransferRows(), pruned.deletedStationIds().size(), head(pruned.staleEdgeKeys()), head(pruned.deletedStationIds()));
         }
         log.info("지하철 적재 완료 ({} ms)", elapsedMs(started));
     }
@@ -258,19 +275,70 @@ public class StaticLoadRunner implements ApplicationRunner {
         log.info("KTDB geometry 적재 완료 ({} ms)", elapsedMs(started));
     }
 
+    /**
+     * 좌표 원천을 우선순위 순서로 잇는다 (빌더는 앞 원천을 먼저 쓴다):
+     * ① 서울교통공사 역사 좌표(1~8호선) → ② 국가철도공단 노선별 역위치(코레일·연장 구간·9호선) → ③ KTDB 노드(②가 무효인 역, 이름 대조).
+     * ②와 ③이 500 m 넘게 어긋나는 역은 경고로 남긴다 — 어느 쪽이 맞는지는 원천이 말해 주지 않는다.
+     */
     private List<StationCoord> readCoords(StationNameNormalizer normalizer) throws IOException {
-        List<StationCoord> coords = new ArrayList<>();
+        List<StationCoord> seoulMetro = new ArrayList<>();
         for (Map<String, String> row : csv(SUBWAY_DIR, SEOULMETRO_COORDS_FILE).rows()) {
-            LineCodes.fromSeoulMetroLine(row.get("호선")).ifPresent(lineId -> coords.add(new StationCoord(
+            LineCodes.fromSeoulMetroLine(row.get("호선")).ifPresent(lineId -> seoulMetro.add(new StationCoord(
                     lineId, normalizer.normalize(row.get("역명")),
                     Double.parseDouble(row.get("위도")), Double.parseDouble(row.get("경도")),
                     row.get("고유역번호(외부역코드)"))));
         }
-        for (Map<String, String> row : csv(SUBWAY_DIR, LINE9_COORDS_FILE).rows()) {
-            coords.add(new StationCoord("1009", normalizer.normalize(row.get("역명")),
-                    Double.parseDouble(row.get("위도")), Double.parseDouble(row.get("경도")), null));
+        var kricParser = new KricStationCoordParser(normalizer);
+        List<StationCoord> kric = new ArrayList<>();
+        for (String file : KRIC_COORD_FILES) {
+            kric.addAll(kricParser.parse(csv(SUBWAY_DIR, file).rows()));
         }
+        logWarnings("역위치 파싱", kricParser.warnings());
+        List<StationCoord> ktdb = new KtdbNodeCoordParser(normalizer).parse(
+                CsvTable.parse(new ClassPathResource(KTDB_NODE_FILE).getContentAsString(StandardCharsets.UTF_8)).rows());
+
+        // 서울교통공사 좌표가 있는 역은 그 값을 쓰므로, 실제로 쓰일 국가철도공단 좌표(그 밖의 역)만 KTDB 와 대조한다.
+        // 5 km 를 넘게 어긋나면 국가철도공단 파일의 오기로 보고 빼서 KTDB 가 채우게 하고, 500 m~5 km 는 유지하되 검토 목록으로 남긴다.
+        Set<String> seoulNames = seoulMetro.stream().map(StationCoord::stationName).collect(Collectors.toSet());
+        List<StationCoord> kricUsed = kric.stream().filter(c -> !seoulNames.contains(c.stationName())).toList();
+        List<StationCoord> kricCovered = kric.stream().filter(c -> seoulNames.contains(c.stationName())).toList();
+        var check = StationCoordCrossCheck.resolve(kricUsed, ktdb, COORD_CROSSCHECK_METERS, COORD_REPLACE_METERS);
+        logWarnings("좌표 교차검증", check.warnings());
+        log.info("좌표 원천: 서울교통공사 {} · 국가철도공단 역위치 {} (무효 {} 건너뜀, KTDB 로 대체 {}: {}) · KTDB 노드 {} (수도권, 이름별 평균)",
+                seoulMetro.size(), kric.size(), kricParser.skipped(), check.replaced().size(), String.join(", ", check.replaced()), ktdb.size());
+
+        List<StationCoord> coords = new ArrayList<>(seoulMetro);
+        coords.addAll(kricCovered);
+        coords.addAll(check.kept());
+        coords.addAll(ktdb);
+        this.coordSources = List.of(seoulMetro, kric, ktdb);
         return coords;
+    }
+
+    private List<List<StationCoord>> coordSources = List.of();
+
+    /** 역마다 어느 원천의 좌표가 쓰였는지 값으로 되짚어 센다 (빌더는 출처를 남기지 않는다). */
+    private void logCoordSourceSummary(SubwayGraph graph) {
+        String[] labels = {"서울교통공사", "국가철도공단", "KTDB"};
+        int[] counts = new int[labels.length];
+        List<String> ktdbStations = new ArrayList<>();
+        for (StationRow s : graph.stations()) {
+            if (s.lat() == null) {
+                continue;
+            }
+            for (int i = 0; i < coordSources.size(); i++) {
+                boolean hit = coordSources.get(i).stream().anyMatch(c -> c.lat() == s.lat() && c.lng() == s.lng());
+                if (hit) {
+                    counts[i]++;
+                    if (i == 2) {
+                        ktdbStations.add(s.stationId());
+                    }
+                    break;
+                }
+            }
+        }
+        log.info("역 좌표 출처: 서울교통공사 {} · 국가철도공단 {} · KTDB {} ({})", counts[0], counts[1], counts[2],
+                String.join(", ", ktdbStations));
     }
 
     private Map<String, String> readPairs(String file, String keyCol, String valueCol) throws IOException {

@@ -17,7 +17,7 @@
 
 | 캐시 | 키 형식 | 예시 | TTL |
 | --- | --- | --- | --- |
-| 역전구간 판정 결과 | `reversal:{originStationId}:{destStationId}:{dowType}:{timeSlot}` | `reversal:0222:0221:0:14` | 30분 |
+| 역전구간 판정 결과 | `reversal:{originStationId}:{destStationId}:{dowType}:{timeSlot}` | `reversal:222:221:0:14` | 30분 |
 | 따릉이 실시간 재고 | `bike:stock:{rentalId}` | `bike:stock:ST-1577` | 90초 |
 
 `dowType`·`timeSlot`은 `BE/docs/db/schema.md`와 동일하게 0=평일/1=토요일/2=일요일·공휴일, 30분 단위 슬롯(0~47)이다.

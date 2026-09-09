@@ -10,11 +10,37 @@
 | --- | --- | --- | --- | --- |
 | `seoul-train-timetable_20260616.csv.gz` | 공공데이터포털 [15098251 서울교통공사_서울 도시철도 열차운행시각표](https://www.data.go.kr/data/15098251/fileData.do) | 2026-06-16 | 424,264 | **1~9호선 `edge_time` 의 정본.** 열차별 역 도착·출발 시각 → 완행 열차 정차 순서로 방향 있는 구간 914개(`travel_sec` 중앙값, `source=timetable`) + 요일 3종 × 30분 슬롯별 `wait_sec`. `station`·`line` 도 여기서 |
 | `seoulmetro-transfer_20250331.csv` | 서울 열린데이터광장 [OA-13290 서울교통공사 환승역거리 소요시간 정보](https://data.seoul.go.kr/dataList/OA-13290/F/1/datasetView.do) | 2025-03-31 | 140 | 1~8호선 환승역 74개의 노선 쌍별 도보 초 → `transfer_meta`(`source=extract`). 보행속도 1.2 m/s 기준 |
-| `seoulmetro-station-coords_20250814.csv` | 공공데이터포털 [15099316 서울교통공사 1~8호선 역사 좌표(위경도)](https://www.data.go.kr/data/15099316/fileData.do) | 2025-08-14 | 276 | 1~8호선(서울교통공사 운영 역) 좌표 → `station.lat/lng`. "고유역번호" 열은 실시간 API 매핑 참고용 |
-| `kric-line9-station-coords_20250630.csv` | 공공데이터포털 [15041335 국가철도공단 수도권 9호선 역위치](https://www.data.go.kr/data/15041335/fileData.do) | 2025-06-30 | 38 | 9호선 38역 좌표 (시각표 역명과 전부 일치) |
+| `seoulmetro-station-coords_20250814.csv` | 공공데이터포털 [15099316 서울교통공사 1~8호선 역사 좌표(위경도)](https://www.data.go.kr/data/15099316/fileData.do) | 2025-08-14 | 276 | 1~8호선(서울교통공사 운영 역) 좌표 → `station.lat/lng` **1순위**. "고유역번호" 열은 실시간 API 매핑 참고용 |
+| `kric/kric-*-station-coords_*.csv` (11개) | 공공데이터포털 국가철도공단 노선별 역위치 — 아래 표 | 2024-09~2025-12 | 567 | 서울교통공사 파일에 없는 코레일·연장 구간·9호선 역 좌표 **2순위** (역 170개) |
+| `../railgeometry/ktdb-rail-node_2024.csv` (읽기만) | KTDB 철도망 노드 (63 에서 도입, 전국 1,652개) | 2024 | 735 (수도권) | 역위치 파일이 무효·오기인 역의 **3순위** 보완 (역 14개). 노드 여러 개면 평균점 |
 | `korail-segments_20240826.csv` | 공공데이터포털 [15134768 서울시 도시철도 구간정보](https://www.data.go.kr/data/15134768/fileData.do) | 2024-08-26 | 100 | **시각표에 없는 노선(경의중앙 1063 · 수인분당 1075)만** 거리 → `edge_time`(SUBWAY, `source=avg`, 거리 ÷ 9.2 m/s 추정, 양방향). 1호선·4호선 코레일 구간은 시각표가 덮으므로 여기서는 걸러낸다 |
 
 2026-09-09 까지 쓰던 `seoulmetro-station-time_20240810.csv`(OA-12034 역간거리·소요시간, 1~8호선 279행)와 `conf/branch-anchors.csv` 는 시각표로 대체되어 삭제했다 (git 이력에 있음).
+
+## 좌표 원천 (`kric/`)
+
+| 파일 | 데이터셋 | 배포일 | 행 | 비고 |
+| --- | --- | --- | --- | --- |
+| `kric-line1-station-coords_20250630.csv` | [15041300 수도권1호선](https://www.data.go.kr/data/15041300/fileData.do) | 2025-06-30 | 102 | 코레일 구간(인천·신창·연천) 포함. **청산 좌표 오기**(실제와 28 km) → KTDB 로 대체 |
+| `kric-line2-station-coords_20251230.csv` | [15041301 수도권2호선](https://www.data.go.kr/data/15041301/fileData.do) | 2025-12-30 | 51 | |
+| `kric-line3-station-coords_20250630.csv` | [15041302 수도권3호선](https://www.data.go.kr/data/15041302/fileData.do) | 2025-06-30 | 44 | 일산선 포함. **원흥 위도에 소수점 누락**(37650709) → 무효, KTDB 로 |
+| `kric-line4-station-coords_20250630.csv` | [15041303 수도권4호선](https://www.data.go.kr/data/15041303/fileData.do) | 2025-06-30 | 51 | 과천안산·진접선 포함. **별내별가람 좌표 오기**(7.8 km) → KTDB 로 대체. 산본은 KTDB 와 1.1 km 차이 — 유지, 검토 필요 |
+| `kric-line5-station-coords_20250630.csv` | [15041304 수도권5호선](https://www.data.go.kr/data/15041304/fileData.do) | 2025-06-30 | 95 | 39역이 같은 좌표로 두 번 들어 있음 → 합침 |
+| `kric-line6-station-coords_20240930.csv` | [15041305 수도권6호선](https://www.data.go.kr/data/15041305/fileData.do) | 2024-09-30 | 38 | **좌표가 한 행씩 밀려 있음**(구산 좌표가 새절 자리 등). 6호선은 전부 서울교통공사 좌표가 있어 이 파일은 실제로 쓰이지 않는다 |
+| `kric-line7-station-coords_20240930.csv` | [15041306 수도권7호선](https://www.data.go.kr/data/15041306/fileData.do) | 2024-09-30 | 52 | **부천·인천 구간 11역(까치울~석남)이 0,0** → 무효, KTDB 로 |
+| `kric-line8-station-coords_20250630.csv` | [15041334 수도권8호선](https://www.data.go.kr/data/15041334/fileData.do) | 2025-06-30 | 24 | 별내선 포함 |
+| `kric-line9-station-coords_20250630.csv` | [15041335 수도권9호선](https://www.data.go.kr/data/15041335/fileData.do) | 2025-06-30 | 38 | |
+| `kric-suin-bundang-station-coords_20250630.csv` | [15041336 수인선](https://www.data.go.kr/data/15041336/fileData.do) (= 15041333 분당선과 동일 파일) | 2025-06-30 | 63 | 선명 "수인분당" → 1075. 청명 좌표 오기(35 km, 우리 그래프엔 없음) |
+| `kric-gyeongui-jungang-station-coords_20250630.csv` | [15041487 경의중앙선](https://www.data.go.kr/data/15041487/fileData.do) | 2025-06-30 | 78 | 선명 "경의중앙" → 1063. 응봉·한남·서빙고 등 |
+
+열은 `철도운영기관(명) · 선명 · 역명 · 경도 · 위도`(WGS84 도). CP949 → UTF-8, CRLF → LF 변환만 했고 값은 그대로다 — 위의 오기·0,0 도 파일에 남아 있고 로더가 걸러낸다.
+
+**좌표 결정 규칙** (`StaticLoadRunner.readCoords` → `SubwayGraphBuilder`)
+1. 서울교통공사 역사 좌표(1~8호선 운영 역, 232개)가 있으면 그것.
+2. 없으면 국가철도공단 역위치의 (노선, 역) 좌표, 없으면 이름만 같은 좌표(170개). 0,0·수도권 밖·형식 오류는 무효로 건너뛴다.
+3. 국가철도공단 좌표를 KTDB 노드(수도권 범위, 이름별 평균)와 대조해 **5 km 넘게 어긋나면 파일 오기로 보고 KTDB 좌표를 쓴다**(청산·별내별가람). 500 m~5 km 는 유지하고 "검토 필요" 경고(산본).
+4. 그래도 없으면 KTDB 노드(14개: 위 2 + 7호선 부천 11 + 원흥). KTDB 는 선로 노드 좌표라 역사 좌표와 수십 m(중앙값 29 m, 95% 140 m) 차이가 난다.
+5. 어느 원천에도 없으면 null — 현재 0개.
 
 ## 시각표 파일 읽는 규칙 (`TrainTimetableParser`)
 
@@ -32,11 +58,11 @@
 | --- | --- |
 | `station-aliases.csv` | 원천마다 다른 역명 표기 → 정본 표기. 정본은 **최신 공식 이름**(서울교통공사 좌표 파일·실시간 API 쪽: "서울", "총신대입구", "신내", "자양") |
 | `korail-line-overrides.csv` | 코레일 구간 파일의 노선 코드는 **물리 선로**(경원선 103 등) 기준이라 서비스 노선과 어긋나는 구간을 (출발역, 도착역) 단위로 바로잡는다. 청량리~회기는 1호선·경의중앙선 둘 다 — 지금은 경의중앙선 쪽만 살아남는다 |
-| `station-disambiguation.csv` | 같은 이름의 다른 물리 역을 `(역명, line_id) → station_id` 로 갈라낸다. 현재 데이터 범위에는 해당 사례가 없어 비어 있다 |
+| `station-ids.csv` | **물리 역 ID 의 정본** (`station_id, name, codes, source`, 416행). `station_id` = 서울교통공사 역번호(노선별 역사코드 최솟값, 앞 0 제거: 서울 150, 시청 151, 강남 222). 코드가 없는 코레일 전용 역 12개는 9001~9012 (`source=assigned`, `codes` 에 노선만 `1075:`). 로더는 (정규화 역명, 노선) → ID 를 이 표로만 정하고 **표에 없는 역이 나오면 적재를 멈춘다**. 새 역은 행을 추가하고, 개명은 `name` 만 바꾼다(ID 유지). 초안은 `BE/scripts/data/station-ids-bootstrap.mjs` 로 만들었고 다시 생성하지 않는다. 동명이역은 같은 이름의 행을 둘 두고 `codes` 의 노선으로 가른다 |
 
 ## 식별자 규칙
 
-- `station.station_id` = **정규화 역명** (괄호 부기 제거 + 별칭 적용). 물리 역 1행. 노선별 승강장은 `edge_time.route_id` 로 표현한다. 시각표가 최신 공식명을 쓰므로 개명이 반영된다(당고개 → 불암산, 지제 → 평택지제).
+- `station.station_id` = **서울교통공사 역번호** (`conf/station-ids.csv`, 2026-09-09 회의 결정). 물리 역 1행, 환승역은 소속 노선 코드 중 최솟값(서울 0150·0426 → `150`). `station.name` 은 정규화 역명(괄호 부기 제거 + 별칭)으로 표시용이다. 개명은 name 만 바뀌고 ID 는 유지된다. 노선별 승강장은 `edge_time.route_id` 로 표현한다.
 - `line.line_id` = 서울시 실시간 지하철 API 의 `subwayId` (1001~1009, 1063 경의중앙, 1075 수인분당 …). 수집기가 변환 없이 쓰기 위해서다.
 - 실시간 API 의 `statnId` 는 `subwayId(4) + 역코드(6, 0 채움)` 이다. 시각표의 `역사코드`(4자리, 예 0150)는 좌표 파일의 "고유역번호"(150)와 같은 체계다. **1호선 실시간 코드(126~133)는 다르다.** 수집기 티켓에서 매핑 표를 만든다.
 
@@ -51,7 +77,8 @@ gzip -dc BE/src/main/resources/data/subway/seoul-train-timetable_YYYYMMDD.csv.gz
 
 ## 알려진 빈 곳 (채워 넣지 않고 비워 둔 것)
 
-- **좌표 없는 역 148개**: 코레일 운영 역(1호선 경인·경부·경원, 3호선 일산선, 4호선 과천안산·진접선, 7호선 부천, 8호선 별내, 경의중앙·수인분당). 서울교통공사 좌표 파일에 없어 `station.lat/lng` 가 null 이다. 열린데이터광장 역사마스터 API(`subwayStationMaster`, 8088 포트라 실습실 망에서 불가)로 채우는 것이 후속 작업이다.
+- **좌표 출처가 섞여 있다**: 서울교통공사 역사 좌표 232 · 국가철도공단 역위치 170 · KTDB 선로 노드 14. 어느 역이 어느 출처인지는 적재 로그 "역 좌표 출처" 줄에 나온다. 출처 컬럼(`coord_source`)은 스키마 변경이라 후속.
+- **검토 필요 좌표**: 산본(국가철도공단 vs KTDB 1.1 km). 열린데이터광장 역사마스터 API(`subwayStationMaster`, 8088 — EC2/핫스팟)로 제3 원천 대조가 후속.
 - **급행 열차**는 제외한다(위). 급행 구간을 별도 route 로 넣는 것은 후속 티켓.
 - **하루 운행이 없는 (엣지, 요일)** 은 `wait_sec = 86400` 으로 표시한다 (전체 슬롯 행의 1.3%). 값을 만들어 넣지 않기 위한 표식이다.
 - **코레일 구간 파일은 100행짜리 부분 데이터**다. 남는 수인분당선(1075)은 3조각으로 끊겨 있다 — 검증기가 경고로 출력한다.

@@ -31,7 +31,7 @@ class SubwayGraphBuilderTest {
             new StationCoord("1005", "왕십리", 37.5613, 127.0377, "2541"),
             new StationCoord("1002", "한양대", 37.5556, 127.0437, "209"));
 
-    private final SubwayGraphBuilder builder = new SubwayGraphBuilder(Map.of());
+    private final SubwayGraphBuilder builder = new SubwayGraphBuilder(StationIdTable.identity());
 
     @Test
     @DisplayName("구간에 등장한 역이 물리 역 1행씩 만들어지고 소속 노선을 모은다")
@@ -87,9 +87,13 @@ class SubwayGraphBuilderTest {
     }
 
     @Test
-    @DisplayName("동명이역은 (역명|노선) 예외 표로 별도 station_id 를 받는다 — 2호선 신촌과 경의중앙선 신촌")
+    @DisplayName("동명이역은 ID 표의 (역명, 노선) 행으로 별도 station_id 를 받는다 — 2호선 신촌과 경의중앙선 신촌")
     void disambiguatesSameNameStations() {
-        SubwayGraphBuilder b = new SubwayGraphBuilder(Map.of("신촌|1063", "신촌_경의중앙"));
+        SubwayGraphBuilder b = new SubwayGraphBuilder(StationIdTable.from(List.of(
+                Map.of("station_id", "홍대입구", "name", "홍대입구", "codes", "1002:", "source", "timetable"),
+                Map.of("station_id", "신촌", "name", "신촌", "codes", "1002:", "source", "timetable"),
+                Map.of("station_id", "가좌", "name", "가좌", "codes", "1063:", "source", "assigned"),
+                Map.of("station_id", "신촌_경의중앙", "name", "신촌", "codes", "1063:", "source", "assigned"))));
         List<Segment> segs = List.of(
                 new Segment("1002", "홍대입구", "신촌", 90, 1000, "timetable"),
                 new Segment("1063", "가좌", "신촌", 120, 1500, "avg"));

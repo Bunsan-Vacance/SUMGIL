@@ -67,8 +67,8 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
       "legs": [
         {
           "mode": "SUBWAY",
-          "fromNodeId": "0222", "fromNodeName": "한티", "fromLat": 37.5049, "fromLng": 127.0530,
-          "toNodeId": "0221", "toNodeName": "역삼", "toLat": 37.5006, "toLng": 127.0364,
+          "fromNodeId": "222", "fromNodeName": "한티", "fromLat": 37.5049, "fromLng": 127.0530,
+          "toNodeId": "221", "toNodeName": "역삼", "toLat": 37.5006, "toLng": 127.0364,
           "routeId": "2", "minutes": 5.0,
           "geometry": {
             "type": "MultiLineString",
@@ -78,7 +78,7 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
         },
         {
           "mode": "BIKE",
-          "fromNodeId": "0221", "fromNodeName": "역삼", "fromLat": 37.5006, "fromLng": 127.0364,
+          "fromNodeId": "221", "fromNodeName": "역삼", "fromLat": 37.5006, "fromLng": 127.0364,
           "toNodeId": "ST-1577", "toNodeName": "역삼역 3번출구 대여소", "toLat": 37.4998, "toLng": 127.0371,
           "routeId": null, "minutes": 7.4
         }
