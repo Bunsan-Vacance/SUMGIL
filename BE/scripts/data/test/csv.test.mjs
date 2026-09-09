@@ -2,7 +2,21 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { csvEscape, toCsv } from '../lib/csv.mjs';
+import { csvEscape, parseCsv, toCsv } from '../lib/csv.mjs';
+
+describe('parseCsv', () => {
+  test('헤더를 키로 하는 행 객체 배열 — 따옴표 안 쉼표·이중 따옴표·CRLF·BOM·빈 줄을 toCsv 와 같은 규칙으로 읽는다', () => {
+    const rows = parseCsv('﻿a,b\r\n1,"x,y"\r\n\r\n2,"say ""hi"""\n');
+
+    assert.deepEqual(rows, [{ a: '1', b: 'x,y' }, { a: '2', b: 'say "hi"' }]);
+  });
+
+  test('헤더보다 짧은 행은 빈 문자열로 채우고, toCsv 결과를 되돌리면 같다', () => {
+    const csv = toCsv(['id', 'name'], [['1', '가,나'], ['2']]);
+
+    assert.deepEqual(parseCsv(csv), [{ id: '1', name: '가,나' }, { id: '2', name: '' }]);
+  });
+});
 
 describe('csvEscape', () => {
   test('쉼표·따옴표·줄바꿈이 없으면 그대로 둔다', () => {
