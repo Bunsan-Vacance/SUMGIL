@@ -88,6 +88,21 @@ class RouteSearchServiceWireTest {
         assertTrue(result.isEmpty());
     }
 
+    @Test
+    @DisplayName("역 좌표가 없어도(위경도 null) geometry 부착 단계에서 500 없이 응답한다")
+    void 역좌표_null이어도_예외없음() {
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
+        infos.put("B", new RouteMapper.StationInfo("B", "비역", null, null));
+        infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
+        lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+
+        assertEquals(1, result.size());
+        result.get(0).legs().forEach(leg -> assertEquals("unavailable", leg.geometryStatus()));
+    }
+
     private Station mockStation(String id, String name) {
         Station station = mock(Station.class);
         lenient().when(station.getStationId()).thenReturn(id);

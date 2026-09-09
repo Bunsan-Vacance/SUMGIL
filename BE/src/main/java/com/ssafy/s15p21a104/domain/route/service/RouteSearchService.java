@@ -92,6 +92,9 @@ public class RouteSearchService {
     }
 
     private RouteLegResponse withGeometry(RouteLegResponse leg) {
+        if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
+            return leg;
+        }
         Optional<MultiLineStringResponse> geometry = railGeometryRegistry.geometryForLeg(
                 leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
         if (geometry.isEmpty()) {
