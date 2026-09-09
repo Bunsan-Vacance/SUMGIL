@@ -1,108 +1,106 @@
-"""Phase 0 — target_net_flow 데이터셋 검증 리포트.
+"""Phase 0 — q3_mapped_netflow_v5 데이터셋 검증 리포트.
 
-build_target_dataset.py가 만든 train/valid/test를 독립적으로 검증하고,
-dataset_report.md 등 산출물을 outputs/에 남긴다.
+좌표 기반 station 매핑 + target_net_flow가 이미 계산된 상태로 전달받은 데이터셋을
+독립적으로(자체 validation_report.json을 그대로 믿지 않고) 재검증한다.
+
+build_target_dataset.py/dataset_report.py(구버전 target_delta 기반)는 이 데이터셋과
+무관하다 — target_net_flow 생성이 이미 상류에서 끝나 있어서 여기서는 검증만 한다.
 
 실행 예:
-    python dataset_report.py
+    python dataset_report_v5.py
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_target_dataset import HORIZONS, SPLIT_DEFS  # noqa: E402
+HORIZONS = [5, 10, 15, 30]
+
+SPLIT_DEFS = [
+    ("train", "2024-07-01", "2024-09-16"),
+    ("valid", "2024-09-16", "2024-10-01"),
+    ("test", "2025-07-01", "2025-10-01"),
+]
+
+EXPECTED_COLUMNS = [
+    "od_station_id",
+    "station_no",
+    "station_name",
+    "district",
+    "lat_stock",
+    "lon_stock",
+    "rack_count",
+    "datetime_5m",
+    "datetime_hour",
+    "date",
+    "year",
+    "month",
+    "hour",
+    "minute",
+    "day_of_week",
+    "is_weekend",
+    "slot_5m",
+    "sin_hour",
+    "cos_hour",
+    "sin_slot",
+    "cos_slot",
+    "stock_anchor_hour",
+    "stock_ratio_hour",
+    "minutes_since_stock_anchor",
+    "is_empty_anchor",
+    "is_full_anchor",
+    "rent_count_5m",
+    "return_count_5m",
+    "net_flow_5m",
+    "base_time",
+    "horizon_min",
+    "target_net_flow",
+    "target_rent_count",
+    "target_return_count",
+]
+
+# A안 전용(배포 불가) — feature_availability_matrix에서 제외 표시할 컬럼
+A_ONLY_COLUMNS = {"rent_count_5m", "return_count_5m", "net_flow_5m"}
 
 COVERAGE_PASS_THRESHOLD = 0.95
 ZERO_RATIO_WARN_THRESHOLD = 0.90
 HORIZON_BALANCE_WARN_PCT = 0.05
 EXCEPTION_FLAG_PERCENTILE = 0.95
 
-EXPECTED_COLUMNS = [
-    "station_id",
-    "station_no",
-    "base_time",
-    "horizon_min",
-    "known_stock_at_request",
-    "known_stock_source",
-    "minutes_since_stock_anchor",
-    "capacity_proxy",
-    "target_rent_count",
-    "target_return_count",
-    "target_net_flow",
-    "hour",
-    "minute",
-    "day_of_week",
-    "is_weekend",
-    "month",
-    "known_stock_ratio",
-]
-
 FEATURE_AVAILABILITY = [
-    {
-        "feature": "known_stock_at_request",
-        "trainable": "가능(hourly anchor 대체)",
-        "servable": "가능(실시간 API)",
-        "used_in_baseline": "포함",
-    },
-    {
-        "feature": "minutes_since_stock_anchor",
-        "trainable": "가능",
-        "servable": "가능",
-        "used_in_baseline": "포함",
-    },
-    {
-        "feature": "historical_profile_net (Phase 2)",
-        "trainable": "가능",
-        "servable": "가능",
-        "used_in_baseline": "포함 예정",
-    },
-    {
-        "feature": "recent_net_15m/30m/60m (A안)",
-        "trainable": "가능",
-        "servable": "불가",
-        "used_in_baseline": "제외",
-    },
-    {
-        "feature": "weather_current (Phase 4)",
-        "trainable": "가능",
-        "servable": "가능",
-        "used_in_baseline": "포함 예정",
-    },
-    {
-        "feature": "future_weather_observed",
-        "trainable": "가능",
-        "servable": "불가",
-        "used_in_baseline": "제외",
-    },
+    {"feature": "stock_anchor_hour", "trainable": "가능", "servable": "가능(실시간 API로 대체)", "used_in_baseline": "포함"},
+    {"feature": "minutes_since_stock_anchor", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
+    {"feature": "stock_ratio_hour", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
+    {"feature": "is_empty_anchor / is_full_anchor", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
+    {"feature": "sin/cos_hour, sin/cos_slot", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
+    {"feature": "district, lat_stock, lon_stock, rack_count", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함(Phase 3 조기 사용)"},
+    {"feature": "rent_count_5m / return_count_5m / net_flow_5m", "trainable": "가능", "servable": "불가", "used_in_baseline": "제외 (A안 감사용)"},
+    {"feature": "historical_profile_net (Phase 2)", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함 예정"},
+    {"feature": "weather_current (Phase 4)", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함 예정"},
 ]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="target_net_flow 데이터셋 Phase 0 검증 리포트를 만든다.")
+    parser = argparse.ArgumentParser(description="q3_mapped_netflow_v5 데이터셋 Phase 0 검증 리포트를 만든다.")
     script_dir = Path(__file__).resolve()
     ai_dir = script_dir.parents[4]
-    default_dataset_dir = ai_dir / "data" / "processed" / "BYC" / "stock_q3_seasonal_net_flow"
-    default_master_dir = ai_dir / "data" / "processed" / "BYC" / "stock_q3_seasonal"
+    default_dataset_dir = ai_dir / "data" / "processed" / "BYC" / "stock_q3_mapped_netflow_v5"
     default_output_dir = script_dir.parents[1] / "outputs"
     parser.add_argument("--dataset-dir", default=str(default_dataset_dir))
-    parser.add_argument("--master-dir", default=str(default_master_dir))
     parser.add_argument("--output-dir", default=str(default_output_dir))
     return parser.parse_args()
 
 
 def load_splits(dataset_dir: Path) -> dict[str, pd.DataFrame]:
     splits = {}
-    for split_name, _year, _start, _end in SPLIT_DEFS:
-        path = dataset_dir / f"{split_name}_q3_target_net_flow.csv.gz"
+    for split_name, _start, _end in SPLIT_DEFS:
+        path = dataset_dir / f"{split_name}_netflow_q3_mapped_top300.csv.gz"
         df = pd.read_csv(path)
         df["base_time"] = pd.to_datetime(df["base_time"])
-        df["station_id"] = df["station_id"].astype(str)
+        df["od_station_id"] = df["od_station_id"].astype(str)
         splits[split_name] = df
     return splits
 
@@ -126,7 +124,7 @@ def check_schema(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
 def check_split_boundaries(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
     rows = []
     ranges = {}
-    for split_name, _year, start, end in SPLIT_DEFS:
+    for split_name, start, end in SPLIT_DEFS:
         df = splits[split_name]
         bmin, bmax = df["base_time"].min(), df["base_time"].max()
         in_range = bool((df["base_time"] >= start).all() and (df["base_time"] < end).all())
@@ -157,14 +155,14 @@ def check_split_boundaries(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 
 def check_station_coverage(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, list[str]]:
-    all_stations = sorted(set().union(*[set(df["station_id"].unique()) for df in splits.values()]))
+    all_stations = sorted(set().union(*[set(df["od_station_id"].unique()) for df in splits.values()]))
     max_timestamps = {name: df["base_time"].nunique() for name, df in splits.items()}
 
     rows = []
     for station in all_stations:
-        row = {"station_id": station}
+        row = {"od_station_id": station}
         for name, df in splits.items():
-            sub = df[df["station_id"] == station]
+            sub = df[df["od_station_id"] == station]
             ts_count = sub["base_time"].nunique()
             denom = max_timestamps[name] or 1
             row[f"in_{name}"] = ts_count > 0
@@ -174,7 +172,7 @@ def check_station_coverage(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFram
 
     df_out = pd.DataFrame(rows)
     presence_cols = [f"in_{name}" for name in splits]
-    intersection_stations = df_out.loc[df_out[presence_cols].all(axis=1), "station_id"].tolist()
+    intersection_stations = df_out.loc[df_out[presence_cols].all(axis=1), "od_station_id"].tolist()
     return df_out, intersection_stations
 
 
@@ -186,12 +184,7 @@ def horizon_distribution(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
         for h in HORIZONS:
             c = int(counts.get(h, 0))
             rows.append(
-                {
-                    "split": name,
-                    "horizon_min": h,
-                    "row_count": c,
-                    "ratio_within_split": c / total if total else 0.0,
-                }
+                {"split": name, "horizon_min": h, "row_count": c, "ratio_within_split": c / total if total else 0.0}
             )
     return pd.DataFrame(rows)
 
@@ -253,38 +246,51 @@ def leakage_check(splits: dict[str, pd.DataFrame]) -> list[str]:
     return issues
 
 
-def exception_concentration(master_dir: Path) -> pd.DataFrame:
-    frames = []
-    for year in (2024, 2025):
-        path = master_dir / f"master_{year}_q3_top300.csv.gz"
-        df = pd.read_csv(path, usecols=["station_id", "datetime_5m", "exception_delta_hour"])
-        df["datetime_5m"] = pd.to_datetime(df["datetime_5m"])
-        df["hour_bucket"] = df["datetime_5m"].dt.floor("h")
-        hourly = df.drop_duplicates(subset=["station_id", "hour_bucket"])
-        frames.append(hourly)
-    combined = pd.concat(frames, ignore_index=True)
-    agg = combined.groupby("station_id")["exception_delta_hour"].apply(lambda s: s.abs().sum())
-    agg = agg.reset_index()
-    agg.columns = ["station_id", "exception_abs_sum"]
-    threshold = agg["exception_abs_sum"].quantile(EXCEPTION_FLAG_PERCENTILE)
-    agg["high_exception_flag"] = agg["exception_abs_sum"] >= threshold
-    return agg
+def stock_anchor_coverage(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    rows = []
+    for name, df in splits.items():
+        missing = df["stock_anchor_hour"].isna().mean()
+        rows.append(
+            {
+                "split": name,
+                "stock_anchor_missing_rate": float(missing),
+                "minutes_since_anchor_max": float(df["minutes_since_stock_anchor"].max()),
+                "minutes_since_anchor_min": float(df["minutes_since_stock_anchor"].min()),
+                "is_empty_anchor_rate": float(df["is_empty_anchor"].mean()),
+                "is_full_anchor_rate": float(df["is_full_anchor"].mean()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def station_outlier_flags(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """exception_delta_hour 컬럼이 이 데이터셋엔 없어서, target_net_flow 변동성과
+    empty/full anchor 비율로 이상치 후보 정류장을 잡는다."""
+    train = splits["train"]
+    agg = train.groupby("od_station_id").agg(
+        target_std=("target_net_flow", "std"),
+        empty_rate=("is_empty_anchor", "mean"),
+        full_rate=("is_full_anchor", "mean"),
+    )
+    std_threshold = agg["target_std"].quantile(EXCEPTION_FLAG_PERCENTILE)
+    empty_threshold = agg["empty_rate"].quantile(EXCEPTION_FLAG_PERCENTILE)
+    full_threshold = agg["full_rate"].quantile(EXCEPTION_FLAG_PERCENTILE)
+
+    agg["high_variance_flag"] = agg["target_std"] >= std_threshold
+    agg["high_empty_flag"] = agg["empty_rate"] >= empty_threshold
+    agg["high_full_flag"] = agg["full_rate"] >= full_threshold
+    return agg.reset_index()
 
 
 def build_quality_flags(
-    coverage_df: pd.DataFrame, exception_df: pd.DataFrame, intersection_stations: list[str]
+    coverage_df: pd.DataFrame, outlier_df: pd.DataFrame, intersection_stations: list[str]
 ) -> pd.DataFrame:
     flags = []
     for _, row in coverage_df.iterrows():
-        station = row["station_id"]
+        station = row["od_station_id"]
         if station not in intersection_stations:
             flags.append(
-                {
-                    "station_id": station,
-                    "flag_type": "missing_in_some_split",
-                    "detail_value": "",
-                    "recommendation": "exclude",
-                }
+                {"od_station_id": station, "flag_type": "missing_in_some_split", "detail_value": "", "recommendation": "exclude"}
             )
             continue
         for name in ("train", "valid", "test"):
@@ -292,30 +298,38 @@ def build_quality_flags(
             if cov < COVERAGE_PASS_THRESHOLD:
                 flags.append(
                     {
-                        "station_id": station,
+                        "od_station_id": station,
                         "flag_type": "low_coverage",
                         "detail_value": f"{name}:{cov:.3f}",
                         "recommendation": "exclude_or_caution",
                     }
                 )
 
-    exc_flagged = exception_df[exception_df["high_exception_flag"]]
-    for _, row in exc_flagged.iterrows():
-        flags.append(
-            {
-                "station_id": row["station_id"],
-                "flag_type": "high_exception",
-                "detail_value": f"{row['exception_abs_sum']:.1f}",
-                "recommendation": "exclude_from_profile",
-            }
-        )
+    for _, row in outlier_df.iterrows():
+        if row["high_variance_flag"]:
+            flags.append(
+                {
+                    "od_station_id": row["od_station_id"],
+                    "flag_type": "high_target_variance",
+                    "detail_value": f"{row['target_std']:.2f}",
+                    "recommendation": "review",
+                }
+            )
+        if row["high_empty_flag"] or row["high_full_flag"]:
+            flags.append(
+                {
+                    "od_station_id": row["od_station_id"],
+                    "flag_type": "high_empty_or_full_anchor",
+                    "detail_value": f"empty={row['empty_rate']:.3f},full={row['full_rate']:.3f}",
+                    "recommendation": "review",
+                }
+            )
     return pd.DataFrame(flags)
 
 
 def main() -> None:
     args = parse_args()
     dataset_dir = Path(args.dataset_dir)
-    master_dir = Path(args.master_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -329,16 +343,16 @@ def main() -> None:
     target_df = target_distribution(splits)
     direction_df = direction_distribution(splits)
     leakage_issues = leakage_check(splits)
-
-    print("exception 집중도 계산 (master)...")
-    exception_df = exception_concentration(master_dir)
-    quality_flags_df = build_quality_flags(coverage_df, exception_df, intersection_stations)
+    anchor_df = stock_anchor_coverage(splits)
+    outlier_df = station_outlier_flags(splits)
+    quality_flags_df = build_quality_flags(coverage_df, outlier_df, intersection_stations)
 
     horizon_df.to_csv(output_dir / "horizon_distribution.csv", index=False)
     target_df.to_csv(output_dir / "target_distribution.csv", index=False)
     direction_df.to_csv(output_dir / "direction_distribution.csv", index=False)
     boundary_df.to_csv(output_dir / "split_boundary_check.csv", index=False)
     coverage_df.to_csv(output_dir / "station_coverage.csv", index=False)
+    anchor_df.to_csv(output_dir / "stock_anchor_coverage.csv", index=False)
     quality_flags_df.to_csv(output_dir / "data_quality_flags.csv", index=False)
     pd.DataFrame(FEATURE_AVAILABILITY).to_csv(output_dir / "feature_availability_matrix.csv", index=False)
 
@@ -372,15 +386,27 @@ def main() -> None:
 
     verdicts.append(("feature leakage 점검", "PASS" if not leakage_issues else "WARN"))
 
-    high_exception_count = int(exception_df["high_exception_flag"].sum())
-    verdicts.append((f"이상치 station flag ({high_exception_count}개)", "INFO"))
+    max_missing = anchor_df["stock_anchor_missing_rate"].max()
+    verdicts.append((f"stock anchor 결측률 (최대 {max_missing:.2%})", "PASS" if max_missing < 0.05 else "WARN"))
 
-    report_lines = ["# Q3 target_net_flow 데이터셋 검증 리포트", "", "## 판정 요약", "", "| 항목 | 판정 |", "|---|---|"]
+    outlier_count = int(
+        (outlier_df["high_variance_flag"] | outlier_df["high_empty_flag"] | outlier_df["high_full_flag"]).sum()
+    )
+    verdicts.append((f"이상치 station flag ({outlier_count}개)", "INFO"))
+
+    report_lines = [
+        "# Q3 mapped netflow v5 데이터셋 검증 리포트",
+        "",
+        "## 판정 요약",
+        "",
+        "| 항목 | 판정 |",
+        "|---|---|",
+    ]
     report_lines += [f"| {label} | {verdict} |" for label, verdict in verdicts]
 
     report_lines += ["", "## split별 row 수", ""]
     report_lines += [
-        f"- {name}: {len(df):,} rows, station {df['station_id'].nunique()}개" for name, df in splits.items()
+        f"- {name}: {len(df):,} rows, station {df['od_station_id'].nunique()}개" for name, df in splits.items()
     ]
 
     report_lines += [
@@ -388,7 +414,7 @@ def main() -> None:
         "## 상세 산출물",
         "",
         "- target_distribution.csv, station_coverage.csv, split_boundary_check.csv",
-        "- horizon_distribution.csv, direction_distribution.csv",
+        "- horizon_distribution.csv, direction_distribution.csv, stock_anchor_coverage.csv",
         "- feature_availability_matrix.csv, data_quality_flags.csv, leakage_check_report.md",
     ]
 
@@ -398,7 +424,7 @@ def main() -> None:
     if leakage_issues:
         leakage_lines += [f"- {issue}" for issue in leakage_issues]
     else:
-        leakage_lines.append("이상 없음 — known_stock anchor 시점이 항상 base_time 이전이다.")
+        leakage_lines.append("이상 없음 — stock anchor 시점이 항상 base_time 이전이다.")
     (output_dir / "leakage_check_report.md").write_text("\n".join(leakage_lines), encoding="utf-8")
 
     print(f"완료. 산출물: {output_dir}")
