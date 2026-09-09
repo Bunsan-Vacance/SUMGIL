@@ -66,4 +66,13 @@ class TransferParserTest {
         assertEquals(1, parser.warnings().size());
         assertTrue(parser.warnings().get(0).contains("김포골드라인"));
     }
+
+    @Test
+    @DisplayName("환승소요시간 mm:ss 를 초로 읽는다 — 02:13 → 133, 빈 값 → 0")
+    void parsesMmSs() {
+        assertEquals(133, TransferParser.parseMmSs("02:13"));
+        assertEquals(0, TransferParser.parseMmSs("00:00"));
+        assertEquals(110, TransferParser.parseMmSs("01:50"));
+        assertEquals(0, TransferParser.parseMmSs(""));
+    }
 }
