@@ -4,7 +4,6 @@ import BottomSheet from '../components/BottomSheet'
 import KakaoMap from '../features/map/KakaoMap'
 import { usePlaceSearch } from '../features/route/usePlaceSearch'
 import type { Place } from '../features/route/types'
-import { bikeStationRepository, placeRepository } from '../api/repositories'
 
 interface Props {
   onBack: () => void
@@ -31,11 +30,6 @@ function PlaceInfoCard({
           <small className="browse-place-kind">{place.kind}</small>
           <strong>{place.name}</strong>
           <p>{place.address}</p>
-          {place.kind === '따릉이 대여소' && (
-            <small className="browse-place-id">
-              대여소 ID · {place.id.replace('bike-station:', '')}
-            </small>
-          )}
         </div>
         <button className="icon-button" aria-label="장소 정보 닫기" onClick={onClose}>
           <X size={17} />
@@ -57,10 +51,8 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
   const browseRef = useRef<HTMLElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
-  const [searchMode, setSearchMode] = useState<'place' | 'bike-station'>('place')
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
-  const repository = searchMode === 'bike-station' ? bikeStationRepository : placeRepository
-  const { places, loading, error } = usePlaceSearch(query, repository)
+  const { places, loading, error } = usePlaceSearch(query)
 
   useLayoutEffect(() => {
     const browse = browseRef.current
@@ -122,9 +114,7 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={
-              searchMode === 'bike-station' ? '대여소명, ID, 주소 검색' : '장소, 역, 주소 검색'
-            }
+            placeholder="장소, 역, 주소 검색"
             aria-label="탐색할 장소 검색어"
           />
           {query && (
@@ -133,28 +123,6 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
             </button>
           )}
         </label>
-        <div className="search-modes" role="group" aria-label="검색 대상">
-          <button
-            className="search-mode"
-            aria-pressed={searchMode === 'place'}
-            onClick={() => {
-              setSearchMode('place')
-              setQuery('')
-            }}
-          >
-            장소 검색
-          </button>
-          <button
-            className="search-mode"
-            aria-pressed={searchMode === 'bike-station'}
-            onClick={() => {
-              setSearchMode('bike-station')
-              setQuery('')
-            }}
-          >
-            따릉이 대여소
-          </button>
-        </div>
       </div>
       <BottomSheet
         ariaLabel="장소 탐색 결과"
@@ -173,11 +141,7 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
         ) : (
           <div className="browse-results">
             <p className="section-label">
-              {query.trim()
-                ? `${places.length}개 ${searchMode === 'bike-station' ? '대여소' : '장소'}`
-                : searchMode === 'bike-station'
-                  ? '대여소명, ID, 주소를 검색해 보세요'
-                  : '장소 이름이나 주소를 검색해 보세요'}
+              {query.trim() ? `${places.length}개 장소` : '장소 이름이나 주소를 검색해 보세요'}
             </p>
             {loading && (
               <p role="status" className="browse-state">
@@ -193,11 +157,7 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
               <div className="empty browse-empty">
                 <Search />
                 <h3>검색 결과가 없어요</h3>
-                <p>
-                  {searchMode === 'bike-station'
-                    ? '대여소명, ID, 주소를 다시 입력해 주세요.'
-                    : '다른 장소 이름으로 검색해 주세요.'}
-                </p>
+                <p>다른 장소 이름으로 검색해 주세요.</p>
               </div>
             )}
             {!query.trim() && !loading && (
@@ -223,11 +183,7 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
                       <strong>{place.name}</strong>
                       <small>{place.address}</small>
                     </span>
-                    <small>
-                      {place.kind}
-                      {place.kind === '따릉이 대여소' &&
-                        ` · ${place.id.replace('bike-station:', '')}`}
-                    </small>
+                    <small>{place.kind}</small>
                   </button>
                 ))}
               </div>

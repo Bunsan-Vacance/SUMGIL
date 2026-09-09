@@ -1,5 +1,5 @@
 import type { KakaoMapInstance, KakaoMaps } from '../../lib/kakao/sdk'
-import { bikeStations, type BikeStation } from './bikeStations'
+import { bikeStations, getBikeStationDisplayName, type BikeStation } from './bikeStations'
 
 const BIKE_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="18" r="3"/><circle cx="19" cy="18" r="3"/><path d="M5 18 9 7h5l5 11M9 7l3 11m-5-6h8m-1-5h3"/></svg>'
@@ -28,8 +28,13 @@ export function createBikeStationOverlay(
   const element = document.createElement('button')
   element.type = 'button'
   element.className = 'bike-station-marker'
-  element.setAttribute('aria-label', `${station.name} (${station.id})`)
-  element.title = `${station.name} · 따릉이 대여소`
+  const displayName = getBikeStationDisplayName(station.name)
+  const markerLabel =
+    displayName === '따릉이 대여소'
+      ? `따릉이 대여소 · ${station.address}`
+      : `${displayName} · 따릉이 대여소`
+  element.setAttribute('aria-label', markerLabel)
+  element.title = markerLabel
   element.innerHTML = BIKE_ICON
   const setSelected = (value: boolean) => {
     element.classList.toggle('selected', value)

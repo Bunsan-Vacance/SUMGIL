@@ -66,61 +66,60 @@ export default function KakaoMap({
           )}
         </div>
       )}
-      {status === 'ready' && (
-        <button
-          className="icon-button kakao-locate"
-          aria-label="현재 위치"
-          disabled={locating}
-          onClick={locate}
-        >
-          {locating ? <span className="spinner" /> : <LocateFixed />}
-        </button>
-      )}
-      {showPlaceInfo && (
-        <>
-          <div className="map-place-shortcuts" aria-label="지도 장소 정보">
-            {origin && (
-              <button type="button" onClick={() => selectPlace(origin)}>
-                출발 장소 정보
-              </button>
-            )}
-            {destination && (
-              <button type="button" onClick={() => selectPlace(destination)}>
-                도착 장소 정보
-              </button>
-            )}
-          </div>
-          {selectedPlace && (
-            <section
-              className="map-place-info"
-              role="region"
-              aria-label="선택한 장소 정보"
-              aria-live="polite"
-            >
-              <div>
-                <div className="map-place-info-title">
-                  {selectedPlace.kind === '따릉이 대여소' && (
-                    <span className="bike-station-info-icon">
-                      <Bike size={15} />
-                    </span>
-                  )}
-                  <strong>{selectedPlace.name}</strong>
-                </div>
-                <p>{selectedPlace.address}</p>
+      <div
+        className={`map-bottom-controls${showPlaceInfo && selectedPlace ? ' has-place-info' : ''}`}
+      >
+        {status === 'ready' && (
+          <button
+            className="icon-button kakao-locate"
+            aria-label="현재 위치"
+            disabled={locating}
+            onClick={locate}
+          >
+            {locating ? <span className="spinner" /> : <LocateFixed />}
+          </button>
+        )}
+        {showPlaceInfo && selectedPlace && (
+          <section
+            className="map-place-info"
+            role="region"
+            aria-label="선택한 장소 정보"
+            aria-live="polite"
+          >
+            <div>
+              <div className="map-place-info-title">
                 {selectedPlace.kind === '따릉이 대여소' && (
-                  <small>대여소 ID · {selectedPlace.id.replace('bike-station:', '')}</small>
+                  <span className="bike-station-info-icon">
+                    <Bike size={15} />
+                  </span>
                 )}
+                <strong>{selectedPlace.name}</strong>
               </div>
-              <button
-                className="icon-button"
-                aria-label="장소 정보 닫기"
-                onClick={() => setSelectedPlace(null)}
-              >
-                <X size={17} />
-              </button>
-            </section>
+              <p>{selectedPlace.address}</p>
+            </div>
+            <button
+              className="icon-button"
+              aria-label="장소 정보 닫기"
+              onClick={() => setSelectedPlace(null)}
+            >
+              <X size={17} />
+            </button>
+          </section>
+        )}
+      </div>
+      {showPlaceInfo && (
+        <div className="map-place-shortcuts" aria-label="지도 장소 정보">
+          {origin && (
+            <button type="button" onClick={() => selectPlace(origin)}>
+              출발 장소 정보
+            </button>
           )}
-        </>
+          {destination && (
+            <button type="button" onClick={() => selectPlace(destination)}>
+              도착 장소 정보
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

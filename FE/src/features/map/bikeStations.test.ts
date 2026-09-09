@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bikeStations, parseBikeStations, searchBikeStations, stationToPlace } from './bikeStations'
+import { bikeStations, parseBikeStations, stationToPlace } from './bikeStations'
 
 describe('따릉이 대여소 데이터', () => {
   it('정적 데이터는 좌표가 있는 3,353개 대여소를 제공한다', () => {
@@ -19,17 +19,15 @@ describe('따릉이 대여소 데이터', () => {
     ).toThrow()
   })
 
-  it('ID·주소·대여소명을 공백과 대소문자 차이 없이 검색하고 20개로 제한한다', () => {
-    const stations = Array.from({ length: 21 }, (_, index) => ({
-      id: `ST-${index}`,
-      name: index === 0 ? '강남역 1번 출구' : `대여소 ${index}`,
-      address: index === 0 ? '서울 강남구 테헤란로' : `서울 주소 ${index}`,
-      lat: 37.5,
-      lng: 127,
-    }))
+  it('ID fallback 이름을 화면용 대여소명으로 바꾼다', () => {
+    const station = {
+      id: 'ST-995',
+      name: '따릉이 대여소 ST-995',
+      address: '서울특별시 양천구 중앙로 153',
+      lat: 37.51,
+      lng: 126.85,
+    }
 
-    expect(searchBikeStations(' st- 0 ', stations)).toEqual([stationToPlace(stations[0])])
-    expect(searchBikeStations('강 남 역', stations)).toEqual([stationToPlace(stations[0])])
-    expect(searchBikeStations('서울 주소', stations)).toHaveLength(20)
+    expect(stationToPlace(station).name).toBe('따릉이 대여소')
   })
 })

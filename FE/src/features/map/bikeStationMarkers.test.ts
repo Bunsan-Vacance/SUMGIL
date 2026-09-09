@@ -49,6 +49,17 @@ describe('따릉이 지도 마커', () => {
     expect(marker.element.classList.contains('selected')).toBe(true)
     marker.destroy()
     expect(setMap).toHaveBeenCalledWith(null)
+
+    const fallbackMarker = createBikeStationOverlay(
+      maps,
+      map,
+      { ...station, name: '따릉이 대여소 ST-1' },
+      false,
+      vi.fn(),
+    )
+    expect(fallbackMarker.element.getAttribute('aria-label')).toContain(station.address)
+    expect(fallbackMarker.element.getAttribute('aria-label')).not.toContain('ST-1')
+    fallbackMarker.destroy()
   })
 
   it('현재 지도 bounds 안의 대여소만 선택한다', () => {

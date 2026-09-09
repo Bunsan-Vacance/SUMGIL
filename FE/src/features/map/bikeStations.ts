@@ -9,8 +9,6 @@ export interface BikeStation {
   lng: number
 }
 
-const SEARCH_LIMIT = 20
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -58,30 +56,17 @@ export function parseBikeStations(value: unknown): BikeStation[] {
 
 export const bikeStations = parseBikeStations(rawBikeStations)
 
+export function getBikeStationDisplayName(name: string) {
+  return /^따릉이 대여소\s+ST-[\w-]+$/i.test(name.trim()) ? '따릉이 대여소' : name.trim()
+}
+
 export function stationToPlace(station: BikeStation): Place {
   return {
     id: `bike-station:${station.id}`,
-    name: station.name,
+    name: getBikeStationDisplayName(station.name),
     address: station.address,
     kind: '따릉이 대여소',
     lat: station.lat,
     lng: station.lng,
   }
-}
-
-function normalizeSearch(value: string) {
-  return value.toLocaleLowerCase().replace(/\s+/g, '')
-}
-
-export function searchBikeStations(query: string, stations: BikeStation[] = bikeStations): Place[] {
-  const normalized = normalizeSearch(query.trim())
-  if (!normalized) return []
-  return stations
-    .filter((station) =>
-      [station.id, station.name, station.address].some((value) =>
-        normalizeSearch(value).includes(normalized),
-      ),
-    )
-    .slice(0, SEARCH_LIMIT)
-    .map(stationToPlace)
 }

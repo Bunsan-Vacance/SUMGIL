@@ -177,6 +177,11 @@ describe('일반 지도 장소 마커', () => {
     expect(screen.getByRole('region', { name: '선택한 장소 정보' }).textContent).toContain(
       '서울 강남구 강남대로',
     )
+    const locateButton = screen.getByRole('button', { name: '현재 위치' })
+    const infoCard = screen.getByRole('region', { name: '선택한 장소 정보' })
+    expect(
+      locateButton.compareDocumentPosition(infoCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: '장소 정보 닫기' }))
     expect(screen.queryByRole('region', { name: '선택한 장소 정보' })).toBeNull()
