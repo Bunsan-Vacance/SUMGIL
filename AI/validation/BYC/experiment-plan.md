@@ -369,6 +369,17 @@ AI/validation/BYC/q3-seasonal-dataset-check/
                               Naive_Profile이 전반적으로 우세 → Phase 2 필요성 확인
   Phase 1 (stratified300)  : 완료. 같은 패턴이 더 뚜렷함(tree 모델 direction accuracy 급락:
                               0.269→0.155). Phase 2 필요성이 top300보다 더 명확히 드러남
+  Phase 2 (top300)         : PASS (§7 기준 — MAE·R² 모두 LightGBM 우위: MAE 1.0012<1.0225,
+                              R² 0.2391>0.2194). 단 direction_accuracy는 LightGBM 0.2901 <
+                              Naive_Profile 0.3018로 여전히 역전되지 않음
+  Phase 2 (stratified300)  : PASS (MAE 0.5625<0.5781, R² 0.2728>0.2483). direction_accuracy
+                              격차는 top300보다 더 벌어짐(LightGBM 0.1666 vs Naive_Profile
+                              0.3361, 거의 절반 수준) — decrease_f1도 Naive_Profile이 더
+                              우세(0.276 vs 0.221). historical profile feature를 직접 줘도
+                              tree 모델의 방향성 예측력이 Naive_Profile보다 못한 상태가
+                              Phase 1부터 Phase 2까지 해소되지 않음 → 데이터 기간만 늘리는
+                              Phase 2.5로 저절로 해결될지 불확실하며, 별도 원인 분석이
+                              필요할 수 있음
 ```
 
 ## 10. 참고 진단 실험 — Sequence 모델 상한 성능 (Phase 순서 밖, A안)
