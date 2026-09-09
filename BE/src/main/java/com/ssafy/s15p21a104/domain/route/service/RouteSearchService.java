@@ -88,7 +88,10 @@ public class RouteSearchService {
                     graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM,
                     transferSecs);
             return response.map(this::withGeometry)
-                    .filter(r -> BikeStockGate.passes(r.legs(), graphRegistry.bikeStock()))
+                    .filter(r -> BikeStockGate.passesEdges(
+                            found.edges().stream().map(Edge::fromNode).toList(),
+                            found.edges().stream().map(Edge::mode).toList(),
+                            graphRegistry.bikeStock()))
                     .map(List::of).orElseGet(List::of);
         } catch (DomainException exception) {
             if (exception.getErrorType() == ErrorType.ROUTE_NOT_FOUND) {
