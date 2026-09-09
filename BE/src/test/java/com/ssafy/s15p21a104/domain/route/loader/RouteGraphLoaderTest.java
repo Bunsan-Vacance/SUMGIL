@@ -141,4 +141,26 @@ class RouteGraphLoaderTest {
         assertEquals("2호선", result.nameMapper().lineNameOf("L2").orElseThrow());
         assertTrue(result.nameMapper().lineNameOf("L_UNKNOWN").isEmpty());
     }
+
+    @Test
+    @DisplayName("109-T5: 추가 엣지가 같은 규칙으로 합쳐진다")
+    void T109_추가엣지_병합() {
+        RouteGraph graph = RouteGraphLoader.load(goldenRawData(), List.of(
+                        new com.ssafy.s15p21a104.domain.route.graph.Edge(
+                                "st_A", "R1", "BIKE", 240, 0, TravelMode.BIKE)))
+                .graph();
+
+        assertEquals(4, graph.edgeCount());
+        assertTrue(graph.findEdge("st_A", "R1").isPresent());
+        assertEquals(TravelMode.BIKE, graph.findEdge("st_A", "R1").orElseThrow().mode());
+        assertTrue(graph.nodes().contains("R1"));
+    }
+
+    @Test
+    @DisplayName("109-T6: 추가 엣지 없이 기존 호출은 그대로 동작한다")
+    void T109_추가없음_기존동일() {
+        RouteGraph graph = RouteGraphLoader.load(goldenRawData(), List.of()).graph();
+
+        assertEquals(3, graph.edgeCount());
+    }
 }
