@@ -13,7 +13,7 @@ public final class LineCodes {
 
     private static final Map<String, String> NAMES = new LinkedHashMap<>();
     private static final Map<String, String> BY_NAME = new LinkedHashMap<>();
-    private static final Map<String, String> BY_KORAIL_CODE = new LinkedHashMap<>();
+    private static final Map<String, String> BY_STD_CODE = new LinkedHashMap<>();
 
     static {
         for (int i = 1; i <= 9; i++) {
@@ -40,18 +40,39 @@ public final class LineCodes {
         BY_NAME.put("분당선", "1075");
         BY_NAME.put("수인선", "1075");
         BY_NAME.put("인천국제공항철도", "1065");
+        BY_NAME.put("인천국제공항선", "1065");   // 표준데이터 노선명
+        BY_NAME.put("공항선", "1065");
+        BY_NAME.put("안산과천선", "1004");       // 코레일 물리 선로 표기 — 4호선 운행 구간
+        BY_NAME.put("안산선", "1004");
+        BY_NAME.put("과천선", "1004");
+        BY_NAME.put("진접선", "1004");
+        BY_NAME.put("일산선", "1003");
 
-        // 공공데이터포털 "도시철도 구간정보"(코레일 광역 구간)의 노선 코드
-        BY_KORAIL_CODE.put("4", "1004");     // 4호선 경계 구간 (남태령–선바위)
-        BY_KORAIL_CODE.put("101", "1001");   // 경부선
-        BY_KORAIL_CODE.put("102", "1001");   // 경인선
-        BY_KORAIL_CODE.put("108", "1001");   // 경원선
-        BY_KORAIL_CODE.put("109", "1001");   // 장항선 (천안 이남, 권역 밖)
-        BY_KORAIL_CODE.put("103", "1063");   // 경의중앙선
-        BY_KORAIL_CODE.put("110", "1063");   // 경의선 용산 구간
-        BY_KORAIL_CODE.put("104", "1004");   // 안산선
-        BY_KORAIL_CODE.put("105", "1004");   // 과천선
-        BY_KORAIL_CODE.put("106", "1075");   // 분당선
+        // 전국도시철도역사정보표준데이터(15013205)의 노선번호. 서비스 노선이 하나로 정해지는 코드만 둔다 —
+        // 경원선 I4102(1호선·경의중앙·경춘 공용)처럼 물리 선로 코드는 비워 두고 호출자가 이름으로만 쓴다.
+        for (int i = 1; i <= 9; i++) {
+            BY_STD_CODE.put("S110" + i, "100" + i);
+        }
+        BY_STD_CODE.put("S1121", "1002");   // 2호선 성수지선
+        BY_STD_CODE.put("S1122", "1002");   // 2호선 신정지선
+        BY_STD_CODE.put("I4101", "1001");   // 1호선(서울교통공사 표기)·경부선
+        BY_STD_CODE.put("I1101", "1001");   // 경인선
+        BY_STD_CODE.put("I1103", "1003");
+        BY_STD_CODE.put("I4106", "1003");   // 일산선
+        BY_STD_CODE.put("I1104", "1004");
+        BY_STD_CODE.put("I4103", "1004");   // 안산과천선
+        BY_STD_CODE.put("I4104", "1004");   // 진접선
+        BY_STD_CODE.put("S4108", "1008");   // 8호선 별내선(남양주도시공사)
+        BY_STD_CODE.put("I4108", "1063");   // 경의중앙선
+        BY_STD_CODE.put("I4105", "1075");   // 분당선
+        BY_STD_CODE.put("I28K1", "1075");   // 수인선
+        BY_STD_CODE.put("I41K2", "1067");   // 경춘선
+        BY_STD_CODE.put("I41K5", "1081");   // 경강선
+        BY_STD_CODE.put("I41WS", "1093");   // 서해선
+        BY_STD_CODE.put("I28A1", "1065");   // 인천국제공항선
+        BY_STD_CODE.put("I11D1", "1077");   // 신분당선
+        BY_STD_CODE.put("L11UI", "1092");   // 우이신설선
+        BY_STD_CODE.put("L11SL", "1094");   // 신림선
     }
 
     private LineCodes() {
@@ -77,12 +98,28 @@ public final class LineCodes {
         return Optional.ofNullable(BY_NAME.get(name.trim()));
     }
 
-    /** 코레일 구간 파일의 노선 코드. */
-    public static Optional<String> fromKorailCode(String code) {
+    /**
+     * 국토교통부 "도시철도 전체노선"(15122916)의 노선명. '선'이 빠진 표기("경의중앙", "경춘", "신분당")와 "공항"(공항철도)을 받는다.
+     * 실시간 API 코드가 없는 노선(인천1호선·에버라인·GTX-A)은 비어 있다.
+     */
+    public static Optional<String> fromUrbanLineName(String name) {
+        if (name == null) {
+            return Optional.empty();
+        }
+        String n = name.trim();
+        if (n.equals("공항")) {
+            return Optional.of("1065");
+        }
+        Optional<String> id = fromName(n);
+        return id.isPresent() ? id : fromName(n + "선");
+    }
+
+    /** 전국도시철도역사정보표준데이터(15013205)의 노선번호. 물리 선로 공용 코드(경원선 I4102)와 코드 없는 노선은 비어 있다. */
+    public static Optional<String> fromStdLineCode(String code) {
         if (code == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(BY_KORAIL_CODE.get(code.trim()));
+        return Optional.ofNullable(BY_STD_CODE.get(code.trim()));
     }
 
     /** 표시 이름. 모르는 ID 는 ID 그대로. */
