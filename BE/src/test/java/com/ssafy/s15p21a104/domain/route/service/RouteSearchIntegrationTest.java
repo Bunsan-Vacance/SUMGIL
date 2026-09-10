@@ -81,7 +81,7 @@ class RouteSearchIntegrationTest {
     @Test
     @DisplayName("IT1: 지하철만 있으면 SUBWAY 단일 응답이다")
     void it1_지하철만_SUBWAY() {
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
@@ -100,7 +100,7 @@ class RouteSearchIntegrationTest {
                 bike("A", "R1", 120),
                 bike("R1", "C", 120)));
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
         assertEquals(1, result.get(0).legs().size());
@@ -119,7 +119,7 @@ class RouteSearchIntegrationTest {
                 bike("B", "R1", 120),
                 bike("R1", "C", 120)));
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
         List<TravelMode> modes = result.get(0).legs().stream().map(leg -> leg.mode()).toList();
@@ -137,7 +137,7 @@ class RouteSearchIntegrationTest {
                 bike("R1", "C", 400)));
 
         List<RouteSearchResponse> result =
-                routeSearchService.search("A", "C", List.of(TravelMode.BIKE), null);
+                routeSearchService.search("A", "C", List.of(TravelMode.BIKE), null, null);
 
         assertTrue(result.isEmpty());
     }
@@ -149,7 +149,7 @@ class RouteSearchIntegrationTest {
                 subway("A", "B", "L1", 100),
                 subway("B", "C", "L2", 50)));
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
         assertEquals(3, result.get(0).legs().size());
@@ -167,7 +167,7 @@ class RouteSearchIntegrationTest {
                 bike("R1", "C", 120)));
         lenient().when(graphRegistry.bikeStock()).thenReturn(Map.of("R1", 0));
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertTrue(result.isEmpty());
     }
@@ -179,7 +179,7 @@ class RouteSearchIntegrationTest {
                 subway("A", "B", "L1", 100),
                 subway("C", "C", "L9", 10)));
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertTrue(result.isEmpty());
     }
