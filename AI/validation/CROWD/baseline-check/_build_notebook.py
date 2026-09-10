@@ -33,13 +33,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path.cwd()))
 
 import pandas as pd
-
 from baseline import DayTypeLookupBaseline, regression_metrics, residuals
+from compare_models import add_improvement_columns
 from dataset import load_panel, time_split
 from features import FEATURE_SETS, build_matrix
+
 from models import CANDIDATES, fit_predict
 
-pd.set_option("display.width", 120)"""))
+pd.set_option("display.width", 200)"""))
 
 cells.append(nbf.v4.new_markdown_cell("## 1. 데이터 로드 · 베이스라인"))
 
@@ -95,7 +96,14 @@ cells.append(nbf.v4.new_markdown_cell("""## 3. 후보 비교 (잔차 예측)
 
 `feature_set`을 바꿔가며(`features.FEATURE_SETS`) 잔차를 무엇으로 설명시킬지 스왑한다."""))
 
-cells.append(nbf.v4.new_code_cell("""def compare(feature_set: str) -> pd.DataFrame:
+cells.append(
+    nbf.v4.new_code_cell(
+        """# 절마다 돌린 결과를 여기 모아둔다 — 6절의 집계 셀이 이 dict만 보고 표를 만든다.
+# 절을 건너뛰고 실행하면 그 세트가 비어 6절 표에서 빠지므로, 위에서부터 순서대로 실행한다.
+RESULTS: dict[str, pd.DataFrame] = {}
+
+
+def compare(feature_set: str) -> pd.DataFrame:
     X_train = build_matrix(train, feature_set)
     X_test = build_matrix(test, feature_set)
 
@@ -115,14 +123,21 @@ cells.append(nbf.v4.new_code_cell("""def compare(feature_set: str) -> pd.DataFra
                  **regression_metrics(test[target], pd.Series(final_pred))}
             )
 
-    result = pd.DataFrame(rows)
-    base_rmse = result[result["model"] == "lookup_baseline"].set_index("target")["rmse"]
-    result["RMSE_개선율_%"] = result.apply(
-        lambda r: round((1 - r["rmse"] / base_rmse[r["target"]]) * 100, 2), axis=1
+    # RMSE·MAE·R² 개선율과 절대 개선폭(명)을 한 번에 붙인다(compare_models.py 공용 함수).
+    result = add_improvement_columns(pd.DataFrame(rows))
+    RESULTS[feature_set] = result
+    return result"""
     )
-    return result"""))
+)
 
-cells.append(nbf.v4.new_markdown_cell("### 3.1 이벤트 피처만 (`game_count`, `festival_count`)"))
+cells.append(
+    nbf.v4.new_markdown_cell(
+        "### 3.1 이벤트 피처만 (`game_count`, `festival_count`)\n\n"
+        "둘 다 극히 희소하다 — 전체 패널 398.7만 행 중 `game_count > 0`이 20,460행(0.51%), "
+        "`festival_count > 0`이 143,120행(3.59%)이다. 트리가 학습할 수 있는 조건부 평균의 "
+        "종류가 몇 개 안 된다는 뜻이라, 개선폭이 작게 나오는 것이 정상이다."
+    )
+)
 cells.append(nbf.v4.new_code_cell('events_result = compare("events")\nevents_result.round(2)'))
 
 cells.append(
@@ -130,7 +145,11 @@ cells.append(
         "### 3.2 기상 + 이벤트 전부\n\n"
         "잔차-기상 상관이 이미 전부 `|0.09|` 미만으로 나왔던 것(`run_baseline.py`)과 "
         "일관되는지 확인한다 — 신호가 없는 피처를 더하면 트리 모델은 노이즈에 과적합해 "
-        "오히려 손해를 볼 수 있다."
+        "오히려 손해를 볼 수 있다.\n\n"
+        "**손해의 크기는 RMSE보다 MAE에서 훨씬 크게 드러난다.** RMSE만 보면 -0.3~4% 악화로 "
+        "보이지만 MAE는 -7~16% 악화다. 기상 컬럼은 거의 모든 행에 값이 있어(이벤트와 달리 "
+        "희소하지 않다) 트리가 **평상시 행까지 전부 흔들어놓기** 때문이다 — 이벤트처럼 소수 "
+        "행에만 개입하는 피처와 손해의 성질이 다르다."
     )
 )
 cells.append(
@@ -177,27 +196,179 @@ cells.append(
     )
 )
 
-cells.append(nbf.v4.new_markdown_cell("""## 5. 정리
+cells.append(nbf.v4.new_markdown_cell("""### 4.3 + 축제 개최 기간 분해
 
-- **원본 범주형 직접 예측(2절)**: 세 모델 다 베이스라인보다 나빴다(RMSE -11~-47%p) — 트리
+축제에는 `game_attendance`에 대응하는 관중수가 원천에 없다(`parsers_festival.py` 참고).
+대신 **개최 기간**으로 축제의 성격을 가른다 — `festival_count` 하나만 쓸 때는 역·날짜별 축제
+행의 91.8%를 차지하는 장기 상설 행사(서울아트쇼 231일, 박물관 기획전 등)가 정작 인원이
+몰리는 단기 축제의 신호를 덮고 있었다.
+
+`festival_short_count`(≤3일)·`festival_long_count`(>3일)로 개수를 쪼개고,
+`festival_min_duration_days`(연속값)를 같이 넣어 모델이 3일 경계 대신 다른 경계를 고를 수
+있게 한다.
+
+> 후원기관 수(`festival_sponsored_count`)도 규모 프록시로 넣어봤지만 개선폭이 0이라
+> 파이프라인에서 제거했다 — 경위는 `parsers_festival.py` docstring에 남겼다."""))
+cells.append(
+    nbf.v4.new_code_cell(
+        'events_festival_result = compare("events_station_time_festival")\n'
+        "events_festival_result.round(2)"
+    )
+)
+
+cells.append(nbf.v4.new_markdown_cell("""### 4.4 관중수 + 축제 기간 둘 다
+
+두 규모 신호를 합치면 더 좋아지는지, 아니면 희소·약신호가 겹쳐 과적합하는지 확인한다 —
+기상(3.2절)에서 이미 후자가 관찰됐다."""))
+cells.append(
+    nbf.v4.new_code_cell(
+        'both_scale_result = compare("events_station_time_attendance_festival")\n'
+        "both_scale_result.round(2)"
+    )
+)
+
+cells.append(nbf.v4.new_markdown_cell("""## 5. 피처별 효과 집계
+
+**절마다 흩어진 표를 여기서 한 장으로 모은다.** 위 절들을 순서대로 실행하면 `RESULTS`에
+세트별 결과가 쌓이고, 아래 두 셀이 그것만 읽어 (1) 세트×모델 요약과 (2) **피처 그룹을
+추가했을 때의 증분 기여**를 낸다.
+
+증분 표가 이 노트북의 핵심 산출물이다 — "이 세트가 베이스라인보다 1.3% 낫다"는 절대 수치는
+어느 컬럼이 그 1.3%를 만들었는지 말해주지 않는다. 직전 세트와의 차이를 봐야 방금 추가한
+컬럼의 몫이 분리된다."""))
+
+cells.append(
+    nbf.v4.new_code_cell('''def summary_table(metric: str = "RMSE_개선율_%") -> pd.DataFrame:
+    """세트(행) × 모델·타깃(열) 요약. 값은 베이스라인 대비 개선율."""
+    frames = []
+    for feature_set, result in RESULTS.items():
+        sub = result[result["model"] != "lookup_baseline"]
+        frames.append(
+            sub.assign(feature_set=feature_set).pivot_table(
+                index="feature_set", columns=["model", "target"], values=metric
+            )
+        )
+    return pd.concat(frames).reindex(RESULTS.keys())
+
+
+# R² 개선폭은 0.1%p 단위라 소수 2자리로 자르면 전부 0.1로 뭉개진다 — 지표별로 자릿수를 다르게.
+for metric, digits in (("RMSE_개선율_%", 2), ("MAE_개선율_%", 2), ("R2_개선_%p", 3)):
+    print(f"\\n=== {metric} (베이스라인 대비) ===")
+    print(summary_table(metric).round(digits).to_string())''')
+)
+
+cells.append(nbf.v4.new_markdown_cell("""### 5.1 피처 그룹별 증분 기여
+
+각 행은 "직전 세트에 이 컬럼들을 더했을 때 개선율이 몇 %p 움직였나"다. **양수면 그 컬럼이
+기여했고, 음수면 넣어서 손해를 봤다는 뜻이다.**"""))
+
+cells.append(nbf.v4.new_code_cell('''# (라벨, 기준 세트, 비교 세트, 추가된 컬럼)
+STEPS = [
+    ("이벤트 유무", None, "events", "game_count·festival_count"),
+    ("+ 기상 5종", "events", "weather_events", "temp_c·precip_mm·wind_ms·humidity_pct·snow_cm"),
+    ("+ 역", "events", "events_station", "station_no"),
+    ("+ 시간대", "events_station", "events_station_time", "time_slot"),
+    ("+ 경기 관중수", "events_station_time", "events_station_time_attendance", "game_attendance(+missing)"),
+    ("+ 축제 기간 분해", "events_station_time", "events_station_time_festival", "festival_short/long_count·min_duration_days"),
+    ("+ 둘 다", "events_station_time", "events_station_time_attendance_festival", "관중수 + 축제 기간"),
+]
+
+
+def incremental_table(metric: str = "RMSE_개선율_%") -> pd.DataFrame:
+    """직전 세트 대비 증분(%p). 기준이 None인 행은 베이스라인 대비 절대값이다."""
+    rows = []
+    for label, base_set, target_set, added in STEPS:
+        if target_set not in RESULTS or (base_set is not None and base_set not in RESULTS):
+            continue  # 해당 절을 실행하지 않았으면 건너뛴다
+        cur = RESULTS[target_set]
+        cur = cur[cur["model"] != "lookup_baseline"].set_index(["model", "target"])[metric]
+        if base_set is None:
+            delta = cur
+        else:
+            prev = RESULTS[base_set]
+            prev = prev[prev["model"] != "lookup_baseline"].set_index(["model", "target"])[metric]
+            delta = cur - prev
+        row = {"단계": label, "추가된 컬럼": added}
+        row.update({f"{m}/{t}": round(v, 2) for (m, t), v in delta.items()})
+        rows.append(row)
+    return pd.DataFrame(rows).set_index("단계")
+
+
+for metric in ("RMSE_개선율_%", "MAE_개선율_%"):
+    print(f"\\n=== 증분 기여 ({metric}, 단위 %p) ===")
+    print(incremental_table(metric).to_string())'''))
+
+cells.append(nbf.v4.new_markdown_cell("""### 5.2 절대 개선폭 — 명 단위
+
+개선율(%)만으로는 서비스에서 체감되는 차이인지 판단할 수 없다. 베이스라인 RMSE가 216명
+수준이라, 1%는 약 2명이다."""))
+
+cells.append(nbf.v4.new_code_cell("""abs_rows = []
+for feature_set, result in RESULTS.items():
+    base = result[result["model"] == "lookup_baseline"].set_index("target")
+    for _, r in result[result["model"] != "lookup_baseline"].iterrows():
+        abs_rows.append({
+            "feature_set": feature_set, "model": r["model"], "target": r["target"],
+            "베이스라인_RMSE_명": round(base.loc[r["target"], "rmse"], 1),
+            "모델_RMSE_명": round(r["rmse"], 1),
+            "RMSE_개선_명": r["RMSE_개선_명"],
+            "MAE_개선_명": r["MAE_개선_명"],
+            "R2": round(r["r2"], 4),
+        })
+print(pd.DataFrame(abs_rows).to_string(index=False))"""))
+
+cells.append(nbf.v4.new_markdown_cell("""## 6. 정리
+
+베이스라인: RMSE 216.2/217.6명, MAE 95.4/99.2명, R² 0.960/0.963 (boarding/alighting,
+조회 실패 0건). 아래 수치는 전부 이 기준 대비다.
+
+### 절별 결과
+
+- **원본 범주형 직접 예측(2절)**: 세 모델 다 베이스라인보다 나빴다(RMSE -11~-47%) — 트리
   모델의 근사 범주형 분할이 lookup 테이블만큼 정확하지 않다는 뜻이라 폐기했다.
-- **이벤트만(3.1절)**: 세 모델 다 베이스라인 대비 RMSE 소폭 개선(+0.1%대) — 방향은 맞지만
-  절대 개선폭은 미미하다. `game_count`·`festival_count`가 극히 희소한 이진성 변수라(연
-  10,200건/123,360건 vs 전체 199만건) 트리가 학습할 수 있는 조건부 평균이 몇 종류 안 된다.
-- **기상까지 추가(3.2절)**: 오히려 악화(-0.3~4%p). 잔차와 상관이 없던 변수를 더하면 모델이
-  노이즈에 과적합한다는 뜻 — `run_baseline.py`의 상관 분석 결과와 일관된다.
-- **이벤트 × 역(4절)**: LightGBM·XGBoost가 +0.45~0.50%로 개선폭이 커졌다(RandomForest는
-  -0.4%대로 오히려 나빠짐 — station_no를 서수 인코딩하는 방식이 고카디널리티에서 불리하기
-  때문으로 보인다).
-- **이벤트 × 역 × 시간대(4.1절)**: LightGBM·XGBoost가 +1.2~1.5%로 더 개선됐다 — 종합운동장·
-  잠실·월드컵경기장(성산) 쏠림이 실제로 "이벤트가 특정 역·특정 시간대에 크게 작동한다"는
-  상호작용이었다는 뜻이다. 남은 4% 중 약 1.5%p(전체의 30%대)를 이 상호작용만으로 회수했다.
-- **관중수 규모까지(4.2절)**: 혼재된 결과다 — LightGBM은 +1.5~1.6%로 소폭 더 좋아졌지만,
-  XGBoost는 오히려 +0.9~1.2%로 후퇴했다(NaN 처리 방식 차이로 추정). RandomForest는
-  -0.25%대로 계속 열세다. 관중수 규모는 "확실한 개선"이라기보다 LightGBM에서만 미세하게
-  더 이기는 정도라, 굳이 넣을지는 복잡도 대비 이득을 보고 판단할 문제다.
-- **후보 순위**: LightGBM ≈ XGBoost가 유효한 후보(이벤트×역×시간대 조합에서 +1.2~1.6%),
-  RandomForest는 범주형 인코딩 한계로 세 후보 중 가장 약하다."""))
+- **이벤트만(3.1절)**: RMSE +0.07~0.12%, MAE -0.7~0.9%. 사실상 아무 일도 일어나지 않는다.
+  두 컬럼이 극히 희소해(0.51%/3.59%) 트리가 배울 조건부 평균이 몇 개 없다.
+- **기상까지(3.2절)**: RMSE -0.3~4.1%, **MAE -7.3~16.4%**. 신호 없는 피처를 더하면 손해라는
+  것이 확인됐고, 그 손해가 MAE에서 훨씬 크다 — 기상은 희소하지 않아 평상시 행까지 흔든다.
+- **이벤트 × 역(4절)**: RMSE +0.44~0.50%(LightGBM·XGBoost). RandomForest는 -0.4~0.5%로
+  오히려 나빠진다 — `station_no`를 서수 인코딩하는 방식이 고카디널리티에서 불리하다.
+- **이벤트 × 역 × 시간대(4.1절)**: RMSE +1.19~1.53%. **단일 단계로는 가장 큰 도약**이다 —
+  `diagnose_residuals.py`가 짚은 종합운동장·잠실·월드컵경기장(성산) 쏠림이 실제로 "이벤트가
+  특정 역·특정 시간대에 작동한다"는 상호작용이었다. 다만 MAE는 여전히 음수(-0.15~0.38%)다.
+- **관중수 규모(4.2절)**: LightGBM만 RMSE 최고치(+1.64/1.46%)를 내고 XGBoost는 1.46→0.86%로
+  후퇴한다(NaN 처리 방식 차이로 추정). MAE는 세 모델 다 개선되지 않는다.
+- **축제 개최 기간 분해(4.3절)**: **MAE가 처음으로 양수로 돌아선 세트다.** LightGBM
+  RMSE +1.26/1.23% · MAE +0.08/0.19%, XGBoost RMSE +1.29/1.25% · MAE +0.02/0.16% —
+  RMSE·MAE를 **동시에** 개선하는 유일한 조합이다. RandomForest의 개선폭이 가장 크다
+  (RMSE 0.27→0.95%, MAE -2.28→-0.51%): 오염된 `festival_count` 하나만 있던 때는 서수
+  인코딩된 `station_no`에 의존할 수밖에 없었는데, 분해된 수치 컬럼이 쓸 만한 분할을 줬다.
+- **관중수 + 축제 둘 다(4.4절)**: XGBoost가 1.29→0.67%로 크게 후퇴한다. 희소·약신호를 쌓으면
+  과적합한다는 패턴이 기상·관중수에 이어 **세 번째로 재현**됐다.
+
+### 후보 순위와 권장 조합
+
+**LightGBM ≈ XGBoost**가 유효한 후보다. RandomForest는 범주형을 서수 인코딩해야 하는 한계로
+계속 열세지만, 축제 기간 컬럼을 주면 격차가 크게 줄어든다(RMSE -0.1~0.27% → 0.88~0.95%).
+
+권장 조합은 **`events_station_time_festival`**이다. RMSE 최고치는 관중수 세트가 내지만
+(LightGBM +1.64%) 그 세트는 MAE를 악화시키고 XGBoost에서 후퇴한다. 두 지표를 동시에
+개선하면서 세 모델 모두에서 안정적인 것은 축제 기간 세트뿐이다.
+
+### 그런데 절대값이 작다 — 87번의 실질적 답
+
+**최대 개선이 RMSE 3.5명 / 216명, MAE 0.2명, R² 0.960 → 0.961이다.** 시간대당 3명 안쪽이다.
+
+R² 기준으로 보면 더 분명하다. 베이스라인이 남긴 여지가 분산의 4.0%인데, 최고 후보가 회수한
+것은 **0.107~0.129%p, 즉 남은 여지의 약 3%**다. (이전 정리는 "남은 4% 중 1.5%p를 회수했다"고
+적었는데 이는 RMSE 개선율 1.5%를 분산 %p로 잘못 옮긴 것이다 — 실제로는 그 1/10 수준이다.)
+
+즉 **요일유형×역×시간대 평균 조회가 이미 상한에 가깝다.** 기상은 해가 되고, 이벤트는
+상호작용으로 넣어야 겨우 1%대를 얻고, 규모 피처는 그 위에 거의 못 얹는다.
+
+**다음 단계**: 이 3명이 서비스에서 의미가 있는지는 승하차 기준으로는 판단할 수 없다. 예측을
+혼잡도(착석 기회 지수)로 변환해 **등급 경계가 실제로 움직이는지** 확인해야 한다
+(`build_congestion_label.py`). 등급이 바뀌지 않는다면 87번의 결론은 "베이스라인 채택 +
+이벤트일 예외 처리"가 된다."""))
 
 nb["cells"] = cells
 nb["metadata"] = {
@@ -205,7 +376,9 @@ nb["metadata"] = {
     "language_info": {"name": "python", "version": "3"},
 }
 
-with open("model_comparison.ipynb", "w") as f:
+# encoding을 명시하지 않으면 Windows 기본 코드페이지(cp949)로 써서 한글 주석의 em dash에서
+# UnicodeEncodeError가 난다 — 노트북은 항상 UTF-8이다.
+with open("model_comparison.ipynb", "w", encoding="utf-8") as f:
     nbf.write(nb, f)
 
 print("wrote model_comparison.ipynb")
