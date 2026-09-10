@@ -3,11 +3,14 @@ import { ArrowLeft, Bike, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-
 import type { Place } from '../features/route/types'
 import MapPlacePicker from '../features/map/MapPlacePicker'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
+import { stationRepository } from '../api/repositories'
 import {
   clearRecentPlaces,
   loadRecentPlaces,
   removeRecentPlace,
   saveRecentPlace,
+  stationSearchResultToPlace,
+  useStationSearch,
   usePlaceSearch,
 } from '../features/route/usePlaceSearch'
 interface Props {
@@ -20,7 +23,17 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
   const [recentPlaces, setRecentPlaces] = useState<Place[]>(loadRecentPlaces)
   const [mapMode, setMapMode] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
-  const { places, loading, error } = usePlaceSearch(mapMode ? '' : query)
+  const stationSearchEnabled = Boolean(stationRepository)
+  const { places, loading, error } = usePlaceSearch(mapMode || stationSearchEnabled ? '' : query)
+  const {
+    stations,
+    loading: stationsLoading,
+    error: stationsError,
+  } = useStationSearch(mapMode ? '' : query)
+  const searchPlaces = [
+    ...stations.map(stationSearchResultToPlace),
+    ...(stationSearchEnabled ? [] : places),
+  ]
   const selectPlace = (place: Place, save = true) => {
     const accepted = choosePlace(place)
     if (accepted !== false && save) setRecentPlaces(saveRecentPlace(place))
@@ -85,7 +98,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="장소, 역, 주소 검색"
+          placeholder={stationSearchEnabled ? '지하철역 검색' : '장소, 역, 주소 검색'}
           aria-label="장소 검색어"
         />
         {query && (
@@ -119,7 +132,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
             : '검색어를 입력해 장소를 찾아보세요'}
       </p>
       <div className="place-list">
-        {places.map((place) => (
+        {searchPlaces.map((place) => (
           <button key={place.id} onClick={() => selectPlace(place)}>
             <span className="place-icon">
               {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
@@ -169,14 +182,23 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           <p>장소 이름이나 도로명 주소로 검색할 수 있어요.</p>
         </div>
       )}
-      {query.trim() && !loading && !error && !places.length && (
-        <div className="empty">
-          <Search />
-          <h3>검색 결과가 없어요</h3>
-          <p>다른 장소 이름으로 검색해 주세요.</p>
-        </div>
-      )}
-      {loading && (
+      {query.trim() &&
+        !loading &&
+        !stationsLoading &&
+        !error &&
+        !stationsError &&
+        !searchPlaces.length && (
+          <div className="empty">
+            <Search />
+            <h3>검색 결과가 없어요</h3>
+            <p>
+              {stationSearchEnabled
+                ? '다른 역 이름으로 검색해 주세요.'
+                : '다른 장소 이름으로 검색해 주세요.'}
+            </p>
+          </div>
+        )}
+      {(loading || stationsLoading) && (
         <p role="status" className="section-label">
           검색 중…
         </p>
@@ -184,6 +206,11 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
       {error && (
         <p role="alert" className="error">
           {error}
+        </p>
+      )}
+      {stationsError && (
+        <p role="alert" className="error">
+          {stationsError}
         </p>
       )}
     </section>

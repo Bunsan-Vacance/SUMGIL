@@ -1,7 +1,7 @@
 import { ArrowLeft, Navigation } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import LegList from '../features/route/LegList'
-import { arrival } from '../features/route/selectors'
+import { arrival, roundMinutes } from '../features/route/selectors'
 import type { Place, Route } from '../features/route/types'
 import type { Navigate } from '../app/useNavigation'
 interface Props {
@@ -35,10 +35,10 @@ export default function DetailPage({ origin, destinationName, selected, go, star
         </p>
         <div className="detail-title">
           <h2>
-            {selected.minutes}
+            {roundMinutes(selected.minutes)}
             <small>분</small>
           </h2>
-          <span>{arrival(selected.minutes)} 도착 예상</span>
+          <span>{arrival(selected.minutes, selected.departedAt)} 도착 예상</span>
           <b className={selected.id === 'calm' ? 'calm-text' : 'fast-text'}>{selected.label}</b>
         </div>
         <div className="stats">
@@ -46,14 +46,18 @@ export default function DetailPage({ origin, destinationName, selected, go, star
             <strong>{selected.transfers}회</strong>
             <small>환승</small>
           </div>
-          <div>
-            <strong>{selected.walk}m</strong>
-            <small>도보</small>
-          </div>
-          <div>
-            <strong>{selected.congestionPercent}%</strong>
-            <small>혼잡도 예상 · 09:41</small>
-          </div>
+          {selected.walk !== undefined && (
+            <div>
+              <strong>{selected.walk}m</strong>
+              <small>도보</small>
+            </div>
+          )}
+          {selected.congestionPercent !== undefined && (
+            <div>
+              <strong>{selected.congestionPercent}%</strong>
+              <small>혼잡도 예상</small>
+            </div>
+          )}
         </div>
         <section className="route-legs" aria-label="구간별 이동 안내">
           <h3>구간별 이동 안내</h3>

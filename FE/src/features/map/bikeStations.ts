@@ -9,6 +9,14 @@ export interface BikeStation {
   lng: number
 }
 
+export interface NearbyBikeStationLike {
+  id: string
+  name: string
+  address?: string
+  lat: number
+  lng: number
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -66,6 +74,16 @@ export function stationToPlace(station: BikeStation): Place {
     name: getBikeStationDisplayName(station.name),
     address: station.address,
     kind: '따릉이 대여소',
+    lat: station.lat,
+    lng: station.lng,
+  }
+}
+
+export function nearbyStationToBikeStation(station: NearbyBikeStationLike): BikeStation {
+  return {
+    id: station.id,
+    name: station.name,
+    address: station.address?.trim() || '',
     lat: station.lat,
     lng: station.lng,
   }

@@ -3,6 +3,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RouteRepository } from '../../api/contracts'
+import { RepositoryError } from '../../api/errors'
 import { places, routes } from '../../api/mock/fixtures'
 import { previewTrip } from '../../app/preview'
 import type { TripState } from './tripReducer'
@@ -58,6 +59,26 @@ describe('경로 검색 요청 수명', () => {
       status: 'success',
       error: '',
     })
+  })
+
+  it('RepositoryError 메시지는 사용자에게 전달하고 일반 오류는 기본 문구를 유지한다', async () => {
+    const repository: RouteRepository = {
+      search: vi
+        .fn()
+        .mockRejectedValueOnce(new RepositoryError('station-not-found', '역 정보를 찾지 못했어요.'))
+        .mockRejectedValueOnce(new Error('internal details')),
+    }
+    const { result } = renderHook(() => useTrip(previewTrip, repository))
+
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+    expect(result.current.error).toBe('역 정보를 찾지 못했어요.')
+
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+    expect(result.current.error).toBe('경로를 불러오지 못했어요.')
   })
 
   it('새 검색은 이전 경로를 즉시 숨기고 앞선 요청의 늦은 응답을 무시한다', async () => {

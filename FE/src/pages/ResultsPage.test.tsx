@@ -87,6 +87,19 @@ describe('경로 결과 상태', () => {
     expect(screen.queryByText(/혼잡 \d+구간/)).toBeNull()
   })
 
+  it('혼잡도 없는 결과는 혼잡도와 고정 출발 시각을 표시하지 않는다', () => {
+    const liveRoutes = routes
+      .slice(0, 1)
+      .map(({ congestionPercent: _congestionPercent, ...route }) => route)
+    render(<ResultsPage {...props({ visible: liveRoutes, isLiveApi: true })} />)
+
+    expect(screen.queryByText(/혼잡도/)).toBeNull()
+    expect(screen.queryByText(/09:41 출발 기준/)).toBeNull()
+    expect(
+      (screen.getByRole('button', { name: '덜 붐빔 우선' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+  })
+
   it('출발·도착 교환을 요청한다', () => {
     const swapPlaces = vi.fn()
     render(<ResultsPage {...props({ swapPlaces })} />)

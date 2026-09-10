@@ -16,7 +16,7 @@ export type TripAction =
   | { type: 'search'; origin?: Place; destination: Place }
   | { type: 'swap' }
   | { type: 'loaded'; routes: Route[] }
-  | { type: 'failed' }
+  | { type: 'failed'; error?: string }
   | { type: 'modes'; modes: Mode[] }
   | { type: 'priority'; priority: Priority }
   | { type: 'select'; id: string }
@@ -70,7 +70,7 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
         candidates: [],
         selected: null,
         status: 'error',
-        error: '경로를 불러오지 못했어요.',
+        error: action.error || '경로를 불러오지 못했어요.',
       }
     case 'modes': {
       if (!action.modes.length) return state

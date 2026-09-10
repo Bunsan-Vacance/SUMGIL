@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, RotateCw } from 'lucide-react'
+import { bikeStationRepository, isBackendConfigured } from '../../api/repositories'
 import {
   loadKakaoMaps,
   type KakaoMapClickEvent,
@@ -15,7 +16,12 @@ import {
   type BikeStationClusterOverlay,
   zoomToBikeStationCluster,
 } from './bikeStationMarkers'
-import { stationToPlace, type BikeStation } from './bikeStations'
+import {
+  bikeStations,
+  nearbyStationToBikeStation,
+  stationToPlace,
+  type BikeStation,
+} from './bikeStations'
 
 interface Props {
   target: 'origin' | 'destination'
@@ -33,6 +39,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
   const marker = useRef<MapOverlay | null>(null)
   const stationMarkers = useRef(new Map<string, BikeStationOverlay>())
   const stationClusterMarkers = useRef(new Map<string, BikeStationClusterOverlay>())
+  const stationList = useRef(bikeStationRepository ? [] : bikeStations)
   const selectedStationId = useRef<string | null>(null)
   const requestId = useRef(0)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -47,6 +54,8 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
     let clickHandler: ((event: KakaoMapClickEvent) => void) | null = null
     let idleHandler: (() => void) | null = null
     let resizeObserver: ResizeObserver | null = null
+    let nearbyAbort: AbortController | null = null
+    let nearbyRequestId = 0
     const element = canvas.current
     if (!element) return
 
@@ -55,6 +64,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
       .then((loaded) => {
         if (cancelled) return
         maps = loaded
+        stationList.current = bikeStationRepository ? [] : bikeStations
         const instance = new loaded.Map(element, {
           center: new loaded.LatLng(37.50162, 127.03944),
           level: 5,
@@ -74,7 +84,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
           )
         }
         const syncStationMarkers = () => {
-          const groups = groupVisibleBikeStations(loaded, instance)
+          const groups = groupVisibleBikeStations(loaded, instance, stationList.current)
           const individualGroups = groups.filter((group) => group.stations.length === 1)
           const visibleIds = new Set(individualGroups.map((group) => group.stations[0].id))
           stationMarkers.current.forEach((stationMarker, id) => {
@@ -113,9 +123,42 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
               )
             })
         }
+        const loadNearbyStations = () => {
+          if (!bikeStationRepository) return
+          const center = instance.getCenter()
+          nearbyAbort?.abort()
+          const controller = new AbortController()
+          nearbyAbort = controller
+          const requestId = ++nearbyRequestId
+          bikeStationRepository
+            .nearby(
+              {
+                lat: center.getLat(),
+                lng: center.getLng(),
+                radiusMeters: 3000,
+                limit: 100,
+              },
+              controller.signal,
+            )
+            .then((stations) => {
+              if (cancelled || controller.signal.aborted || requestId !== nearbyRequestId) return
+              stationList.current = stations.map(nearbyStationToBikeStation)
+              syncStationMarkers()
+            })
+            .catch(() => {
+              if (cancelled || controller.signal.aborted || requestId !== nearbyRequestId) return
+              stationList.current = []
+              syncStationMarkers()
+              setMessage('주변 대여소 정보를 불러오지 못했어요.')
+            })
+        }
         syncStationMarkers()
-        idleHandler = () => syncStationMarkers()
+        idleHandler = () => {
+          syncStationMarkers()
+          loadNearbyStations()
+        }
         loaded.event.addListener(instance, 'idle', idleHandler)
+        if (bikeStationRepository) loadNearbyStations()
         clickHandler = (event) => {
           const lat = event.latLng.getLat()
           const lng = event.latLng.getLng()
@@ -177,6 +220,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
         resizeObserver = new ResizeObserver(() => {
           instance.relayout()
           syncStationMarkers()
+          loadNearbyStations()
         })
         resizeObserver.observe(element)
         setStatus('ready')
@@ -186,6 +230,8 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
       })
     return () => {
       cancelled = true
+      nearbyAbort?.abort()
+      nearbyRequestId++
       requestId.current++
       if (maps && map.current) {
         if (clickHandler) maps.event.removeListener(map.current, 'click', clickHandler)
@@ -216,6 +262,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
       </header>
       <div className="map-picker-canvas">
         <div ref={canvas} className="kakao-map-canvas" aria-label="지도에서 장소 선택" />
+        {isBackendConfigured && <p className="map-nearby-hint">지도 중심 3km 이내 대여소</p>}
         {status !== 'ready' && (
           <div className="map-state" role="status">
             <p>{status === 'loading' ? '지도를 불러오고 있어요' : '지도를 불러오지 못했어요'}</p>

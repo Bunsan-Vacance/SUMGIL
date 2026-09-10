@@ -52,6 +52,13 @@ export default function App() {
                     ? null
                     : trip.destination
               }
+              route={
+                screen === 'guide'
+                  ? guidance.route
+                  : screen === 'results' || screen === 'detail'
+                    ? trip.selected
+                    : null
+              }
               onMessage={planner.setMessage}
             />
           )}

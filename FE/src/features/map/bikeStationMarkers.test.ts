@@ -47,6 +47,10 @@ describe('따릉이 지도 마커', () => {
     expect(marker.element.classList.contains('selected')).toBe(false)
     marker.setSelected(true)
     expect(marker.element.classList.contains('selected')).toBe(true)
+    marker.setRouteActive(true)
+    expect(marker.element.classList.contains('route-active')).toBe(true)
+    marker.setRouteActive(false)
+    expect(marker.element.classList.contains('route-active')).toBe(false)
     marker.destroy()
     expect(setMap).toHaveBeenCalledWith(null)
 
@@ -152,8 +156,9 @@ describe('따릉이 지도 마커', () => {
       center: { lat: 37.5, lng: 127 },
     }
     const onZoom = vi.fn(() => zoomToBikeStationCluster(maps, map, group))
-    const cluster = createBikeStationClusterOverlay(maps, map, group, onZoom)
+    const cluster = createBikeStationClusterOverlay(maps, map, group, onZoom, true)
 
+    expect(cluster.element.classList.contains('route-active')).toBe(true)
     expect(cluster.element.getAttribute('aria-label')).toBe(
       '이 지역 따릉이 대여소 2개, 확대해서 보기',
     )

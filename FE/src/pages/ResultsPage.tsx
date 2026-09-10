@@ -4,6 +4,7 @@ import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
+import { isBackendConfigured } from '../api/repositories'
 interface Props {
   origin: Place
   destinationName: string
@@ -23,6 +24,7 @@ interface Props {
   startGuide: () => void
   canSwap: boolean
   swapPlaces: () => void
+  isLiveApi?: boolean
 }
 export default function ResultsPage({
   origin,
@@ -43,7 +45,10 @@ export default function ResultsPage({
   startGuide,
   canSwap,
   swapPlaces,
+  isLiveApi,
 }: Props) {
+  const hasCongestion = visible.some((route) => route.congestionPercent !== undefined)
+  const liveApi = isLiveApi ?? isBackendConfigured
   return (
     <>
       <div className="trip-summary">
@@ -118,7 +123,9 @@ export default function ResultsPage({
             <header className="row between results-header">
               <div>
                 <h2>추천 경로</h2>
-                <p>{visible.length}개 경로 · 09:41 출발 기준</p>
+                <p>
+                  {visible.length}개 경로{!liveApi && ' · 09:41 출발 기준'}
+                </p>
               </div>
               <button className="secondary filter-button" onClick={openFilter}>
                 <SlidersHorizontal size={16} />
@@ -129,7 +136,11 @@ export default function ResultsPage({
               <button aria-pressed={priority === 'fast'} onClick={() => setPriority('fast')}>
                 빠름 우선
               </button>
-              <button aria-pressed={priority === 'calm'} onClick={() => setPriority('calm')}>
+              <button
+                aria-pressed={priority === 'calm'}
+                disabled={!hasCongestion}
+                onClick={() => setPriority('calm')}
+              >
                 덜 붐빔 우선
               </button>
             </div>

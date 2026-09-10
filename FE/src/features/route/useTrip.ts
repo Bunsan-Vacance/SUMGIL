@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react'
 import { routeRepository } from '../../api/repositories'
+import { RepositoryError } from '../../api/errors'
 import type { RouteRepository } from '../../api/contracts'
 import { modes } from './constants'
 import { getRoutes } from './selectors'
@@ -18,8 +19,13 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
     try {
       const candidates = await repository.search({ origin, destination }, pending.signal)
       if (!pending.signal.aborted) dispatch({ type: 'loaded', routes: candidates })
-    } catch {
-      if (!pending.signal.aborted) dispatch({ type: 'failed' })
+    } catch (error: unknown) {
+      if (!pending.signal.aborted) {
+        dispatch({
+          type: 'failed',
+          error: error instanceof RepositoryError ? error.message : undefined,
+        })
+      }
     }
   }
   return {

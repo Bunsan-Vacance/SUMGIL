@@ -1,5 +1,6 @@
 import type { Route } from './types'
 import { modeIcons } from './ModeIcon'
+import { roundMinutes } from './selectors'
 export default function LegList({ route }: { route: Route }) {
   return (
     <ol className="leg-list">
@@ -14,7 +15,7 @@ export default function LegList({ route }: { route: Route }) {
               <strong>{leg.title}</strong>
               <p>{leg.note}</p>
             </div>
-            <span>{leg.minutes}분</span>
+            <span>{roundMinutes(leg.minutes)}분</span>
           </li>
         )
       })}

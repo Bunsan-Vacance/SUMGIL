@@ -8,6 +8,7 @@ import { useGuidance } from '../features/guidance/useGuidance'
 import type { GuidanceDialog } from '../features/guidance/GuidanceDialogs'
 import type { RouteRepository } from '../api/contracts'
 import type { Mode, Place } from '../features/route/types'
+import { isBackendConfigured } from '../api/repositories'
 
 function samePlace(first: Place, second: Place) {
   return (
@@ -145,7 +146,7 @@ export function useRoutePlanner(repository?: RouteRepository) {
     setModal(null)
   }
   const acceptProposal = () => {
-    if (screen !== 'guide' || !guidance.route) return
+    if (isBackendConfigured || screen !== 'guide' || !guidance.route) return
     guidance.start(previewProposal, guidance.origin, guidance.destination)
     setModal(null)
   }
