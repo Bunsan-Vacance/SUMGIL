@@ -63,7 +63,14 @@ FESTIVAL_SHAPE_COLS = [
 ]
 CATEGORICAL_COLS = ["station_no", "time_slot"]
 
+# 인접역 피처(89번). `neighbor_features.py`가 패널에 붙이고, 이름은 `app/CROWD/pipeline/
+# adjacency.neighbor_feature_names`와 같다. `_raw`는 인접역 승하차 원본값, `_resid`는 인접역의
+# lookup 잔차 — 원본값은 역 수준을 다시 담아 87의 함정에 빠질 수 있어 둘을 나란히 비교한다.
+NEIGHBOR_RAW_COLS = [f"nb_{s}_{t}" for s in ("prev", "next") for t in ("boarding", "alighting")]
+NEIGHBOR_RESID_COLS = [f"{c}_resid" for c in NEIGHBOR_RAW_COLS]
+
 _EVENT_INTERACTION = EVENT_COLS + ["station_no", "time_slot"]
+_FESTIVAL_SET = _EVENT_INTERACTION + FESTIVAL_SHAPE_COLS
 
 FEATURE_SETS: dict[str, list[str]] = {
     "weather": WEATHER_COLS,
@@ -72,10 +79,15 @@ FEATURE_SETS: dict[str, list[str]] = {
     "events_station": EVENT_COLS + ["station_no"],
     "events_station_time": _EVENT_INTERACTION,
     "events_station_time_attendance": _EVENT_INTERACTION + ATTENDANCE_COLS,
-    "events_station_time_festival": _EVENT_INTERACTION + FESTIVAL_SHAPE_COLS,
+    "events_station_time_festival": _FESTIVAL_SET,
     "events_station_time_attendance_festival": (
         _EVENT_INTERACTION + ATTENDANCE_COLS + FESTIVAL_SHAPE_COLS
     ),
+    # ── 89번: 인접역 피처. 87 권장 세트(_FESTIVAL_SET) 위에 얹어 증분을 본다.
+    "neighbors_resid": NEIGHBOR_RESID_COLS,
+    "neighbors_raw": NEIGHBOR_RAW_COLS,
+    "festival_neighbors_resid": _FESTIVAL_SET + NEIGHBOR_RESID_COLS,
+    "festival_neighbors_raw": _FESTIVAL_SET + NEIGHBOR_RAW_COLS,
 }
 
 

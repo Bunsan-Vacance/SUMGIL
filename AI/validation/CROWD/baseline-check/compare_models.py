@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from baseline import DayTypeLookupBaseline, regression_metrics, residuals
 from dataset import load_panel, time_split
 from features import FEATURE_SETS, build_matrix
+from neighbor_features import add_neighbor_columns, needs_neighbor_columns, neighbor_map_for
 
 from models import CANDIDATES, fit_predict
 
@@ -41,6 +42,16 @@ def compare(feature_set: str = "weather_events") -> pd.DataFrame:
     lookup = DayTypeLookupBaseline().fit(train)
     train_resid = residuals(lookup, train)
     test_resid = residuals(lookup, test)
+
+    if needs_neighbor_columns(FEATURE_SETS[feature_set]):
+        # 89번 인접역 피처 — 학습·평가 각각 자기 구간의 같은 (date, time_slot) 인접역 값을
+        # 붙인다. 잔차는 학습 구간 lookup 기준(타깃 잔차와 같은 기준).
+        neighbor_map, gaps = neighbor_map_for(panel)
+        if len(gaps):
+            print("[안내] 토폴로지에 있으나 패널에 없는 역(양옆 역이 인접으로 이어진다):")
+            print(gaps.to_string(index=False))
+        train = add_neighbor_columns(train, lookup, neighbor_map)
+        test = add_neighbor_columns(test, lookup, neighbor_map)
 
     X_train = build_matrix(train, feature_set)
     X_test = build_matrix(test, feature_set)
