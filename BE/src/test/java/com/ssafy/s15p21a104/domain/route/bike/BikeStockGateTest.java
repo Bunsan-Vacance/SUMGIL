@@ -49,4 +49,15 @@ class BikeStockGateTest {
         assertTrue(BikeStockGate.passes(
                 List.of(subwayLeg()), Map.of("R1", 0)));
     }
+
+    @Test
+    @DisplayName("112-T4: 묶음 BIKE 엣지의 경유 대여소도 검사한다")
+    void t112_묶음경유_검사() {
+        assertFalse(BikeStockGate.passesEdges(
+                List.of("A", "R1"), List.of(TravelMode.BIKE, TravelMode.BIKE), Map.of("R1", 0)));
+        assertTrue(BikeStockGate.passesEdges(
+                List.of("A", "R1"), List.of(TravelMode.BIKE, TravelMode.BIKE), Map.of("R1", 5)));
+        assertTrue(BikeStockGate.passesEdges(
+                List.of("A", "R1"), List.of(TravelMode.BIKE, TravelMode.BIKE), Map.of()));
+    }
 }

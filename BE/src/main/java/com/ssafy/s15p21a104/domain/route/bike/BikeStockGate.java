@@ -40,4 +40,34 @@ public final class BikeStockGate {
         }
         return true;
     }
+
+    /**
+     * 탐색 결과 엣지들이 재고 게이트를 통과하는지 판정한다.
+     *
+     * <p>BIKE 구간이 여러 엣지로 묶여 하나의 leg가 되면 경유 대여소가 leg 경계에
+     * 나타나지 않는다. 엣지 단위 검사가 정확한 판정이다.
+     *
+     * @param fromNodes 엣지별 출발 정점 ID (순서대로)
+     * @param modes 엣지별 수단 (순서대로, fromNodes와 같은 크기)
+     * @param predictedBikes 대여소별 예상 재고. 비어 있으면 원천 없음(허용)
+     * @return BIKE 엣지 출발 대여소가 소진(0대 이하)이면 false, 그 외 true
+     */
+    public static boolean passesEdges(
+            List<String> fromNodes, List<TravelMode> modes, Map<String, Integer> predictedBikes) {
+        Objects.requireNonNull(fromNodes, "fromNodes");
+        Objects.requireNonNull(modes, "modes");
+        if (predictedBikes == null || predictedBikes.isEmpty()) {
+            return true;
+        }
+        for (int i = 0; i < fromNodes.size() && i < modes.size(); i++) {
+            if (modes.get(i) != TravelMode.BIKE) {
+                continue;
+            }
+            Integer bikes = predictedBikes.get(fromNodes.get(i));
+            if (bikes != null && bikes <= 0) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
