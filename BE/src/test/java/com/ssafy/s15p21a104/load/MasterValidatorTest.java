@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
+import com.ssafy.s15p21a104.load.crowd.CongestionRow;
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -85,5 +88,57 @@ class MasterValidatorTest {
         ValidationReport bus = MasterValidator.validateBus(List.of(new BusStopRow("", "이름", 37.5, 127.0)), List.of());
 
         assertEquals(1, bus.errors().size());
+    }
+
+    private static CongestionRow crowd(String type, String id, int dow, int slot, String level) {
+        return new CongestionRow(type, id, dow, slot, new BigDecimal(level), "stat");
+    }
+
+    @Test
+    @DisplayName("혼잡도: 적재된 역·노선만 target_id 로 쓸 수 있다 — 없는 역은 오류(유령 대상 방지)")
+    void congestionTargetMustExist() {
+        ValidationReport ok = MasterValidator.validateCongestion(
+                List.of(crowd("STATION", "150", 0, 17, "92.2"), crowd("LINE", "1001", 0, 17, "66.1")),
+                Set.of("150"), Set.of("1001"));
+        ValidationReport bad = MasterValidator.validateCongestion(
+                List.of(crowd("STATION", "9999", 0, 17, "50.0"), crowd("LINE", "1099", 0, 17, "50.0")),
+                Set.of("150"), Set.of("1001"));
+
+        assertTrue(ok.ok());
+        assertTrue(ok.warnings().isEmpty());
+        assertEquals(2, bad.errors().size());
+    }
+
+    @Test
+    @DisplayName("혼잡도: 100 을 넘는 값은 정상이다(정원 대비 %) — 음수만 오류")
+    void congestionLevelRange() {
+        ValidationReport over = MasterValidator.validateCongestion(
+                List.of(crowd("STATION", "150", 0, 17, "144.6")), Set.of("150"), Set.of());
+        ValidationReport negative = MasterValidator.validateCongestion(
+                List.of(crowd("STATION", "150", 0, 17, "-0.1")), Set.of("150"), Set.of());
+
+        assertTrue(over.ok());
+        assertEquals(1, negative.errors().size());
+    }
+
+    @Test
+    @DisplayName("혼잡도: 요일 0~2·슬롯 0~47 밖이면 오류, 모르는 target_type 도 오류")
+    void congestionKeyRange() {
+        ValidationReport report = MasterValidator.validateCongestion(List.of(
+                crowd("STATION", "150", 3, 17, "50.0"),
+                crowd("STATION", "150", 0, 48, "50.0"),
+                crowd("ROUTE", "150", 0, 17, "50.0")), Set.of("150"), Set.of());
+
+        assertEquals(3, report.errors().size());
+    }
+
+    @Test
+    @DisplayName("혼잡도: 같은 (타깃, 요일, 슬롯) 이 두 번이면 오류 — PK 충돌을 적재 전에 잡는다")
+    void congestionDuplicateKey() {
+        ValidationReport report = MasterValidator.validateCongestion(
+                List.of(crowd("STATION", "150", 0, 17, "92.2"), crowd("STATION", "150", 0, 17, "40.0")),
+                Set.of("150"), Set.of());
+
+        assertEquals(1, report.errors().size());
     }
 }

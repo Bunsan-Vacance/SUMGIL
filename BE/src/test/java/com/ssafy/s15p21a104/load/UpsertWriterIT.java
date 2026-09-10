@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
+import com.ssafy.s15p21a104.load.crowd.CongestionRow;
 import com.ssafy.s15p21a104.load.subway.EdgeRow;
+import java.math.BigDecimal;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeExpander;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
 import com.ssafy.s15p21a104.load.subway.LineRow;
@@ -58,6 +60,7 @@ class UpsertWriterIT {
         jdbc.update("DELETE FROM bike_station WHERE rental_id IN (?, ?)", RENT, RENT + "2");
         jdbc.update("DELETE FROM edge_time WHERE route_id = ?", L);
         jdbc.update("DELETE FROM transfer_meta WHERE station_id IN (?, ?, ?, ?, ?)", A, B, C, D, E);
+        jdbc.update("DELETE FROM congestion WHERE target_id IN (?, ?)", A, L);
         jdbc.update("DELETE FROM station WHERE station_id IN (?, ?, ?, ?, ?)", A, B, C, D, E);
         jdbc.update("DELETE FROM line WHERE line_id = ?", L);
     }
@@ -211,6 +214,29 @@ class UpsertWriterIT {
         assertEquals(37.6, jdbc.queryForObject("SELECT lat FROM bus_stop WHERE stop_id = ?", Double.class, STOP), 1e-9);
         assertEquals("새 147", jdbc.queryForObject("SELECT name FROM bus_route WHERE route_id = ?", String.class, ROUTE));
         assertEquals(20, jdbc.queryForObject("SELECT dock_count FROM bike_station WHERE rental_id = ?", Integer.class, RENT));
+    }
+
+    @Test
+    @DisplayName("congestion 을 넣고 다시 넣어도 건수가 같고, 같은 키의 값은 새 값으로 덮어쓴다 — 100 초과 값도 그대로 들어간다")
+    void congestionUpsertIsIdempotent() {
+        List<CongestionRow> rows = List.of(
+                new CongestionRow("STATION", A, 0, 17, new BigDecimal("92.2"), "stat"),
+                new CongestionRow("STATION", A, 0, 18, new BigDecimal("144.6"), "stat"),
+                new CongestionRow("LINE", L, 0, 17, new BigDecimal("66.1"), "stat"));
+
+        assertEquals(3, writer.upsertCongestion(rows));
+        assertEquals(3, writer.upsertCongestion(rows));
+        assertEquals(3, count("congestion", "target_id IN (?, ?)", A, L));
+        assertEquals(new BigDecimal("144.6"),
+                jdbc.queryForObject("SELECT level FROM congestion WHERE target_id = ? AND time_slot = 18", BigDecimal.class, A));
+
+        writer.upsertCongestion(List.of(new CongestionRow("STATION", A, 0, 17, new BigDecimal("11.1"), "live")));
+
+        assertEquals(new BigDecimal("11.1"),
+                jdbc.queryForObject("SELECT level FROM congestion WHERE target_id = ? AND time_slot = 17", BigDecimal.class, A));
+        assertEquals("live",
+                jdbc.queryForObject("SELECT source FROM congestion WHERE target_id = ? AND time_slot = 17", String.class, A));
+        assertEquals(3, count("congestion", "target_id IN (?, ?)", A, L));
     }
 
     private int count(String table, String where, Object... args) {

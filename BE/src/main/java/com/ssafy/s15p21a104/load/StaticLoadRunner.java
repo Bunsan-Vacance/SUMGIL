@@ -6,6 +6,8 @@ import com.ssafy.s15p21a104.load.bus.BusRouteParser;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopParser;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
+import com.ssafy.s15p21a104.load.crowd.CongestionParser;
+import com.ssafy.s15p21a104.load.crowd.CrowdStationCodes;
 import com.ssafy.s15p21a104.load.csv.CsvTable;
 import com.ssafy.s15p21a104.load.railgeometry.RailGeometryParser;
 import com.ssafy.s15p21a104.load.subway.DirectedSegment;
@@ -70,6 +72,7 @@ public class StaticLoadRunner implements ApplicationRunner {
     private static final String BUS_DIR = "data/bus/";
     private static final String BIKE_DIR = "data/bike/";
     private static final String RAILGEOMETRY_DIR = "data/railgeometry/";
+    private static final String CROWD_DIR = "data/crowd/";
 
     // 원천 파일명 (출처·갱신일은 각 폴더 README). 새 배포분을 받으면 여기와 README 를 함께 바꾼다.
     static final String TIMETABLE_FILE = "seoul-train-timetable_20260616.csv.gz";
@@ -97,6 +100,8 @@ public class StaticLoadRunner implements ApplicationRunner {
     static final String BUS_ROUTE_STOPS_FILE = "seoul-bus-route-stops_20260902.csv";
     static final String BIKE_SNAPSHOT_FILE = "seoul-bike-stations-live_20260909.csv";
     static final String BIKE_FILE = "seoul-bike-stations_202606.csv";
+    /** 서울교통공사 지하철혼잡도정보(공공데이터포털 15071311). 1~8호선 요일·30분 슬롯별 혼잡도 %. */
+    static final String CONGESTION_FILE = "seoulmetro-congestion_20260630.csv";
 
     private final LoadProperties props;
     private final UpsertWriter writer;
@@ -110,7 +115,8 @@ public class StaticLoadRunner implements ApplicationRunner {
                 case "bus" -> loadBus();
                 case "bike" -> loadBike();
                 case "railgeometry" -> loadRailGeometry();
-                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry)", source);
+                case "congestion" -> loadCongestion();
+                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion)", source);
             }
         }
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
@@ -292,6 +298,36 @@ public class StaticLoadRunner implements ApplicationRunner {
         timed("rail_node", () -> writer.upsertRailNodes(nodes));
         timed("rail_link_geometry", () -> writer.upsertRailLinkGeometry(links));
         log.info("KTDB geometry 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 혼잡도. 서울교통공사 지하철혼잡도정보(1~8호선)를 STATION·LINE 타깃으로 넣는다 (S15P21A104-73).
+     * 역번호가 노선별 역사코드라 {@code conf/station-ids.csv} 의 {@code codes} 를 역방향으로 읽어 station_id 로 바꾼다.
+     * 대상 존재 검증에 적재된 역·노선을 쓰므로 <b>지하철 적재가 선행 조건</b>이다 — 역이 없으면 검증 오류로 멈춘다.
+     */
+    private void loadCongestion() throws IOException {
+        long started = System.nanoTime();
+        CrowdStationCodes codes = CrowdStationCodes.from(
+                csv(SUBWAY_DIR, "conf/station-ids.csv").rows(), csv(CROWD_DIR, "conf/crowd-station-aliases.csv").rows());
+
+        var parser = new CongestionParser(codes);
+        CongestionParser.Result parsed = parser.parse(csv(CROWD_DIR, CONGESTION_FILE).rows());
+        logWarnings("혼잡도 파싱", parser.warnings());
+        var st = parsed.stats();
+        long stationRows = parsed.rows().stream().filter(r -> r.targetType().equals("STATION")).count();
+        log.info("혼잡도: 원천 {} 행 · 역 {} · 슬롯 {}/48 · 모르는 역번호 {} 행 · 100 초과 {} · congestion {} 행 (STATION {} + LINE {})",
+                st.sourceRows(), st.stations(), st.slots(), st.unknownCodes(), st.over100(),
+                parsed.rows().size(), stationRows, parsed.rows().size() - stationRows);
+
+        ValidationReport report = MasterValidator.validateCongestion(
+                parsed.rows(), writer.existingStationIds(), writer.existingLineIds());
+        logWarningsGrouped("검증", report.warnings());
+        if (!abortIfErrors("혼잡도", report) || dryRun("혼잡도", started)) {
+            return;
+        }
+
+        timed("congestion", () -> writer.upsertCongestion(parsed.rows()));
+        log.info("혼잡도 적재 완료 ({} ms)", elapsedMs(started));
     }
 
     /**
