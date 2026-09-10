@@ -17,9 +17,12 @@ import java.util.regex.Pattern;
  * 서울교통공사 "지하철혼잡도정보"(공공데이터포털 15071311) → {@link CongestionRow}.
  * 열은 {@code 구분 · 호선 · 역번호 · 역명 · 상하구분} + 30분 단위 시각 39개(5시30분~00시30분)이고, 1~8호선만 담는다.
  * <p>
- * <b>방향을 STATION 한 행으로 합친다.</b> 스키마에 방향이 없어 상선·하선·내선·외선 중 <b>최대값</b>을 쓴다 —
- * 경로 추천에서 혼잡은 보수적으로 봐야 하고, 평균은 한 방향의 극심(원천 최대 144.6)을 희석한다.
- * LINE 은 그 노선 STATION 값들의 평균이다(소수 1자리).
+ * <b>STATION 은 그 물리 역의 모든 노선·방향 중 최대값이다.</b> 스키마에 방향이 없고 환승역은 노선별 행이 따로 있는데
+ * ({@code station_id} 는 노선 코드 최솟값이라 합쳐진다 — 서울역 1호선 150 · 4호선 426 → 둘 다 150) 값은 하나여야 한다.
+ * 최대를 쓰는 이유는 경로 추천에서 혼잡을 보수적으로 봐야 하고 평균이 한 방향·한 노선의 극심(원천 최대 144.6)을 희석하기 때문이다.
+ * <p>
+ * <b>LINE 은 그 노선 안에서만 계산한다</b> — 노선별 (역, 방향 최대) 값들의 평균(소수 1자리). STATION 값을 재사용하면
+ * 환승역이 다른 노선의 값을 끌고 들어와 노선 평균이 오염된다(1~8호선에 그런 역이 35개 있다).
  * <p>
  * 값을 만들어 넣지 않는다: 원천이 덮지 않는 슬롯(01:00~05:29)·빈 칸·모르는 역번호는 행을 만들지 않고,
  * 모르는 역번호·구분·상하구분은 건수와 예시를 한 줄로 집계 경고한다.
@@ -59,10 +62,11 @@ public final class CongestionParser {
 
     public Result parse(List<Map<String, String>> sourceRows) {
         warnings.clear();
-        // (targetType|targetId|dow|slot) → 값. STATION 은 방향 최대, LINE 은 뒤에서 평균으로 만든다.
+        // (station|dow|slot) → 그 역의 모든 노선·방향 중 최대. 환승역은 노선 행이 여럿이라 여기서 한 값으로 합쳐진다.
         Map<String, BigDecimal> stationMax = new LinkedHashMap<>();
-        Map<String, List<BigDecimal>> lineValues = new LinkedHashMap<>();
-        Map<String, String> lineOfStation = new LinkedHashMap<>();
+        // (line|station|dow|slot) → 그 노선 안에서의 방향 최대. LINE 평균은 이 값으로 낸다 —
+        // STATION 을 재사용하면 환승역이 다른 노선의 값을 끌고 들어온다.
+        Map<String, BigDecimal> lineStationMax = new LinkedHashMap<>();
         Set<String> stations = new LinkedHashSet<>();
         Set<Integer> slots = new LinkedHashSet<>();
         List<String> unknownStations = new ArrayList<>();
@@ -85,7 +89,7 @@ public final class CongestionParser {
             }
             String id = stationId.get();
             stations.add(id);
-            LineCodes.fromName(value(row, "호선")).ifPresent(lineId -> lineOfStation.put(id, lineId));
+            String lineId = LineCodes.fromName(value(row, "호선")).orElse(null);
 
             for (Map.Entry<String, String> cell : row.entrySet()) {
                 if (FIXED_COLUMNS.contains(cell.getKey())) {
@@ -103,26 +107,26 @@ public final class CongestionParser {
                     over100++;
                 }
                 slots.add(slot);
-                String key = STATION + "|" + id + "|" + dowType + "|" + slot;
-                BigDecimal previous = stationMax.get(key);
-                if (previous == null || level.compareTo(previous) > 0) {
-                    stationMax.put(key, level);
+                stationMax.merge(id + "|" + dowType + "|" + slot, level, CongestionParser::max);
+                if (lineId != null) {
+                    lineStationMax.merge(lineId + "|" + id + "|" + dowType + "|" + slot, level, CongestionParser::max);
                 }
             }
         }
 
         List<CongestionRow> rows = new ArrayList<>(stationMax.size());
         for (Map.Entry<String, BigDecimal> e : stationMax.entrySet()) {
+            String[] k = e.getKey().split("\\|", 3);
+            rows.add(new CongestionRow(STATION, k[0], Integer.parseInt(k[1]), Integer.parseInt(k[2]), e.getValue(), SOURCE));
+        }
+        Map<String, List<BigDecimal>> lineValues = new LinkedHashMap<>();
+        for (Map.Entry<String, BigDecimal> e : lineStationMax.entrySet()) {
             String[] k = e.getKey().split("\\|", 4);
-            rows.add(new CongestionRow(STATION, k[1], Integer.parseInt(k[2]), Integer.parseInt(k[3]), e.getValue(), SOURCE));
-            String lineId = lineOfStation.get(k[1]);
-            if (lineId != null) {
-                lineValues.computeIfAbsent(LINE + "|" + lineId + "|" + k[2] + "|" + k[3], key -> new ArrayList<>()).add(e.getValue());
-            }
+            lineValues.computeIfAbsent(k[0] + "|" + k[2] + "|" + k[3], key -> new ArrayList<>()).add(e.getValue());
         }
         for (Map.Entry<String, List<BigDecimal>> e : lineValues.entrySet()) {
-            String[] k = e.getKey().split("\\|", 4);
-            rows.add(new CongestionRow(LINE, k[1], Integer.parseInt(k[2]), Integer.parseInt(k[3]), average(e.getValue()), SOURCE));
+            String[] k = e.getKey().split("\\|", 3);
+            rows.add(new CongestionRow(LINE, k[0], Integer.parseInt(k[1]), Integer.parseInt(k[2]), average(e.getValue()), SOURCE));
         }
 
         if (!unknownStations.isEmpty()) {
@@ -166,6 +170,10 @@ public final class CongestionParser {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private static BigDecimal max(BigDecimal a, BigDecimal b) {
+        return a.compareTo(b) >= 0 ? a : b;
     }
 
     private static BigDecimal average(List<BigDecimal> values) {

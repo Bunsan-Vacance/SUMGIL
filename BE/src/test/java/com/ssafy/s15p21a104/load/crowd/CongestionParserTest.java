@@ -99,6 +99,20 @@ class CongestionParserTest {
     }
 
     @Test
+    @DisplayName("환승역은 노선마다 그 노선 값으로 LINE 에 들어간다 — 서울역 1호선 92.2·4호선 50.0 이면 STATION 은 전체 최대 92.2, LINE 1001 은 1호선 값만(시청과 평균 66.1), LINE 1004 는 50.0")
+    void transferStationContributesPerLine() {
+        var result = new CongestionParser(IDENTITY).parse(List.of(
+                row("평일", "1호선", "150", "서울역", "상선", times("8시30분", "92.2")),
+                row("평일", "4호선", "150", "서울역", "상선", times("8시30분", "50.0")),
+                row("평일", "1호선", "151", "시청", "상선", times("8시30분", "40.0"))));
+
+        assertEquals(new BigDecimal("92.2"), find(result.rows(), "STATION", "150", 0, 17).level());
+        assertEquals(new BigDecimal("66.1"), find(result.rows(), "LINE", "1001", 0, 17).level());
+        assertEquals(new BigDecimal("50.0"), find(result.rows(), "LINE", "1004", 0, 17).level());
+        assertEquals(2, result.rows().stream().filter(r -> r.targetType().equals("STATION")).count());
+    }
+
+    @Test
     @DisplayName("100 을 넘는 값도 그대로 저장한다 — 정원 대비 %라 넘을 수 있다 (원천 최대 144.6)")
     void keepsValuesOver100() {
         var result = new CongestionParser(IDENTITY).parse(List.of(
