@@ -31,4 +31,12 @@ public class RailNode {
 
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
+
+    /** 테스트 전용 — 실제 JPA/DB 없이 노드 매칭 로직을 검증하기 위함. */
+    public RailNode(String nodeId, double lat, double lng, String stationNameRaw) {
+        this.nodeId = nodeId;
+        this.lat = lat;
+        this.lng = lng;
+        this.stationNameRaw = stationNameRaw;
+    }
 }
