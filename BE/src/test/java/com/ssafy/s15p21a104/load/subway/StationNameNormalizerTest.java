@@ -53,4 +53,15 @@ class StationNameNormalizerTest {
         assertEquals("역삼", normalizer.normalize("역삼"));
         assertEquals("동대문역사문화공원", normalizer.normalize("동대문역사문화공원"));
     }
+
+    @Test
+    @DisplayName("normalizeStation: 끝의 '역'까지 뗀다 — KTDB 노드·표준데이터처럼 역명에 '역'을 붙이는 원천용. 청량리역 → 청량리, 서울역(경의) → 서울")
+    void normalizeStationStripsSuffix() {
+        assertEquals("청량리", normalizer.normalizeStation("청량리역"));
+        assertEquals("석남", normalizer.normalizeStation("석남(거북시장)역"));
+        assertEquals("서울", normalizer.normalizeStation("서울역(경의)"));
+        assertEquals("역촌", normalizer.normalizeStation("역촌역"));
+        assertEquals("역삼", normalizer.normalizeStation("역삼"));
+        assertEquals("역", normalizer.normalizeStation("역"));
+    }
 }
