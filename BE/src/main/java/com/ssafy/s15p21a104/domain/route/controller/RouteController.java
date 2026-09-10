@@ -8,6 +8,7 @@ import com.ssafy.s15p21a104.global.response.ApiResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -21,8 +22,10 @@ public class RouteController implements RouteApi {
             String originStationId,
             String destStationId,
             List<TravelMode> modes,
-            RoutePriority priority
+            RoutePriority priority,
+            LocalDateTime departureTime
     ) {
-        return ApiResult.ok(routeSearchService.search(originStationId, destStationId, modes, priority));
+        return ApiResult.ok(
+                routeSearchService.search(originStationId, destStationId, modes, priority, departureTime));
     }
 }

@@ -73,7 +73,7 @@ class RouteSearchServiceWireTest {
     @Test
     @DisplayName("106-T1: TRANSFER leg에 실측 환승 시간이 들어간다")
     void t106_TRANSFER_leg_실측값() {
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
@@ -89,7 +89,7 @@ class RouteSearchServiceWireTest {
     @Test
     @DisplayName("연결 불가면 빈 배열로 응답한다(에러 아님)")
     void 연결불가_빈배열() {
-        List<RouteSearchResponse> result = routeSearchService.search("A", "X", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "X", null, null, null);
 
         assertTrue(result.isEmpty());
     }
@@ -103,7 +103,7 @@ class RouteSearchServiceWireTest {
         infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
         result.get(0).legs().forEach(leg -> assertEquals("unavailable", leg.geometryStatus()));
@@ -122,7 +122,7 @@ class RouteSearchServiceWireTest {
         infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
         assertEquals(1, result.get(0).legs().size());

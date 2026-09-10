@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
+import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.MultiLineStringResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
@@ -24,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -45,7 +47,8 @@ public class RouteSearchService {
             String originStationId,
             String destStationId,
             List<TravelMode> modes,
-            RoutePriority priority
+            RoutePriority priority,
+            LocalDateTime departureTime
     ) {
         if (originStationId.equals(destStationId)) {
             throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
@@ -59,11 +62,15 @@ public class RouteSearchService {
 
         findStation(originStationId);
         findStation(destStationId);
-        return filterByModes(algorithmCandidates(graph, originStationId, destStationId), modes);
+        // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
+        DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
+        return filterByModes(algorithmCandidates(graph, originStationId, destStationId, departureSlot), modes);
     }
 
     private List<RouteSearchResponse> algorithmCandidates(
-            RouteGraph graph, String originStationId, String destStationId) {
+            RouteGraph graph, String originStationId, String destStationId, DepartureSlot departureSlot) {
+        // departureSlot은 이번 커밋(API 파라미터, S15P21A104-63)에서는 아직 안 쓴다 — 그래프 슬롯 선택과
+        // 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 graph()/ShortestPathFinder 호출에 넘긴다.
         try {
             // 탐색과 leg 표시에 같은 규칙(실측 우선)을 쓴다. 합계와 leg 합이 어긋나지 않는다.
             TransferRule rule = transferRule.withTable(graphRegistry.transferTimes());
