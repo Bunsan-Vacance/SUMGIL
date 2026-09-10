@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.load;
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
+import com.ssafy.s15p21a104.load.crowd.CongestionRow;
 import com.ssafy.s15p21a104.load.railgeometry.RailLinkGeometryRow;
 import com.ssafy.s15p21a104.load.railgeometry.RailNodeRow;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
@@ -84,10 +85,39 @@ public class UpsertWriter {
                   line_id = EXCLUDED.line_id, length_km = EXCLUDED.length_km, geometry = EXCLUDED.geometry, updated_at = now()
             """;
 
+    private static final String UPSERT_CONGESTION = """
+            INSERT INTO congestion (target_type, target_id, dow_type, time_slot, level, source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, now())
+            ON CONFLICT (target_type, target_id, dow_type, time_slot) DO UPDATE
+            SET level = EXCLUDED.level, source = EXCLUDED.source, updated_at = now()
+            """;
+
     private final JdbcTemplate jdbc;
 
     public UpsertWriter(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    public int upsertCongestion(List<CongestionRow> rows) {
+        jdbc.batchUpdate(UPSERT_CONGESTION, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setString(1, r.targetType());
+            ps.setString(2, r.targetId());
+            ps.setInt(3, r.dowType());
+            ps.setInt(4, r.timeSlot());
+            ps.setBigDecimal(5, r.level());
+            ps.setString(6, r.source());
+        });
+        return rows.size();
+    }
+
+    /** 적재된 역 ID. 혼잡도처럼 다른 테이블을 참조하는 적재가 대상 존재를 검증하는 데 쓴다. */
+    public Set<String> existingStationIds() {
+        return Set.copyOf(jdbc.queryForList("SELECT station_id FROM station", String.class));
+    }
+
+    /** 적재된 노선 ID. */
+    public Set<String> existingLineIds() {
+        return Set.copyOf(jdbc.queryForList("SELECT line_id FROM line", String.class));
     }
 
     public int upsertBusStops(List<BusStopRow> rows) {

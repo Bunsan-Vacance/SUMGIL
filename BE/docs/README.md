@@ -34,7 +34,8 @@ BE/
 │  ├─ db/migration/           ← Flyway V1 스키마, V2 source 열 확대
 │  ├─ data/subway/            ← 지하철 정적 적재 원천 CSV·설정 (출처는 그 폴더 README)
 │  ├─ data/bus/               ← 버스 정류소·노선 원천 CSV (OA-15067 · OA-1095)
-│  └─ data/bike/              ← 따릉이 대여소 스냅샷(bikeList)·파일(OA-13252)
+│  ├─ data/bike/              ← 따릉이 대여소 스냅샷(bikeList)·파일(OA-13252)
+│  └─ data/crowd/             ← 지하철혼잡도정보(15071311)·역번호 별칭 (출처는 그 폴더 README)
 ├─ src/main/java/.../load/    ← 정적 적재 로더 (load 프로파일, docs/db/load-subway.md · load-bus-bike.md)
 ├─ docs/                      ← 이 폴더. api/db/global/infra/external/perf 로 나눠서 정리
 │                                (external: 외부 데이터 소스 조사·샘플, perf: 성능 측정 기록)

@@ -62,7 +62,7 @@ CREATE TABLE congestion ( -- 혼잡도 통계
   target_id   VARCHAR(24) NOT NULL, -- 대상 ID
   dow_type    INTEGER NOT NULL, -- 0 평일 / 1 토 / 2 일·공휴일
   time_slot   INTEGER NOT NULL, -- 30분 단위 슬롯 (0~47)
-  level       NUMERIC(4,1) NOT NULL, -- 혼잡도 0.0~100.0
+  level       NUMERIC(4,1) NOT NULL, -- 혼잡도 %. 정원 대비라 100 을 넘을 수 있다 (원천 최대 144.6, S15P21A104-73)
   source      VARCHAR(8) NOT NULL, -- stat|live
   updated_at  TIMESTAMPTZ NOT NULL, -- 적재 시각
   PRIMARY KEY (target_type, target_id, dow_type, time_slot)

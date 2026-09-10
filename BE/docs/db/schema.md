@@ -50,7 +50,7 @@
 | 테이블 | 키 | 내용 |
 |---|---|---|
 | `edge_time` | `from·to·mode·route·dow·slot` | 탐색 그래프의 엣지 |
-| `congestion` | `target·dow·slot` | 혼잡도 0.0~100.0 |
+| `congestion` | `target·dow·slot` | 혼잡도 %. **100 을 넘을 수 있다**(정원 대비, 원천 최대 144.6). `target_type` 은 `STATION`·`LINE` 만 쓴다 — `ROUTE` 는 의미가 정해지지 않아 적재하지 않는다. 값·범위 규약은 `data/crowd/README.md` |
 | `bike_stock_pred` | `rental·dow·slot` | 도착 예상 시각 기준 재고 예측 |
 | `transfer_meta` | `station·from·to` | 동일 역 내 노선 간 환승 정보 |
 
