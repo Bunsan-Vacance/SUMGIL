@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
@@ -131,25 +132,6 @@ class RouteSearchServiceWireTest {
     }
 
     private Station mockStation(String id, String name) {
-        Station station = mock(Station.class);
-        lenient().when(station.getStationId()).thenReturn(id);
-        lenient().when(station.getName()).thenReturn(name);
-        lenient().when(station.getLat()).thenReturn(37.5);
-        lenient().when(station.getLng()).thenReturn(127.0);
-        return station;
-    }
-
-    private static RouteGraph graphOf(Edge... edges) {
-        Set<String> nodes = new HashSet<>();
-        Map<String, List<Edge>> adjacency = new HashMap<>();
-        Map<String, Set<String>> lines = new HashMap<>();
-        for (Edge edge : edges) {
-            nodes.add(edge.fromNode());
-            nodes.add(edge.toNode());
-            adjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
-            lines.computeIfAbsent(edge.fromNode(), key -> new HashSet<>()).add(edge.routeId());
-            lines.computeIfAbsent(edge.toNode(), key -> new HashSet<>()).add(edge.routeId());
-        }
-        return RouteGraph.of(nodes, adjacency, lines);
+        return com.ssafy.s15p21a104.domain.route.RouteTestFixtures.mockStation(id, name);
     }
 }
