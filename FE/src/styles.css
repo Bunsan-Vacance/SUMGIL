@@ -825,6 +825,9 @@ small {
   height: 30%;
   min-height: 0;
 }
+.screen-guide .bottom-sheet.compact-sheet[data-snap='collapsed'] {
+  height: min(180px, calc(100% - 16px));
+}
 .bottom-sheet.dragging {
   transition: none;
   user-select: none;
