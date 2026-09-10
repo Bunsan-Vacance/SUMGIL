@@ -25,4 +25,17 @@ public final class StationNameNormalizer {
         String name = PARENTHETICAL.matcher(raw).replaceAll("").trim();
         return aliases.getOrDefault(name, name);
     }
+
+    /**
+     * {@link #normalize(String)} 에 더해 끝의 '역'을 뗀다. KTDB 노드("청량리역", "서울역(경의)")·표준데이터("판교역")처럼
+     * 역명에 '역'을 붙여 쓰는 원천용이다. 별칭은 떼기 전후 둘 다 적용한다 — "서울역" 은 별칭으로 "서울" 이 되고, 한 글자 이름은 자르지 않는다.
+     * 시각표·환승 파일처럼 '역'을 붙이지 않는 원천에는 {@link #normalize(String)} 을 써야 한다 ("역삼", "동대문역사문화공원" 은 그대로).
+     */
+    public String normalizeStation(String raw) {
+        String name = normalize(raw);
+        if (name.length() > 1 && name.endsWith("역")) {
+            name = normalize(name.substring(0, name.length() - 1));
+        }
+        return name;
+    }
 }

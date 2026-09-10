@@ -11,10 +11,13 @@ import com.ssafy.s15p21a104.load.railgeometry.RailGeometryParser;
 import com.ssafy.s15p21a104.load.subway.DirectedSegment;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeExpander;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
-import com.ssafy.s15p21a104.load.subway.KorailSegmentParser;
 import com.ssafy.s15p21a104.load.subway.KricStationCoordParser;
+import com.ssafy.s15p21a104.load.subway.KtdbLinkSegmentParser;
 import com.ssafy.s15p21a104.load.subway.KtdbNodeCoordParser;
-import com.ssafy.s15p21a104.load.subway.StationCoordCrossCheck;
+import com.ssafy.s15p21a104.load.subway.LineSpeeds;
+import com.ssafy.s15p21a104.load.subway.StdStationParser;
+import com.ssafy.s15p21a104.load.subway.UrbanLineParser;
+import com.ssafy.s15p21a104.load.subway.StationCoordResolver;
 import com.ssafy.s15p21a104.load.subway.StationIdTable;
 import com.ssafy.s15p21a104.load.subway.LineCodes;
 import com.ssafy.s15p21a104.load.subway.LineRow;
@@ -37,6 +40,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -69,7 +73,12 @@ public class StaticLoadRunner implements ApplicationRunner {
 
     // 원천 파일명 (출처·갱신일은 각 폴더 README). 새 배포분을 받으면 여기와 README 를 함께 바꾼다.
     static final String TIMETABLE_FILE = "seoul-train-timetable_20260616.csv.gz";
-    static final String KORAIL_SEGMENTS_FILE = "korail-segments_20240826.csv";
+    /** 국토교통부 도시철도 전체노선(15122916). 시각표 밖 노선의 후보 목록과 역 목록 대조용 — 인접 관계는 여기서 뽑지 않는다(지선 순번 중복). */
+    static final String URBAN_LINES_FILE = "molit-urban-lines_20251211.csv";
+    /** 전국도시철도역사정보표준데이터(15013205). 코레일·사철 역의 좌표(국가철도공단 역위치 파일이 없는 노선)와 역번호(station-ids 정본). */
+    static final String STATION_STANDARD_FILE = "kric-station-standard_20260630.csv";
+    /** KTDB 철도망 링크(63 에서 도입한 railgeometry 원천을 읽기만 한다). 시각표 밖 노선의 인접 구간·선로 거리 정본. */
+    static final String KTDB_LINK_FILE = "data/railgeometry/ktdb-rail-link_2024.csv";
     static final String TRANSFER_FILE = "seoulmetro-transfer_20250331.csv";
     static final String SEOULMETRO_COORDS_FILE = "seoulmetro-station-coords_20250814.csv";
     /** 국가철도공단 노선별 역위치 (data/subway/kric/). 서울교통공사 좌표가 없는 코레일·연장 구간 역을 채운다. */
@@ -108,21 +117,25 @@ public class StaticLoadRunner implements ApplicationRunner {
     }
 
     /**
-     * 지하철. 열차운행시각표가 1~9호선 엣지의 정본이고(방향 있는 구간 + 슬롯별 기대 대기), 시각표에 없는 노선(경의중앙·수인분당)만
-     * 코레일 거리 구간(avg)으로 보충한다. 적재 뒤 시각표가 덮는 노선의 옛 행을 prune 한다.
+     * 지하철. 열차운행시각표가 1~9호선 엣지의 정본이고(방향 있는 구간 + 슬롯별 기대 대기, 코레일 운행 구간 포함), 시각표에 없는 노선
+     * (경의중앙·수인분당·경춘·경강·서해·공항철도·신분당·우이신설·신림)은 KTDB 철도망 링크의 선로 거리 ÷ 노선별 표정속도로 보충한다(avg, wait_sec 0).
+     * 전체노선 파일은 그 노선들의 역 목록을 대조하는 데만 쓴다. 적재 뒤 이번 그래프 노선의 옛 행을 prune 한다.
      */
     private void loadSubway() throws IOException {
         long started = System.nanoTime();
 
         Map<String, String> aliases = readPairs("conf/station-aliases.csv", "원천표기", "정본표기");
         StationNameNormalizer normalizer = new StationNameNormalizer(aliases);
-        Map<String, List<String>> korailOverrides = new HashMap<>();
-        for (Map<String, String> row : csv(SUBWAY_DIR, "conf/korail-line-overrides.csv").rows()) {
-            korailOverrides.put(normalizer.normalize(row.get("출발역")) + "|" + normalizer.normalize(row.get("도착역")),
-                    List.of(row.get("line_ids").split(";")));
+        Map<String, KtdbLinkSegmentParser.LinkOverride> linkOverrides = new HashMap<>();
+        for (Map<String, String> row : csv(SUBWAY_DIR, "conf/ktdb-link-overrides.csv").rows()) {
+            Double km = Coords.parseOrNull(row.get("거리_km"));
+            linkOverrides.put(normalizer.normalize(row.get("출발역")) + "|" + normalizer.normalize(row.get("도착역")),
+                    new KtdbLinkSegmentParser.LinkOverride(List.of(row.get("line_ids").split(";")),
+                            km == null ? null : (int) Math.round(km * 1000)));
         }
+        LineSpeeds speeds = LineSpeeds.from(csv(SUBWAY_DIR, "conf/line-speeds.csv").rows(), props.avgSpeedMps());
         StationIdTable idTable = StationIdTable.from(csv(SUBWAY_DIR, "conf/station-ids.csv").rows());
-        log.info("역 ID 표: {} 역 (conf/station-ids.csv — 서울교통공사 역번호, 코레일 전용 역은 9001~)", idTable.size());
+        log.info("역 ID 표: {} 역 (conf/station-ids.csv — 서울교통공사 역번호, 코레일·사철 전용 역은 표준데이터 역번호)", idTable.size());
 
         // 1) 시각표 (42만 행, 스트리밍)
         long parseStarted = System.nanoTime();
@@ -137,13 +150,19 @@ public class StaticLoadRunner implements ApplicationRunner {
                 st.skippedRows(), tt.lineIds(), elapsedMs(parseStarted));
         logWarnings("시각표 파싱", timetable.warnings());
 
-        // 2) 코레일 거리 구간 — 시각표가 덮는 노선은 제외 (1호선·4호선 코레일 구간도 시각표에 있다)
-        var korail = new KorailSegmentParser(normalizer, props.avgSpeedMps(), korailOverrides);
-        List<Segment> korailAll = korail.parse(csv(SUBWAY_DIR, KORAIL_SEGMENTS_FILE).rows());
-        List<Segment> korailSegments = korailAll.stream().filter(s -> !tt.lineIds().contains(s.lineId())).toList();
-        logWarnings("코레일 구간 파싱", korail.warnings());
-        log.info("코레일 거리 구간: {} 중 시각표 밖 노선만 {} 유지 ({})", korailAll.size(), korailSegments.size(),
-                korailSegments.stream().map(Segment::lineId).distinct().sorted().toList());
+        // 2) KTDB 링크 거리 구간 — 전체노선 파일에 있으면서 시각표가 덮지 않는 노선만 (1~9호선은 코레일 운행 구간까지 시각표에 있다)
+        var urban = new UrbanLineParser(normalizer);
+        Map<String, List<String>> urbanLines = urban.parse(csv(SUBWAY_DIR, URBAN_LINES_FILE).rows());
+        logWarnings("전체노선 파싱", urban.warnings());
+        Set<String> distanceLines = urbanLines.keySet().stream().filter(l -> !tt.lineIds().contains(l))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        var ktdbLinks = new KtdbLinkSegmentParser(normalizer, speeds, linkOverrides);
+        List<Segment> distanceSegments = ktdbLinks.parse(csv("", KTDB_NODE_FILE).rows(), csv("", KTDB_LINK_FILE).rows(), distanceLines);
+        logWarnings("KTDB 링크 파싱", ktdbLinks.warnings());
+        logWarnings("역 목록 대조", compareStationLists(ktdbLinks.stationsByLine(), urbanLines, distanceLines));
+        log.info("KTDB 링크 거리 구간: 노선 {} {} · 구간 {} · 표정속도 표 {}개 노선, 기본 {} m/s 적용 {}", distanceLines.size(), distanceLines,
+                distanceSegments.size(), speeds.table().size(), speeds.fallbackMps(),
+                distanceLines.stream().filter(speeds::isDefault).toList());
 
         // 3) 환승·좌표
         var transferParser = new TransferParser(normalizer);
@@ -157,12 +176,12 @@ public class StaticLoadRunner implements ApplicationRunner {
             directed = directed.stream().filter(s -> props.region().contains(s.lineId())).toList();
             waits = waits.entrySet().stream().filter(e -> props.region().contains(e.getKey().substring(0, e.getKey().indexOf('|'))))
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a, LinkedHashMap::new));
-            korailSegments = korailSegments.stream().filter(s -> props.region().contains(s.lineId())).toList();
+            distanceSegments = distanceSegments.stream().filter(s -> props.region().contains(s.lineId())).toList();
             transfers = transfers.stream().filter(t -> props.region().contains(t.fromLineId())).toList();
             log.info("권역 필터 적용: {}", props.region());
         }
 
-        SubwayGraph graph = new SubwayGraphBuilder(idTable).build(directed, korailSegments, transfers, coords, waits);
+        SubwayGraph graph = new SubwayGraphBuilder(idTable).build(directed, distanceSegments, transfers, coords, waits);
         ValidationReport report = LoadValidator.validate(graph);
         logWarningsGrouped("검증", report.warnings());
         long noCoords = graph.stations().stream().filter(s -> s.lat() == null).count();
@@ -176,7 +195,7 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         Set<String> keptEdgeKeys = graph.edges().stream().map(EdgeTimeExpander::edgeKey).collect(Collectors.toSet());
         Set<String> keptStationIds = graph.stations().stream().map(StationRow::stationId).collect(Collectors.toSet());
-        // prune 범위는 이번 그래프의 모든 노선 — 시각표 노선뿐 아니라 코레일 거리 구간(1063·1075)의 옛 행도 정리한다
+        // prune 범위는 이번 그래프의 모든 노선 — 시각표 노선뿐 아니라 KTDB 거리 구간 노선의 옛 행(옛 코레일 구간 파일·임시 ID 9001~ 역)도 정리한다
         Set<String> coveredLines = graph.lines().stream().map(LineRow::lineId).collect(Collectors.toSet());
         if (props.dryRun()) {
             if (props.prune()) {
@@ -297,29 +316,51 @@ public class StaticLoadRunner implements ApplicationRunner {
         List<StationCoord> ktdb = new KtdbNodeCoordParser(normalizer).parse(
                 CsvTable.parse(new ClassPathResource(KTDB_NODE_FILE).getContentAsString(StandardCharsets.UTF_8)).rows());
 
-        // 서울교통공사 좌표가 있는 역은 그 값을 쓰므로, 실제로 쓰일 국가철도공단 좌표(그 밖의 역)만 KTDB 와 대조한다.
-        // 5 km 를 넘게 어긋나면 국가철도공단 파일의 오기로 보고 빼서 KTDB 가 채우게 하고, 500 m~5 km 는 유지하되 검토 목록으로 남긴다.
-        Set<String> seoulNames = seoulMetro.stream().map(StationCoord::stationName).collect(Collectors.toSet());
-        List<StationCoord> kricUsed = kric.stream().filter(c -> !seoulNames.contains(c.stationName())).toList();
-        List<StationCoord> kricCovered = kric.stream().filter(c -> seoulNames.contains(c.stationName())).toList();
-        var check = StationCoordCrossCheck.resolve(kricUsed, ktdb, COORD_CROSSCHECK_METERS, COORD_REPLACE_METERS);
-        logWarnings("좌표 교차검증", check.warnings());
-        log.info("좌표 원천: 서울교통공사 {} · 국가철도공단 역위치 {} (무효 {} 건너뜀, KTDB 로 대체 {}: {}) · KTDB 노드 {} (수도권, 이름별 평균)",
-                seoulMetro.size(), kric.size(), kricParser.skipped(), check.replaced().size(), String.join(", ", check.replaced()), ktdb.size());
+        var stdParser = new StdStationParser(normalizer);
+        List<StationCoord> std = stdParser.parse(csv(SUBWAY_DIR, STATION_STANDARD_FILE).rows());
 
-        List<StationCoord> coords = new ArrayList<>(seoulMetro);
-        coords.addAll(kricCovered);
-        coords.addAll(check.kept());
-        coords.addAll(ktdb);
-        this.coordSources = List.of(seoulMetro, kric, ktdb);
-        return coords;
+        // 우선순위·다수결·교차검증 규칙은 StationCoordResolver 에 있다 (data/subway/README.md "좌표 결정 규칙").
+        var resolved = StationCoordResolver.resolve(seoulMetro, kric, std, ktdb, COORD_CROSSCHECK_METERS, COORD_REPLACE_METERS);
+        logWarnings("좌표 다수결(서울교통공사)", resolved.seoulVote().warnings());
+        logWarnings("좌표 다수결(국가철도공단)", resolved.kricVote().warnings());
+        logWarnings("좌표 교차검증", resolved.crossCheck().warnings());
+        log.info("좌표 원천: 서울교통공사 {} (표준데이터로 대체 {}: {}) · 국가철도공단 역위치 {} (무효 {} 건너뜀, 표준데이터로 대체 {}: {}) "
+                        + "· 표준데이터 {} (수도권 밖 {} 건너뜀, 그중 실제 쓰임 {}) · KTDB 로 대체 {}: {} · KTDB 노드 {} (수도권, 이름별 평균)",
+                seoulMetro.size(), resolved.seoulVote().replaced().size(), String.join(", ", resolved.seoulVote().replaced()),
+                kric.size(), kricParser.skipped(), resolved.kricVote().replaced().size(), String.join(", ", resolved.kricVote().replaced()),
+                std.size(), stdParser.skipped(), resolved.stdUsed(),
+                resolved.crossCheck().replaced().size(), String.join(", ", resolved.crossCheck().replaced()), ktdb.size());
+
+        this.coordSources = resolved.sourcesInPriority();
+        return resolved.coords();
+    }
+
+    /**
+     * KTDB 링크가 만든 역 집합과 전체노선 파일의 역 목록을 노선별로 대조한다.
+     * 어느 한쪽에만 있는 역은 원천 누락·개통 시차(서해선 원종은 KTDB 에만, 경춘선 광운대는 예외 표로 붙임)라 경고로 남기고 값을 만들어 넣지 않는다.
+     */
+    private static List<String> compareStationLists(Map<String, Set<String>> fromLinks, Map<String, List<String>> fromUrbanFile,
+                                                    Set<String> lines) {
+        List<String> warnings = new ArrayList<>();
+        for (String line : lines) {
+            Set<String> links = fromLinks.getOrDefault(line, Set.of());
+            Set<String> urban = new LinkedHashSet<>(fromUrbanFile.getOrDefault(line, List.of()));
+            List<String> onlyLinks = links.stream().filter(s -> !urban.contains(s)).sorted().toList();
+            List<String> onlyUrban = urban.stream().filter(s -> !links.contains(s)).toList();
+            if (links.isEmpty()) {
+                warnings.add(LineCodes.nameOf(line) + ": KTDB 링크가 없어 구간을 만들지 못함 (전체노선 역 " + urban.size() + "개)");
+            } else if (!onlyLinks.isEmpty() || !onlyUrban.isEmpty()) {
+                warnings.add(LineCodes.nameOf(line) + ": KTDB 링크에만 " + onlyLinks + " · 전체노선에만 " + onlyUrban);
+            }
+        }
+        return warnings;
     }
 
     private List<List<StationCoord>> coordSources = List.of();
 
     /** 역마다 어느 원천의 좌표가 쓰였는지 값으로 되짚어 센다 (빌더는 출처를 남기지 않는다). */
     private void logCoordSourceSummary(SubwayGraph graph) {
-        String[] labels = {"서울교통공사", "국가철도공단", "KTDB"};
+        String[] labels = {"서울교통공사", "국가철도공단", "표준데이터", "KTDB"};
         int[] counts = new int[labels.length];
         List<String> ktdbStations = new ArrayList<>();
         for (StationRow s : graph.stations()) {
@@ -330,14 +371,14 @@ public class StaticLoadRunner implements ApplicationRunner {
                 boolean hit = coordSources.get(i).stream().anyMatch(c -> c.lat() == s.lat() && c.lng() == s.lng());
                 if (hit) {
                     counts[i]++;
-                    if (i == 2) {
+                    if (i == labels.length - 1) {
                         ktdbStations.add(s.stationId());
                     }
                     break;
                 }
             }
         }
-        log.info("역 좌표 출처: 서울교통공사 {} · 국가철도공단 {} · KTDB {} ({})", counts[0], counts[1], counts[2],
+        log.info("역 좌표 출처: 서울교통공사 {} · 국가철도공단 {} · 표준데이터 {} · KTDB {} ({})", counts[0], counts[1], counts[2], counts[3],
                 String.join(", ", ktdbStations));
     }
 

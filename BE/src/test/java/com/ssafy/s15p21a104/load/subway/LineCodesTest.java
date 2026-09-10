@@ -32,27 +32,52 @@ class LineCodesTest {
         assertEquals(Optional.of("1092"), LineCodes.fromName("우이신설선"));
         assertEquals(Optional.of("1001"), LineCodes.fromName("국철"));
         assertEquals(Optional.of("1001"), LineCodes.fromName("경원선"));
+        assertEquals(Optional.of("1065"), LineCodes.fromName("인천국제공항선"));
+        assertEquals(Optional.of("1004"), LineCodes.fromName("안산과천선"));
+        assertEquals(Optional.of("1003"), LineCodes.fromName("일산선"));
     }
 
     @Test
-    @DisplayName("코레일 구간 파일의 노선 코드 → subwayId (경부·경인·경원선은 1호선, 분당선은 수인분당선)")
-    void korailCodes() {
-        assertEquals(Optional.of("1001"), LineCodes.fromKorailCode("101"));
-        assertEquals(Optional.of("1001"), LineCodes.fromKorailCode("102"));
-        assertEquals(Optional.of("1001"), LineCodes.fromKorailCode("108"));
-        assertEquals(Optional.of("1063"), LineCodes.fromKorailCode("103"));
-        assertEquals(Optional.of("1063"), LineCodes.fromKorailCode("110"));
-        assertEquals(Optional.of("1004"), LineCodes.fromKorailCode("104"));
-        assertEquals(Optional.of("1004"), LineCodes.fromKorailCode("105"));
-        assertEquals(Optional.of("1004"), LineCodes.fromKorailCode("4"));
-        assertEquals(Optional.of("1075"), LineCodes.fromKorailCode("106"));
+    @DisplayName("도시철도 전체노선 파일의 노선명 → subwayId — '선'이 빠진 표기(경의중앙·경춘·신분당)와 '공항'을 받는다")
+    void urbanLineNames() {
+        assertEquals(Optional.of("1063"), LineCodes.fromUrbanLineName("경의중앙"));
+        assertEquals(Optional.of("1075"), LineCodes.fromUrbanLineName("수인분당"));
+        assertEquals(Optional.of("1067"), LineCodes.fromUrbanLineName("경춘"));
+        assertEquals(Optional.of("1081"), LineCodes.fromUrbanLineName("경강"));
+        assertEquals(Optional.of("1093"), LineCodes.fromUrbanLineName("서해선"));
+        assertEquals(Optional.of("1065"), LineCodes.fromUrbanLineName("공항"));
+        assertEquals(Optional.of("1077"), LineCodes.fromUrbanLineName("신분당"));
+        assertEquals(Optional.of("1092"), LineCodes.fromUrbanLineName("우이신설"));
+        assertEquals(Optional.of("1094"), LineCodes.fromUrbanLineName("신림선"));
+        assertEquals(Optional.of("1002"), LineCodes.fromUrbanLineName("2호선"));
+        assertTrue(LineCodes.fromUrbanLineName("인천1호선").isEmpty());
+        assertTrue(LineCodes.fromUrbanLineName("GTX-A").isEmpty());
+    }
+
+    @Test
+    @DisplayName("표준데이터 노선번호 → subwayId. 서비스 노선이 여럿인 물리 선로(I4102 경원선)와 코드 없는 노선(김포·인천)은 비어 있다")
+    void stdLineCodes() {
+        assertEquals(Optional.of("1063"), LineCodes.fromStdLineCode("I4108"));
+        assertEquals(Optional.of("1075"), LineCodes.fromStdLineCode("I4105"));
+        assertEquals(Optional.of("1075"), LineCodes.fromStdLineCode("I28K1"));
+        assertEquals(Optional.of("1067"), LineCodes.fromStdLineCode("I41K2"));
+        assertEquals(Optional.of("1081"), LineCodes.fromStdLineCode("I41K5"));
+        assertEquals(Optional.of("1093"), LineCodes.fromStdLineCode("I41WS"));
+        assertEquals(Optional.of("1065"), LineCodes.fromStdLineCode("I28A1"));
+        assertEquals(Optional.of("1077"), LineCodes.fromStdLineCode("I11D1"));
+        assertEquals(Optional.of("1092"), LineCodes.fromStdLineCode("L11UI"));
+        assertEquals(Optional.of("1094"), LineCodes.fromStdLineCode("L11SL"));
+        assertEquals(Optional.of("1002"), LineCodes.fromStdLineCode("S1102"));
+        assertEquals(Optional.of("1004"), LineCodes.fromStdLineCode("I4103"));
+        assertTrue(LineCodes.fromStdLineCode("I4102").isEmpty());
+        assertTrue(LineCodes.fromStdLineCode("L41G1").isEmpty());
+        assertTrue(LineCodes.fromStdLineCode(null).isEmpty());
     }
 
     @Test
     @DisplayName("모르는 표기는 비어 있는 Optional 이다 — 예외로 죽이지 않고 호출자가 보고한다")
     void unknownIsEmpty() {
         assertTrue(LineCodes.fromName("김포골드라인").isEmpty());
-        assertTrue(LineCodes.fromKorailCode("999").isEmpty());
         assertTrue(LineCodes.fromSeoulMetroLine("x").isEmpty());
     }
 
