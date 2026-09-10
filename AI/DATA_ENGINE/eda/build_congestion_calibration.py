@@ -49,10 +49,13 @@
   코로나 이후 뚜렷한 회복 추세다(직접 대조 확인) — 다년 평균을 내면 우리 목표 구간
   (2025~2026)의 실제 수준을 과소평가한다. 2025년 단독으로 13역·평일/휴일·급행/일반이
   전부 커버돼 다른 연도가 없어도 결측이 생기지 않는다.
-- **급행은 뺀다(일반만 쓴다).** 우리 재귀식 라벨은 급행/일반을 구분하지 않고 계산한 총
-  승하차 기반이라, "일반"(전 역 공통 운행)에 대응시키는 게 일관적이다. 13역 중 6역에만
-  급행이 서고 나머지 7역은 급행 자체가 없어, 급행까지 섞으면 역마다 기준이 달라진다.
-  급행 보정은 9번(급행/일반 배분 계수 도출) 몫으로 남긴다.
+- **일반/급행을 별도 배율표로 낸다.** 우리 재귀식 라벨은 급행/일반을 구분하지 않고
+  계산한 총 승하차 기반이라, 두 배율 다 **같은 raw 평균을 분모로** 쓰되 분자(실측)만
+  일반/급행으로 갈라 계산한다 — "raw가 실제로 몇 배인가"를 보는 두 개의 독립된 렌즈다.
+  13역 중 6역(선정릉·봉은사·종합운동장·석촌·올림픽공원·중앙보훈병원)에만 급행이 서므로
+  급행 배율표는 이 6역만 담는다. `main()`이 두 표를 각각
+  `crowd_congestion_calibration.parquet`(일반)·`crowd_congestion_calibration_express.parquet`
+  (급행)로 저장한다.
 
 ## 9호선 스냅샷엔 역번호가 없다
 
@@ -83,6 +86,7 @@ CROWD_PROCESSED = AI_ROOT / "data" / "CROWD" / "processed"
 LABEL_NAME = "crowd_congestion_label_2024_2026.parquet"
 SNAPSHOT_NAME = "crowd_congestion_long.parquet"
 OUTPUT_NAME = "crowd_congestion_calibration.parquet"
+OUTPUT_NAME_EXPRESS = "crowd_congestion_calibration_express.parquet"
 
 # 9호선 스냅샷의 day_type 정의를 그대로 따른다 — 주말+공휴일을 "휴일" 하나로 묶는다.
 _LINE9_DAY_TYPE_BUCKET = {"평일": "평일", "토요일": "휴일", "일요일": "휴일", "휴일": "휴일"}
@@ -99,15 +103,17 @@ _LINE9_CALIBRATION_YEAR = 2025
 _SLOT_PATTERN = re.compile(r"^(\d{2}):(\d{2})$")
 
 
-def dedupe_snapshot_keys(snapshot: pd.DataFrame) -> pd.DataFrame:
+def dedupe_snapshot_keys(snapshot: pd.DataFrame, line9_train_type: str = "일반") -> pd.DataFrame:
     """9호선 스냅샷의 (연도·급행/일반) 중복을 걷어내 키 하나당 한 행으로 만든다.
 
     1~8호선은 연도·train_type 축이 아예 없어(단일 대표 조사) 이 필터가 영향을 주지
-    않는다. 9호선만 `year == 2025` & `train_type in (NaN, "일반")`로 좁힌다.
+    않는다. 9호선만 `year == 2025` & `train_type == line9_train_type`으로 좁힌다 —
+    `"일반"`(기본값)이면 13역, `"급행"`이면 급행이 서는 6역만 남는다(급행이 없는 역은
+    애초에 그 값을 가진 행이 없어 자연히 빠진다).
     """
     is_line9 = snapshot["line"] == "9호선"
     keep = ~is_line9 | (
-        (snapshot["year"] == _LINE9_CALIBRATION_YEAR) & (snapshot["train_type"] == "일반")
+        (snapshot["year"] == _LINE9_CALIBRATION_YEAR) & (snapshot["train_type"] == line9_train_type)
     )
     return snapshot[keep].reset_index(drop=True)
 
@@ -185,12 +191,20 @@ def raw_hourly_mean(labels: pd.DataFrame) -> pd.DataFrame:
     return grouped["congestion_raw_pct"].agg(raw_mean="mean", n_dates="count").reset_index()
 
 
-def build_calibration_ratio() -> tuple[pd.DataFrame, dict[str, int]]:
+def build_calibration_ratio(
+    line9_train_type: str = "일반",
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """배율표를 만든다. `line9_train_type`을 `"급행"`으로 주면 급행 6역용 배율표가 된다.
+
+    두 호출 모두 같은 raw 평균(분모, 재귀식은 열차 종류를 구분하지 않는다)을 쓰고
+    분자(실측)만 갈라서 계산한다 — "raw가 실제로 몇 배 과대한가"를 일반·급행 두
+    시선으로 각각 보는 것이다. 하나가 다른 하나에서 유도되는 관계가 아니다.
+    """
     labels = pd.read_parquet(CROWD_PROCESSED / LABEL_NAME)
     snapshot = pd.read_parquet(CROWD_INTERIM / SNAPSHOT_NAME)
 
     snapshot = attach_snapshot_station_no(snapshot)
-    snapshot = dedupe_snapshot_keys(snapshot)
+    snapshot = dedupe_snapshot_keys(snapshot, line9_train_type=line9_train_type)
     snapshot = snapshot.copy()
     snapshot["hour_bucket"] = snapshot["time_slot"].map(slot_30min_to_hour_bucket)
 
@@ -236,17 +250,15 @@ def build_calibration_ratio() -> tuple[pd.DataFrame, dict[str, int]]:
     return merged[cols], diagnostics
 
 
-def save_calibration(ratio: pd.DataFrame) -> Path:
+def save_calibration(ratio: pd.DataFrame, output_name: str = OUTPUT_NAME) -> Path:
     CROWD_PROCESSED.mkdir(parents=True, exist_ok=True)
-    out_path = CROWD_PROCESSED / OUTPUT_NAME
+    out_path = CROWD_PROCESSED / output_name
     ratio.to_parquet(out_path, index=False)
     return out_path
 
 
-def main() -> None:
-    ratio, diagnostics = build_calibration_ratio()
-    out_path = save_calibration(ratio)
-
+def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_path: Path) -> None:
+    print(f"\n=== {label} ===")
     print(
         f"[안내] 스냅샷 {diagnostics['스냅샷_행']:,}행 중 "
         f"raw 평균 매칭 실패(조인 자체가 안 됨) {diagnostics['raw_평균_매칭_실패']:,}행, "
@@ -267,7 +279,7 @@ def main() -> None:
     zero_raw = ratio[ratio["raw_mean"] == 0]
     if len(zero_raw):
         print(f"  raw 평균이 0이라 배율을 정의할 수 없어 제외한 행: {len(zero_raw):,}행")
-    print("\n[배율 분포] 호선별 요약:")
+    print("[배율 분포] 호선별 요약:")
     print(
         ratio.dropna(subset=["ratio"])
         .groupby("line", observed=True)["ratio"]
@@ -275,7 +287,26 @@ def main() -> None:
         .round(2)
         .to_string()
     )
-    print(f"\n저장 완료: {out_path} ({len(ratio):,}행)")
+    print(f"저장 완료: {out_path} ({len(ratio):,}행)")
+
+
+def main() -> None:
+    local_ratio, local_diag = build_calibration_ratio(line9_train_type="일반")
+    local_path = save_calibration(local_ratio, OUTPUT_NAME)
+    _report("일반", local_ratio, local_diag, local_path)
+
+    # 급행은 9호선에만 있는 개념이라(1~8호선은 train_type 자체가 없다) dedupe_snapshot_keys가
+    # 1~8호선 행을 그대로 통과시켜도, 여기서는 9호선만 남긴다 — "급행" 산출물에 급행이
+    # 없는 호선의 행이 섞여 있으면 헷갈린다.
+    express_ratio, _ = build_calibration_ratio(line9_train_type="급행")
+    express_ratio = express_ratio[express_ratio["line"] == "9호선"].reset_index(drop=True)
+    express_diag = {
+        "스냅샷_행": len(express_ratio),
+        "raw_평균_매칭_실패": int(express_ratio["raw_mean"].isna().sum()),
+        "배율_계산됨": int(express_ratio["ratio"].notna().sum()),
+    }
+    express_path = save_calibration(express_ratio, OUTPUT_NAME_EXPRESS)
+    _report("급행(9호선 6역만)", express_ratio, express_diag, express_path)
 
 
 if __name__ == "__main__":

@@ -86,6 +86,15 @@ def test_dedupe_snapshot_keys_keeps_only_latest_year_and_local_train_for_line9()
     assert result.iloc[0]["train_type"] == "일반"
 
 
+def test_dedupe_snapshot_keys_can_select_express_instead():
+    """9번(급행/일반 배분) — line9_train_type="급행"이면 급행 행만 남아야 한다."""
+    result = dedupe_snapshot_keys(_line9_snapshot_rows(), line9_train_type="급행")
+
+    assert len(result) == 1
+    assert result.iloc[0]["year"] == 2025
+    assert result.iloc[0]["train_type"] == "급행"
+
+
 def test_dedupe_snapshot_keys_leaves_1_to_8_line_untouched():
     """1~8호선은 연도·급행 축이 없는 단일 대표 조사라 필터가 아무것도 안 걸러야 한다."""
     df = pd.DataFrame(
