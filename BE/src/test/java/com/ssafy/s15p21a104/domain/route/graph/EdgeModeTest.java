@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.graph;
 
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -70,19 +71,5 @@ class EdgeModeTest {
         assertEquals(1, path.transferCount());
         assertEquals(List.of(TravelMode.BIKE, TravelMode.SUBWAY),
                 path.edges().stream().map(Edge::mode).toList());
-    }
-
-    private static RouteGraph graphOf(Edge... edges) {
-        Set<String> nodes = new HashSet<>();
-        Map<String, List<Edge>> adjacency = new HashMap<>();
-        Map<String, Set<String>> lines = new HashMap<>();
-        for (Edge edge : edges) {
-            nodes.add(edge.fromNode());
-            nodes.add(edge.toNode());
-            adjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
-            lines.computeIfAbsent(edge.fromNode(), key -> new HashSet<>()).add(edge.routeId());
-            lines.computeIfAbsent(edge.toNode(), key -> new HashSet<>()).add(edge.routeId());
-        }
-        return RouteGraph.of(nodes, adjacency, lines);
     }
 }
