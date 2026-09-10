@@ -63,7 +63,7 @@ class RouteSearchServiceTest {
     @DisplayName("출발지와 도착지가 같으면 SAME_ORIGIN_DEST")
     void 출발지와_도착지가_같으면_SAME_ORIGIN_DEST() {
         DomainException exception = assertThrows(DomainException.class,
-                () -> routeSearchService.search("0222", "0222", null, null));
+                () -> routeSearchService.search("0222", "0222", null, null, null));
 
         assertEquals(ErrorType.SAME_ORIGIN_DEST, exception.getErrorType());
     }
@@ -72,7 +72,7 @@ class RouteSearchServiceTest {
     @DisplayName("존재하지 않는 역이면 STATION_NOT_FOUND")
     void 존재하지_않는_역이면_STATION_NOT_FOUND() {
         DomainException exception = assertThrows(DomainException.class,
-                () -> routeSearchService.search("9999", "0221", null, null));
+                () -> routeSearchService.search("9999", "0221", null, null, null));
 
         assertEquals(ErrorType.STATION_NOT_FOUND, exception.getErrorType());
     }
@@ -83,7 +83,7 @@ class RouteSearchServiceTest {
         RouteSearchService unloaded = new RouteSearchService(
                 stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null));
 
-        List<RouteSearchResponse> result = unloaded.search("0222", "0221", null, null);
+        List<RouteSearchResponse> result = unloaded.search("0222", "0221", null, null, null);
 
         assertTrue(result.isEmpty());
     }
