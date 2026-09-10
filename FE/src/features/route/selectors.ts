@@ -17,14 +17,32 @@ export function getRoutes(routes: Route[], enabled: Mode[], priority: Priority) 
   ]
 }
 export function arrival(minutes: number, departedAt?: string) {
-  const departure = departedAt ? new Date(departedAt) : null
-  const start =
-    departure && Number.isFinite(departure.getTime()) ? departure : new Date(2000, 0, 1, 9, 41)
-  const arrivalAt = new Date(start.getTime() + Math.round(minutes * 60_000))
-  return [
-    String(arrivalAt.getHours()).padStart(2, '0'),
-    String(arrivalAt.getMinutes()).padStart(2, '0'),
-  ].join(':')
+  const trimmed = departedAt?.trim()
+  const hasTimeZone = trimmed ? /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed) : false
+  const departure = trimmed
+    ? new Date(
+        hasTimeZone ? trimmed : `${trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`}+09:00`,
+      )
+    : null
+  const elapsedMinutes = Math.round(minutes)
+  if (!departure || !Number.isFinite(departure.getTime())) {
+    const totalMinutes = (9 * 60 + 41 + elapsedMinutes) % (24 * 60)
+    const normalizedMinutes = (totalMinutes + 24 * 60) % (24 * 60)
+    return [
+      String(Math.floor(normalizedMinutes / 60)).padStart(2, '0'),
+      String(normalizedMinutes % 60).padStart(2, '0'),
+    ].join(':')
+  }
+  const arrivalAt = new Date(departure.getTime() + elapsedMinutes * 60_000)
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(arrivalAt)
+  const hour = parts.find((part) => part.type === 'hour')?.value || '00'
+  const minute = parts.find((part) => part.type === 'minute')?.value || '00'
+  return [hour, minute].join(':')
 }
 export function roundMinutes(minutes: number) {
   return Math.round(minutes)
