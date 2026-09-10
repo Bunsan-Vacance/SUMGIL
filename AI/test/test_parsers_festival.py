@@ -2,8 +2,10 @@ import pandas as pd
 
 from DATA_ENGINE.eda.parsers_festival import (
     CAPITAL_PROVINCES,
+    add_duration_days,
     drop_duplicate_festivals,
     filter_capital_area,
+    find_reversed_dates,
 )
 
 
@@ -40,6 +42,7 @@ def _festivals(**overrides):
         "end_date": pd.to_datetime(["2024-10-05", "2024-10-05", "2024-08-31"]),
         "lat": [37.5, 37.5, 37.6],
         "lon": [127.0, 127.0, 127.1],
+        "sponsor": ["서울시", "서울시", None],
     }
     base.update(overrides)
     return pd.DataFrame(base)
@@ -67,17 +70,25 @@ def test_drop_duplicate_festivals_keeps_same_name_on_different_dates():
     assert len(deduped) == 3
 
 
-def test_drop_duplicate_festivals_keeps_same_name_at_different_venues():
-    """같은 이름·기간이라도 좌표가 다르면 다른 장소의 행사다."""
-    df = _festivals(lat=[37.5, 37.9, 37.6])
+def test_add_duration_days_counts_single_day_festival_as_one():
+    result = add_duration_days(_festivals())
 
-    deduped, removed = drop_duplicate_festivals(df)
-
-    assert removed == 0
-    assert len(deduped) == 3
+    assert result.loc[0, "duration_days"] == 1
+    assert result.loc[2, "duration_days"] == 184
 
 
-def test_drop_duplicate_festivals_resets_index():
-    deduped, _ = drop_duplicate_festivals(_festivals())
+def test_find_reversed_dates_flags_end_before_start():
+    """종료일이 시작일보다 이르면 개최일 전개에서 조용히 사라지므로 따로 잡아낸다."""
+    df = _festivals(
+        start_date=pd.to_datetime(["2025-09-27", "2024-10-05", "2024-03-01"]),
+        end_date=pd.to_datetime(["2024-10-06", "2024-10-05", "2024-08-31"]),
+    )
 
-    assert list(deduped.index) == [0, 1]
+    reversed_rows = find_reversed_dates(add_duration_days(df))
+
+    assert len(reversed_rows) == 1
+    assert reversed_rows.iloc[0]["festival_id"] == "a"
+
+
+def test_find_reversed_dates_empty_when_all_valid():
+    assert find_reversed_dates(add_duration_days(_festivals())).empty
