@@ -73,3 +73,6 @@ AI/DATA_ENGINE/reports/bike_weather_eda.md
 AI/DATA_ENGINE/reports/crowd_eda.md
 AI/DATA_ENGINE/reports/figures/*
 !AI/DATA_ENGINE/reports/figures/.gitkeep
+
+# AI 팀 로컬 Drive 동기화 — 팀원마다 드라이브 문자·경로가 달라 로컬 전용 설정.
+AI/scripts/.drive-sync-path.local

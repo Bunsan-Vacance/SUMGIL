@@ -1,0 +1,20 @@
+#!/bin/sh
+# AI 팀 전용 훅 — develop-AI 로 merge/pull 될 때 Google Drive(SUMGIL) 데이터를
+# 로컬 AI/data/ 로 받아온다. core.hooksPath를 .githooks 로 설정한 AI 팀원에게만
+# 동작한다 (설치: AI/scripts/install_drive_sync_hook.ps1).
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$branch" != "develop-AI" ]; then
+  exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+sync_config="$repo_root/AI/scripts/.drive-sync-path.local"
+
+if [ ! -f "$sync_config" ]; then
+  exit 0
+fi
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$repo_root/AI/scripts/sync_drive_data.ps1" -Direction Pull
+
+exit 0
