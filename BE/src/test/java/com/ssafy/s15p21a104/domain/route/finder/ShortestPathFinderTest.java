@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -168,20 +169,6 @@ class ShortestPathFinderTest {
     }
 
     private static Edge edge(String from, String to, String routeId, int travelSec) {
-        return new Edge(from, to, routeId, travelSec, 0, TravelMode.SUBWAY);
-    }
-
-    private static RouteGraph graphOf(Edge... edges) {
-        Set<String> nodes = new HashSet<>();
-        Map<String, List<Edge>> adjacency = new HashMap<>();
-        Map<String, Set<String>> lines = new HashMap<>();
-        for (Edge edge : edges) {
-            nodes.add(edge.fromNode());
-            nodes.add(edge.toNode());
-            adjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
-            lines.computeIfAbsent(edge.fromNode(), key -> new HashSet<>()).add(edge.routeId());
-            lines.computeIfAbsent(edge.toNode(), key -> new HashSet<>()).add(edge.routeId());
-        }
-        return RouteGraph.of(nodes, adjacency, lines);
+        return com.ssafy.s15p21a104.domain.route.RouteTestFixtures.subway(from, to, routeId, travelSec);
     }
 }

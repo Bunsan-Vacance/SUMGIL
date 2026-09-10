@@ -1,10 +1,15 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bike;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.subway;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.walk;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
+import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -221,42 +226,6 @@ class RouteSearchIntegrationTest {
     }
 
     private Station mockStation(String id, String name) {
-        Station stationA = mock(Station.class);
-        lenient().when(stationA.getStationId()).thenReturn(id);
-        lenient().when(stationA.getName()).thenReturn(name);
-        lenient().when(stationA.getLat()).thenReturn(37.5);
-        lenient().when(stationA.getLng()).thenReturn(127.0);
-        return stationA;
-    }
-
-    private static Edge subway(String from, String to, String routeId, int sec) {
-        return new Edge(from, to, routeId, sec, 0, TravelMode.SUBWAY);
-    }
-
-    private static Edge bike(String from, String to, int sec) {
-        return new Edge(from, to, BikeRouteIds.BIKE, sec, 0, TravelMode.BIKE);
-    }
-
-    private static Edge walk(String from, String to, int sec) {
-        return new Edge(from, to, "WALK", sec, 0, TravelMode.WALK);
-    }
-
-    private static RouteGraph graphOf(Edge... edges) {
-        Set<String> nodes = new HashSet<>();
-        Map<String, List<Edge>> adjacency = new HashMap<>();
-        Map<String, Set<String>> lines = new HashMap<>();
-        for (Edge edge : edges) {
-            nodes.add(edge.fromNode());
-            nodes.add(edge.toNode());
-            adjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
-            lines.computeIfAbsent(edge.fromNode(), key -> new HashSet<>()).add(edge.routeId());
-            lines.computeIfAbsent(edge.toNode(), key -> new HashSet<>()).add(edge.routeId());
-        }
-        return RouteGraph.of(nodes, adjacency, lines);
-    }
-
-    /** 따릉이 routeId 상수. BikeEdgeBuilder와 같은 값("BIKE")을 쓴다. */
-    private static final class BikeRouteIds {
-        static final String BIKE = "BIKE";
+        return RouteTestFixtures.mockStation(id, name);
     }
 }
