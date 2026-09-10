@@ -3,6 +3,7 @@ import pytest
 
 from DATA_ENGINE.eda.build_congestion_calibration import (
     bucket_day_type,
+    dedupe_snapshot_keys,
     slot_30min_to_hour_bucket,
 )
 
@@ -55,3 +56,51 @@ def test_bucket_day_type_merges_line9_weekend_and_holiday_into_hyuil():
     result = bucket_day_type(line, day_type)
 
     assert list(result) == ["평일", "휴일", "휴일", "휴일"]
+
+
+def _line9_snapshot_rows():
+    """언주역 평일 08:00 — 연도 2020~2025 × 급행/일반이 전부 섞인 중복 키 상황."""
+    rows = []
+    for year in (2020, 2021, 2022, 2023, 2024, 2025):
+        for train_type in ("일반", "급행"):
+            rows.append(
+                {
+                    "line": "9호선",
+                    "station_no": 4126,
+                    "direction": "상선",
+                    "day_type": "평일",
+                    "time_slot": "08:00",
+                    "year": year,
+                    "train_type": train_type,
+                    "congestion_pct": float(year - 2000),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_dedupe_snapshot_keys_keeps_only_latest_year_and_local_train_for_line9():
+    result = dedupe_snapshot_keys(_line9_snapshot_rows())
+
+    assert len(result) == 1
+    assert result.iloc[0]["year"] == 2025
+    assert result.iloc[0]["train_type"] == "일반"
+
+
+def test_dedupe_snapshot_keys_leaves_1_to_8_line_untouched():
+    """1~8호선은 연도·급행 축이 없는 단일 대표 조사라 필터가 아무것도 안 걸러야 한다."""
+    df = pd.DataFrame(
+        {
+            "line": ["1호선", "1호선"],
+            "station_no": [150, 151],
+            "direction": ["상선", "상선"],
+            "day_type": ["평일", "평일"],
+            "time_slot": ["08:00", "08:00"],
+            "year": [None, None],
+            "train_type": [None, None],
+            "congestion_pct": [50.0, 60.0],
+        }
+    )
+
+    result = dedupe_snapshot_keys(df)
+
+    assert len(result) == 2

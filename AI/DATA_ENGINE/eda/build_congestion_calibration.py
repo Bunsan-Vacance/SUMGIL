@@ -38,6 +38,22 @@
 순환선으로 취급할지 여부는 `line_topology.yaml`/`build_congestion_label.py` 쪽에서
 따로 판단할 문제라 이 모듈의 스코프 밖에 남겨 둔다.
 
+## 9호선 스냅샷은 (station, direction, day_type, time_slot) 키가 원래 중복이다
+
+1~8호선 스냅샷은 "대표 1주" 단일 조사라 이 키가 유일하다. 9호선은 **2020~2025년 6개
+연도**를 각각 따로 담고 있고, **급행/일반**도 별도 행이라 키 하나에 최대 12행이 붙는다.
+아무 처리 없이 조인하면 그 행 수만큼 배율이 카티전 곱으로 불어난다(2026-09-10 발견 —
+8번 작업 중 항등식 검증에서 드러남).
+
+- **연도는 2025년만 쓴다.** 종합운동장 출근시간대 혼잡도가 2020년 30.8%→2025년 63.8%로
+  코로나 이후 뚜렷한 회복 추세다(직접 대조 확인) — 다년 평균을 내면 우리 목표 구간
+  (2025~2026)의 실제 수준을 과소평가한다. 2025년 단독으로 13역·평일/휴일·급행/일반이
+  전부 커버돼 다른 연도가 없어도 결측이 생기지 않는다.
+- **급행은 뺀다(일반만 쓴다).** 우리 재귀식 라벨은 급행/일반을 구분하지 않고 계산한 총
+  승하차 기반이라, "일반"(전 역 공통 운행)에 대응시키는 게 일관적이다. 13역 중 6역에만
+  급행이 서고 나머지 7역은 급행 자체가 없어, 급행까지 섞으면 역마다 기준이 달라진다.
+  급행 보정은 9번(급행/일반 배분 계수 도출) 몫으로 남긴다.
+
 ## 9호선 스냅샷엔 역번호가 없다
 
 XLSX 원본(9호선 혼잡도 자료)에 역명만 있고 역번호 컬럼이 없어 파싱 결과의 `station_no`가
@@ -76,7 +92,24 @@ _LINE9_DAY_TYPE_BUCKET = {"평일": "평일", "토요일": "휴일", "일요일"
 # 아니라서) 방향 라벨이 안 맞는다 — 잔여 매칭 실패를 진단할 때 구분하는 용도로만 쓴다.
 _LINE2_BRANCH_STATIONS = {211, 244, 245, 250, 246, 234, 247, 248, 249}
 
+# 9호선 스냅샷 다년치 중 이 연도만 쓴다 — 모듈 docstring "9호선 스냅샷은 키가 원래
+# 중복이다" 참고(코로나 회복 추세를 피하기 위해 최신 연도만).
+_LINE9_CALIBRATION_YEAR = 2025
+
 _SLOT_PATTERN = re.compile(r"^(\d{2}):(\d{2})$")
+
+
+def dedupe_snapshot_keys(snapshot: pd.DataFrame) -> pd.DataFrame:
+    """9호선 스냅샷의 (연도·급행/일반) 중복을 걷어내 키 하나당 한 행으로 만든다.
+
+    1~8호선은 연도·train_type 축이 아예 없어(단일 대표 조사) 이 필터가 영향을 주지
+    않는다. 9호선만 `year == 2025` & `train_type in (NaN, "일반")`로 좁힌다.
+    """
+    is_line9 = snapshot["line"] == "9호선"
+    keep = ~is_line9 | (
+        (snapshot["year"] == _LINE9_CALIBRATION_YEAR) & (snapshot["train_type"] == "일반")
+    )
+    return snapshot[keep].reset_index(drop=True)
 
 
 def slot_30min_to_hour_bucket(slot: str) -> str:
@@ -157,8 +190,17 @@ def build_calibration_ratio() -> tuple[pd.DataFrame, dict[str, int]]:
     snapshot = pd.read_parquet(CROWD_INTERIM / SNAPSHOT_NAME)
 
     snapshot = attach_snapshot_station_no(snapshot)
+    snapshot = dedupe_snapshot_keys(snapshot)
     snapshot = snapshot.copy()
     snapshot["hour_bucket"] = snapshot["time_slot"].map(slot_30min_to_hour_bucket)
+
+    key = ["station_no", "direction", "line", "day_type", "time_slot"]
+    remaining_dupes = snapshot.duplicated(key, keep=False)
+    if remaining_dupes.any():
+        raise ValueError(
+            f"dedupe_snapshot_keys 이후에도 스냅샷 키 중복이 {remaining_dupes.sum()}행 "
+            "남아 있다 — 배율표가 조인 시 행 수를 부풀린다. 원인을 먼저 확인할 것."
+        )
 
     raw_mean = raw_hourly_mean(labels)
 
