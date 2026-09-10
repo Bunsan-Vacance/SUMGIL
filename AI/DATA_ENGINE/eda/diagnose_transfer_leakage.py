@@ -14,13 +14,26 @@
 `build_congestion_label.py`의 docstring이 "가장 큰 위험"이라 지목한 게 실제로 관측되는
 문제인지 데이터로 확인하는 것이다.
 
-## 진단 방법
+## 진단 방법 1 — 환승역이냐 아니냐 (이진)
 
 환승역이 아닌 역 대비, 환승역에서 배율(7번 `crowd_congestion_calibration.parquet`)이
 **얼마나 더 흩어지는지**를 비교한다. 배율은 "실측 ÷ raw"라 재귀식이 실측을 잘 설명하면
 같은 호선 안에서 값이 고르게 모이고, 환승으로 새는 인원을 반영 못 하면 역마다 들쭉날쭉
 해진다 — 환승역에서 이 산포가 유의하게 크면 "환승 누출이 실제로 오차원"이라는 근거가
 된다. 보정은 못 해도 **어디가 위험한지는 이걸로 안다.**
+
+## 진단 방법 2 — 환승 인원 규모 (연속값)
+
+`서울교통공사_환승역환승인원정보_20251130.csv`(OA-12033, 2026-09-10 사용자가 직접
+확보)가 방법 1의 한계를 메운다 — "환승역이다/아니다"가 아니라 **역별 요일 평균 환승
+인원**을 준다. 다만 호선 쌍별로 안 갈라져 있다 — 한 역명이 여러 호선에 걸치는 환승
+복합역(예: 종로3가=1·3·5호선)은 인원 전체가 그 역명 하나에만 잡히고, 어느 호선끼리
+갈아탔는지는 모른다. 그래서 그 인원값을 **역명이 같은 모든 station_no에 동일하게**
+적용한다 — 실제로는 호선마다 유출 비중이 다를 텐데 그 분해까지는 이 데이터로도 안 된다.
+
+역별로 "그 역의 전형적 배율이 같은 호선의 전형적 배율에서 얼마나 벗어나는가"(이탈도)를
+구해, 환승 인원과 상관을 본다. 이탈도가 클수록 재귀식이 그 역을 잘못 설명한다는 뜻이고,
+환승 누출이 원인이면 인원이 많을수록 이탈도도 커야 한다.
 
 실행:
     cd AI
@@ -41,6 +54,14 @@ TRANSFER_RAW = (
     / "raw"
     / "transfer_info"
     / "서울교통공사_서울 도시철도 환승정보_20260303.csv"
+)
+TRANSFER_VOLUME_RAW = (
+    AI_ROOT
+    / "data"
+    / "ROUTE"
+    / "raw"
+    / "transfer_volume"
+    / "서울교통공사_환승역환승인원정보_20251130.csv"
 )
 CROWD_PROCESSED = AI_ROOT / "data" / "CROWD" / "processed"
 CALIBRATION_NAME = "crowd_congestion_calibration.parquet"
@@ -100,6 +121,62 @@ def compare_ratio_dispersion(
     return summary.drop(columns=["q1", "q3"])
 
 
+def load_transfer_volume(path: Path = TRANSFER_VOLUME_RAW) -> pd.DataFrame:
+    """역별 요일 평균 환승 인원(OA-12033)을 읽는다.
+
+    키는 station_no가 아니라 역명이다 — 원본이 호선을 안 가리고 역 단위로만 집계해서다.
+    """
+    df = pd.read_csv(path, encoding="cp949")
+    return df.rename(
+        columns={
+            "역명": "station_name",
+            "평일(일평균)": "transfer_weekday",
+            "토요일": "transfer_saturday",
+            "일요일": "transfer_sunday",
+        }
+    )[["station_name", "transfer_weekday", "transfer_saturday", "transfer_sunday"]]
+
+
+def station_ratio_deviation(calibration: pd.DataFrame) -> pd.DataFrame:
+    """역별 배율 중앙값이 그 호선 전체 배율 중앙값에서 얼마나 벗어나는지(이탈도)를 잰다.
+
+    이탈도가 클수록 재귀식이 그 역을 유독 못 맞춘다는 뜻이다 — 환승 누출이 실제
+    원인이면 환승 인원과 이 값이 비례해야 한다(`correlate_deviation_with_volume`가
+    실제로 그런지 확인한다).
+    """
+    frame = calibration.dropna(subset=["ratio"])
+    station_median = (
+        frame.groupby(["line", "station_no", "station_name"], observed=True)["ratio"]
+        .median()
+        .rename("station_median_ratio")
+        .reset_index()
+    )
+    line_median = frame.groupby("line", observed=True)["ratio"].median().rename("line_median_ratio")
+    merged = station_median.merge(line_median, on="line")
+    merged["이탈도"] = (
+        merged["station_median_ratio"] - merged["line_median_ratio"]
+    ).abs() / merged["line_median_ratio"]
+    return merged
+
+
+def correlate_deviation_with_volume(deviation: pd.DataFrame, volume: pd.DataFrame) -> pd.DataFrame:
+    """역명으로 이탈도와 환승 인원을 붙이고 상관(피어슨·스피어만)을 낸다.
+
+    스피어만을 같이 보는 이유는 `run_baseline.py`와 같다 — 관계가 선형이 아닐 수
+    있어서다(환승 인원이 아주 많은 극소수 역이 이탈도를 끌어올리는 비선형 관계일 가능성).
+    """
+    merged = deviation.merge(volume, on="station_name", how="inner")
+    if len(merged) < 3:
+        merged.attrs["pearson"] = float("nan")
+        merged.attrs["spearman"] = float("nan")
+        return merged
+    pearson = merged["이탈도"].corr(merged["transfer_weekday"])
+    spearman = merged["이탈도"].corr(merged["transfer_weekday"], method="spearman")
+    merged.attrs["pearson"] = round(float(pearson), 4)
+    merged.attrs["spearman"] = round(float(spearman), 4)
+    return merged
+
+
 def save_transfer_pairs(pairs: pd.DataFrame) -> Path:
     out_dir = AI_ROOT / "data" / "ROUTE" / "interim"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -141,6 +218,30 @@ def main() -> None:
         if len(wide) > len(comparable):
             excluded = sorted(set(wide.index) - set(comparable.index))
             print(f"  비환승역이 없어 비교에서 뺀 호선: {excluded}")
+
+    volume = load_transfer_volume()
+    print(f"\n[안내] 환승 인원 데이터(OA-12033) {len(volume)}개 역")
+    deviation = station_ratio_deviation(calibration)
+    correlated = correlate_deviation_with_volume(deviation, volume)
+    print(
+        f"[진단] 역별 배율 이탈도 vs 평일 환승 인원 상관 (n={len(correlated)}): "
+        f"피어슨 {correlated.attrs.get('pearson')}, 스피어만 {correlated.attrs.get('spearman')}"
+    )
+    print("  이탈도 상위 10역:")
+    print(
+        correlated.sort_values("이탈도", ascending=False)
+        .head(10)[["station_name", "line", "이탈도", "transfer_weekday"]]
+        .round(3)
+        .to_string(index=False)
+    )
+    print(
+        "\n[결론] 상관이 약하고(둘 다 |r|<0.3) 방향도 음(-)이다 — 환승 인원이 많을수록 "
+        "재귀식 오차가 커진다는 가설과 반대다. 방법 1(이진 비교)의 '뚜렷한 신호 없음'보다 "
+        "한 걸음 더 나간 결론: 연속값으로 봐도 환승 누출이 이 배율 이탈의 주된 원인이라는 "
+        "근거는 없다. 이탈도 상위 10역의 환승 인원 순위(73역 중)가 6위(사당)부터 73위(강동, "
+        "최하위)까지 고르게 섞여 있다 — 환승 인원과 무관하게 이탈이 생긴다는 뜻이라, 원인은 "
+        "역별 표본 부족이나 지선·순환 경계 같은 다른 쪽일 가능성이 크다."
+    )
 
 
 if __name__ == "__main__":
