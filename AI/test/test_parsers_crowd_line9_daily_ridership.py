@@ -1,12 +1,26 @@
 import pandas as pd
+import pytest
 
 from DATA_ENGINE.eda.parsers_crowd_line9_daily_ridership import (
     EXCLUDED_FILENAMES,
     _normalize_hour_column,
+    attach_station_master,
     drop_conflicting_duplicates,
     duplicate_cell_inventory,
     load_line9_daily_csv,
+    load_station_master,
 )
+
+
+def _write_station_master_csv(path):
+    """4126~4138(9호선(연장)) 2역 + 범위 밖 1역을 담은 축소 역사마스터 픽스처."""
+    path.write_text(
+        "역사_ID,역사명,호선,위도,경도\n"
+        "4126,언주,9호선(연장),37.507287,127.033868\n"
+        "4136,올림픽공원(한국체대),9호선(연장),37.516269,127.130288\n"
+        "150,서울역,1호선,37.554648,126.972559\n",
+        encoding="cp949",
+    )
 
 
 def test_normalize_hour_column_matches_hh_si_hh_si_format():
@@ -115,6 +129,36 @@ def test_drop_conflicting_duplicates_removes_only_the_conflicting_station_day():
     # 언주 2025-03-22의 08-09, 09-10 행이 전부 빠지고, 정상 조합(선정릉·2025-01-01 언주)만 남는다.
     assert len(cleaned) == 2
     assert not ((cleaned["station_no"] == 4126) & (cleaned["date"] == "2025-03-22")).any()
+
+
+def test_load_station_master_keeps_only_stage_2_3_range(tmp_path):
+    _write_station_master_csv(tmp_path / "서울시 역사마스터 정보.csv")
+
+    result = load_station_master(tmp_path)
+
+    assert set(result["station_no"]) == {4126, 4136}
+    assert list(result.columns) == ["station_no", "station_name_master", "lat", "lon"]
+
+
+def test_attach_station_master_prefers_master_spelling(tmp_path):
+    """이 CSV의 "올림픽공원"과 마스터의 "올림픽공원(한국체대)"이 다르면 마스터 쪽을 쓴다."""
+    _write_station_master_csv(tmp_path / "서울시 역사마스터 정보.csv")
+    df = pd.DataFrame({"station_no": [4136], "station_name": ["올림픽공원"], "passengers": [10]})
+
+    result = attach_station_master(df, tmp_path)
+
+    assert result["station_name"].iloc[0] == "올림픽공원(한국체대)"
+    assert result["lat"].iloc[0] == pytest.approx(37.516269)
+    assert "station_name_master" not in result.columns
+
+
+def test_attach_station_master_raises_on_unknown_station(tmp_path):
+    """역사마스터 4126~4138 범위에 없는 station_no가 섞이면 조용히 버리지 않고 예외를 낸다."""
+    _write_station_master_csv(tmp_path / "서울시 역사마스터 정보.csv")
+    df = pd.DataFrame({"station_no": [4126, 9999], "station_name": ["언주", "미확인역"]})
+
+    with pytest.raises(ValueError, match="9999"):
+        attach_station_master(df, tmp_path)
 
 
 def test_drop_conflicting_duplicates_is_noop_when_no_conflicts():

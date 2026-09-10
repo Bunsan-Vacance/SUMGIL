@@ -48,6 +48,7 @@ import pandas as pd
 AI_ROOT = Path(__file__).resolve().parents[2]
 RAW_DIR = AI_ROOT / "data" / "CROWD" / "raw"
 INTERIM_DIR = AI_ROOT / "data" / "CROWD" / "interim"
+STATION_RAW = AI_ROOT / "data" / "EXTERNAL" / "station" / "raw"
 
 # 연간 파일(20250101-251231)의 순수 부분집합이라 뺀다 — 모듈 docstring 참고.
 EXCLUDED_FILENAMES = {"서울교통공사_9호선2_3단계 역별일별시간대별승하차인원_20250731.csv"}
@@ -145,6 +146,42 @@ def drop_conflicting_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
     is_conflict = df.set_index(key_cols).index.isin(conflict_keys.set_index(key_cols).index)
     cleaned = df[~is_conflict].reset_index(drop=True)
     return cleaned, conflict_keys
+
+
+def load_station_master(station_raw: Path = STATION_RAW) -> pd.DataFrame:
+    """역사마스터에서 이 원천의 역(4126~4138, "9호선(연장)")만 골라 온다.
+
+    `build_crowd_panel.py`가 1~8호선을 `station_no ↔ 역사_ID`로 조인하는 것과 같은
+    방식이다 — 9호선 2·3단계도 원본 CSV의 `역번호`가 이미 역사마스터 `역사_ID`와 같은
+    체계(4126~4138)를 그대로 쓰고 있어(2026-09-10 대조 확인, 순수 충돌 0건), 새로
+    번호를 매길 필요 없이 그대로 조인 키로 쓴다.
+    """
+    master = pd.read_csv(station_raw / "서울시 역사마스터 정보.csv", encoding="cp949")
+    return master[master["역사_ID"].between(4126, 4138)].rename(
+        columns={
+            "역사_ID": "station_no",
+            "역사명": "station_name_master",
+            "위도": "lat",
+            "경도": "lon",
+        }
+    )[["station_no", "station_name_master", "lat", "lon"]]
+
+
+def attach_station_master(df: pd.DataFrame, station_raw: Path = STATION_RAW) -> pd.DataFrame:
+    """역사마스터의 위경도를 붙이고, 역명 표기가 다른 역만 마스터 이름으로 정정한다.
+
+    두 원천의 역명은 12/13역이 완전히 같고, `올림픽공원`(이 CSV) 하나만 역사마스터가
+    `올림픽공원(한국체대)`로 부기명을 붙여 쓴다. 조인은 station_no로 하니 지장은 없지만,
+    표출용 이름은 하나로 통일해야 하므로 마스터 쪽을 정본으로 채택한다 — 부기명이 실제
+    시설(한국체대 캠퍼스 인접)을 가리키는 더 구체적인 표기라서다.
+    """
+    master = load_station_master(station_raw)
+    merged = df.merge(master, on="station_no", how="left")
+    if merged["station_name_master"].isna().any():
+        missing = sorted(merged.loc[merged["station_name_master"].isna(), "station_no"].unique())
+        raise ValueError(f"역사마스터에서 찾지 못한 station_no: {missing}")
+    merged["station_name"] = merged["station_name_master"]
+    return merged.drop(columns="station_name_master")
 
 
 def save_interim(df: pd.DataFrame) -> Path:
