@@ -35,6 +35,16 @@ TARGETS = ["boarding", "alighting"]
 # 베이스라인이 조회 키로 쓰는 컬럼. "요일유형 × 역 × 시간대 평균"이 곧 베이스라인이다.
 BASELINE_KEYS = ["day_type", "station_no", "time_slot"]
 
+# 이벤트 테이블의 개수 컬럼 — "이벤트가 없었다"가 0인 게 맞으므로 0으로 채운다.
+# 개수가 아닌 컬럼(`game_attendance`, `festival_min_duration_days`)은 여기 넣지 않는다.
+EVENT_COUNT_COLS = [
+    "game_count",
+    "festival_count",
+    "festival_short_count",
+    "festival_long_count",
+    "festival_sponsored_count",
+]
+
 
 def load_panel(with_events: bool = False) -> pd.DataFrame:
     """패널을 읽고, 필요하면 이벤트 컬럼까지 붙인다."""
@@ -44,9 +54,12 @@ def load_panel(with_events: bool = False) -> pd.DataFrame:
     if with_events:
         events = pd.read_parquet(CROWD_PROCESSED / EVENTS_NAME)
         panel = panel.merge(events, on=["date", "station_no"], how="left")
-        for col in ("game_count", "festival_count"):
+        for col in EVENT_COUNT_COLS:
             panel[col] = panel[col].fillna(0).astype(int)
-        # 관중수는 채우지 않는다 — 경기가 없는 날과 관중수만 모르는 날을 구분해야 한다.
+        # 관중수(`game_attendance`)와 축제 최단 개최일수(`festival_min_duration_days`)는
+        # 채우지 않는다. 앞은 경기가 없는 날과 관중수만 모르는 날을 구분해야 하고, 뒤는
+        # 축제가 없는 날에 "기간 0일"이라는 없는 값을 만들지 않기 위해서다 — 둘 다
+        # 대응하는 count 컬럼이 0인지로 구별된다.
 
     return panel
 
