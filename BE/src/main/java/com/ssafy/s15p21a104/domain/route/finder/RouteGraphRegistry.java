@@ -2,6 +2,8 @@ package com.ssafy.s15p21a104.domain.route.finder;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bike.BikeRentalEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteStopsReader;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
@@ -91,8 +93,19 @@ public class RouteGraphRegistry {
             }
             List<Edge> rentalEdges = BikeRentalEdgeBuilder.build(rentals);
             List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals);
+            Map<String, List<BusEdgeBuilder.RouteStop>> busRoutes = BusRouteStopsReader.read();
+            List<Edge> busEdges = BusEdgeBuilder.build(busRoutes);
+            for (List<BusEdgeBuilder.RouteStop> routeStops : busRoutes.values()) {
+                for (BusEdgeBuilder.RouteStop routeStop : routeStops) {
+                    infos.putIfAbsent(routeStop.stopId(), new RouteMapper.StationInfo(
+                            routeStop.stopId(),
+                            routeStop.name() == null ? routeStop.stopId() : routeStop.name(),
+                            routeStop.lat(), routeStop.lng()));
+                }
+            }
             List<Edge> extraEdges = new java.util.ArrayList<>(walkEdges);
             extraEdges.addAll(rentalEdges);
+            extraEdges.addAll(busEdges);
             RouteGraphLoader.LoadResult result = RouteGraphLoader.load(
                     new RouteGraphRawData(rows, stationNames, lineNames), extraEdges);
             this.graph = result.graph();
@@ -106,9 +119,9 @@ public class RouteGraphRegistry {
                         meta.getId().getToLine()), meta.getWalkSec());
             }
             this.transferTimes = Map.copyOf(times);
-            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건, 대여소 {}곳·자전거 엣지 {}개·도보 엣지 {}개",
+            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건, 대여소 {}곳·자전거 엣지 {}개·도보 엣지 {}개·버스 엣지 {}개",
                     graph.nodeCount(), graph.edgeCount(), transferTimes.size(),
-                    rentalTotal, rentalEdges.size(), walkEdges.size());
+                    rentalTotal, rentalEdges.size(), walkEdges.size(), busEdges.size());
         } catch (DomainException e) {
             log.warn("탐색 그래프 없음(미적재). 그래프 로드 후 재기동하면 알고리즘 경로로 동작한다: {}",
                     e.getMessage());
