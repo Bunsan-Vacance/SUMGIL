@@ -17,7 +17,7 @@ import com.ssafy.s15p21a104.load.subway.KtdbNodeCoordParser;
 import com.ssafy.s15p21a104.load.subway.LineSpeeds;
 import com.ssafy.s15p21a104.load.subway.StdStationParser;
 import com.ssafy.s15p21a104.load.subway.UrbanLineParser;
-import com.ssafy.s15p21a104.load.subway.StationCoordCrossCheck;
+import com.ssafy.s15p21a104.load.subway.StationCoordResolver;
 import com.ssafy.s15p21a104.load.subway.StationIdTable;
 import com.ssafy.s15p21a104.load.subway.LineCodes;
 import com.ssafy.s15p21a104.load.subway.LineRow;
@@ -319,32 +319,20 @@ public class StaticLoadRunner implements ApplicationRunner {
         var stdParser = new StdStationParser(normalizer);
         List<StationCoord> std = stdParser.parse(csv(SUBWAY_DIR, STATION_STANDARD_FILE).rows());
 
-        // 서울교통공사 좌표가 있는 역은 그 값을 쓰므로, 실제로 쓰일 국가철도공단 좌표(그 밖의 역)와 그것도 없는 역의 표준데이터 좌표만 KTDB 와 대조한다.
-        // 5 km 를 넘게 어긋나면 파일의 오기로 보고 빼서 KTDB 가 채우게 하고, 500 m~5 km 는 유지하되 검토 목록으로 남긴다.
-        Set<String> seoulNames = seoulMetro.stream().map(StationCoord::stationName).collect(Collectors.toSet());
-        List<StationCoord> kricUsed = kric.stream().filter(c -> !seoulNames.contains(c.stationName())).toList();
-        List<StationCoord> kricCovered = kric.stream().filter(c -> seoulNames.contains(c.stationName())).toList();
-        Set<String> kricNames = kricUsed.stream().map(StationCoord::stationName).collect(Collectors.toSet());
-        List<StationCoord> stdUsed = std.stream()
-                .filter(c -> !seoulNames.contains(c.stationName()) && !kricNames.contains(c.stationName())).toList();
-        // 국가철도공단 좌표가 표준데이터와 어긋나는데 표준데이터·KTDB 가 일치하면 국가철도공단 쪽 오기다 (한국항공대 4.9 km·송도 2.5 km·산본 1.1 km)
-        var vote = StationCoordCrossCheck.majority(kricUsed, std, ktdb, COORD_CROSSCHECK_METERS);
-        logWarnings("좌표 다수결", vote.warnings());
-        List<StationCoord> official = new ArrayList<>(vote.kept());
-        official.addAll(stdUsed);
-        var check = StationCoordCrossCheck.resolve(official, ktdb, COORD_CROSSCHECK_METERS, COORD_REPLACE_METERS);
-        logWarnings("좌표 교차검증", check.warnings());
-        log.info("좌표 원천: 서울교통공사 {} · 국가철도공단 역위치 {} (무효 {} 건너뜀, 표준데이터로 대체 {}: {}) · 표준데이터 {} (수도권 밖 {} 건너뜀, 그중 실제 쓰임 {}) "
-                        + "· KTDB 로 대체 {}: {} · KTDB 노드 {} (수도권, 이름별 평균)",
-                seoulMetro.size(), kric.size(), kricParser.skipped(), vote.replaced().size(), String.join(", ", vote.replaced()),
-                std.size(), stdParser.skipped(), stdUsed.size(), check.replaced().size(), String.join(", ", check.replaced()), ktdb.size());
+        // 우선순위·다수결·교차검증 규칙은 StationCoordResolver 에 있다 (data/subway/README.md "좌표 결정 규칙").
+        var resolved = StationCoordResolver.resolve(seoulMetro, kric, std, ktdb, COORD_CROSSCHECK_METERS, COORD_REPLACE_METERS);
+        logWarnings("좌표 다수결(서울교통공사)", resolved.seoulVote().warnings());
+        logWarnings("좌표 다수결(국가철도공단)", resolved.kricVote().warnings());
+        logWarnings("좌표 교차검증", resolved.crossCheck().warnings());
+        log.info("좌표 원천: 서울교통공사 {} (표준데이터로 대체 {}: {}) · 국가철도공단 역위치 {} (무효 {} 건너뜀, 표준데이터로 대체 {}: {}) "
+                        + "· 표준데이터 {} (수도권 밖 {} 건너뜀, 그중 실제 쓰임 {}) · KTDB 로 대체 {}: {} · KTDB 노드 {} (수도권, 이름별 평균)",
+                seoulMetro.size(), resolved.seoulVote().replaced().size(), String.join(", ", resolved.seoulVote().replaced()),
+                kric.size(), kricParser.skipped(), resolved.kricVote().replaced().size(), String.join(", ", resolved.kricVote().replaced()),
+                std.size(), stdParser.skipped(), resolved.stdUsed(),
+                resolved.crossCheck().replaced().size(), String.join(", ", resolved.crossCheck().replaced()), ktdb.size());
 
-        List<StationCoord> coords = new ArrayList<>(seoulMetro);
-        coords.addAll(kricCovered);
-        coords.addAll(check.kept());
-        coords.addAll(ktdb);
-        this.coordSources = List.of(seoulMetro, kric, std, ktdb);
-        return coords;
+        this.coordSources = resolved.sourcesInPriority();
+        return resolved.coords();
     }
 
     /**
