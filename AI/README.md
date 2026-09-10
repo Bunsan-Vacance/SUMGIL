@@ -194,6 +194,25 @@ AI/
   Drive([SUMGIL](https://drive.google.com/drive/folders/1C_x37kCT3wfeLqqw1aApt_ODWNks8THw))의 `data/`에
   같은 도메인·경로 구조로 올린다.
 
+### 선택: 로컬 Drive 자동 동기화 (AI 팀 전용)
+
+Google Drive for Desktop으로 SUMGIL 폴더를 로컬에 마운트해뒀다면, `develop-AI`에 새 MR이
+merge된 뒤 `git pull`을 받을 때마다 로컬 `AI/data/`가 Drive의 최신 데이터로 자동 갱신되게
+할 수 있다. 완전히 opt-in이라 설치하지 않으면 아무 영향이 없다.
+
+```bash
+# 최초 1회 (AI 팀원 각자)
+cd AI
+powershell -File scripts/install_drive_sync_hook.ps1
+```
+
+- 설치 스크립트가 물어보는 경로는 Google Drive for Desktop이 마운트한 SUMGIL 폴더(예:
+  `G:\내 드라이브\SUMGIL`)다.
+- 이후 `develop-AI`에서 `git pull`로 새 MR을 받을 때마다 Drive → 로컬 `AI/data/` 방향으로만
+  자동 복사된다(로컬 파일이 더 최신이면 덮어쓰지 않고, 삭제도 하지 않는다).
+- 새로 만든 데이터를 Drive에 올리는 건 자동화하지 않는다 — 검증 후 직접
+  `powershell AI/scripts/sync_drive_data.ps1 -Direction Push` 로 실행한다.
+
 ## 8. 작업 규칙
 
 - **`validation/`은 탐색용, `app/`은 재현·서빙용.** `validation/`에서 검증된 로직은
