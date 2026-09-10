@@ -1,6 +1,7 @@
 import { Bike, LocateFixed, RotateCw, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import type { Place } from '../route/types'
+import { isBackendConfigured } from '../../api/repositories'
+import type { Place, Route } from '../route/types'
 import { useKakaoMap } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
 export default function KakaoMap({
@@ -11,6 +12,7 @@ export default function KakaoMap({
   onPlaceSelect,
   showPlaceInfo = true,
   focusedPlace,
+  route,
 }: {
   origin?: Place | null
   destination?: Place | null
@@ -19,6 +21,7 @@ export default function KakaoMap({
   onPlaceSelect?: (place: Place) => void
   showPlaceInfo?: boolean
   focusedPlace?: Place | null
+  route?: Route | null
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const routePlaces = useMemo(
@@ -27,6 +30,10 @@ export default function KakaoMap({
   )
   const mapPlaces = places ?? routePlaces
   const mapFocus = focusedPlace === undefined ? selectedPlace : focusedPlace
+  const showSelectedPlaceInfo =
+    showPlaceInfo &&
+    selectedPlace &&
+    (selectedPlace.kind !== '따릉이 대여소' || Boolean(selectedPlace.address))
   const selectPlace = (place: Place) => {
     setSelectedPlace(place)
     onPlaceSelect?.(place)
@@ -39,6 +46,7 @@ export default function KakaoMap({
     mapPlaces,
     mapFocus,
     places === undefined ? null : mapFocus,
+    route,
   )
   const { locating, locate } = useCurrentLocation(showPosition, onMessage, locationScope)
   useEffect(() => {
@@ -66,9 +74,7 @@ export default function KakaoMap({
           )}
         </div>
       )}
-      <div
-        className={`map-bottom-controls${showPlaceInfo && selectedPlace ? ' has-place-info' : ''}`}
-      >
+      <div className={`map-bottom-controls${showSelectedPlaceInfo ? ' has-place-info' : ''}`}>
         {status === 'ready' && (
           <button
             className="icon-button kakao-locate"
@@ -79,7 +85,7 @@ export default function KakaoMap({
             {locating ? <span className="spinner" /> : <LocateFixed />}
           </button>
         )}
-        {showPlaceInfo && selectedPlace && (
+        {showSelectedPlaceInfo && selectedPlace && (
           <section
             className="map-place-info"
             role="region"
@@ -107,6 +113,7 @@ export default function KakaoMap({
           </section>
         )}
       </div>
+      {isBackendConfigured && <p className="map-nearby-hint">지도 중심 3km 이내 대여소</p>}
       {showPlaceInfo && (
         <div className="map-place-shortcuts" aria-label="지도 장소 정보">
           {origin && (

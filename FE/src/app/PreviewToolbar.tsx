@@ -1,3 +1,5 @@
+import { isBackendConfigured } from '../api/repositories'
+
 interface Props {
   guiding: boolean
   lastStep: boolean
@@ -5,6 +7,7 @@ interface Props {
   onTrain: () => void
   onNext: () => void
   onHome: () => void
+  isLiveApi?: boolean
 }
 export default function PreviewToolbar({
   guiding,
@@ -13,17 +16,24 @@ export default function PreviewToolbar({
   onTrain,
   onNext,
   onHome,
+  isLiveApi = isBackendConfigured,
 }: Props) {
   return (
     <div className="demo-toolbar">
-      <span>
-        <b>숨길</b> 화면 미리보기 · 샘플 데이터
-      </span>
+      {!isLiveApi && (
+        <span>
+          <b>숨길</b> 화면 미리보기 · 샘플 데이터
+        </span>
+      )}
       <div>
         {guiding && (
           <>
-            <button onClick={onProposal}>경로 제안</button>
-            <button onClick={onTrain}>탑승 확인</button>
+            <button disabled={isLiveApi} onClick={onProposal}>
+              경로 제안
+            </button>
+            <button disabled={isLiveApi} onClick={onTrain}>
+              탑승 확인
+            </button>
             <button onClick={onNext}>{lastStep ? '도착' : '다음 단계'}</button>
           </>
         )}

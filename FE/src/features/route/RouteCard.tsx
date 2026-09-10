@@ -1,5 +1,5 @@
 import { Check } from 'lucide-react'
-import { arrival } from './selectors'
+import { arrival, roundMinutes } from './selectors'
 import type { Route } from './types'
 
 export default function RouteCard({
@@ -11,6 +11,11 @@ export default function RouteCard({
   selected: boolean
   onSelect: () => void
 }) {
+  const facts = [
+    route.walk === undefined ? null : `도보 ${route.walk}m`,
+    `환승 ${route.transfers ? `${route.transfers}회` : '없음'}`,
+    route.congestionPercent === undefined ? null : `혼잡도 ${route.congestionPercent}%`,
+  ].filter((fact): fact is string => fact !== null)
   return (
     <button
       className={`route-card ${selected ? 'selected' : ''}`}
@@ -32,14 +37,18 @@ export default function RouteCard({
       </span>
       <span className="route-time">
         <span>
-          <b>{route.minutes}</b>분
+          <b>{roundMinutes(route.minutes)}</b>분
         </span>
-        <small>{arrival(route.minutes)} 도착</small>
+        <small>{arrival(route.minutes, route.departedAt)} 도착</small>
       </span>
-      <span className="route-lines">{route.line}</span>
+      {route.line && <span className="route-lines">{route.line}</span>}
       <span className="route-facts">
-        도보 {route.walk}m <i /> 환승 {route.transfers ? `${route.transfers}회` : '없음'} <i />{' '}
-        혼잡도 {route.congestionPercent}%
+        {facts.map((fact, index) => (
+          <span key={fact}>
+            {index > 0 && <i />}
+            {fact}
+          </span>
+        ))}
       </span>
     </button>
   )

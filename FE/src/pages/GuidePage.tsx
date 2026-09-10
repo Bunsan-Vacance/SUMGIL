@@ -1,7 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import { modeIcons } from '../features/route/ModeIcon'
-import { arrival, remaining } from '../features/route/selectors'
+import { arrival, remaining, roundMinutes } from '../features/route/selectors'
 import type { Route } from '../features/route/types'
 import type { Navigate } from '../app/useNavigation'
 import LegList from '../features/route/LegList'
@@ -37,7 +37,7 @@ export default function GuidePage({ selected, step, train, destinationName, go, 
           <div>
             <strong>{currentLeg.title}</strong>
             <p>
-              {currentLeg.note} · {currentLeg.minutes}분
+              {currentLeg.note} · {roundMinutes(currentLeg.minutes)}분
             </p>
           </div>
         </div>
@@ -60,9 +60,9 @@ export default function GuidePage({ selected, step, train, destinationName, go, 
             <strong>{destinationName}</strong>
           </div>
           <div>
-            <strong>{arrival(selected.minutes)}</strong>
+            <strong>{arrival(selected.minutes, selected.departedAt)}</strong>
             <small>도착</small>
-            <b>{remaining(selected, step)}분</b>
+            <b>{roundMinutes(remaining(selected, step))}분</b>
             <small>남음</small>
           </div>
         </div>
@@ -71,7 +71,7 @@ export default function GuidePage({ selected, step, train, destinationName, go, 
           <strong>{next?.title || `${destinationName} 도착`}</strong>
           {next && (
             <p>
-              {next.note} · {next.minutes}분
+              {next.note} · {roundMinutes(next.minutes)}분
             </p>
           )}
         </div>

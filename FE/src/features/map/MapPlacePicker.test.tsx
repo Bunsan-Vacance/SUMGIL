@@ -12,6 +12,10 @@ import MapPlacePicker from './MapPlacePicker'
 
 const mocks = vi.hoisted(() => ({ loadKakaoMaps: vi.fn() }))
 vi.mock('../../lib/kakao/sdk', () => ({ loadKakaoMaps: mocks.loadKakaoMaps }))
+vi.mock('../../api/repositories', () => ({
+  bikeStationRepository: null,
+  isBackendConfigured: false,
+}))
 
 const callbacks: Array<(results: KakaoCoord2AddressResult[], status: string) => void> = []
 const clickHandlers: Array<(event: KakaoMapClickEvent) => void> = []

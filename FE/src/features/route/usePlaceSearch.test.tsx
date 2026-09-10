@@ -2,9 +2,9 @@
 
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { PlaceRepository } from '../../api/contracts'
+import type { PlaceRepository, StationRepository } from '../../api/contracts'
 import type { Place } from './types'
-import { usePlaceSearch } from './usePlaceSearch'
+import { stationSearchResultToPlace, usePlaceSearch, useStationSearch } from './usePlaceSearch'
 
 afterEach(() => {
   cleanup()
@@ -82,5 +82,45 @@ describe('장소 검색 요청', () => {
     await new Promise((resolve) => setTimeout(resolve, 310))
     await waitFor(() => expect(hook.current.error).toContain('검색하지 못했어요'))
     expect(hook.current.places).toEqual([])
+  })
+})
+
+describe('역 검색 요청', () => {
+  it('역 검색 결과의 stationId를 경로 입력 장소에 그대로 보존한다', async () => {
+    vi.useFakeTimers()
+    const stationRepository: StationRepository = {
+      search: vi.fn(async () => [
+        {
+          stationId: '214',
+          stationName: '강변',
+          lineId: '1002',
+          lineName: '2호선',
+          lat: 37.535161,
+          lng: 127.094684,
+        },
+      ]),
+    }
+    const { result: hook } = renderHook(() => useStationSearch(' 강변역 ', stationRepository))
+
+    await act(async () => {
+      vi.advanceTimersByTime(300)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(hook.current.stations[0].stationId).toBe('214')
+    expect(stationSearchResultToPlace(hook.current.stations[0])).toMatchObject({
+      id: 'station:214:1002',
+      name: '강변 (2호선)',
+      stationId: '214',
+      kind: '지하철역',
+    })
+  })
+
+  it('백엔드가 설정되지 않은 환경에서는 역 검색 요청을 만들지 않는다', async () => {
+    const { result: hook } = renderHook(() => useStationSearch('강변', null))
+
+    await waitFor(() => expect(hook.current.loading).toBe(false))
+    expect(hook.current.stations).toEqual([])
   })
 })

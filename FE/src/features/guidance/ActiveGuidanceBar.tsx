@@ -1,6 +1,6 @@
 import { ChevronRight, Navigation } from 'lucide-react'
 import type { Route } from '../route/types'
-import { remaining } from '../route/selectors'
+import { remaining, roundMinutes } from '../route/selectors'
 
 export default function ActiveGuidanceBar({
   route,
@@ -22,7 +22,7 @@ export default function ActiveGuidanceBar({
       <Navigation size={22} aria-hidden="true" />
       <span className="active-guidance-copy">
         <strong>
-          {destinationName} 안내 중 · {remaining(route, step)}분 남음
+          {destinationName} 안내 중 · {roundMinutes(remaining(route, step))}분 남음
         </strong>
         <span>{route.legs[step]?.title}</span>
       </span>

@@ -7,6 +7,7 @@ export interface MapPixelPoint {
   y: number
 }
 export interface MapProjection {
+  pointFromCoords(point: MapPoint): MapPixelPoint
   containerPointFromCoords(point: MapPoint): MapPixelPoint
 }
 export interface MapSize {
@@ -59,6 +60,10 @@ export interface KakaoMapInstance {
 export interface MapOverlay {
   setMap(map: KakaoMapInstance | null): void
 }
+export interface KakaoAbstractOverlay extends MapOverlay {
+  getPanels(): { overlayLayer: HTMLElement }
+  getProjection(): MapProjection
+}
 export interface KakaoMarker extends MapOverlay {
   setImage(image: MapMarkerImage): void
   setZIndex(zIndex: number): void
@@ -90,7 +95,9 @@ export interface KakaoMaps {
     position: MapPoint
     content: Node
     clickable?: boolean
+    zIndex?: number
   }) => MapOverlay
+  AbstractOverlay: new () => KakaoAbstractOverlay
   Polyline: new (options: {
     map: KakaoMapInstance
     path: MapPoint[]
@@ -98,6 +105,7 @@ export interface KakaoMaps {
     strokeColor: string
     strokeOpacity: number
     strokeStyle: string
+    zIndex?: number
   }) => MapOverlay
   services: {
     Places: new () => {

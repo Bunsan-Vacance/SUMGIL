@@ -8,11 +8,15 @@ import type {
   KakaoMaps,
   MapOverlay,
 } from '../../lib/kakao/sdk'
-import type { Place } from '../route/types'
+import type { Place, Route } from '../route/types'
 import KakaoMap from './KakaoMap'
 
 const mocks = vi.hoisted(() => ({ loadKakaoMaps: vi.fn() }))
 vi.mock('../../lib/kakao/sdk', () => ({ loadKakaoMaps: mocks.loadKakaoMaps }))
+vi.mock('../../api/repositories', () => ({
+  bikeStationRepository: null,
+  isBackendConfigured: false,
+}))
 
 const origin = {
   id: 'origin',
@@ -24,8 +28,18 @@ const origin = {
 }
 
 class FakeResizeObserver {
+  static callbacks: Array<() => void> = []
+
+  constructor(callback: ResizeObserverCallback) {
+    FakeResizeObserver.callbacks.push(() => callback([], this as unknown as ResizeObserver))
+  }
+
   observe = vi.fn()
   disconnect = vi.fn()
+
+  static trigger() {
+    FakeResizeObserver.callbacks.forEach((callback) => callback())
+  }
 }
 
 class FakeLatLng {
@@ -52,7 +66,13 @@ class FakeMap {
 
   getCenter = vi.fn(() => new FakeLatLng(37.5, 127) as never)
   getLevel = vi.fn(() => 5)
-  getProjection = vi.fn(() => ({ containerPointFromCoords: () => ({ x: 0, y: 0 }) }))
+  getProjection = vi.fn(() => ({
+    pointFromCoords: (point: FakeLatLng) => ({
+      x: point.getLng() * 100,
+      y: point.getLat() * 100,
+    }),
+    containerPointFromCoords: () => ({ x: 0, y: 0 }),
+  }))
   setCenter = vi.fn()
   setLevel = vi.fn()
   setBounds = vi.fn()
@@ -75,9 +95,34 @@ class FakeMarker {
 }
 
 class FakeCustomOverlay {
+  static instances: FakeCustomOverlay[] = []
   setMap = vi.fn()
 
-  constructor(readonly options: unknown) {}
+  constructor(readonly options: unknown) {
+    FakeCustomOverlay.instances.push(this)
+  }
+}
+
+class FakeAbstractOverlay {
+  static instances: FakeAbstractOverlay[] = []
+  map: KakaoMapInstance | null = null
+
+  constructor() {
+    FakeAbstractOverlay.instances.push(this)
+  }
+
+  setMap = vi.fn((map: KakaoMapInstance | null) => {
+    if (this.map && !map) (this as unknown as { onRemove?: () => void }).onRemove?.()
+    this.map = map
+    if (map) {
+      const overlay = this as unknown as { onAdd?: () => void; draw?: () => void }
+      overlay.onAdd?.()
+      overlay.draw?.()
+    }
+  })
+
+  getPanels = vi.fn(() => ({ overlayLayer: document.body }))
+  getProjection = vi.fn(() => FakeMap.instances[0].getProjection())
 }
 
 function fakeMaps(
@@ -120,7 +165,10 @@ function fakeMaps(
       }
     } as unknown as KakaoMaps['Marker'],
     CustomOverlay: FakeCustomOverlay as unknown as KakaoMaps['CustomOverlay'],
-    Polyline: class {} as unknown as KakaoMaps['Polyline'],
+    AbstractOverlay: FakeAbstractOverlay as unknown as KakaoMaps['AbstractOverlay'],
+    Polyline: class {
+      setMap = vi.fn()
+    } as unknown as KakaoMaps['Polyline'],
     services: {
       Places: class {
         keywordSearch = vi.fn()
@@ -144,20 +192,39 @@ function fakeMaps(
   }
 }
 
-function renderMap(options: { places?: Place[] } = {}) {
+function renderMap(
+  options: { places?: Place[]; route?: Route | null; onPlaceSelect?: (place: Place) => void } = {},
+) {
   const markerClickHandlers: Array<() => void> = []
   const markers: FakeMarker[] = []
   const removeListener = vi.fn()
   const maps = fakeMaps(markerClickHandlers, removeListener, markers)
   mocks.loadKakaoMaps.mockResolvedValue(maps)
   const rendered = render(
-    <KakaoMap origin={origin} destination={null} places={options.places} onMessage={vi.fn()} />,
+    <KakaoMap
+      origin={origin}
+      destination={null}
+      places={options.places}
+      route={options.route}
+      onPlaceSelect={options.onPlaceSelect}
+      onMessage={vi.fn()}
+    />,
   )
-  return { ...rendered, markerClickHandlers, markers, maps, removeListener }
+  return {
+    ...rendered,
+    markerClickHandlers,
+    markers,
+    maps,
+    removeListener,
+    customOverlays: FakeCustomOverlay.instances,
+  }
 }
 
 beforeEach(() => {
   FakeMap.instances = []
+  FakeCustomOverlay.instances = []
+  FakeAbstractOverlay.instances = []
+  FakeResizeObserver.callbacks = []
   vi.stubGlobal('ResizeObserver', FakeResizeObserver)
 })
 
@@ -286,5 +353,162 @@ describe('일반 지도 장소 마커', () => {
     )
     expect(rendered.markers[1].setImage.mock.calls.at(-1)?.[0]).not.toBe(selectedImage)
     expect(rendered.markers[1].setZIndex).toHaveBeenLastCalledWith(1)
+  })
+
+  it('MultiLineString의 각 선을 따로 그리고 경로 변경·해제 시 정리한다', async () => {
+    const geometry: NonNullable<Route['geometry']> = {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127, 37.5],
+          [127.01, 37.51],
+        ],
+        [
+          [127.1, 37.6],
+          [127.11, 37.61],
+        ],
+      ],
+    }
+    const route: Route = {
+      id: 'route-1',
+      label: '최단 경로',
+      minutes: 10,
+      transfers: 0,
+      modes: ['subway'],
+      legs: [],
+      geometry,
+    }
+    const rendered = renderMap({ route })
+    await waitFor(() =>
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(2),
+    )
+    const firstSvg = document.querySelector('.route-svg-overlay') as SVGSVGElement
+    expect(firstSvg.style.zIndex).toBe('5')
+    expect(firstSvg.style.overflow).toBe('visible')
+    expect(firstSvg.querySelectorAll('polyline')[0].getAttribute('points')).toContain('12700')
+    expect(firstSvg.querySelectorAll('polyline')[1].getAttribute('points')).toContain('12710')
+
+    const nextRoute: Route = {
+      ...route,
+      geometry: { ...geometry, coordinates: [geometry.coordinates[0]] },
+    }
+    rendered.rerender(
+      <KakaoMap origin={origin} destination={null} route={nextRoute} onMessage={vi.fn()} />,
+    )
+    await waitFor(() =>
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(1),
+    )
+    expect(FakeAbstractOverlay.instances[0].setMap).toHaveBeenCalledWith(null)
+    expect(document.querySelectorAll('.route-svg-overlay')).toHaveLength(1)
+
+    rendered.unmount()
+    expect(FakeAbstractOverlay.instances.at(-1)?.setMap).toHaveBeenCalledWith(null)
+    expect(document.querySelectorAll('.route-svg-overlay')).toHaveLength(0)
+  })
+
+  it('구간별 geometry 선 색상과 승차·환승·하차 marker를 관리한다', async () => {
+    const onPlaceSelect = vi.fn()
+    const transfer = { id: 'transfer', name: '환승역', lat: 37.51, lng: 127.04 }
+    const route: Route = {
+      id: 'route-styled',
+      label: '최단 경로',
+      minutes: 10,
+      transfers: 1,
+      modes: ['subway', 'bus'],
+      legs: [
+        {
+          mode: 'subway',
+          title: '2호선',
+          note: '2호선',
+          minutes: 5,
+          routeId: '1002',
+          from: { id: 'start', name: '승차역', lat: 37.5, lng: 127.03 },
+          to: transfer,
+          geometry: {
+            type: 'MultiLineString',
+            coordinates: [
+              [
+                [127.03, 37.5],
+                [127.04, 37.51],
+              ],
+            ],
+          },
+        },
+        {
+          mode: 'bus',
+          title: '버스',
+          note: '버스',
+          minutes: 5,
+          routeId: 'bus-1',
+          from: transfer,
+          to: { id: 'end', name: '하차역', lat: 37.52, lng: 127.05 },
+          geometry: {
+            type: 'MultiLineString',
+            coordinates: [
+              [
+                [127.04, 37.51],
+                [127.05, 37.52],
+              ],
+            ],
+          },
+        },
+      ],
+    }
+    const rendered = renderMap({ route, onPlaceSelect })
+    await waitFor(() =>
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(2),
+    )
+    const routeLines = document.querySelectorAll('.route-svg-overlay polyline')
+    expect(routeLines[0].getAttribute('stroke')).toBe('#6379bd')
+    expect(routeLines[1].getAttribute('stroke')).toBe('#2f80c0')
+    await waitFor(() => expect(rendered.customOverlays).toHaveLength(3))
+    expect(
+      rendered.customOverlays.every(
+        (overlay) => (overlay.options as { zIndex?: number }).zIndex === 10,
+      ),
+    ).toBe(true)
+    const contents = rendered.customOverlays.map(
+      (overlay) => (overlay.options as { content: HTMLButtonElement }).content,
+    )
+    expect(contents.map((content) => content.textContent)).toEqual(['승차', '하차', '환승'])
+    expect(contents[0].getAttribute('aria-label')).toContain('승차역')
+    expect(contents[0].getAttribute('aria-label')).not.toContain('start')
+    fireEvent.click(contents[0])
+    expect(onPlaceSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: '승차' }))
+
+    rendered.unmount()
+    rendered.customOverlays.forEach((overlay) => expect(overlay.setMap).toHaveBeenCalledWith(null))
+  })
+
+  it('지도 크기가 바뀌면 저장한 경로 bounds를 다시 적용한다', async () => {
+    const geometry: NonNullable<Route['geometry']> = {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127, 37.5],
+          [127.01, 37.51],
+        ],
+      ],
+    }
+    const route: Route = {
+      id: 'route-resize',
+      label: '최단 경로',
+      minutes: 10,
+      transfers: 0,
+      modes: ['subway'],
+      legs: [],
+      geometry,
+    }
+    renderMap({ route })
+    await waitFor(() =>
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(1),
+    )
+    const map = FakeMap.instances[0]
+    const setBoundsCalls = map.setBounds.mock.calls.length
+
+    act(() => FakeResizeObserver.trigger())
+
+    expect(map.setBounds.mock.calls.length).toBeGreaterThan(setBoundsCalls)
+    expect(map.setCenter).toHaveBeenCalledTimes(1)
   })
 })

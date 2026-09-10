@@ -7,6 +7,7 @@ const BIKE_ICON =
 export interface BikeStationOverlay {
   element: HTMLButtonElement
   setSelected(selected: boolean): void
+  setRouteActive(active: boolean): void
   destroy(): void
 }
 
@@ -24,15 +25,18 @@ export function createBikeStationOverlay(
   station: BikeStation,
   selected: boolean,
   onSelect: () => void,
+  routeActive = false,
 ): BikeStationOverlay {
   const element = document.createElement('button')
   element.type = 'button'
   element.className = 'bike-station-marker'
   const displayName = getBikeStationDisplayName(station.name)
-  const markerLabel =
-    displayName === '따릉이 대여소'
-      ? `따릉이 대여소 · ${station.address}`
-      : `${displayName} · 따릉이 대여소`
+  const markerLabel = [
+    displayName === '따릉이 대여소' ? displayName : `${displayName} · 따릉이 대여소`,
+    station.address,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   element.setAttribute('aria-label', markerLabel)
   element.title = markerLabel
   element.innerHTML = BIKE_ICON
@@ -40,17 +44,21 @@ export function createBikeStationOverlay(
     element.classList.toggle('selected', value)
     element.setAttribute('aria-pressed', String(value))
   }
+  const setRouteActive = (active: boolean) => element.classList.toggle('route-active', active)
   setSelected(selected)
+  setRouteActive(routeActive)
   element.addEventListener('click', onSelect)
   const overlay = new maps.CustomOverlay({
     map,
     position: new maps.LatLng(station.lat, station.lng),
     content: element,
     clickable: true,
+    zIndex: 1,
   })
   return {
     element,
     setSelected,
+    setRouteActive,
     destroy() {
       element.removeEventListener('click', onSelect)
       overlay.setMap(null)
@@ -113,6 +121,7 @@ export function groupVisibleBikeStations(
 
 export interface BikeStationClusterOverlay {
   element: HTMLButtonElement
+  setRouteActive(active: boolean): void
   destroy(): void
 }
 
@@ -131,6 +140,7 @@ export function createBikeStationClusterOverlay(
   map: KakaoMapInstance,
   group: BikeStationGroup,
   onZoom: () => void,
+  routeActive = false,
 ): BikeStationClusterOverlay {
   const element = document.createElement('button')
   const label = `이 지역 따릉이 대여소 ${group.stations.length}개, 확대해서 보기`
@@ -139,15 +149,19 @@ export function createBikeStationClusterOverlay(
   element.setAttribute('aria-label', label)
   element.title = label
   element.textContent = String(group.stations.length)
+  const setRouteActive = (active: boolean) => element.classList.toggle('route-active', active)
+  setRouteActive(routeActive)
   element.addEventListener('click', onZoom)
   const overlay = new maps.CustomOverlay({
     map,
     position: new maps.LatLng(group.center.lat, group.center.lng),
     content: element,
     clickable: true,
+    zIndex: 1,
   })
   return {
     element,
+    setRouteActive,
     destroy() {
       element.removeEventListener('click', onZoom)
       overlay.setMap(null)
