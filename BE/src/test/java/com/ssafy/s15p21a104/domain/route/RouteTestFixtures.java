@@ -80,7 +80,7 @@ public final class RouteTestFixtures {
         return new Edge(from, to, WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK);
     }
 
-    /** 버스 엣지 (2주차 수단 확장 선행). */
+    /** 버스 엣지 (ROUTE_ID 그대로, 노선별 leg 분리). */
     public static Edge bus(String from, String to, String routeId, int sec) {
         return new Edge(from, to, routeId, sec, 0, TravelMode.BUS);
     }

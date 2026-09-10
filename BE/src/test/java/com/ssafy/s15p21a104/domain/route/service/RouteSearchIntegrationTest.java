@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bike;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bus;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.subway;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.walk;
@@ -287,6 +288,42 @@ class RouteSearchIntegrationTest {
         assertEquals("R2", result.get(0).legs().get(2).toNodeId());
         assertEquals("R2", result.get(0).legs().get(3).fromNodeId());
         assertEquals("R3", result.get(0).legs().get(3).toNodeId());
+    }
+
+    @Test
+    @DisplayName("IT12: 버스 지름길이 이기면 BUS leg로 응답한다")
+    void it12_버스우위_BUS() {
+        // 지하철 A→C 직통 900초 vs 버스 A→T1→C 240초. 버스가 이겨야 한다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "C", "L1", 900),
+                bus("A", "T1", "B100", 120),
+                bus("T1", "C", "B100", 120)));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+
+        assertEquals(1, result.size());
+        assertEquals(1, result.get(0).legs().size());
+        assertEquals(TravelMode.BUS, result.get(0).legs().get(0).mode());
+        assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("IT13: 혼합(지하철+버스) 경로가 응답된다")
+    void it13_혼합_지하철버스() {
+        // A→B 지하철 100초, B→T1→C 버스 240초 vs A→B→C 지하철 500초(환승 포함).
+        // 혼합이 이긴다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "B", "L1", 100),
+                subway("B", "C", "L2", 400),
+                bus("B", "T1", "B100", 120),
+                bus("T1", "C", "B100", 120)));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+
+        assertEquals(1, result.size());
+        List<TravelMode> modes = result.get(0).legs().stream().map(leg -> leg.mode()).toList();
+        assertTrue(modes.contains(TravelMode.BUS));
+        assertTrue(modes.contains(TravelMode.SUBWAY));
     }
 
     private Station mockStation(String id, String name) {
