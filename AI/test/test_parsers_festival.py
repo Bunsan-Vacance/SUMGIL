@@ -42,7 +42,6 @@ def _festivals(**overrides):
         "end_date": pd.to_datetime(["2024-10-05", "2024-10-05", "2024-08-31"]),
         "lat": [37.5, 37.5, 37.6],
         "lon": [127.0, 127.0, 127.1],
-        "sponsor": ["서울시", "서울시", None],
     }
     base.update(overrides)
     return pd.DataFrame(base)

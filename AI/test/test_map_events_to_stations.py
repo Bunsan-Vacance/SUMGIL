@@ -75,7 +75,6 @@ def _fest_events():
             "station_no": [218, 218, 2620],
             "date": pd.to_datetime(["2024-10-05", "2024-10-05", "2024-10-05"]),
             "duration_days": [1, 184, 3],
-            "sponsor": ["서울시", None, None],
         }
     )
 
@@ -102,14 +101,6 @@ def test_aggregate_festival_rows_takes_shortest_duration():
 
     assert rows.loc[218, "festival_min_duration_days"] == 1
     assert rows.loc[2620, "festival_min_duration_days"] == 3
-
-
-def test_aggregate_festival_rows_counts_only_sponsored_festivals():
-    """후원기관이 원본에 없는 축제(NaN)는 규모 프록시에서 세지 않는다."""
-    rows = aggregate_festival_rows(_fest_events()).set_index("station_no")
-
-    assert rows.loc[218, "festival_sponsored_count"] == 1
-    assert rows.loc[2620, "festival_sponsored_count"] == 0
 
 
 def test_aggregate_festival_rows_treats_boundary_duration_as_short():

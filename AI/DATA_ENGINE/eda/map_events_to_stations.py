@@ -130,7 +130,7 @@ def load_festivals(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     fest["date"] = [
         pd.date_range(s, e, freq="D") for s, e in zip(fest["start_date"], fest["end_date"])
     ]
-    cols = ["festival_id", "name", "lat", "lon", "date", "duration_days", "sponsor"]
+    cols = ["festival_id", "name", "lat", "lon", "date", "duration_days"]
     return fest.explode("date")[cols]
 
 
@@ -142,17 +142,13 @@ def aggregate_festival_rows(fest_events: pd.DataFrame) -> pd.DataFrame:
     축제의 신호를 덮고 있었다. 그래서 개수를 기간 기준으로 쪼개고, 트리가 경계를 직접
     고를 수 있도록 연속값(최단 기간)도 같이 낸다.
     """
-    flagged = fest_events.assign(
-        _spike=fest_events["duration_days"].between(1, SPIKE_MAX_DAYS),
-        _sponsored=fest_events["sponsor"].notna(),
-    )
+    flagged = fest_events.assign(_spike=fest_events["duration_days"].between(1, SPIKE_MAX_DAYS))
     rows = (
         flagged.groupby(["date", "station_no"])
         .agg(
             festival_count=("festival_id", "nunique"),
             festival_short_count=("_spike", "sum"),
             festival_min_duration_days=("duration_days", "min"),
-            festival_sponsored_count=("_sponsored", "sum"),
         )
         .reset_index()
     )
@@ -206,7 +202,6 @@ def build_station_events(
         "festival_count",
         "festival_short_count",
         "festival_long_count",
-        "festival_sponsored_count",
     ]
     events[count_cols] = events[count_cols].fillna(0).astype(int)
     return events, venue_summary, venue_links
