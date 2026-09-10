@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 # validation/CROWD/baseline-check/ 는 하이픈 때문에 패키지가 못 된다 — 경로로 가져온다.
 sys.path.insert(
@@ -10,6 +11,7 @@ sys.path.insert(
 )
 
 from baseline import DayTypeLookupBaseline, evaluate, regression_metrics, residuals
+from compare_models import add_improvement_columns
 from dataset import time_split
 
 
@@ -117,3 +119,83 @@ def test_residuals_are_actual_minus_prediction():
 
     assert resid.loc[0, "boarding_resid"] == 30.0
     assert resid.loc[0, "alighting_resid"] == 15.0
+
+
+def test_regression_metrics_r2_is_one_for_perfect_prediction():
+    actual = pd.Series([100.0, 200.0, 300.0])
+
+    assert regression_metrics(actual, actual.copy())["r2"] == 1.0
+
+
+def test_regression_metrics_r2_is_zero_when_predicting_the_mean():
+    """평균만 내놓는 예측의 R²는 0 — 이게 R²의 기준점이다."""
+    actual = pd.Series([100.0, 200.0, 300.0])
+    predicted = pd.Series([200.0, 200.0, 200.0])
+
+    assert regression_metrics(actual, predicted)["r2"] == pytest.approx(0.0)
+
+
+def test_regression_metrics_r2_is_negative_when_worse_than_the_mean():
+    actual = pd.Series([100.0, 200.0, 300.0])
+    predicted = pd.Series([300.0, 200.0, 100.0])
+
+    assert regression_metrics(actual, predicted)["r2"] < 0
+
+
+def test_regression_metrics_r2_is_nan_for_constant_actuals():
+    """실측이 전부 같으면 분모가 0이라 R²가 정의되지 않는다 — 0(설명력 없음)이 아니다."""
+    actual = pd.Series([50.0, 50.0, 50.0])
+    predicted = pd.Series([50.0, 51.0, 49.0])
+
+    assert np.isnan(regression_metrics(actual, predicted)["r2"])
+
+
+def _comparison_frame():
+    """lookup_baseline보다 rmse·mae가 낮고 r2가 높은 후보 하나."""
+    return pd.DataFrame(
+        [
+            {
+                "model": "lookup_baseline",
+                "target": "boarding",
+                "rmse": 200.0,
+                "mae": 100.0,
+                "r2": 0.90,
+            },
+            {"model": "lightgbm", "target": "boarding", "rmse": 190.0, "mae": 95.0, "r2": 0.92},
+        ]
+    )
+
+
+def test_add_improvement_columns_reports_relative_and_absolute_gain():
+    result = add_improvement_columns(_comparison_frame()).set_index("model")
+
+    assert result.loc["lightgbm", "RMSE_개선율_%"] == 5.0
+    assert result.loc["lightgbm", "MAE_개선율_%"] == 5.0
+    assert result.loc["lightgbm", "RMSE_개선_명"] == 10.0
+    assert result.loc["lightgbm", "MAE_개선_명"] == 5.0
+
+
+def test_add_improvement_columns_uses_percentage_points_for_r2():
+    """R²는 높을수록 좋으므로 비율이 아니라 차이(%p)로 낸다."""
+    result = add_improvement_columns(_comparison_frame()).set_index("model")
+
+    assert result.loc["lightgbm", "R2_개선_%p"] == pytest.approx(2.0)
+
+
+def test_add_improvement_columns_leaves_baseline_at_zero():
+    """베이스라인 자신의 개선폭은 모든 지표에서 0이어야 한다."""
+    result = add_improvement_columns(_comparison_frame()).set_index("model")
+
+    for col in ("RMSE_개선율_%", "MAE_개선율_%", "R2_개선_%p", "RMSE_개선_명", "MAE_개선_명"):
+        assert result.loc["lookup_baseline", col] == 0
+
+
+def test_add_improvement_columns_reports_negative_gain_for_worse_model():
+    frame = _comparison_frame()
+    frame.loc[1, ["rmse", "mae", "r2"]] = [220.0, 110.0, 0.88]
+
+    result = add_improvement_columns(frame).set_index("model")
+
+    assert result.loc["lightgbm", "RMSE_개선율_%"] == -10.0
+    assert result.loc["lightgbm", "RMSE_개선_명"] == -20.0
+    assert result.loc["lightgbm", "R2_개선_%p"] == pytest.approx(-2.0)

@@ -56,16 +56,23 @@ def regression_metrics(actual: pd.Series, predicted: pd.Series) -> dict[str, flo
     a = actual[mask].to_numpy(dtype=float)
     p = predicted[mask].to_numpy(dtype=float)
     if len(a) == 0:
-        return {"rmse": np.nan, "mae": np.nan, "mape": np.nan, "n": 0, "mape_n": 0}
+        return {"rmse": np.nan, "mae": np.nan, "mape": np.nan, "r2": np.nan, "n": 0, "mape_n": 0}
 
     error = a - p
     nonzero = a != 0
     mape = float(np.mean(np.abs(error[nonzero] / a[nonzero])) * 100) if nonzero.any() else np.nan
 
+    # R² = 1 − 잔차제곱합/전체제곱합. 분모는 **평가 구간 실측의 분산**이라, 같은 test에
+    # 대해서는 모델끼리 비교 가능하다. 실측이 전부 같은 값이면 분모가 0이 되어 정의되지
+    # 않으므로 NaN으로 둔다 — 0으로 두면 "설명력 없음"으로 오독된다.
+    total_ss = float(np.sum((a - a.mean()) ** 2))
+    r2 = 1 - float(np.sum(error**2)) / total_ss if total_ss else np.nan
+
     return {
         "rmse": float(np.sqrt(np.mean(error**2))),
         "mae": float(np.mean(np.abs(error))),
         "mape": mape,
+        "r2": r2,
         "n": len(a),
         "mape_n": int(nonzero.sum()),
     }

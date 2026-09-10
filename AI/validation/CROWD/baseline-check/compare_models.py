@@ -71,10 +71,32 @@ def compare(feature_set: str = "weather_events") -> pd.DataFrame:
             )
             print(f"[{name}/{target}] {elapsed:.1f}s")
 
-    result = pd.DataFrame(rows)
-    base_rmse = result[result["model"] == "lookup_baseline"].set_index("target")["rmse"]
-    result["RMSE_개선율_%"] = result.apply(
-        lambda r: round((1 - r["rmse"] / base_rmse[r["target"]]) * 100, 2), axis=1
+    return add_improvement_columns(pd.DataFrame(rows))
+
+
+def add_improvement_columns(result: pd.DataFrame) -> pd.DataFrame:
+    """베이스라인 대비 개선폭을 붙인다 — 상대(%)와 절대(명) 양쪽으로.
+
+    RMSE·MAE는 낮을수록 좋아서 `1 − 모델/베이스라인`, R²는 높을수록 좋아서 차이(%p)로
+    계산한다. **절대 열(`_개선_명`)을 같이 내는 이유**는 상대 개선율만으로는 실질적 의미를
+    판단할 수 없기 때문이다 — "RMSE 1.5% 개선"이 시간대당 몇 명인지 보여야 서비스에서
+    체감되는 차이인지 말할 수 있다(7단계 판단 기준).
+    """
+    base = result[result["model"] == "lookup_baseline"].set_index("target")
+
+    def _rel(row: pd.Series, col: str) -> float:
+        return round((1 - row[col] / base.loc[row["target"], col]) * 100, 2)
+
+    result["RMSE_개선율_%"] = result.apply(lambda r: _rel(r, "rmse"), axis=1)
+    result["MAE_개선율_%"] = result.apply(lambda r: _rel(r, "mae"), axis=1)
+    result["R2_개선_%p"] = result.apply(
+        lambda r: round((r["r2"] - base.loc[r["target"], "r2"]) * 100, 3), axis=1
+    )
+    result["RMSE_개선_명"] = result.apply(
+        lambda r: round(base.loc[r["target"], "rmse"] - r["rmse"], 1), axis=1
+    )
+    result["MAE_개선_명"] = result.apply(
+        lambda r: round(base.loc[r["target"], "mae"] - r["mae"], 1), axis=1
     )
     return result
 
