@@ -42,7 +42,6 @@ EVENT_COUNT_COLS = [
     "festival_count",
     "festival_short_count",
     "festival_long_count",
-    "festival_sponsored_count",
 ]
 
 

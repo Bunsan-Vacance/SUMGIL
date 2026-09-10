@@ -40,9 +40,11 @@ day_type·time_slot은 잔차 자체가 이미 그 축의 평균을 뺀 값이�
   3일 경계는 임의로 정한 것이라, 모델이 다른 경계를 고를 수 있도록 같이 넣는다. 축제가
   없는 날은 NaN이다 — 0으로 채우면 "1일보다 짧은 축제"라는 없는 순서가 생긴다.
 
-**`FESTIVAL_SPONSOR_COLS`**: 후원기관이 명시된 축제 수. 원본에서 분산이 있는 유일한 규모
-프록시지만(775건 중 371건) 관중수의 대체물로는 약하다 — 별도 세트로 분리해 기여도를 따로
-측정한다.
+**세트를 왜 이 8개로 줄였나**: 후보 비교를 실제로 돌려보고 기여가 없는 컬럼을 뺐다. 후원기관
+수(`festival_sponsored_count`)는 넣고 빼도 LightGBM·XGBoost 개선율이 소수점까지 같아서
+파이프라인에서 제거했다(경위는 `parsers_festival.py` docstring). 세트는 "무엇이 효과를
+만들었는지 분리해서 볼 수 있는 최소 단위"만 남긴다 — 컬럼을 쌓기만 한 세트는 희소·약신호가
+겹쳐 과적합하는 것이 기상·관중수에서 이미 두 번 확인됐다.
 """
 
 from __future__ import annotations
@@ -52,15 +54,13 @@ import pandas as pd
 WEATHER_COLS = ["temp_c", "precip_mm", "wind_ms", "humidity_pct", "snow_cm"]
 EVENT_COLS = ["game_count", "festival_count"]
 ATTENDANCE_COLS = ["game_attendance", "game_attendance_missing"]
-# 축제 쪽 규모·성격 컬럼. 관중수가 원천에 없어 `game_attendance`의 대응물이 없고
-# (`parsers_festival.py` 참고), 대신 개최 기간으로 성격을 가르고 후원기관 유무를 약한
-# 규모 프록시로 쓴다.
+# 축제 쪽 성격 컬럼. 관중수가 원천에 없어 `game_attendance`의 대응물이 없고
+# (`parsers_festival.py` 참고), 대신 개최 기간으로 단기 축제와 상설 행사를 가른다.
 FESTIVAL_SHAPE_COLS = [
     "festival_short_count",
     "festival_long_count",
     "festival_min_duration_days",
 ]
-FESTIVAL_SPONSOR_COLS = ["festival_sponsored_count"]
 CATEGORICAL_COLS = ["station_no", "time_slot"]
 
 _EVENT_INTERACTION = EVENT_COLS + ["station_no", "time_slot"]
@@ -72,15 +72,9 @@ FEATURE_SETS: dict[str, list[str]] = {
     "events_station": EVENT_COLS + ["station_no"],
     "events_station_time": _EVENT_INTERACTION,
     "events_station_time_attendance": _EVENT_INTERACTION + ATTENDANCE_COLS,
-    # 아래 세 세트가 4단계(이벤트 유무·규모) 잔여분이다. 축제 기여를 경기 관중수와 섞지
-    # 않고 단계별로 쌓아, 어느 컬럼이 실제로 개선을 만드는지 분리해서 본다
-    # (원칙 1의 "확장 모델의 기여도를 별도 검증한다").
     "events_station_time_festival": _EVENT_INTERACTION + FESTIVAL_SHAPE_COLS,
-    "events_station_time_festival_sponsor": (
-        _EVENT_INTERACTION + FESTIVAL_SHAPE_COLS + FESTIVAL_SPONSOR_COLS
-    ),
-    "events_station_time_all_scale": (
-        _EVENT_INTERACTION + ATTENDANCE_COLS + FESTIVAL_SHAPE_COLS + FESTIVAL_SPONSOR_COLS
+    "events_station_time_attendance_festival": (
+        _EVENT_INTERACTION + ATTENDANCE_COLS + FESTIVAL_SHAPE_COLS
     ),
 }
 
