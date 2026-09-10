@@ -25,3 +25,21 @@ node scripts/loadtest/loadtest.mjs --base http://localhost:8080 --concurrency 50
 - 300 동시 요청까지 **에러 0건**. 처리량이 ~450~460 req/s에서 수렴하고 지연시간만 늘어나는(죽지 않고 줄서서 처리) 정상적인 포화 양상 — 발표/시연 규모(동시 사용자 소수)에는 문제없다.
 - `stations/search`가 다른 엔드포인트보다 일관되게 느림(동시성 10에서 평균 107ms vs 나머지 27~43ms) — `StationSearchService`가 매칭된 역마다 노선 조회 쿼리를 따로 날리는 N+1 패턴이라서다(`RouteEdgeTimeRepository.findDistinctSubwayRouteIdsByStationId` + `RouteLineRepository.findById`를 역 개수만큼 반복 호출). 지금 트래픽 규모에선 문제 안 되지만, 결과가 많이 잡히는 검색어에서는 체감될 수 있어 기록해둔다 — 필요해지면 별도 최적화(배치 조회) 검토.
 - HikariCP 커넥션 풀 관련 타임아웃·경합 로그 없음(기본 설정 그대로 사용 중).
+
+## stations/search N+1 최적화 전/후 비교 (2026-09-10)
+
+위에서 발견한 N+1 문제(`perf/ROUTE-station-search-batch`에서 배치 조회로 수정)가 실제로 얼마나 영향이 있었는지, 같은 코드베이스를 최적화 커밋 전/후로 오가며 직접 측정했다.
+
+```bash
+node scripts/loadtest/station-search-only.mjs --base http://localhost:8080
+```
+
+넓은 검색어("산", 49개 역 매칭)로 동시성 50·요청 500건:
+
+| | 최적화 전(N+1) | 최적화 후(배치) | 차이 |
+| --- | --- | --- | --- |
+| 평균 응답시간 | 2,244~2,522ms | 630~634ms | **약 3.7배 빠름** |
+| p99 | 2,505~3,033ms | 1,033~1,139ms | 약 2.5배 |
+| 처리량 | 18.9~21.2 req/s | 75.3~75.8 req/s | **약 4배** |
+
+이론적인 우려가 아니라 실제로 체감되는 수준의 차이였다 — 매칭 역이 많은 검색어에서 최적화 전엔 2초 넘게 걸리던 게 0.6초대로 줄었다.
