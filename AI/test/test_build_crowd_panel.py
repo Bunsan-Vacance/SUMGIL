@@ -1,7 +1,9 @@
 import pandas as pd
 import pytest
 
+import DATA_ENGINE.eda.build_crowd_panel as build_crowd_panel_module
 from DATA_ENGINE.eda.build_crowd_panel import (
+    attach_calendar,
     pivot_directions,
     slot_to_weather_offset,
     station_name_inventory,
@@ -42,6 +44,31 @@ def test_station_name_inventory_empty_when_no_rename():
     df = pd.DataFrame({"station_no": [150, 150], "station_name": ["서울역", "서울역"]})
 
     assert station_name_inventory(df).empty
+
+
+def test_attach_calendar_keeps_saturday_sunday_distinct_from_weekday_holiday(tmp_path, monkeypatch):
+    """holiday_calendar의 is_holiday는 원천(학교 휴업일)상 주말도 대부분 Y다 — dow<5 가드
+    없이 조건 없는 덮어쓰기를 쓰면 토요일·일요일이 전부 "휴일"로 사라진다(2026-09-10
+    원본 대조로 발견: 일요일 100%·토요일 60%가 is_holiday=True)."""
+    holiday = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01", "2024-01-06", "2024-01-07", "2024-01-08"]),
+            "weekday_ko": ["월", "토", "일", "월"],
+            # 01-01 신정(평일 공휴일), 01-06·01-07은 원천상 주말이라 Y, 01-08은 평범한 평일.
+            "is_holiday": [True, True, True, False],
+        }
+    )
+    holiday.to_parquet(tmp_path / "holiday_calendar.parquet", index=False)
+    monkeypatch.setattr(build_crowd_panel_module, "HOLIDAY_INTERIM", tmp_path)
+
+    result = attach_calendar(pd.DataFrame({"date": holiday["date"]}))
+
+    assert result.set_index("date")["day_type"].to_dict() == {
+        pd.Timestamp("2024-01-01"): "휴일",  # 평일에 걸린 공휴일만 덮인다
+        pd.Timestamp("2024-01-06"): "토요일",  # is_holiday=True여도 주말이라 유지
+        pd.Timestamp("2024-01-07"): "일요일",
+        pd.Timestamp("2024-01-08"): "평일",
+    }
 
 
 def test_pivot_directions_makes_boarding_alighting_columns():

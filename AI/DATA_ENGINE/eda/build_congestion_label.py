@@ -47,7 +47,14 @@ CONF_DIR = AI_ROOT / "DATA_ENGINE" / "conf"
 CROWD_PROCESSED = AI_ROOT / "data" / "CROWD" / "processed"
 
 PANEL_NAME = "crowd_panel_2024_2025.parquet"
-OUTPUT_NAME = "crowd_congestion_label_2024_2025.parquet"
+# 9호선 2·3단계는 날짜 범위가 달라(2024-12-31~2026-01-31, `build_crowd_line9_panel.py`
+# 참고) 메인 패널과 합치지 않고 별도 파일로 둔다. 여기서는 재귀 계산에 필요한 다섯 컬럼만
+# 같은 스키마로 이어 붙인다 — 구간별 계산(`_segment_frame`)은 station_no로 걸러서 보므로
+# 두 패널의 날짜 범위가 달라도 서로 섞이지 않는다.
+LINE9_PANEL_NAME = "crowd_panel_line9_2025_2026.parquet"
+# 9호선 편입으로 실제 커버 구간이 2026-01까지 늘어나 파일명을 갱신했다 — 다만 전체 기간이
+# 균일하지 않다: 1~8호선은 여전히 2024~2025뿐이고, 2026-01은 9호선(2·3단계)만 있다.
+OUTPUT_NAME = "crowd_congestion_label_2024_2026.parquet"
 
 # 누적 방향 → 실측 스냅샷의 방향 라벨.
 #
@@ -283,10 +290,10 @@ def terminal_residual(labels: pd.DataFrame, topology: list[dict]) -> pd.DataFram
 
 
 def build_labels() -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
-    panel = pd.read_parquet(
-        CROWD_PROCESSED / PANEL_NAME,
-        columns=["date", "station_no", "time_slot", "boarding", "alighting"],
-    )
+    cols = ["date", "station_no", "time_slot", "boarding", "alighting"]
+    panel = pd.read_parquet(CROWD_PROCESSED / PANEL_NAME, columns=cols)
+    line9_panel = pd.read_parquet(CROWD_PROCESSED / LINE9_PANEL_NAME, columns=cols)
+    panel = pd.concat([panel, line9_panel], ignore_index=True)
     panel[["boarding", "alighting"]] = panel[["boarding", "alighting"]].fillna(0.0)
 
     capacity = load_capacity()
