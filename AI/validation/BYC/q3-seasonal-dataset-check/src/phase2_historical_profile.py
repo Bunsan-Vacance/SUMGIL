@@ -108,16 +108,26 @@ def parse_args() -> argparse.Namespace:
     default_output_dir = script_dir.parents[1] / "outputs" / "phase2"
     parser.add_argument("--data-dir", default=str(default_data_dir))
     parser.add_argument("--output-dir", default=str(default_output_dir))
+    parser.add_argument("--train-path", help="train CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
+    parser.add_argument("--valid-path", help="valid CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
+    parser.add_argument("--test-path", help="test CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
     parser.add_argument("--rf-max-rows", type=int, default=2_000_000)
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("--file-tag", default="top300")
     return parser.parse_args()
 
 
-def read_split_with_targets(data_dir: Path, split: str, file_tag: str) -> pd.DataFrame:
+def resolve_split_path(args: argparse.Namespace, split: str) -> Path:
+    explicit = getattr(args, f"{split}_path", None)
+    if explicit:
+        return Path(explicit)
+    return Path(args.data_dir) / f"{split}_netflow_q3_mapped_{args.file_tag}.csv.gz"
+
+
+def read_split_with_targets(data_dir: Path, split: str, file_tag: str, path: Path | None = None) -> pd.DataFrame:
     """프로파일 계산에 target_rent_count/target_return_count도 필요해서 phase1의
     read_split보다 컬럼을 더 읽는다."""
-    path = data_dir / f"{split}_netflow_q3_mapped_{file_tag}.csv.gz"
+    path = path or data_dir / f"{split}_netflow_q3_mapped_{file_tag}.csv.gz"
     # p1.FEATURE_COLS는 이미 확장된 상태라 원래 Phase 1 컬럼만 골라 읽는다.
     base_cols = [c for c in p1.FEATURE_COLS if c not in HISTORICAL_FEATURE_COLS]
     usecols = ["od_station_id", *base_cols, TARGET_COL, "target_rent_count", "target_return_count"]
@@ -133,9 +143,9 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("split 로드...")
-    train_df = read_split_with_targets(data_dir, "train", args.file_tag)
-    valid_df = read_split_with_targets(data_dir, "valid", args.file_tag)
-    test_df = read_split_with_targets(data_dir, "test", args.file_tag)
+    train_df = read_split_with_targets(data_dir, "train", args.file_tag, resolve_split_path(args, "train"))
+    valid_df = read_split_with_targets(data_dir, "valid", args.file_tag, resolve_split_path(args, "valid"))
+    test_df = read_split_with_targets(data_dir, "test", args.file_tag, resolve_split_path(args, "test"))
     train_df, valid_df, test_df, station_categories = p1.add_station_code(train_df, valid_df, test_df)
 
     print("historical profile fit (train만 사용)...")
