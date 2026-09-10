@@ -9,33 +9,39 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
-# ai-lint/ai-test는 changes:로 걸러지므로 AI/를 건드리지 않는 MR(문서·기획 등)은 잡이
-# 하나도 안 생긴다. GitLab은 잡 0개 파이프라인을 "No stages / jobs for this pipeline"로
+# ai-lint/ai-test를 실제로 돌리는 변경 패턴. mr-guard와 .ai_job이 이 목록을 그대로
+# 공유해야 한다 — 두 곳의 패턴이 어긋나면(예: 한쪽만 넓혀 갱신) 어느 쪽도 안 도는
+# 사각지대가 다시 생긴다.
+.ai_trigger_paths: &ai_trigger_paths
+  - "AI/**/*.py"
+  - "AI/pyproject.toml"
+  - "AI/requirements.txt"
+  - "AI/requirements-dev.txt"
+  - "AI/requirements-ci.txt"
+
+# ai-lint/ai-test는 changes:로 걸러지므로, 위 패턴에 안 걸리는 MR(문서·기획, 혹은
+# AI/ 안이라도 .py·requirements가 아닌 변경 — README, 스크립트 등)은 잡이 하나도
+# 안 생긴다. GitLab은 잡 0개 파이프라인을 "No stages / jobs for this pipeline"로
 # 거부해 MR이 실패로 표시되므로, 그 경우에만 대신 실행돼 파이프라인을 비지 않게 한다.
+# 스킵 조건을 .ai_trigger_paths와 동일하게 맞춰서 "둘 다 안 도는" 사각지대를 없앤다.
 mr-guard:
   stage: lint
   image: alpine:3.20
   tags:
     - CI
   rules:
-    - changes:
-        - "AI/**/*"
+    - changes: *ai_trigger_paths
       when: never
     - when: on_success
   script:
-    - echo "AI 변경 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
+    - echo "ai-lint/ai-test 대상 변경이 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
 
 .ai_job:
   image: python:3.11-slim
   tags:
     - CI
   rules:
-    - changes:
-        - "AI/**/*.py"
-        - "AI/pyproject.toml"
-        - "AI/requirements.txt"
-        - "AI/requirements-dev.txt"
-        - "AI/requirements-ci.txt"
+    - changes: *ai_trigger_paths
   variables:
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   cache:
