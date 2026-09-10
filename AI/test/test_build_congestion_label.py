@@ -9,6 +9,8 @@ from DATA_ENGINE.eda.build_congestion_label import (
     circular_path_masks,
     directional_loads,
     expand_stations,
+    load_capacity,
+    load_topology,
     resolve_segments,
 )
 
@@ -146,3 +148,29 @@ def test_directional_loads_conserves_flow_symmetry():
     assert (up >= 0).all()
     assert (down >= 0).all()
     assert pd.notna(up).all()
+
+
+def test_line9_segment_station_order_is_descending():
+    """9호선은 역번호 증가=상선이라(2026-09-10 실측 검증, 1~8호선과 반대) 리스트를
+    내림차순으로 둬서 ASCENDING="하선" 전역 상수를 코드 변경 없이 그대로 쓴다."""
+    seg9 = next(s for s in load_topology() if s["line"] == "9호선")
+
+    assert seg9["stations"] == sorted(seg9["stations"], reverse=True)
+    assert seg9["stations"][0] == 4138  # 중앙보훈병원(실제 종점)이 리스트 시작
+    assert seg9["stations"][-1] == 4126  # 언주(1단계 쪽 절단면)가 리스트 끝
+
+
+def test_line9_segment_is_truncated():
+    """언주 쪽이 실제 종점이 아니라 1단계 데이터 부재로 인한 절단이다."""
+    seg9 = next(s for s in load_topology() if s["line"] == "9호선")
+
+    assert seg9["truncated"] is True
+
+
+def test_line9_falls_back_to_line_level_capacity():
+    """9호선 구간은 자체 cars_per_train을 안 두고 전역 표의 9호선(6량)을 그대로 쓴다."""
+    seg9 = next(s for s in load_topology() if s["line"] == "9호선")
+    capacity = load_capacity()
+
+    assert "cars_per_train" not in seg9
+    assert capacity["cars_per_train"]["9호선"] == 6
