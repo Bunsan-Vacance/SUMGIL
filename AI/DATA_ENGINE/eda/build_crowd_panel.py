@@ -106,17 +106,28 @@ def pivot_directions(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def attach_calendar(panel: pd.DataFrame) -> pd.DataFrame:
-    """휴일 달력을 붙이고 요일·주말 파생 컬럼을 만든다."""
+    """휴일 달력을 붙이고 요일·주말 파생 컬럼을 만든다.
+
+    `holiday_calendar.parquet`의 `is_holiday`는 "법정공휴일"이 아니라 원본(사립학교교직원
+    연금공단 공휴일 관리 정보)이 정의하는 **학교 휴업일**이다 — 일요일 100%, 토요일 60%가
+    Y로 잡혀 있다(2026-09-10 원본 대조 확인). 그래서 `is_holiday`를 조건 없이 덮어쓰면
+    토요일·일요일이 전부 "휴일"로 흡수돼 `day_type`이 평일/휴일 2종으로만 나온다 — 아래
+    `panel["dow"] < 5` 조건 없이는 이 버그가 재현된다.
+
+    평일에 걸린 공휴일(신정·설날·추석 등, 평일 중 2.65%)만 "휴일"로 덮어써야 혼잡도
+    스냅샷(`crowd_congestion_long`)의 day_type과 같은 축이 된다 — 1~8호선 스냅샷은
+    평일/토요일/일요일 3종뿐이고(휴일 구분 없음), 9호선은 평일/휴일 2종이라 주말+공휴일을
+    스냅샷 스스로 "휴일" 하나로 묶는다. `dow < 5` 가드가 있어야 주말은 항상 토요일/일요일로
+    남고, "휴일"은 평일 공휴일만 가리키게 된다.
+    """
     holiday = pd.read_parquet(HOLIDAY_INTERIM / "holiday_calendar.parquet")
     panel = panel.merge(holiday[["date", "weekday_ko", "is_holiday"]], on="date", how="left")
     panel["dow"] = panel["date"].dt.dayofweek  # 월=0
     panel["is_weekend"] = panel["dow"] >= 5
-    # 혼잡도 스냅샷(`crowd_congestion_long`)의 day_type과 맞춘 구분 — 나중에 스냅샷을
-    # 참조 타겟으로 붙일 때 같은 축으로 비교하기 위해서다.
     panel["day_type"] = "평일"
     panel.loc[panel["dow"] == 5, "day_type"] = "토요일"
     panel.loc[panel["dow"] == 6, "day_type"] = "일요일"
-    panel.loc[panel["is_holiday"], "day_type"] = "휴일"
+    panel.loc[panel["is_holiday"] & (panel["dow"] < 5), "day_type"] = "휴일"
     return panel
 
 
