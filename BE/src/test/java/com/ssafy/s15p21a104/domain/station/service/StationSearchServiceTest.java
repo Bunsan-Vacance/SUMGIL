@@ -2,17 +2,20 @@ package com.ssafy.s15p21a104.domain.station.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.ssafy.s15p21a104.domain.route.repository.RouteEdgeTimeRepository;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
+import com.ssafy.s15p21a104.domain.route.repository.StationRouteEdge;
 import com.ssafy.s15p21a104.domain.station.dto.response.StationSearchResultResponse;
 import com.ssafy.s15p21a104.domain.station.entity.Line;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,14 +49,13 @@ class StationSearchServiceTest {
         Station gangnamgucheong = mockStation("2201", "강남구청", 37.5175, 127.0473);
         lenient().when(stationRepository.findByNameContainingIgnoreCase("강남"))
                 .thenReturn(List.of(gangnamgucheong, gangnam));
-        lenient().when(routeEdgeTimeRepository.findDistinctSubwayRouteIdsByStationId("222"))
-                .thenReturn(List.of("1002"));
-        lenient().when(routeEdgeTimeRepository.findDistinctSubwayRouteIdsByStationId("2201"))
-                .thenReturn(List.of("1007"));
+        lenient().when(routeEdgeTimeRepository.findSubwayRouteEdgesTouchingStations(any()))
+                .thenReturn(List.of(
+                        new StationRouteEdge("222", "223", "1002"),
+                        new StationRouteEdge("2201", "2202", "1007")));
         Line line1002 = mockLine("1002", "2호선");
         Line line1007 = mockLine("1007", "7호선");
-        lenient().when(routeLineRepository.findById("1002")).thenReturn(Optional.of(line1002));
-        lenient().when(routeLineRepository.findById("1007")).thenReturn(Optional.of(line1007));
+        lenient().when(routeLineRepository.findAllById(any())).thenReturn(List.of(line1002, line1007));
 
         List<StationSearchResultResponse> result = stationSearchService.search("강남");
 
@@ -68,10 +70,10 @@ class StationSearchServiceTest {
     void 역_표기_허용() {
         Station gangbyeon = mockStation("214", "강변", 37.5352, 127.0947);
         lenient().when(stationRepository.findByNameContainingIgnoreCase("강변")).thenReturn(List.of(gangbyeon));
-        lenient().when(routeEdgeTimeRepository.findDistinctSubwayRouteIdsByStationId("214"))
-                .thenReturn(List.of("1002"));
+        lenient().when(routeEdgeTimeRepository.findSubwayRouteEdgesTouchingStations(any()))
+                .thenReturn(List.of(new StationRouteEdge("214", "215", "1002")));
         Line line1002 = mockLine("1002", "2호선");
-        lenient().when(routeLineRepository.findById("1002")).thenReturn(Optional.of(line1002));
+        lenient().when(routeLineRepository.findAllById(any())).thenReturn(List.of(line1002));
 
         List<StationSearchResultResponse> result = stationSearchService.search("강변역");
 
@@ -84,12 +86,13 @@ class StationSearchServiceTest {
     void 환승역_노선별_행분리() {
         Station wangsimni = mockStation("1023", "왕십리", 37.5613, 127.0374);
         lenient().when(stationRepository.findByNameContainingIgnoreCase("왕십리")).thenReturn(List.of(wangsimni));
-        lenient().when(routeEdgeTimeRepository.findDistinctSubwayRouteIdsByStationId("1023"))
-                .thenReturn(List.of("1002", "1005"));
+        lenient().when(routeEdgeTimeRepository.findSubwayRouteEdgesTouchingStations(any()))
+                .thenReturn(List.of(
+                        new StationRouteEdge("1022", "1023", "1002"),
+                        new StationRouteEdge("1023", "1024", "1005")));
         Line line1002 = mockLine("1002", "2호선");
         Line line1005 = mockLine("1005", "5호선");
-        lenient().when(routeLineRepository.findById("1002")).thenReturn(Optional.of(line1002));
-        lenient().when(routeLineRepository.findById("1005")).thenReturn(Optional.of(line1005));
+        lenient().when(routeLineRepository.findAllById(any())).thenReturn(List.of(line1002, line1005));
 
         List<StationSearchResultResponse> result = stationSearchService.search("왕십리");
 
@@ -104,6 +107,17 @@ class StationSearchServiceTest {
         List<StationSearchResultResponse> result = stationSearchService.search("   ");
 
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("매칭된 역이 없으면 노선 조회를 하지 않는다")
+    void 매칭없으면_노선조회_생략() {
+        lenient().when(stationRepository.findByNameContainingIgnoreCase("존재안함")).thenReturn(List.of());
+
+        List<StationSearchResultResponse> result = stationSearchService.search("존재안함");
+
+        assertTrue(result.isEmpty());
+        verify(routeEdgeTimeRepository, never()).findSubwayRouteEdgesTouchingStations(any());
     }
 
     private Station mockStation(String id, String name, double lat, double lng) {

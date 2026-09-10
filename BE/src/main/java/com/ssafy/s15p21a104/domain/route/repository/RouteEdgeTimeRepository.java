@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.domain.route.repository;
 import com.ssafy.s15p21a104.domain.route.entity.EdgeTime;
 import com.ssafy.s15p21a104.domain.route.entity.EdgeTimeId;
 import com.ssafy.s15p21a104.domain.route.loader.RouteEdgeRow;
+import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -48,12 +49,17 @@ public interface RouteEdgeTimeRepository extends JpaRepository<EdgeTime, EdgeTim
         return findSubwayEdgesBySlot(0, 0);
     }
 
-    /** 역이 속한 SUBWAY 노선 ID 목록(환승역이면 여러 개). 역 검색(stations/search) 결과에 노선 정보를 붙일 때 쓴다. */
+    /**
+     * 역이 속한 SUBWAY 노선 ID 목록(환승역이면 여러 개). 역 검색(stations/search) 결과에 노선 정보를 붙일 때 쓴다.
+     * 역 여러 개를 한 번에 조회하므로(N+1 방지), 어느 역에 속한 엣지인지는 fromNode/toNode를 호출 측에서
+     * stationIds와 대조해 판정한다.
+     */
     @Query("""
-            select distinct e.id.routeId
+            select new com.ssafy.s15p21a104.domain.route.repository.StationRouteEdge(
+                e.id.fromNode, e.id.toNode, e.id.routeId)
             from EdgeTime e
             where e.id.mode = com.ssafy.s15p21a104.domain.route.entity.TravelMode.SUBWAY
-              and (e.id.fromNode = :stationId or e.id.toNode = :stationId)
+              and (e.id.fromNode in :stationIds or e.id.toNode in :stationIds)
             """)
-    List<String> findDistinctSubwayRouteIdsByStationId(@Param("stationId") String stationId);
+    List<StationRouteEdge> findSubwayRouteEdgesTouchingStations(@Param("stationIds") Collection<String> stationIds);
 }
