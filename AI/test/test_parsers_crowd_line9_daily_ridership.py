@@ -3,6 +3,7 @@ import pandas as pd
 from DATA_ENGINE.eda.parsers_crowd_line9_daily_ridership import (
     EXCLUDED_FILENAMES,
     _normalize_hour_column,
+    drop_conflicting_duplicates,
     duplicate_cell_inventory,
     load_line9_daily_csv,
 )
@@ -83,3 +84,52 @@ def test_duplicate_cell_inventory_ignores_unique_keys():
 def test_excluded_filenames_contains_the_redundant_subset_file():
     """20250731.csv는 연간 파일(20250101-251231)의 완전한 부분집합이라 제외 대상이다."""
     assert "서울교통공사_9호선2_3단계 역별일별시간대별승하차인원_20250731.csv" in EXCLUDED_FILENAMES
+
+
+def _conflicting_frame():
+    """언주역 2025-03-22 alighting이 값이 다른 2건으로 중복된 상황 — 다른 역·날짜는 정상."""
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                ["2025-03-22", "2025-03-22", "2025-03-22", "2025-01-01", "2025-01-01"]
+            ),
+            "station_no": [4126, 4126, 4126, 4126, 4127],
+            "station_name": ["언주", "언주", "언주", "언주", "선정릉"],
+            "time_slot": ["08-09", "08-09", "09-10", "08-09", "08-09"],
+            "direction": ["alighting", "alighting", "alighting", "alighting", "alighting"],
+            "passengers": [3389, 431, 605, 200, 210],
+        }
+    )
+
+
+def test_drop_conflicting_duplicates_removes_only_the_conflicting_station_day():
+    """충돌하는 (날짜, 역, 방향) 조합은 그 조합 전체(모든 time_slot)가 빠져야 한다."""
+    cleaned, dropped = drop_conflicting_duplicates(_conflicting_frame())
+
+    assert len(dropped) == 1
+    assert dropped.iloc[0][["date", "station_no", "direction"]].tolist() == [
+        pd.Timestamp("2025-03-22"),
+        4126,
+        "alighting",
+    ]
+    # 언주 2025-03-22의 08-09, 09-10 행이 전부 빠지고, 정상 조합(선정릉·2025-01-01 언주)만 남는다.
+    assert len(cleaned) == 2
+    assert not ((cleaned["station_no"] == 4126) & (cleaned["date"] == "2025-03-22")).any()
+
+
+def test_drop_conflicting_duplicates_is_noop_when_no_conflicts():
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2025-01-01"]),
+            "station_no": [4126],
+            "station_name": ["언주"],
+            "time_slot": ["08-09"],
+            "direction": ["alighting"],
+            "passengers": [200],
+        }
+    )
+
+    cleaned, dropped = drop_conflicting_duplicates(df)
+
+    assert len(cleaned) == 1
+    assert dropped.empty
