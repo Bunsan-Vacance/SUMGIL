@@ -109,9 +109,9 @@ def parse_args() -> argparse.Namespace:
     default_output_dir = script_dir.parents[1] / "outputs" / "phase1"
     parser.add_argument("--data-dir", default=str(default_data_dir))
     parser.add_argument("--output-dir", default=str(default_output_dir))
-    parser.add_argument("--train-path", help="train CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
-    parser.add_argument("--valid-path", help="valid CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
-    parser.add_argument("--test-path", help="test CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
+    parser.add_argument("--train-path", nargs="+", help="train CSV 경로. 여러 개 지정하면 순서대로 합쳐 읽는다.")
+    parser.add_argument("--valid-path", nargs="+", help="valid CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
+    parser.add_argument("--test-path", nargs="+", help="test CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
     parser.add_argument("--rf-max-rows", type=int, default=2_000_000)
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument(
@@ -122,17 +122,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_split_path(args: argparse.Namespace, split: str) -> Path:
+def resolve_split_path(args: argparse.Namespace, split: str) -> list[Path]:
     explicit = getattr(args, f"{split}_path", None)
     if explicit:
-        return Path(explicit)
-    return Path(args.data_dir) / f"{split}_netflow_q3_mapped_{args.file_tag}.csv.gz"
+        return [Path(path) for path in explicit]
+    return [Path(args.data_dir) / f"{split}_netflow_q3_mapped_{args.file_tag}.csv.gz"]
 
 
-def read_split(data_dir: Path, split: str, file_tag: str = "top300", path: Path | None = None) -> pd.DataFrame:
-    path = path or data_dir / f"{split}_netflow_q3_mapped_{file_tag}.csv.gz"
+def read_split(
+    data_dir: Path, split: str, file_tag: str = "top300", path: Path | list[Path] | None = None
+) -> pd.DataFrame:
+    paths = path or [data_dir / f"{split}_netflow_q3_mapped_{file_tag}.csv.gz"]
+    if isinstance(paths, Path):
+        paths = [paths]
     usecols = ["od_station_id", *FEATURE_COLS, TARGET_COL]
-    df = pd.read_csv(path, usecols=usecols)
+    df = pd.concat((pd.read_csv(p, usecols=usecols) for p in paths), ignore_index=True)
     df["od_station_id"] = df["od_station_id"].astype(str)
     return df
 
