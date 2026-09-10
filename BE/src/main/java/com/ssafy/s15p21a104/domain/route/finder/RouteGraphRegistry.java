@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.loader.RouteEdgeRow;
@@ -87,8 +88,11 @@ public class RouteGraphRegistry {
                         rental.getRentalId(), rental.getName(), rental.getLat(), rental.getLng()));
             }
             List<Edge> bikeEdges = BikeEdgeBuilder.build(stops, rentals);
+            List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals);
+            List<Edge> extraEdges = new java.util.ArrayList<>(bikeEdges);
+            extraEdges.addAll(walkEdges);
             RouteGraphLoader.LoadResult result = RouteGraphLoader.load(
-                    new RouteGraphRawData(rows, stationNames, lineNames), bikeEdges);
+                    new RouteGraphRawData(rows, stationNames, lineNames), extraEdges);
             this.graph = result.graph();
             this.stationInfos = Map.copyOf(infos);
             Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
@@ -99,9 +103,9 @@ public class RouteGraphRegistry {
                         meta.getId().getToLine()), meta.getWalkSec());
             }
             this.transferTimes = Map.copyOf(times);
-            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건, 대여소 {}곳·자전거 엣지 {}개",
+            log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건, 대여소 {}곳·자전거 엣지 {}개·도보 엣지 {}개",
                     graph.nodeCount(), graph.edgeCount(), transferTimes.size(),
-                    rentalTotal, bikeEdges.size());
+                    rentalTotal, bikeEdges.size(), walkEdges.size());
         } catch (DomainException e) {
             log.warn("탐색 그래프 없음(미적재). 그래프 로드 후 재기동하면 알고리즘 경로로 동작한다: {}",
                     e.getMessage());

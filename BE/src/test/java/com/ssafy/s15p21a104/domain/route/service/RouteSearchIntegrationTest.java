@@ -184,6 +184,42 @@ class RouteSearchIntegrationTest {
         assertTrue(result.isEmpty());
     }
 
+    @Test
+    @DisplayName("IT8: 도보 지름길이 이기면 WALK leg로 응답한다")
+    void it8_도보우위_WALK() {
+        // 지하철 A→C 직통 900초 vs 도보 A→R1→C 240초. 도보가 이겨야 한다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "C", "L1", 900),
+                walk("A", "R1", 120),
+                walk("R1", "C", 120)));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+
+        assertEquals(1, result.size());
+        assertEquals(1, result.get(0).legs().size());
+        assertEquals(TravelMode.WALK, result.get(0).legs().get(0).mode());
+        assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("IT9: 혼합(지하철+도보) 경로가 응답된다")
+    void it9_혼합_지하철도보() {
+        // A→B 지하철 100초, B→R1→C 도보 240초 vs A→B→C 지하철 500초(환승 포함).
+        // 혼합이 이긴다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "B", "L1", 100),
+                subway("B", "C", "L2", 400),
+                walk("B", "R1", 120),
+                walk("R1", "C", 120)));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+
+        assertEquals(1, result.size());
+        List<TravelMode> modes = result.get(0).legs().stream().map(leg -> leg.mode()).toList();
+        assertTrue(modes.contains(TravelMode.WALK));
+        assertTrue(modes.contains(TravelMode.SUBWAY));
+    }
+
     private Station mockStation(String id, String name) {
         Station stationA = mock(Station.class);
         lenient().when(stationA.getStationId()).thenReturn(id);
@@ -199,6 +235,10 @@ class RouteSearchIntegrationTest {
 
     private static Edge bike(String from, String to, int sec) {
         return new Edge(from, to, BikeRouteIds.BIKE, sec, 0, TravelMode.BIKE);
+    }
+
+    private static Edge walk(String from, String to, int sec) {
+        return new Edge(from, to, "WALK", sec, 0, TravelMode.WALK);
     }
 
     private static RouteGraph graphOf(Edge... edges) {
