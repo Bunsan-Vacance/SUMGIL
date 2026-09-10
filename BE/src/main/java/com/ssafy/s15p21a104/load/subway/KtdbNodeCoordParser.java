@@ -39,7 +39,7 @@ public final class KtdbNodeCoordParser {
             if (lat == null || lng == null || !Coords.inMetroArea(lat, lng)) {
                 continue;
             }
-            byName.computeIfAbsent(normalizeName(raw), k -> new ArrayList<>()).add(new double[] {lat, lng});
+            byName.computeIfAbsent(normalizer.normalizeStation(raw), k -> new ArrayList<>()).add(new double[] {lat, lng});
         }
         List<StationCoord> out = new ArrayList<>(byName.size());
         for (Map.Entry<String, List<double[]>> e : byName.entrySet()) {
@@ -48,14 +48,6 @@ public final class KtdbNodeCoordParser {
             out.add(new StationCoord(null, e.getKey(), lat, lng, null));
         }
         return out;
-    }
-
-    private String normalizeName(String raw) {
-        String name = normalizer.normalize(raw);
-        if (name.length() > 1 && name.endsWith("역")) {
-            name = normalizer.normalize(name.substring(0, name.length() - 1));
-        }
-        return name;
     }
 
     /** 이 파서는 결함 행을 조용히 건너뛴다(전국 데이터의 대부분이 범위 밖). 경고 목록은 비어 있다. */

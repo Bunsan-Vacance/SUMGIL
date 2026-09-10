@@ -87,4 +87,42 @@ class StationCoordCrossCheckTest {
         assertTrue(r.warnings().isEmpty());
         assertTrue(r.replaced().isEmpty());
     }
+
+    @Test
+    @DisplayName("majority: 국가철도공단이 표준데이터와 어긋나고 표준데이터·KTDB 가 일치하면 표준데이터 좌표로 바꾼다 — 한국항공대 4.9 km, 산본 1.1 km. 노선 코드는 유지")
+    void majorityReplacesOutlierPrimary() {
+        StationCoordCrossCheck.Result r = StationCoordCrossCheck.majority(
+                List.of(new StationCoord("1063", "한국항공대", 37.637837, 126.832503, null),
+                        new StationCoord("1004", "산본", 37.350297, 126.925537, null)),
+                List.of(new StationCoord("1063", "한국항공대", 37.603102, 126.868291, "1268"),
+                        new StationCoord(null, "산본", 37.358019, 126.932969, "1707")),
+                List.of(new StationCoord(null, "한국항공대", 37.603419, 126.867672, null),
+                        new StationCoord(null, "산본", 37.358076, 126.933117, null)),
+                500);
+
+        assertEquals(List.of("한국항공대", "산본"), r.replaced());
+        assertEquals(2, r.warnings().size());
+        StationCoord airUniv = r.kept().get(0);
+        assertEquals("1063", airUniv.lineId());
+        assertEquals(37.603102, airUniv.lat());
+        assertEquals(126.868291, airUniv.lng());
+        assertEquals("1004", r.kept().get(1).lineId());
+    }
+
+    @Test
+    @DisplayName("majority: 세 원천이 다 없거나, 표준데이터와 KTDB 가 서로 어긋나면 판정하지 않고 그대로 둔다 (resolve 가 이어서 본다)")
+    void majorityLeavesUndecidableAlone() {
+        StationCoordCrossCheck.Result r = StationCoordCrossCheck.majority(
+                List.of(new StationCoord("1075", "송도", 37.417769, 126.678991, null),
+                        new StationCoord("1001", "남영", 37.5410, 126.9712, null)),
+                List.of(new StationCoord("1075", "송도", 37.429714, 126.654486, null)),
+                List.of(new StationCoord(null, "송도", 37.4500, 126.7000, null),
+                        new StationCoord(null, "남영", 37.5403, 126.9712, null)),
+                500);
+
+        assertTrue(r.replaced().isEmpty());
+        assertTrue(r.warnings().isEmpty());
+        assertEquals(37.417769, r.kept().get(0).lat());
+        assertEquals(2, r.kept().size());
+    }
 }
