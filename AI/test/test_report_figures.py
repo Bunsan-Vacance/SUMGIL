@@ -114,6 +114,34 @@ class _FakeInputs(rf.Inputs):
         self._cache["grade"] = pd.DataFrame(
             {"actual": a, "lookup": a + rng.normal(0, 10, 500), "model": a + rng.normal(0, 5, 500)}
         )
+        # 92 시뮬레이션 평가 표(evaluate.py 출력 스키마)
+        rows = []
+        for sc in ("none", "delay", "skip"):
+            for sig in (0.03, 0.05):
+                for h0, h1 in ((5.0, 10.0), (5.0, 15.0)):
+                    for pred, acc in (
+                        ("slot_flat", 94.0),
+                        ("prop", 97.0),
+                        ("mix", 97.5),
+                        ("oracle_tt", 97.8),
+                    ):
+                        for unit in ("train", "bin5"):
+                            rows.append(
+                                {
+                                    "cfg_scenario": sc,
+                                    "cfg_sigma_shape": sig,
+                                    "cfg_mix_h0": h0,
+                                    "cfg_mix_h1": h1,
+                                    "seed": 0,
+                                    "predictor": pred,
+                                    "unit": unit,
+                                    "등급일치_%": acc - sig * 10,
+                                    "MAE_%p": 100 - acc,
+                                }
+                            )
+        sim = pd.DataFrame(rows)
+        self._cache["sim_base"] = sim[(sim["cfg_sigma_shape"] == 0.05) & (sim["cfg_mix_h0"] == 5.0)]
+        self._cache["sim_grid"] = sim
 
     def load_by_train(self):
         return self._lbt

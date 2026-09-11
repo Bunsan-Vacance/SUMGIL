@@ -18,6 +18,8 @@
 | 10 | train_load_gangnam_rush | 강남 내선 08시대 열차별 재차 막대, 배차 주석 | 135 2층 |
 | 11 | headway_distribution_by_line | 호선별 배차 간격 분포(러시/비러시) | 135 |
 | 12 | line9_* | 기존 9호선 히트맵·군집 재생성(report_crowd 위임) | 88 |
+| 13 | sim_predictor_comparison | 시뮬레이션 정답 위 예측기 4종 등급 일치율·MAE, 시나리오별 | 92 |
+| 14 | sim_sensitivity_grid | 생성기 가정(σ_shape × 도착 혼합) 격자에서 mix−flat 일치율 차이 | 92 |
 
 8번 입력(`compare_results.parquet`)은 `compare_models.py --save-results`로 만든다. 9번은
 `grade_sensitivity.py --save-cells`의 셀 표.
@@ -62,6 +64,8 @@ CALIBRATION = PROCESSED / "crowd_congestion_calibration.parquet"
 TIMETABLE = INTERIM / "timetable_long.parquet"
 COMPARE_RESULTS = VALIDATION_CACHE / "compare_results.parquet"
 GRADE_CELLS = VALIDATION_CACHE / "grade_cells.parquet"
+SIM_EVAL_BASE = VALIDATION_CACHE / "sim_eval_base.parquet"
+SIM_EVAL_GRID = VALIDATION_CACHE / "sim_eval_grid.parquet"
 # Drive 동기화 스크립트는 AI/data/ 만 옮기므로 그림을 공유할 때는 여기로 복사한다(--mirror).
 DATA_MIRROR = AI_ROOT / "data" / "CROWD" / "reports" / "figures"
 
@@ -153,6 +157,14 @@ class Inputs:
     @property
     def grade_cells(self):
         return self._load("grade", GRADE_CELLS)
+
+    @property
+    def sim_eval_base(self):
+        return self._load("sim_base", SIM_EVAL_BASE)
+
+    @property
+    def sim_eval_grid(self):
+        return self._load("sim_grid", SIM_EVAL_GRID)
 
     def load_by_train(self) -> pd.DataFrame | None:
         files = sorted(PROCESSED.glob("crowd_load_by_train_*.parquet"))
@@ -865,6 +877,134 @@ def fig_line9(inp: Inputs) -> list:
     ]
 
 
+# ── 13·14 시뮬레이션 평가(92) ──
+PREDICTOR_LABELS = {
+    "slot_flat": "30분 그대로",
+    "prop": "간격 비례(135)",
+    "mix": "도착 혼합(92)",
+    "oracle_tt": "실제 배차 알 때",
+}
+SCENARIO_LABELS = {"none": "운행 편차 없음", "delay": "러시 20% 지연", "skip": "러시 5% 결행"}
+
+
+def fig_sim_predictor_comparison(inp: Inputs, unit: str = "train") -> list:
+    """시나리오 × 예측기 등급 일치율(50/100)과 MAE. `unit`은 train / bin5."""
+    base = inp.sim_eval_base
+    if base is None:
+        return []
+    default = unit == "train"
+    b = base[base["unit"] == unit]
+    agg = b.groupby(["cfg_scenario", "predictor"], sort=False)[["등급일치_%", "MAE_%p"]].mean()
+    scenarios = [s for s in SCENARIO_LABELS if s in set(b["cfg_scenario"])]
+    preds = [p for p in PREDICTOR_LABELS if p in set(b["predictor"])]
+    colors = {
+        "slot_flat": fs.COLOR_BASELINE,
+        "prop": fs.LINE_COLORS["4호선"],
+        "mix": fs.COLOR_MODEL,
+        "oracle_tt": fs.COLOR_ACCENT,
+    }
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+    width = 0.8 / len(preds)
+    for ax, metric, title in zip(
+        axes, ("등급일치_%", "MAE_%p"), ("등급(50/100) 일치율 (%)", "혼잡도 MAE (%p)")
+    ):
+        for i, p in enumerate(preds):
+            vals = [
+                agg.loc[(sc, p), metric] if (sc, p) in agg.index else np.nan for sc in scenarios
+            ]
+            ax.bar(
+                np.arange(len(scenarios)) + i * width,
+                vals,
+                width=width,
+                color=colors.get(p, fs.PALETTE_NEUTRAL[1]),
+                label=PREDICTOR_LABELS[p],
+            )
+            for x, v in zip(np.arange(len(scenarios)) + i * width, vals):
+                if not np.isnan(v):
+                    ax.text(x, v, f"{v:.1f}", ha="center", va="bottom", fontsize=8)
+        ax.set_xticks(np.arange(len(scenarios)) + width * (len(preds) - 1) / 2)
+        ax.set_xticklabels([SCENARIO_LABELS[s] for s in scenarios])
+        ax.set_title(title)
+        if metric == "등급일치_%":
+            lo = float(np.nanmin(agg[metric])) - 2
+            ax.set_ylim(lo, 100)
+        ax.legend(frameon=False, fontsize=9)
+    unit_label = "열차" if unit == "train" else "5분 빈"
+    fig.suptitle(
+        f"시뮬레이션 정답 위 예측기 비교 — {unit_label} 단위, 예측기는 계획 시각표와 30분 라벨만 안다",
+        y=1.02,
+    )
+    fig.tight_layout()
+    fs.caption(
+        fig,
+        "출처: sim_eval_base.parquet (validation/CROWD/sim-eval/evaluate.py, 2025-06-02~08, seed 평균). "
+        "'실제 배차 알 때'와 '도착 혼합'의 차 = 실시간 배차 정보의 가치.",
+    )
+    return [fs.save(fig, _name("sim_predictor_comparison", unit, default=default))]
+
+
+def fig_sim_sensitivity_grid(inp: Inputs, metric: str = "등급일치_%") -> list:
+    """생성기 가정 격자(σ_shape × 도착 혼합 h0-h1) × 시나리오 — mix − slot_flat 차이 히트맵."""
+    grid = inp.sim_eval_grid
+    if grid is None:
+        return []
+    default = metric == "등급일치_%"
+    g = grid[(grid["unit"] == "train") & grid["predictor"].isin(["slot_flat", "mix"])]
+    piv = g.pivot_table(
+        index=["cfg_scenario", "cfg_sigma_shape"],
+        columns=["cfg_mix_h0", "cfg_mix_h1", "predictor"],
+        values=metric,
+    )
+    scenarios = [s for s in SCENARIO_LABELS if s in piv.index.get_level_values(0)]
+    mixes = sorted({(h0, h1) for h0, h1, _ in piv.columns})
+    fig, axes = _grid(len(scenarios), cols=3, cell=(4.6, 3.8))
+    sign = 1.0 if metric == "등급일치_%" else -1.0  # MAE는 낮을수록 좋아 부호를 뒤집는다
+    vmax = 0.0
+    mats = []
+    for sc in scenarios:
+        sub = piv.loc[sc]
+        mat = np.array(
+            [
+                [
+                    sign * (sub.loc[sig, (h0, h1, "mix")] - sub.loc[sig, (h0, h1, "slot_flat")])
+                    for (h0, h1) in mixes
+                ]
+                for sig in sub.index
+            ]
+        )
+        mats.append((sc, sub.index.tolist(), mat))
+        vmax = max(vmax, float(np.nanmax(np.abs(mat))))
+    im = None
+    for ax, (sc, sigmas, mat) in zip(axes, mats):
+        im = ax.imshow(mat, cmap="RdBu", vmin=-vmax, vmax=vmax, aspect="auto")
+        ax.set_xticks(range(len(mixes)))
+        ax.set_xticklabels([f"{h0:g}-{h1:g}분" for h0, h1 in mixes])
+        ax.set_yticks(range(len(sigmas)))
+        ax.set_yticklabels([f"σ={s:g}" for s in sigmas])
+        for i in range(mat.shape[0]):
+            for j in range(mat.shape[1]):
+                ax.text(j, i, f"{mat[i, j]:+.1f}", ha="center", va="center", fontsize=9)
+        ax.set_title(SCENARIO_LABELS.get(sc, sc), fontsize=12)
+        ax.set_xlabel("생성기 도착 혼합 h0-h1")
+        ax.grid(False)
+    if im is not None:
+        fig.colorbar(
+            im,
+            ax=list(axes),
+            fraction=0.02,
+            pad=0.02,
+            label=f"도착 혼합 − 30분 그대로 ({metric}, 좋아지는 방향이 +)",
+        )
+    fig.suptitle(
+        "생성기 가정 민감도 — 열차 단위. 예측기(도착 혼합 5-15분)는 고정, 정답 생성 가정만 바꾼다",
+        y=1.0,
+    )
+    fs.caption(
+        fig, "출처: sim_eval_grid.parquet (evaluate.py 민감도 격자, seed 0). 판정 기준 +3%p."
+    )
+    return [fs.save(fig, _name("sim_sensitivity_grid", metric, default=default))]
+
+
 FIGURES: dict[int, tuple[str, Callable[[Inputs], list]]] = {
     1: ("panel_heatmap_station_slot", fig_panel_heatmap),
     2: ("panel_daily_total_by_line", fig_daily_total_by_line),
@@ -878,6 +1018,8 @@ FIGURES: dict[int, tuple[str, Callable[[Inputs], list]]] = {
     10: ("train_load_gangnam_rush", fig_train_load),
     11: ("headway_distribution_by_line", fig_headway_distribution),
     12: ("line9", fig_line9),
+    13: ("sim_predictor_comparison", fig_sim_predictor_comparison),
+    14: ("sim_sensitivity_grid", fig_sim_sensitivity_grid),
 }
 
 
