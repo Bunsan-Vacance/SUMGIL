@@ -55,3 +55,12 @@ def resolve_segments(topology: list[dict], available: set[int]) -> tuple[list[di
             gaps.append({"line": seg["line"], "segment": seg["segment"], "missing": missing})
         resolved.append({**seg, "stations": present})
     return resolved, pd.DataFrame(gaps, columns=["line", "segment", "missing"])
+
+
+DEFAULT_CAPACITY_PATH = AI_ROOT / "DATA_ENGINE" / "conf" / "train_capacity.yaml"
+
+
+def load_capacity(path: Path = DEFAULT_CAPACITY_PATH) -> dict:
+    """호선별 편성 량수·1량 정원(`train_capacity.yaml`). 혼잡도(%) 계산의 분모."""
+    with Path(path).open(encoding="utf-8") as f:
+        return yaml.safe_load(f)
