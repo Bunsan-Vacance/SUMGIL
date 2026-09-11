@@ -23,27 +23,13 @@ import pandas as pd
 # 디렉터리명에 하이픈이 있어(`baseline-check`, validation/README.md의 `<기능>-check/` 관례)
 # 패키지가 될 수 없다. 상대 import가 불가능하므로 같은 폴더를 경로에 넣고 평범하게 가져온다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from dataset import BASELINE_KEYS, TARGETS
 
-
-class DayTypeLookupBaseline:
-    """요일유형 × 역 × 시간대 평균을 외워두고 그대로 되돌려주는 모델."""
-
-    def __init__(self, keys: list[str] | None = None, targets: list[str] | None = None) -> None:
-        self.keys = keys or BASELINE_KEYS
-        self.targets = targets or TARGETS
-        self.table_: pd.DataFrame | None = None
-
-    def fit(self, train: pd.DataFrame) -> DayTypeLookupBaseline:
-        self.table_ = train.groupby(self.keys)[self.targets].mean().reset_index()
-        return self
-
-    def predict(self, frame: pd.DataFrame) -> pd.DataFrame:
-        if self.table_ is None:
-            raise RuntimeError("fit()을 먼저 호출해야 한다.")
-        merged = frame[self.keys].merge(self.table_, on=self.keys, how="left")
-        return merged[self.targets]
+# 90번에서 app/CROWD/pipeline/lookup.py로 승격했다 — 학습·추론이 같은 클래스를 쓰기 위해서다.
+# 여기서는 같은 이름으로 재수출해 기존 검증 코드·노트북이 그대로 동작하게 한다.
+from app.CROWD.pipeline.lookup import DayTypeLookupBaseline
 
 
 def regression_metrics(actual: pd.Series, predicted: pd.Series) -> dict[str, float]:
