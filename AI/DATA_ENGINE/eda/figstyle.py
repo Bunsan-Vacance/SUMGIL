@@ -9,6 +9,9 @@
 - **팔레트**: 서울 지하철 노선 공식 색(1~9호선). 호선이 아닌 범주는 `PALETTE_NEUTRAL`.
 - **저장**: `DATA_ENGINE/reports/figures/<name>.png`(300dpi)와 `.svg`를 함께. 반환값은 PNG 경로.
   그림 파일은 gitignore(재생성 가능) — Drive `data/` 미러와 Notion 첨부로 공유한다.
+- **인라인 모드**(노트북, 141): `apply(inline=True)`로 켜면 `save()`가 파일을 쓰지 않고 figure를
+  그대로 돌려준다(닫지도 않는다). Jupyter가 셀 끝에서 열린 figure를 그리므로 `fig_*(...)` 호출만으로
+  인라인 표시가 된다. 백엔드도 건드리지 않는다(inline 백엔드를 Agg로 덮으면 그림이 안 보인다).
 """
 
 from __future__ import annotations
@@ -47,16 +50,22 @@ SLIDE_SIZE = (11.0, 6.0)  # inch, 16:9 슬라이드 한 장에 맞는 비율
 DPI = 300
 
 _font_name: str | None = None
+INLINE = False  # True면 save()가 파일을 쓰지 않고 figure를 돌려준다(노트북용)
 
 
 def korean_font_available() -> bool:
     return _font_name is not None
 
 
-def apply() -> str | None:
-    """rcParams를 통일한다. 적용된 한글 폰트 이름(없으면 None)을 돌려준다."""
-    global _font_name
-    matplotlib.use("Agg", force=False)
+def apply(inline: bool = False) -> str | None:
+    """rcParams를 통일한다. 적용된 한글 폰트 이름(없으면 None)을 돌려준다.
+
+    `inline=True`는 노트북용 — 파일 저장 대신 figure 반환, 백엔드는 그대로 둔다.
+    """
+    global _font_name, INLINE
+    INLINE = inline
+    if not inline:
+        matplotlib.use("Agg", force=False)
     installed = {f.name for f in fm.fontManager.ttflist}
     _font_name = next((f for f in KOREAN_FONT_CANDIDATES if f in installed), None)
     if _font_name:
@@ -92,8 +101,13 @@ def line_color(line: str) -> str:
     return LINE_COLORS.get(str(line), PALETTE_NEUTRAL[1])
 
 
-def save(fig, name: str, out_dir: Path = FIGURES_DIR, svg: bool = True) -> Path:
-    """`<out_dir>/<name>.png`(+`.svg`) 저장 후 figure를 닫는다. PNG 경로를 돌려준다."""
+def save(fig, name: str, out_dir: Path = FIGURES_DIR, svg: bool = True):
+    """`<out_dir>/<name>.png`(+`.svg`) 저장 후 figure를 닫는다. PNG 경로를 돌려준다.
+
+    인라인 모드(`apply(inline=True)`)에서는 저장·닫기 없이 figure 자체를 돌려준다.
+    """
+    if INLINE:
+        return fig
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     png = out_dir / f"{name}.png"
