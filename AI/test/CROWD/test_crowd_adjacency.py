@@ -6,8 +6,10 @@ import numpy as np
 import pandas as pd
 
 from app.CROWD.pipeline.adjacency import (
+    SIDES,
     attach_neighbor_features,
     build_neighbor_map,
+    build_transfer_map,
     neighbor_feature_names,
 )
 
@@ -106,3 +108,28 @@ def test_feature_names_match_attached_columns():
         "nb_next_boarding",
         "nb_next_alighting",
     ]
+
+
+def test_transfer_map_links_same_name_other_line_nodes_only():
+    stations = pd.DataFrame(
+        {
+            "station_no": [223, 330, 201, 222],
+            "station_name": ["교대", "교대", "시청", "강남"],
+            "line": ["2호선", "3호선", "2호선", "2호선"],
+        }
+    )
+    xmap = build_transfer_map(stations)
+    assert set(xmap["side"]) == {"xfer"}
+    assert _pairs(xmap, 223, "xfer") == {330}
+    assert _pairs(xmap, 330, "xfer") == {223}
+    assert _pairs(xmap, 201, "xfer") == set()  # 비환승역은 행이 없다
+
+
+def test_attach_handles_transfer_side_alongside_line_sides():
+    stations = pd.DataFrame({"station_no": [1, 4], "station_name": ["A", "A"]})
+    nmap = pd.concat([build_neighbor_map([{"stations": [1, 2, 3]}]), build_transfer_map(stations)])
+    out = attach_neighbor_features(_panel(), nmap, ["boarding"])
+    r = out.set_index(["time_slot", "station_no"])
+    assert r.loc[("07-08", 1), "nb_xfer_boarding"] == 40.0
+    assert np.isnan(r.loc[("07-08", 2), "nb_xfer_boarding"])
+    assert neighbor_feature_names(["boarding"], sides=SIDES)[-1] == "nb_xfer_boarding"

@@ -25,9 +25,11 @@
 - 분기점(5호선 강동, 2호선 성수·신도림): 한 역이 여러 세그먼트에 속해 같은 side에 인접역이
   둘 이상이다. `attach_neighbor_features`가 side별로 **평균**(기본)해 한 값으로 만든다 —
   합계를 쓰면 분기점만 값이 2배로 뛰어 "분기점 여부"를 학습하는 꼴이 된다.
-- 환승역: 패널에서 환승역은 호선마다 다른 `station_no`를 갖는다(교대 223/330). 여기서는
-  **같은 호선 토폴로지의 앞뒤 역만** 인접으로 본다. 다른 호선의 같은 역 노드는 별도 피처
-  후보로 미뤄뒀다(미해결 논의).
+- 환승역: 패널에서 환승역은 호선마다 다른 `station_no`를 갖는다(교대 223/330).
+  `build_neighbor_map`은 **같은 호선 토폴로지의 앞뒤 역만** 인접으로 본다. 다른 호선의 같은
+  역 노드는 `build_transfer_map`이 별도 side `xfer`로 만든다 — 역명이 같으면 같은 역으로
+  본다(패널 역명은 역사마스터 기준으로 정정돼 있어 부기명 차이가 없다). 둘을 concat해서
+  `attach_neighbor_features`에 넘기면 `nb_xfer_*` 컬럼이 같이 붙는다.
 - 패널에 없는 역(3호선 충무로 321 등)은 `resolve_segments`가 이미 빼서 넘기므로, 그 양옆
   역이 서로 인접으로 잡힌다 — "데이터가 있는 가장 가까운 역"이라는 뜻이고 물리적 인접은
   아니다. 결번 인벤토리는 `resolve_segments`의 `gaps`로 따로 확인한다.
@@ -39,7 +41,7 @@ from collections.abc import Iterable, Sequence
 
 import pandas as pd
 
-SIDES = ("prev", "next")
+SIDES = ("prev", "next", "xfer")
 NEIGHBOR_MAP_COLS = ["station_no", "line", "segment", "side", "neighbor_station_no"]
 
 
@@ -64,6 +66,29 @@ def build_neighbor_map(segments: Iterable[dict]) -> pd.DataFrame:
                 rows.append(_row(seg, s, "next", stations[(i + 1) % n]))
     out = pd.DataFrame(rows, columns=NEIGHBOR_MAP_COLS)
     return out.drop_duplicates(["station_no", "side", "neighbor_station_no"]).reset_index(drop=True)
+
+
+def build_transfer_map(stations: pd.DataFrame) -> pd.DataFrame:
+    """같은 역명을 가진 다른 `station_no`(= 다른 호선의 같은 환승역)를 side `xfer`로 잇는다.
+
+    `stations`는 `station_no`·`station_name`(·선택적 `line`) 컬럼을 가진 역 목록이다.
+    한 역명에 노드가 하나뿐이면(비환승역) 행이 없다 → 피처는 NaN.
+    """
+    cols = ["station_no", "station_name"] + (["line"] if "line" in stations.columns else [])
+    nodes = stations[cols].drop_duplicates("station_no")
+    pairs = nodes.merge(nodes, on="station_name", suffixes=("", "_nb"))
+    pairs = pairs[pairs["station_no"] != pairs["station_no_nb"]]
+    out = pd.DataFrame(
+        {
+            "station_no": pairs["station_no"].astype(int).to_numpy(),
+            "line": pairs["line"].to_numpy() if "line" in pairs.columns else None,
+            "segment": "환승:" + pairs["station_name"].astype(str).to_numpy(),
+            "side": "xfer",
+            "neighbor_station_no": pairs["station_no_nb"].astype(int).to_numpy(),
+        },
+        columns=NEIGHBOR_MAP_COLS,
+    )
+    return out.sort_values(["station_no", "neighbor_station_no"]).reset_index(drop=True)
 
 
 def _row(seg: dict, station: int, side: str, neighbor: int) -> dict:
@@ -96,7 +121,8 @@ def attach_neighbor_features(
     )
 
     out = panel.copy()
-    for side in SIDES:
+    present = set(neighbor_map["side"].unique())
+    for side in (s for s in SIDES if s in present):
         pairs = neighbor_map.loc[
             neighbor_map["side"] == side, ["station_no", "neighbor_station_no"]
         ]
@@ -108,6 +134,11 @@ def attach_neighbor_features(
     return out
 
 
-def neighbor_feature_names(value_cols: Sequence[str], prefix: str = "nb") -> list[str]:
-    """`attach_neighbor_features`가 만드는 컬럼 이름 목록 — 피처 세트 레지스트리에서 쓴다."""
-    return [f"{prefix}_{side}_{c}" for side in SIDES for c in value_cols]
+def neighbor_feature_names(
+    value_cols: Sequence[str], prefix: str = "nb", sides: Sequence[str] = ("prev", "next")
+) -> list[str]:
+    """`attach_neighbor_features`가 만드는 컬럼 이름 목록 — 피처 세트 레지스트리에서 쓴다.
+
+    기본은 노선 앞뒤(`prev`·`next`)만이다. 환승 노드까지 쓰면 `sides=SIDES`.
+    """
+    return [f"{prefix}_{side}_{c}" for side in sides for c in value_cols]
