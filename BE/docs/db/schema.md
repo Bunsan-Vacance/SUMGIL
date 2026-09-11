@@ -6,6 +6,15 @@
 **V2 `widen_source_columns`**: `source` 열(edge_time·congestion·bike_stock_pred·transfer_meta)을 VARCHAR(16)으로 확대 — V1의 VARCHAR(8)에는 값 규약의 `timetable`(9자)이 들어가지 않았다 (S15P21A104-69).
 테이블 9종 (마스터 5종, 산출 4종)이며 파일 내 순서는 의존성 순이다.
 
+> **이미 적용된 마이그레이션 파일은 고치지 않는다 — 주석 한 글자도.**
+> Flyway 는 파일 내용의 체크섬을 이력 테이블에 적어 두고 기동 때마다 대조한다. 내용이 달라지면
+> `Migration checksum mismatch` 로 **애플리케이션이 아예 뜨지 않는다**(`@SpringBootTest` 도 전부 깨진다).
+> 실제로 S15P21A104-73 에서 V1 의 `level` 주석 한 줄을 고쳤다가 기존 로컬 DB 가 전부 막혔다.
+> CI 는 매번 빈 DB 에 처음부터 적용해서 체크섬이 항상 맞으므로 **이 사고를 잡아내지 못한다.**
+> 설명을 덧붙일 일이 있으면 이 문서에 쓰고, 스키마를 바꿀 일이면 새 버전 파일(`V4__…`)을 만든다.
+> 이미 깨진 로컬 DB 는 파일을 원래대로 되돌리거나, 되돌릴 수 없으면 이력을 고친다:
+> `docker exec sumgil-postgres psql -U sumgil -d sumgil -c "delete from flyway_schema_history where version='1'"` 후 재적재(가장 확실한 건 `down -v` 후 처음부터).
+
 ## 용어
 
 | 명사 | 대상 | 테이블 |
