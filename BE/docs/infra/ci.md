@@ -21,4 +21,6 @@
 
 - **러너 tag(`CI`) 필수.** 이 레포에 "ai job에 tags 안 넣어서 pending 무한 대기"였던 이력(`S15P21A104-34`)이 있어서, `be-test`에도 처음부터 `tags: [CI]`를 넣어뒀다.
 - `alias`를 이미지 이름(`postgres`/`redis`)과 같게 두면 러너가 자동 생성하는 별칭과 충돌해서 조용히 skip되고 DB 연결이 실패한다 — `db`/`cache`처럼 겹치지 않는 이름을 쓴다.
+- **CI 에는 Kafka 서비스가 없다.** `KafkaRoundTripIT`(S15P21A104-74)는 `KAFKA_BOOTSTRAP_SERVERS` 가 있을 때만 돌고 없으면 건너뛴다. PoC 하나 때문에 파이프라인에 브로커를 붙이지 않았다 — 수집기 본 구현이 들어올 때 다시 판단한다 (`docs/infra/kafka.md`).
+- **CI 는 마이그레이션 파일 수정 사고를 못 잡는다.** 매번 빈 DB 에 처음부터 적용하므로 체크섬이 항상 맞는다. 이미 적용된 마이그레이션을 고치면 CI 는 초록인데 팀원 로컬 DB 만 전부 막힌다 (`docs/db/schema.md` 머리말, S15P21A104-73 실제 사례).
 - 이건 **테스트(CI)만** 이다. 배포(CD)는 아직 없다 — `Dockerfile`도, EC2도, `deploy` job도 없는 상태. `docs/README.md` 6절 참고.
