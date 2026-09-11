@@ -146,6 +146,35 @@ pip freeze > requirements.lock.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+### CROWD 혼잡도 — 배치 추론과 조회 API
+
+모델은 요청 시점에 돌리지 않는다. 배치가 하루치 예측 표를 만들어 두고 API는 그 표만 읽는다.
+
+```bash
+cd AI
+# (최초 1회) 잔차 모델 아티팩트 — models/CROWD/<세트>_<시각>/ (약 25초)
+python -m app.CROWD.pipeline.train
+
+# 배치 추론 — data/CROWD/serving/predictions_YYYY-MM-DD.parquet + .meta.json
+python -m app.CROWD.pipeline.batch_predict --today --tomorrow          # 운영
+python -m app.CROWD.pipeline.batch_predict --date 2025-06-02           # 패널 안 날짜(재현·검증)
+python -m app.CROWD.pipeline.batch_predict --date 2026-01-05 --predictor lookup   # 기준선만
+
+# 조회
+uvicorn app.main:app --port 8000
+# GET /crowd/meta
+# GET /crowd/stations/222/congestion?date=2026-01-05&direction=내선
+# GET /crowd/lines/2호선/congestion?date=2026-01-05&time=08:30
+```
+
+- 예측기는 `app/CROWD/pipeline/predictor.py`의 `Predictor` 인터페이스로 갈아 끼운다. `CROWD_PREDICTOR`
+  설정값 `auto`(기본)는 아티팩트가 있으면 `lightgbm`, 없으면 `lookup`(요일유형×역×시간대 평균)이다.
+  `llm`은 자리만 있고 `CROWD_LLM_API_KEY`가 설정되면 구현한다.
+- 등급 임계치는 `CROWD_GRADE_THRESHOLDS`(기본 `50,100`, %). 값을 낼 수 없는 셀은 0으로 채우지 않고
+  `data_status`(`no_lookup` / `no_calibration`)로 응답한다. 그 날짜 표가 없으면 404(배치 미실행).
+- 미래 날짜는 달력(요일유형)·이벤트 골격 위에 최근 7일 시차로 예측한다. 전날 실측이 없으면
+  `lag1d_available=false`로 표시된다(1주 전 시차만 사용).
+
 ## 7. 디렉터리 구조
 
 FastAPI 기준 **도메인 우선(domain-first)** 구조를 쓴다. 기능(산출물)마다 `app/<도메인>/`
