@@ -24,6 +24,10 @@ from __future__ import annotations
 import pandas as pd
 
 CANDIDATES = ["lightgbm", "random_forest", "xgboost"]
+# 기본 비교 후보. RandomForest는 400만 행에서 fit 160~210초로 LightGBM(8초)의 20배이고 87·89
+# 비교에서 일관되게 열세여서 기본에서 뺐다(`AI/CLAUDE.md` "실험 실행 효율"). 명시적으로
+# 켤 때만 돌린다(`compare_models.py --all-models`).
+DEFAULT_CANDIDATES = ["lightgbm", "xgboost"]
 
 
 def _encode_for_model(X: pd.DataFrame, name: str) -> pd.DataFrame:

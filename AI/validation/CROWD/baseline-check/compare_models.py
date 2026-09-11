@@ -13,10 +13,13 @@ groupby 평균)만큼 정확히 재현하지 못해 세 모델 다 베이스라�
 
 실행:
     cd AI
-    python validation/CROWD/baseline-check/compare_models.py [feature_set] [--models a,b]
-    (feature_set 생략 시 "weather_events" — features.FEATURE_SETS 참고.
-     --models 로 후보를 좁힐 수 있다: 89번 파생 세트는 RandomForest가 세트당 5분 이상 걸리고
-     1차 비교에서 일관되게 열세라 lightgbm,xgboost 만 돌린다.)
+    python validation/CROWD/baseline-check/compare_models.py [feature_set ...] [옵션]
+    (feature_set 생략 시 "weather_events" — features.FEATURE_SETS 참고. 여러 세트를 나열하면
+     데이터 로딩·lookup fit·파생 컬럼을 한 번만 하고 세트마다 학습만 반복한다.)
+    옵션:
+      --models=a,b      후보 지정. 기본은 models.DEFAULT_CANDIDATES(lightgbm,xgboost).
+      --all-models      RandomForest까지 세 후보 전부(느리다 — 세트당 3~5분 추가).
+      --rebuild-cache   파생 패널 캐시를 무시하고 다시 만든다(derived_features 참고).
 """
 
 from __future__ import annotations
@@ -31,31 +34,61 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from baseline import DayTypeLookupBaseline, regression_metrics, residuals
 from dataset import load_panel, time_split
-from derived_features import add_derived_columns, needs_derived_columns, neighbor_maps_for
+from derived_features import load_or_build_derived, needs_derived_columns, neighbor_maps_for
 from features import FEATURE_SETS, build_matrix
 
-from models import CANDIDATES, fit_predict
+from models import CANDIDATES, DEFAULT_CANDIDATES, fit_predict
 
 
-def compare(feature_set: str = "weather_events", models: list[str] | None = None) -> pd.DataFrame:
-    models = models or CANDIDATES
+def compare_many(
+    feature_sets: list[str],
+    models: list[str] | None = None,
+    rebuild_cache: bool = False,
+) -> dict[str, pd.DataFrame]:
+    """여러 세트를 한 프로세스에서 비교한다 — 데이터 로딩·lookup fit·파생은 한 번만.
+
+    세트 하나가 끝날 때마다 표를 바로 출력하므로 중간에 끊겨도 끝난 세트의 결과는 남는다.
+    """
+    models = models or DEFAULT_CANDIDATES
     panel = load_panel(with_events=True)
     train, test = time_split(panel)
-
     lookup = DayTypeLookupBaseline().fit(train)
 
-    if needs_derived_columns(FEATURE_SETS[feature_set]):
+    if any(needs_derived_columns(FEATURE_SETS[fs]) for fs in feature_sets):
         # 89번 파생 피처(인접역·환승 노드·시차) — 시차가 분할 경계를 넘어 참조해야 하므로
         # 전체 패널에 붙인 뒤 다시 나눈다. 잔차는 학습 구간 lookup 기준(타깃 잔차와 동일).
         _, _, gaps = neighbor_maps_for(panel)
         if len(gaps):
             print("[안내] 토폴로지에 있으나 패널에 없는 역(양옆 역이 인접으로 이어진다):")
             print(gaps.to_string(index=False))
-        train, test = time_split(add_derived_columns(panel, lookup))
+        train, test = time_split(load_or_build_derived(panel, lookup, force=rebuild_cache))
 
     train_resid = residuals(lookup, train)
     test_resid = residuals(lookup, test)
 
+    results: dict[str, pd.DataFrame] = {}
+    for feature_set in feature_sets:
+        print(f"\n[feature_set] {feature_set} = {FEATURE_SETS[feature_set]}", flush=True)
+        result = _compare_split(feature_set, models, train, test, train_resid, test_resid, lookup)
+        results[feature_set] = result
+        print(result.round(2).to_string(index=False), flush=True)
+    return results
+
+
+def compare(feature_set: str = "weather_events", models: list[str] | None = None) -> pd.DataFrame:
+    """세트 하나 비교 — `compare_many`의 단일 세트 편의 함수."""
+    return compare_many([feature_set], models)[feature_set]
+
+
+def _compare_split(
+    feature_set: str,
+    models: list[str],
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    train_resid: pd.DataFrame,
+    test_resid: pd.DataFrame,
+    lookup: DayTypeLookupBaseline,
+) -> pd.DataFrame:
     X_train = build_matrix(train, feature_set)
     X_test = build_matrix(test, feature_set)
 
@@ -84,7 +117,7 @@ def compare(feature_set: str = "weather_events", models: list[str] | None = None
                     "학습_초": round(elapsed, 1),
                 }
             )
-            print(f"[{name}/{target}] {elapsed:.1f}s")
+            print(f"[{name}/{target}] {elapsed:.1f}s", flush=True)
 
     return add_improvement_columns(pd.DataFrame(rows))
 
@@ -117,8 +150,14 @@ def add_improvement_columns(result: pd.DataFrame) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    feature_set = sys.argv[1] if len(sys.argv) > 1 else "weather_events"
-    print(f"[feature_set] {feature_set} = {FEATURE_SETS[feature_set]}\n")
-    out = compare(feature_set)
-    print()
-    print(out.round(2).to_string(index=False))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = {a[2:] for a in sys.argv[1:] if a.startswith("--") and "=" not in a}
+    opts = dict(a[2:].split("=", 1) for a in sys.argv[1:] if a.startswith("--") and "=" in a)
+    feature_sets = args or ["weather_events"]
+    if "models" in opts:
+        models = opts["models"].split(",")
+    elif "all-models" in flags:
+        models = list(CANDIDATES)
+    else:
+        models = list(DEFAULT_CANDIDATES)
+    compare_many(feature_sets, models, rebuild_cache="rebuild-cache" in flags)

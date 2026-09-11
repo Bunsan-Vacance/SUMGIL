@@ -25,6 +25,17 @@
 같은 시간대 이웃(첫 두 줄)은 87 이벤트 피처와 성격이 다르다 — 이벤트 일정은 미리 알지만
 인접역 실측은 그 시간이 지나야 안다. 어느 줄까지 쓸지는 서비스의 예측 시점(90번)이 정한다.
 
+## 캐시 — 파생은 한 번, 학습은 여러 번
+
+파생 컬럼 생성은 400만 행에 대한 merge 십여 번이다. 단독으로 재면 약 15초(2026-09-11, SUMGIL
+환경)로 학습(LightGBM 8초·XGBoost 30초)과 같은 자릿수지만, 세트마다 프로세스를 새로 띄우면
+패널 로딩·lookup fit·파생을 매번 반복한다 — 2차 비교(7세트)가 세트당 4~5분 걸린 것은 이 반복에
+다른 실험 프로세스와의 CPU 경합이 겹친 결과였다. 그래서 `load_or_build_derived`가 결과를
+`data/CROWD/interim/`에 parquet로 저장하고(다시 읽기 0.4초), 옆 `.meta.json`에 입력 조건(패널
+파일 mtime·행 수, 분할 경계, lookup 키, 파생 버전, 컬럼 목록)을 남긴다. 조건이 하나라도 다르면
+stale로 보고 다시 만든다. `compare_models.compare_many`는 여기에 더해 세트 목록을 한 프로세스에서
+돌려 로딩·fit도 한 번만 한다(`AI/CLAUDE.md` "실험 실행 효율").
+
 ## 잔차 계산 기준
 
 잔차는 **학습 구간에 fit한 lookup으로 전체 패널에** 낸다(타깃 잔차와 같은 기준). 시차 피처는
@@ -35,6 +46,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -47,7 +59,7 @@ for p in (str(_HERE), str(AI_ROOT)):
         sys.path.insert(0, p)
 
 from baseline import DayTypeLookupBaseline
-from dataset import TARGETS
+from dataset import CROWD_PROCESSED, PANEL_NAME, SPLIT_DATE, TARGETS
 
 from app.CROWD.pipeline.adjacency import (
     attach_neighbor_features,
@@ -62,6 +74,11 @@ from app.CROWD.pipeline.lags import (
     slot_lag_names,
 )
 from DATA_ENGINE.eda.build_congestion_label import load_topology, resolve_segments
+
+CROWD_INTERIM = AI_ROOT / "data" / "CROWD" / "interim"
+DERIVED_CACHE = CROWD_INTERIM / "crowd_panel_derived_2024_2025.parquet"
+# 파생 규칙(컬럼 정의·조인 방식)이 바뀌면 올린다 — meta가 달라져 캐시가 무효화된다.
+DERIVED_VERSION = 1
 
 # 패널의 20개 운행일 슬롯 순서. 사전순이 아니다(`~06`이 첫 슬롯, `24~`가 마지막).
 SLOT_ORDER = ["~06"] + [f"{h:02d}-{h + 1:02d}" for h in range(6, 24)] + ["24~"]
@@ -106,6 +123,55 @@ def add_derived_columns(panel: pd.DataFrame, lookup: DayTypeLookupBaseline) -> p
     )
     # 시차 이웃: 노선 앞뒤만(환승 노드 시차까지 넣으면 열 수만 는다 — 1차엔 제외).
     out = attach_neighbor_features(out, line_map, [*SELF_DAY_LAG_COLS, *SELF_SLOT_LAG_COLS])
+    return out
+
+
+def _cache_meta(panel: pd.DataFrame, lookup: DayTypeLookupBaseline, split_date) -> dict:
+    src = CROWD_PROCESSED / PANEL_NAME
+    return {
+        "panel_file": src.name,
+        "panel_mtime": src.stat().st_mtime if src.exists() else None,
+        "panel_rows": len(panel),
+        "split_date": str(pd.Timestamp(split_date).date()),
+        "lookup_keys": list(lookup.keys),
+        "derived_version": DERIVED_VERSION,
+    }
+
+
+def load_or_build_derived(
+    panel: pd.DataFrame,
+    lookup: DayTypeLookupBaseline,
+    split_date=SPLIT_DATE,
+    cache_path: Path = DERIVED_CACHE,
+    force: bool = False,
+) -> pd.DataFrame:
+    """캐시가 유효하면 읽고, 아니면 `add_derived_columns`로 만들어 저장한 뒤 돌려준다.
+
+    캐시는 원본 패널 컬럼 + 파생 컬럼 전부를 담은 프레임이라, 돌려준 값이 `panel`을 대신한다.
+    행 수·순서는 입력 패널과 같다(같은 정렬로 읽었을 때). 표준 출력에 어느 경로를 탔는지 남긴다.
+    """
+    meta_path = cache_path.with_suffix(".meta.json")
+    want = _cache_meta(panel, lookup, split_date)
+    if not force and cache_path.exists() and meta_path.exists():
+        have = json.loads(meta_path.read_text(encoding="utf-8"))
+        have_cols = have.pop("columns", None)
+        if have == want:
+            out = pd.read_parquet(cache_path)
+            if len(out) == len(panel) and have_cols == list(out.columns):
+                print(f"[파생 캐시] 재사용: {cache_path.name}", flush=True)
+                return out
+            print("[파생 캐시] 행 수·컬럼 불일치 — 다시 만든다", flush=True)
+        else:
+            print("[파생 캐시] 입력 조건이 달라졌다 — 다시 만든다", flush=True)
+
+    out = add_derived_columns(panel, lookup)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(cache_path, index=False)
+    meta_path.write_text(
+        json.dumps({**want, "columns": list(out.columns)}, ensure_ascii=False, indent=1),
+        encoding="utf-8",
+    )
+    print(f"[파생 캐시] 저장: {cache_path.name} ({len(out):,}행, {out.shape[1]}열)", flush=True)
     return out
 
 
