@@ -13,8 +13,10 @@ groupby 평균)만큼 정확히 재현하지 못해 세 모델 다 베이스라�
 
 실행:
     cd AI
-    python validation/CROWD/baseline-check/compare_models.py [feature_set]
-    (feature_set 생략 시 "weather_events" — features.FEATURE_SETS 참고)
+    python validation/CROWD/baseline-check/compare_models.py [feature_set] [--models a,b]
+    (feature_set 생략 시 "weather_events" — features.FEATURE_SETS 참고.
+     --models 로 후보를 좁힐 수 있다: 89번 파생 세트는 RandomForest가 세트당 5분 이상 걸리고
+     1차 비교에서 일관되게 열세라 lightgbm,xgboost 만 돌린다.)
 """
 
 from __future__ import annotations
@@ -29,29 +31,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from baseline import DayTypeLookupBaseline, regression_metrics, residuals
 from dataset import load_panel, time_split
+from derived_features import add_derived_columns, needs_derived_columns, neighbor_maps_for
 from features import FEATURE_SETS, build_matrix
-from neighbor_features import add_neighbor_columns, needs_neighbor_columns, neighbor_map_for
 
 from models import CANDIDATES, fit_predict
 
 
-def compare(feature_set: str = "weather_events") -> pd.DataFrame:
+def compare(feature_set: str = "weather_events", models: list[str] | None = None) -> pd.DataFrame:
+    models = models or CANDIDATES
     panel = load_panel(with_events=True)
     train, test = time_split(panel)
 
     lookup = DayTypeLookupBaseline().fit(train)
-    train_resid = residuals(lookup, train)
-    test_resid = residuals(lookup, test)
 
-    if needs_neighbor_columns(FEATURE_SETS[feature_set]):
-        # 89번 인접역 피처 — 학습·평가 각각 자기 구간의 같은 (date, time_slot) 인접역 값을
-        # 붙인다. 잔차는 학습 구간 lookup 기준(타깃 잔차와 같은 기준).
-        neighbor_map, gaps = neighbor_map_for(panel)
+    if needs_derived_columns(FEATURE_SETS[feature_set]):
+        # 89번 파생 피처(인접역·환승 노드·시차) — 시차가 분할 경계를 넘어 참조해야 하므로
+        # 전체 패널에 붙인 뒤 다시 나눈다. 잔차는 학습 구간 lookup 기준(타깃 잔차와 동일).
+        _, _, gaps = neighbor_maps_for(panel)
         if len(gaps):
             print("[안내] 토폴로지에 있으나 패널에 없는 역(양옆 역이 인접으로 이어진다):")
             print(gaps.to_string(index=False))
-        train = add_neighbor_columns(train, lookup, neighbor_map)
-        test = add_neighbor_columns(test, lookup, neighbor_map)
+        train, test = time_split(add_derived_columns(panel, lookup))
+
+    train_resid = residuals(lookup, train)
+    test_resid = residuals(lookup, test)
 
     X_train = build_matrix(train, feature_set)
     X_test = build_matrix(test, feature_set)
@@ -68,7 +71,7 @@ def compare(feature_set: str = "weather_events") -> pd.DataFrame:
         )
 
         y_train_resid = train_resid[f"{target}_resid"]
-        for name in CANDIDATES:
+        for name in models:
             t0 = time.time()
             pred_resid = fit_predict(name, X_train, y_train_resid, X_test)
             final_pred = baseline_pred_test.to_numpy() + pred_resid.to_numpy()
