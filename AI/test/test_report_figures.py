@@ -157,3 +157,43 @@ def test_each_figure_produces_files(tmp_path, n):
 def test_missing_input_is_skipped_not_error(tmp_path, monkeypatch):
     monkeypatch.setattr(rf, "COMPARE_RESULTS", tmp_path / "없음.parquet")
     assert rf.fig_feature_set_steps(rf.Inputs()) == []
+
+
+# ── 141: 선택 인자·인라인 모드 ──
+def test_selection_suffix_keeps_default_name_separate(tmp_path):
+    inp = _FakeInputs(tmp_path)
+    default = rf.fig_direction_validation(inp)[0]
+    narrowed = rf.fig_direction_validation(inp, lines=["2호선"], day_type="토요일")[0]
+    assert default.name == "direction_validation_scatter.png"
+    assert narrowed.name == "direction_validation_scatter__2호선_토요일.png"
+    assert default.exists() and narrowed.exists()
+
+
+def test_name_sanitizes_path_characters():
+    assert "/" not in rf._name("g", "분포 50/100", default=False)
+    assert rf._name("g", "x", default=True) == "g"
+
+
+def test_station_selection_and_line_disambiguation(tmp_path):
+    inp = _FakeInputs(tmp_path)
+    paths = rf.fig_station_residual_timeseries(inp, stations=[150, 222])
+    assert paths[0].name == "station_residual_timeseries__150_222_boarding_2025.png"
+    assert rf._station_name(inp.panel, 150, with_line=True) == "서울역(1호선)"
+
+
+def test_inline_mode_returns_figures_without_files(tmp_path, monkeypatch):
+    import matplotlib.pyplot as plt
+
+    monkeypatch.setattr(fs, "INLINE", True)
+    inp = _FakeInputs(tmp_path)
+    out = rf.fig_half_hour_share_curve(inp, stations=[222])
+    assert len(out) == 1 and isinstance(out[0], plt.Figure)
+    assert not list(tmp_path.glob("half_hour_share_curve*"))
+    plt.close("all")
+
+
+def test_apply_inline_sets_flag_and_reverts(monkeypatch):
+    assert fs.apply(inline=True) is None or fs.INLINE is True
+    assert fs.INLINE is True
+    fs.apply()
+    assert fs.INLINE is False

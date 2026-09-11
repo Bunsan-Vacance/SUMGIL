@@ -22,6 +22,11 @@
 8번 입력(`compare_results.parquet`)은 `compare_models.py --save-results`로 만든다. 9번은
 `grade_sensitivity.py --save-cells`의 셀 표.
 
+**선택 인자(141).** 모든 `fig_*`는 기본값이 위 표의 그림이고, 호선·역·요일유형·타깃 같은 선택 인자를
+받는다(`fig_panel_heatmap(inp, lines=["2호선"], day_types=["평일"])`). 기본값이 아닐 때 저장 파일명에
+선택이 접미로 붙어 기본 그림을 덮어쓰지 않는다. 노트북에서는 `fs.apply(inline=True)` 뒤 호출하면
+figure가 그대로 셀에 그려진다(`crowd_eda.ipynb`).
+
 실행:
     cd AI
     python -m DATA_ENGINE.eda.report_figures                 # 전체
@@ -32,9 +37,10 @@
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -62,6 +68,18 @@ DATA_MIRROR = AI_ROOT / "data" / "CROWD" / "reports" / "figures"
 LINE_ORDER = [f"{i}호선" for i in range(1, 9)]
 DAY_TYPES = ["평일", "토요일", "일요일", "휴일"]
 RUSH_SLOTS = {"07:30", "08:00", "08:30", "18:00", "18:30", "19:00"}
+TARGET_LABEL = {"boarding": "승차", "alighting": "하차"}
+DAY_TYPE_COLORS = {
+    "평일": fs.COLOR_MODEL,
+    "토요일": fs.LINE_COLORS["3호선"],
+    "일요일": fs.LINE_COLORS["8호선"],
+    "휴일": fs.LINE_COLORS["5호선"],
+}
+GRADE_THRESHOLDS = {
+    "국토부 150/170/190": [150, 170, 190],
+    "분포 50/100": [50, 100],
+    "분포 50/80/100": [50, 80, 100],
+}
 
 # 실시간 집계가 있어야 쓸 수 있는 세트(89 RESULTS). 8번 그림에서 색으로 구분한다.
 REALTIME_SETS = {
@@ -140,33 +158,81 @@ class Inputs:
         files = sorted(PROCESSED.glob("crowd_load_by_train_*.parquet"))
         return pd.read_parquet(files[-1]) if files else None
 
+    def stations(self) -> pd.DataFrame | None:
+        """역 목록(station_no, station_name, line) — 노트북에서 역을 고를 때."""
+        panel = self.panel
+        return None if panel is None else _station_order(panel).drop(columns="line_rank")
 
+
+# ── 공통 ──
 def _station_order(panel: pd.DataFrame) -> pd.DataFrame:
     st = panel[["station_no", "station_name", "line"]].drop_duplicates("station_no")
     st["line_rank"] = st["line"].map({ln: i for i, ln in enumerate(LINE_ORDER)})
     return st.sort_values(["line_rank", "station_no"])
 
 
+def _name(base: str, *parts, default: bool) -> str:
+    """기본 선택이면 base, 아니면 선택을 접미로 붙여 기본 그림을 덮어쓰지 않는다."""
+    if default:
+        return base
+    suffix = "_".join(str(p) for p in parts if p not in (None, ""))
+    for ch in r'/\:*?"<>| ':  # 파일명에 못 쓰는 문자·공백은 -로
+        suffix = suffix.replace(ch, "-")
+    return f"{base}__{suffix}" if suffix else base
+
+
+def _grid(n: int, cols: int = 4, cell=(4.0, 3.5)):
+    """n개 패널을 최대 cols열 격자로. (fig, axes 1차원 배열) — 남는 축은 숨긴다."""
+    cols = max(1, min(cols, n))
+    rows = math.ceil(n / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(cell[0] * cols, cell[1] * rows), squeeze=False)
+    flat = axes.ravel()
+    for ax in flat[n:]:
+        ax.set_visible(False)
+    return fig, flat[:n]
+
+
+def _lines_label(lines: Sequence[str]) -> str:
+    return "1~8호선" if list(lines) == LINE_ORDER else "·".join(lines)
+
+
+def _station_name(panel: pd.DataFrame, station_no: int, with_line: bool = False) -> str:
+    """station_no → 역명. 서울역처럼 호선마다 다른 station_no를 갖는 이름은 with_line으로 구분."""
+    hit = panel.loc[panel["station_no"] == station_no, ["station_name", "line"]]
+    if not len(hit):
+        return str(station_no)
+    name, line = hit.iloc[0]
+    return f"{name}({line})" if with_line else str(name)
+
+
 # ── 1 ──
-def fig_panel_heatmap(inp: Inputs) -> list[Path]:
+def fig_panel_heatmap(
+    inp: Inputs,
+    day_types: Sequence[str] = DAY_TYPES,
+    lines: Sequence[str] = LINE_ORDER,
+    target: str = "boarding",
+) -> list:
+    """역(호선 순) × 20슬롯 평균 히트맵, 요일유형마다 한 장. `lines`로 호선을 좁힐 수 있다."""
     panel = inp.panel
     if panel is None:
         return []
+    default = list(lines) == LINE_ORDER and target == "boarding"
+    panel = panel[panel["line"].isin(lines)]
     st = _station_order(panel)
     out = []
-    for dt in DAY_TYPES:
+    for dt in day_types:
         sub = panel[panel["day_type"] == dt]
         mat = sub.pivot_table(
-            index="station_no", columns="time_slot", values="boarding", aggfunc="mean"
+            index="station_no", columns="time_slot", values=target, aggfunc="mean"
         )
         mat = mat.reindex(index=st["station_no"], columns=SLOT_ORDER)
-        fig, ax = plt.subplots(figsize=(11, 14))
+        height = max(4.0, min(14.0, 0.05 * len(mat) + 1.5))
+        fig, ax = plt.subplots(figsize=(11, height))
         im = ax.imshow(
             np.log1p(mat.to_numpy()), aspect="auto", cmap="YlOrRd", interpolation="nearest"
         )
         ax.set_xticks(range(len(SLOT_ORDER)))
         ax.set_xticklabels(SLOT_ORDER, rotation=90)
-        # 호선 경계선과 라벨
         bounds = st.groupby("line", sort=False).size().cumsum()
         prev = 0
         for line, b in bounds.items():
@@ -182,50 +248,84 @@ def fig_panel_heatmap(inp: Inputs) -> list[Path]:
                 fontweight="bold",
             )
             prev = b
-        ax.set_yticks([])
-        ax.set_title(f"역 × 시간대 평균 승차 인원 — {dt} (log 스케일, 1~8호선 273역)")
+        if len(lines) == 1:
+            ax.set_yticks(range(len(mat)))
+            ax.set_yticklabels(st["station_name"], fontsize=7)
+        else:
+            ax.set_yticks([])
+        ax.set_title(
+            f"역 × 시간대 평균 {TARGET_LABEL[target]} 인원 — {dt} "
+            f"(log 스케일, {_lines_label(lines)} {len(mat)}역)"
+        )
         ax.set_xlabel("시간대(1시간)")
         ax.grid(False)
         cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.01)
-        cb.set_label("log(1+승차 인원)")
+        cb.set_label(f"log(1+{TARGET_LABEL[target]} 인원)")
         fs.caption(
             fig, f"출처: crowd_panel_2024_2025 (2024-01-01~2025-12-31 {dt} 평균). 색은 로그 스케일."
         )
-        out.append(fs.save(fig, f"panel_heatmap_station_slot_{dt}"))
+        out.append(
+            fs.save(fig, _name(f"panel_heatmap_station_slot_{dt}", *lines, target, default=default))
+        )
     return out
 
 
 # ── 2 ──
-def fig_daily_total_by_line(inp: Inputs) -> list[Path]:
+def fig_daily_total_by_line(
+    inp: Inputs,
+    lines: Sequence[str] = LINE_ORDER,
+    target: str = "boarding",
+    start: str | None = None,
+    end: str | None = None,
+    window: int = 7,
+) -> list:
+    """호선별 일 총량 이동평균. `start/end`('YYYY-MM-DD')로 기간, `window`로 평균 창."""
     panel = inp.panel
     if panel is None:
         return []
-    daily = panel.groupby(["date", "line"], observed=True)["boarding"].sum().unstack("line")
-    daily = daily.reindex(columns=[c for c in LINE_ORDER if c in daily.columns])
-    smooth = daily.rolling(7, center=True, min_periods=4).mean()
-    holidays = panel[panel["day_type"] == "휴일"]["date"].drop_duplicates()
+    default = list(lines) == LINE_ORDER and target == "boarding" and not (start or end)
+    p = panel[panel["line"].isin(lines)]
+    if start:
+        p = p[p["date"] >= start]
+    if end:
+        p = p[p["date"] <= end]
+    daily = p.groupby(["date", "line"], observed=True)[target].sum().unstack("line")
+    daily = daily.reindex(columns=[c for c in lines if c in daily.columns])
+    smooth = daily.rolling(window, center=True, min_periods=max(1, window // 2)).mean()
+    holidays = p[p["day_type"] == "휴일"]["date"].drop_duplicates()
     fig, ax = plt.subplots()
     for line in smooth.columns:
         ax.plot(smooth.index, smooth[line] / 1e4, color=fs.line_color(line), lw=1.6, label=line)
     for h in holidays:
         ax.axvline(h, color=fs.PALETTE_NEUTRAL[2], lw=0.6, alpha=0.6, zorder=0)
-    ax.set_ylabel("일 총 승차 (만 명, 7일 이동평균)")
-    ax.set_title("호선별 일 총 승차 추이 2024~2025 — 회색 세로선은 평일 공휴일")
+    ax.set_ylabel(f"일 총 {TARGET_LABEL[target]} (만 명, {window}일 이동평균)")
+    span = f"{smooth.index.min():%Y-%m}~{smooth.index.max():%Y-%m}" if len(smooth) else ""
+    ax.set_title(f"호선별 일 총 {TARGET_LABEL[target]} 추이 {span} — 회색 세로선은 평일 공휴일")
     ax.legend(ncol=4, loc="upper left", frameon=False)
-    fs.caption(fig, "출처: crowd_panel_2024_2025. 7일 중심 이동평균. 9호선 제외(패널 기간 상이).")
-    return [fs.save(fig, "panel_daily_total_by_line")]
+    fs.caption(
+        fig, f"출처: crowd_panel_2024_2025. {window}일 중심 이동평균. 9호선 제외(패널 기간 상이)."
+    )
+    return [
+        fs.save(
+            fig, _name("panel_daily_total_by_line", *lines, target, start, end, default=default)
+        )
+    ]
 
 
 # ── 3 ──
-def fig_direction_validation(inp: Inputs) -> list[Path]:
+def fig_direction_validation(
+    inp: Inputs, lines: Sequence[str] = LINE_ORDER, day_type: str = "평일"
+) -> list:
+    """재귀식 raw 평균 vs 실측 스냅샷 산점, 호선별 상관. 방향 라벨이 맞는지의 근거."""
     cal = inp.calibration
     if cal is None:
         return []
-    c = cal[(cal["line"] != "9호선") & (cal["day_type"] == "평일")].dropna(
+    default = list(lines) == LINE_ORDER and day_type == "평일"
+    c = cal[cal["line"].isin(lines) & (cal["day_type"] == day_type)].dropna(
         subset=["raw_mean", "congestion_pct"]
     )
-    fig, axes = plt.subplots(2, 4, figsize=(14, 7), sharex=False, sharey=False)
-    for ax, line in zip(axes.ravel(), LINE_ORDER):
+    fig, axes = _grid(len(lines))
+    for ax, line in zip(axes, lines):
         s = c[c["line"] == line]
         for direction, marker in zip(sorted(s["direction"].unique()), ("o", "^")):
             d = s[s["direction"] == direction]
@@ -244,26 +344,37 @@ def fig_direction_validation(inp: Inputs) -> list[Path]:
         ax.set_ylabel("실측 스냅샷(%)", fontsize=9)
         ax.legend(fontsize=8, frameon=False, markerscale=2)
     fig.suptitle(
-        "방향 분해 검증 — 재귀식(배차 미보정) vs 실측 30분 스냅샷, 역·방향·30분 셀", y=1.01
+        f"방향 분해 검증 — 재귀식(배차 미보정) vs 실측 30분 스냅샷, 역·방향·30분 셀 ({day_type})",
+        y=1.01,
     )
     fig.tight_layout()
     fs.caption(
         fig,
-        "출처: crowd_congestion_calibration(평일). 양의 상관이 방향 라벨이 맞다는 근거(88: 뒤집었을 때 -0.80).",
+        f"출처: crowd_congestion_calibration({day_type}). 양의 상관이 방향 라벨이 맞다는 근거(88: 뒤집었을 때 -0.80).",
     )
-    return [fs.save(fig, "direction_validation_scatter")]
+    return [fs.save(fig, _name("direction_validation_scatter", *lines, day_type, default=default))]
 
 
 # ── 4 ──
-def fig_calibration_ratio_heatmap(inp: Inputs) -> list[Path]:
+def fig_calibration_ratio_heatmap(
+    inp: Inputs,
+    lines: Sequence[str] = LINE_ORDER,
+    day_type: str = "평일",
+    directions: Sequence[str] = ("하선", "내선"),
+) -> list:
+    """호선별 역 × 30분 배율 히트맵. `directions`로 상선/외선도 볼 수 있다."""
     cal = inp.calibration
     if cal is None:
         return []
-    c = cal[(cal["line"] != "9호선") & (cal["day_type"] == "평일")]
-    c = c[c["direction"].isin(["하선", "내선"])]
+    default = (
+        list(lines) == LINE_ORDER and day_type == "평일" and tuple(directions) == ("하선", "내선")
+    )
+    c = cal[cal["line"].isin(lines) & (cal["day_type"] == day_type)]
+    c = c[c["direction"].isin(directions)]
     slots = sorted(c["time_slot"].unique(), key=lambda t: (int(t[:2]) < 4, t))
-    fig, axes = plt.subplots(2, 4, figsize=(16, 9))
-    for ax, line in zip(axes.ravel(), LINE_ORDER):
+    fig, axes = _grid(len(lines), cell=(4.0, 4.5))
+    im = None
+    for ax, line in zip(axes, lines):
         s = c[c["line"] == line]
         mat = s.pivot_table(index="station_no", columns="time_slot", values="ratio").reindex(
             columns=slots
@@ -273,44 +384,63 @@ def fig_calibration_ratio_heatmap(inp: Inputs) -> list[Path]:
             aspect="auto",
             cmap="viridis",
             vmin=0,
-            vmax=np.nanpercentile(c["ratio"], 95),
+            vmax=np.nanpercentile(c["ratio"].dropna(), 95) if c["ratio"].notna().any() else 1,
         )
         ax.set_title(f"{line} ({len(mat)}역)", color=fs.line_color(line), fontsize=12)
         ax.set_xticks(range(0, len(slots), 6))
         ax.set_xticklabels(slots[::6], rotation=90, fontsize=8)
-        ax.set_yticks([])
+        if len(lines) == 1:
+            names = inp.stations()
+            lab = (
+                mat.index.map(names.set_index("station_no")["station_name"])
+                if names is not None
+                else mat.index
+            )
+            ax.set_yticks(range(len(mat)))
+            ax.set_yticklabels(lab, fontsize=7)
+        else:
+            ax.set_yticks([])
         ax.grid(False)
-    fig.colorbar(
-        im,
-        ax=axes.ravel().tolist(),
-        fraction=0.015,
-        pad=0.01,
-        label="배율 = 실측30분 ÷ mean(raw 1시간)",
-    )
+    if im is not None:
+        fig.colorbar(
+            im, ax=list(axes), fraction=0.015, pad=0.01, label="배율 = 실측30분 ÷ mean(raw 1시간)"
+        )
     fig.suptitle(
-        "배율표 — 역 × 30분 (평일, 하선/내선). 배차 보정과 30분 모양을 동시에 담는다", y=0.98
+        f"배율표 — 역 × 30분 ({day_type}, {'/'.join(directions)}). 배차 보정과 30분 모양을 동시에 담는다",
+        y=0.98,
     )
     fs.caption(
         fig, "출처: crowd_congestion_calibration. 색 상한은 95분위. 빈 칸은 배율 없음(결측)."
     )
-    return [fs.save(fig, "calibration_ratio_heatmap")]
+    return [
+        fs.save(
+            fig, _name("calibration_ratio_heatmap", *lines, day_type, *directions, default=default)
+        )
+    ]
 
 
 # ── 5 ──
-def fig_half_hour_share_curve(inp: Inputs) -> list[Path]:
+def fig_half_hour_share_curve(
+    inp: Inputs,
+    day_types: Sequence[str] = ("평일", "토요일", "일요일"),
+    lines: Sequence[str] | None = None,
+    stations: Sequence[int] | None = None,
+) -> list:
+    """시간대별 후반 30분 비중 평균 ± 1σ. `stations`(station_no)로 특정 역만 보면 띠는 역 간 산포가 아니라 방향 간 산포다."""
     cal = inp.calibration
     if cal is None:
         return []
-    sh = half_hour_shares(cal[cal["line"] != "9호선"])
+    default = tuple(day_types) == ("평일", "토요일", "일요일") and not lines and not stations
+    c = cal[cal["line"] != "9호선"]
+    if lines:
+        c = c[c["line"].isin(lines)]
+    if stations:
+        c = c[c["station_no"].isin(stations)]
+    sh = half_hour_shares(c)
     late = sh[sh["time_slot_30min"].str.endswith(":30")]
     hours = [h for h in SLOT_ORDER if h not in ("~06",)]
     fig, ax = plt.subplots()
-    colors = {
-        "평일": fs.COLOR_MODEL,
-        "토요일": fs.LINE_COLORS["3호선"],
-        "일요일": fs.LINE_COLORS["8호선"],
-    }
-    for dt, color in colors.items():
+    for dt in day_types:
         g = (
             late[late["day_type"] == dt]
             .groupby("time_slot")["share"]
@@ -318,50 +448,78 @@ def fig_half_hour_share_curve(inp: Inputs) -> list[Path]:
             .reindex(hours)
         )
         x = np.arange(len(hours))
+        color = DAY_TYPE_COLORS.get(dt, fs.PALETTE_NEUTRAL[1])
         ax.plot(x, g["mean"] * 100, color=color, lw=2, label=dt)
         ax.fill_between(
-            x, (g["mean"] - g["std"]) * 100, (g["mean"] + g["std"]) * 100, color=color, alpha=0.15
+            x,
+            (g["mean"] - g["std"].fillna(0)) * 100,
+            (g["mean"] + g["std"].fillna(0)) * 100,
+            color=color,
+            alpha=0.15,
         )
     ax.axhline(50, color=fs.PALETTE_NEUTRAL[1], lw=1, ls="--")
     ax.set_xticks(range(len(hours)))
     ax.set_xticklabels(hours, rotation=90)
     ax.set_ylabel("후반 30분(HH:30) 비중 (%)")
-    ax.set_title("1시간 안 전반/후반 비중 — 역 평균 ± 1σ. 7시는 후반, 8·19시는 전반이 무겁다")
+    scope = f"{len(stations)}역" if stations else (_lines_label(lines) if lines else "1~8호선 전체")
+    ax.set_title(f"1시간 안 전반/후반 비중 — {scope} 평균 ± 1σ")
     ax.legend(frameon=False)
     fs.caption(
         fig,
         "출처: half_hour_shares(crowd_congestion_calibration). 띠는 역 간 표준편차(러시 2.6~3.7%p).",
     )
-    return [fs.save(fig, "half_hour_share_curve")]
+    return [
+        fs.save(
+            fig,
+            _name(
+                "half_hour_share_curve",
+                *(lines or []),
+                *(stations or []),
+                *day_types,
+                default=default,
+            ),
+        )
+    ]
 
 
 # ── 6·7 잔차 ──
-def _residuals(panel: pd.DataFrame) -> pd.DataFrame:
-    """2024 lookup으로 2025 잔차(승차). 그림용 경량 재계산."""
-    train = panel[panel["date"] < "2025-01-01"]
-    test = panel[panel["date"] >= "2025-01-01"].copy()
+def residuals(
+    panel: pd.DataFrame, target: str = "boarding", split: str = "2025-01-01"
+) -> pd.DataFrame:
+    """split 이전 lookup(요일유형×역×시간대 평균)으로 split 이후 잔차. 그림·노트북 공용 경량 계산."""
+    train = panel[panel["date"] < split]
+    test = panel[panel["date"] >= split].copy()
     table = (
-        train.groupby(["day_type", "station_no", "time_slot"], observed=True)["boarding"]
+        train.groupby(["day_type", "station_no", "time_slot"], observed=True)[target]
         .mean()
         .rename("pred")
     )
     test = test.merge(table.reset_index(), on=["day_type", "station_no", "time_slot"], how="left")
-    test["resid"] = test["boarding"] - test["pred"]
+    test["resid"] = test[target] - test["pred"]
     return test.dropna(subset=["resid"])
 
 
-def fig_residual_concentration(inp: Inputs) -> list[Path]:
+def fig_residual_concentration(
+    inp: Inputs,
+    target: str = "boarding",
+    top_n: int = 15,
+    lines: Sequence[str] | None = None,
+) -> list:
+    """잔차 쏠림 — 상위 역·시간대·요일유형. `lines`로 좁히면 그 호선 안에서의 비중."""
     panel = inp.panel
     if panel is None:
         return []
-    r = _residuals(panel)
+    default = target == "boarding" and top_n == 15 and not lines
+    if lines:
+        panel = panel[panel["line"].isin(lines)]
+    r = residuals(panel, target)
     r["sq"] = r["resid"] ** 2
     total = r["sq"].sum()
     by_st = (
         r.groupby(["station_no", "station_name", "line"], observed=True)["sq"].sum().reset_index()
     )
     by_st["share"] = by_st["sq"] / total * 100
-    top = by_st.sort_values("share", ascending=False).head(15)[::-1]
+    top = by_st.sort_values("share", ascending=False).head(top_n)[::-1]
     fig, axes = plt.subplots(1, 3, figsize=(16, 6), gridspec_kw={"width_ratios": [1.4, 1, 0.8]})
     axes[0].barh(
         top["station_name"] + " (" + top["line"] + ")",
@@ -369,7 +527,7 @@ def fig_residual_concentration(inp: Inputs) -> list[Path]:
         color=[fs.line_color(x) for x in top["line"]],
     )
     axes[0].set_xlabel("전체 제곱오차 비중 (%)")
-    axes[0].set_title("역별 잔차 쏠림 상위 15 (승차, 2025)")
+    axes[0].set_title(f"역별 잔차 쏠림 상위 {top_n} ({TARGET_LABEL[target]}, 2025)")
     by_slot = r.groupby("time_slot", observed=True)["sq"].sum().reindex(SLOT_ORDER) / total * 100
     axes[1].bar(range(len(SLOT_ORDER)), by_slot, color=fs.COLOR_MODEL)
     axes[1].axhline(100 / len(SLOT_ORDER), color=fs.PALETTE_NEUTRAL[1], ls="--", lw=1)
@@ -388,19 +546,32 @@ def fig_residual_concentration(inp: Inputs) -> list[Path]:
     fig.tight_layout()
     fs.caption(
         fig,
-        "잔차 = 2025 실측 - 2024 lookup(요일유형×역×시간대 평균). 서울역 한 곳이 오차의 약 14%.",
+        f"잔차 = 2025 실측 - 2024 lookup(요일유형×역×시간대 평균). 범위: {_lines_label(lines) if lines else '1~8호선'}.",
     )
-    return [fs.save(fig, "residual_concentration")]
+    return [
+        fs.save(
+            fig, _name("residual_concentration", *(lines or []), target, top_n, default=default)
+        )
+    ]
 
 
-def fig_station_residual_timeseries(inp: Inputs) -> list[Path]:
+def fig_station_residual_timeseries(
+    inp: Inputs,
+    stations: Sequence[int] = (150, 218),
+    target: str = "boarding",
+    year: int = 2025,
+) -> list:
+    """역별 일별 잔차 합 시계열(경기일 표시). `stations`는 station_no 목록, 역 수만큼 행이 늘어난다."""
     panel = inp.panel
     if panel is None:
         return []
-    r = _residuals(panel)
+    default = tuple(stations) == (150, 218) and target == "boarding" and year == 2025
+    r = residuals(panel, target, split=f"{year}-01-01")
     events = inp.events
-    fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
-    for ax, (no, name) in zip(axes, ((150, "서울역"), (218, "종합운동장"))):
+    fig, axes = plt.subplots(len(stations), 1, figsize=(11, 3.5 * len(stations)), sharex=True)
+    axes = np.atleast_1d(axes)
+    for ax, no in zip(axes, stations):
+        name = _station_name(panel, no, with_line=True)
         s = r[r["station_no"] == no].groupby("date")["resid"].sum()
         ax.plot(s.index, s.values, color=fs.COLOR_MODEL, lw=0.9)
         ax.axhline(0, color=fs.PALETTE_NEUTRAL[1], lw=0.8)
@@ -408,28 +579,35 @@ def fig_station_residual_timeseries(inp: Inputs) -> list[Path]:
             g = events[
                 (events["station_no"] == no)
                 & (events["game_count"] > 0)
-                & (events["date"] >= "2025-01-01")
+                & (events["date"] >= f"{year}-01-01")
             ]["date"]
             for d in g:
                 ax.axvline(d, color=fs.COLOR_ACCENT, lw=0.5, alpha=0.5, zorder=0)
-        ax.set_title(f"{name} — 2025 일별 승차 잔차 합 (빨간 세로선: 경기일)")
-        ax.set_xlim(pd.Timestamp("2025-01-01"), pd.Timestamp("2026-01-01"))
+        ax.set_title(f"{name} — {year} 일별 {TARGET_LABEL[target]} 잔차 합 (빨간 세로선: 경기일)")
+        ax.set_xlim(pd.Timestamp(f"{year}-01-01"), pd.Timestamp(f"{year + 1}-01-01"))
         ax.set_ylabel("잔차 (명/일)")
     fig.tight_layout()
     fs.caption(
-        fig,
-        "잔차 = 실측 - 2024 lookup. 종합운동장은 경기일 스파이크, 서울역은 이벤트로 설명되지 않는 추세.",
+        fig, f"잔차 = 실측 - {year - 1} lookup. 경기일은 crowd_station_events(game_count>0)."
     )
-    return [fs.save(fig, "station_residual_timeseries")]
+    return [
+        fs.save(fig, _name("station_residual_timeseries", *stations, target, year, default=default))
+    ]
 
 
 # ── 8 ──
-def fig_feature_set_steps(inp: Inputs) -> list[Path]:
+def fig_feature_set_steps(
+    inp: Inputs, model: str = "xgboost", feature_sets: Sequence[str] | None = None
+) -> list:
+    """세트별 RMSE/MAE 개선율. `model`은 compare_results의 model 컬럼 값(lightgbm/xgboost)."""
     res = inp.compare_results
     if res is None:
         return []
-    res = res[res["model"] == "xgboost"]
+    default = model == "xgboost" and not feature_sets
+    res = res[res["model"] == model]
     order = [k for k in SET_LABELS if k in set(res["feature_set"])]
+    if feature_sets:
+        order = [k for k in order if k in feature_sets]
     fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
     for ax, metric, title in zip(
         axes, ("RMSE_개선율_%", "MAE_개선율_%"), ("RMSE 개선율", "MAE 개선율")
@@ -450,7 +628,7 @@ def fig_feature_set_steps(inp: Inputs) -> list[Path]:
             )
         ax.set_yticks(range(len(order)))
         ax.set_yticklabels([SET_LABELS[k] for k in order])
-        ax.set_title(f"{title} (베이스라인 lookup 대비, XGBoost)")
+        ax.set_title(f"{title} (베이스라인 lookup 대비, {model})")
         ax.set_xlabel("%")
         ax.legend(frameon=False, loc="lower right")
     fig.text(
@@ -464,30 +642,36 @@ def fig_feature_set_steps(inp: Inputs) -> list[Path]:
     fs.caption(
         fig, "출처: compare_results.parquet (compare_models --save-results, 2024 학습 / 2025 평가)."
     )
-    return [fs.save(fig, "feature_set_improvement_steps")]
+    return [fs.save(fig, _name("feature_set_improvement_steps", model, default=default))]
 
 
 # ── 9 ──
-def fig_grade_threshold_sensitivity(inp: Inputs) -> list[Path]:
+def fig_grade_threshold_sensitivity(
+    inp: Inputs,
+    thresholds: dict[str, list[float]] | None = None,
+    lines: Sequence[str] | None = None,
+) -> list:
+    """임계치 후보별 등급 분포 + lookup/모델 일치율. `thresholds={'이름': [50, 100], ...}`로 후보 교체."""
     cells = inp.grade_cells
     if cells is None:
         return []
-    thresholds = {
-        "국토부 150/170/190": [150, 170, 190],
-        "분포 50/100": [50, 100],
-        "분포 50/80/100": [50, 80, 100],
-    }
+    default = thresholds is None and not lines
+    thresholds = thresholds or GRADE_THRESHOLDS
+    if lines:
+        cells = cells[cells["line"].isin(lines)]
+    n_grade = max(len(v) for v in thresholds.values()) + 1
+    palette = [fs.COLOR_BASELINE, fs.COLOR_MODEL, fs.COLOR_ACCENT, fs.COLOR_REALTIME]
     fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
-    width = 0.25
+    width = 0.8 / len(thresholds)
     for i, (name, ths) in enumerate(thresholds.items()):
         ga = np.searchsorted(ths, cells["actual"], side="right")
-        dist = np.bincount(ga, minlength=len(ths) + 1) / len(ga) * 100
+        dist = np.bincount(ga, minlength=n_grade) / len(ga) * 100
         axes[0].bar(
             np.arange(len(dist)) + i * width,
             dist,
             width=width,
             label=name,
-            color=[fs.COLOR_BASELINE, fs.COLOR_MODEL, fs.COLOR_ACCENT][i],
+            color=palette[i % len(palette)],
         )
         gl = np.searchsorted(ths, cells["lookup"], side="right")
         gm = np.searchsorted(ths, cells["model"], side="right")
@@ -505,64 +689,107 @@ def fig_grade_threshold_sensitivity(inp: Inputs) -> list[Path]:
             color=fs.COLOR_MODEL,
             label="모델" if i == 0 else None,
         )
-    axes[0].set_xticks(np.arange(4) + width)
-    axes[0].set_xticklabels([f"{i + 1}등급" for i in range(4)])
+    axes[0].set_xticks(np.arange(n_grade) + width * (len(thresholds) - 1) / 2)
+    axes[0].set_xticklabels([f"{i + 1}등급" for i in range(n_grade)])
     axes[0].set_xlabel("등급(1=가장 여유)")
     axes[0].set_ylabel("실측 셀 비율 (%)")
-    axes[0].set_title("임계치 후보별 실측 등급 분포 — 국토부 기준은 99.6%가 한 등급")
+    axes[0].set_title("임계치 후보별 실측 등급 분포")
     axes[0].legend(frameon=False)
-    axes[1].set_xticks(range(3))
+    axes[1].set_xticks(range(len(thresholds)))
     axes[1].set_xticklabels(list(thresholds))
     axes[1].set_ylim(85, 100)
     axes[1].set_ylabel("실측 등급 일치율 (%)")
-    axes[1].set_title("lookup vs 모델 등급 일치율")
+    axes[1].set_title(f"lookup vs 모델 등급 일치율 ({_lines_label(lines) if lines else '1~8호선'})")
     axes[1].legend(frameon=False)
     fig.tight_layout()
     fs.caption(
-        fig, "출처: grade_cells.parquet (grade_sensitivity --save-cells, 2025 평가, 764.6만 셀)."
+        fig,
+        f"출처: grade_cells.parquet (grade_sensitivity --save-cells, 2025 평가, {len(cells):,} 셀).",
     )
-    return [fs.save(fig, "grade_threshold_sensitivity")]
+    return [
+        fs.save(
+            fig,
+            _name(
+                "grade_threshold_sensitivity",
+                *(lines or []),
+                *(thresholds.keys() if not default else []),
+                default=default,
+            ),
+        )
+    ]
 
 
 # ── 10·11 ──
-def fig_train_load_gangnam_rush(inp: Inputs) -> list[Path]:
+def fig_train_load(
+    inp: Inputs,
+    station_no: int = 222,
+    direction: str = "내선",
+    date: str | None = None,
+    slots: Sequence[str] = ("07:30", "08:00", "08:30", "09:00"),
+) -> list:
+    """한 역·방향·날짜의 열차별 혼잡도 추정 막대(배차 주석). 기본은 강남 내선 첫 날 08시대."""
     lbt = inp.load_by_train()
     if lbt is None:
         return []
-    day = lbt["date"].min()
-    s = lbt[(lbt["station_no"] == 222) & (lbt["direction"] == "내선") & (lbt["date"] == day)]
-    s = s[s["time_slot_30min"].isin(["07:30", "08:00", "08:30", "09:00"])].sort_values(
-        "arrival_time"
+    default = (
+        station_no == 222
+        and direction == "내선"
+        and date is None
+        and tuple(slots) == ("07:30", "08:00", "08:30", "09:00")
     )
+    day = pd.Timestamp(date) if date else lbt["date"].min()
+    s = lbt[
+        (lbt["station_no"] == station_no) & (lbt["direction"] == direction) & (lbt["date"] == day)
+    ]
+    s = s[s["time_slot_30min"].isin(slots)].sort_values("arrival_time")
     if s.empty:
         return []
-    fig, ax = plt.subplots()
+    name = (
+        _station_name(inp.panel, station_no, with_line=True)
+        if inp.panel is not None
+        else str(station_no)
+    )
+    fig, ax = plt.subplots(figsize=(max(11, 0.28 * len(s)), 6))
     colors = [fs.COLOR_ACCENT if h else fs.COLOR_MODEL for h in s["headway_long"]]
     ax.bar(range(len(s)), s["congestion_pct_est"], color=colors)
     ax.set_xticks(range(len(s)))
     ax.set_xticklabels([t[:5] for t in s["arrival_time"]], rotation=90, fontsize=8)
     for i, (h, v) in enumerate(zip(s["headway_min"], s["congestion_pct_est"])):
         ax.text(i, v + 1, f"{h:.0f}′", ha="center", fontsize=7, color=fs.PALETTE_NEUTRAL[0])
-    for b in ("08:00", "08:30", "09:00"):
+    for b in list(slots)[1:]:
         idx = np.where(s["time_slot_30min"].to_numpy() == b)[0]
         if len(idx):
             ax.axvline(idx[0] - 0.5, color=fs.PALETTE_NEUTRAL[2], lw=1)
     ax.set_ylabel("열차별 혼잡도 추정 (%)")
     ax.set_title(
-        f"강남 내선 07:30~09:29 열차별 혼잡도 추정 — {pd.Timestamp(day):%Y-%m-%d}, 막대 위 숫자 = 직전 열차 간격(분)"
+        f"{name} {direction} {slots[0]}~ 열차별 혼잡도 추정 — {day:%Y-%m-%d}, 막대 위 숫자 = 직전 열차 간격(분)"
     )
     fs.caption(
         fig,
         "30분 평균 혼잡도(88 배율 라벨) × 열차 수를 직전 간격 비례로 배분(135). 빨강 = 간격 12분 초과. '열차별 추정'이며 실측 아님.",
     )
-    return [fs.save(fig, "train_load_gangnam_rush")]
+    return [
+        fs.save(
+            fig,
+            _name(
+                "train_load_gangnam_rush", station_no, direction, date, slots[0], default=default
+            ),
+        )
+    ]
 
 
-def fig_headway_distribution(inp: Inputs) -> list[Path]:
+def fig_headway_distribution(
+    inp: Inputs,
+    lines: Sequence[str] = LINE_ORDER,
+    day_type: str = "평일",
+    long_headway_min: float = 12.0,
+) -> list:
+    """호선별 배차 간격 분포(러시/비러시). `long_headway_min`은 빨간 점선(플래그 임계)."""
     tt = inp.timetable
     if tt is None:
         return []
-    t = tt[tt["day_type"] == "평일"].copy()
+    default = list(lines) == LINE_ORDER and day_type == "평일" and long_headway_min == 12.0
+    t = tt[(tt["day_type"] == day_type) & tt["line"].isin(lines)].copy()
     t["m"] = t["pass_time"].str.slice(0, 2).astype(int) * 60 + t["pass_time"].str.slice(
         3, 5
     ).astype(int)
@@ -573,9 +800,9 @@ def fig_headway_distribution(inp: Inputs) -> list[Path]:
     t["rush"] = t["slot"].isin(RUSH_SLOTS)
     t = t.dropna(subset=["headway"])
     t = t[t["headway"] <= 30]
-    fig, axes = plt.subplots(2, 4, figsize=(16, 7), sharex=True, sharey=True)
+    fig, axes = _grid(len(lines))
     bins = np.arange(0.5, 30.5, 1)
-    for ax, line in zip(axes.ravel(), LINE_ORDER):
+    for ax, line in zip(axes, lines):
         s = t[t["line"] == line]
         ax.hist(
             s[s["rush"]]["headway"],
@@ -593,17 +820,17 @@ def fig_headway_distribution(inp: Inputs) -> list[Path]:
             density=True,
             label="비러시",
         )
-        ax.axvline(12, color=fs.COLOR_ACCENT, lw=1, ls="--")
+        ax.axvline(long_headway_min, color=fs.COLOR_ACCENT, lw=1, ls="--")
         med = s[s["rush"]]["headway"].median()
+        over = (s["headway"] > long_headway_min).mean() * 100 if len(s) else float("nan")
         ax.set_title(
-            f"{line}  러시 중앙값 {med:.0f}분, 12분 초과 {(s['headway'] > 12).mean() * 100:.1f}%",
+            f"{line}  러시 중앙값 {med:.0f}분, {long_headway_min:.0f}분 초과 {over:.1f}%",
             fontsize=11,
         )
-        ax.legend(frameon=False, fontsize=8)
-    for ax in axes[1]:
         ax.set_xlabel("직전 열차 간격 (분)")
+        ax.legend(frameon=False, fontsize=8)
     fig.suptitle(
-        "호선별 배차 간격 분포 (평일 시각표) — 빨간 점선 = 12분(무작위 도착 가정 상한 플래그)",
+        f"호선별 배차 간격 분포 ({day_type} 시각표) — 빨간 점선 = {long_headway_min:.0f}분(무작위 도착 가정 상한 플래그)",
         y=1.0,
     )
     fig.tight_layout()
@@ -611,11 +838,18 @@ def fig_headway_distribution(inp: Inputs) -> list[Path]:
         fig,
         "출처: timetable_long (서울교통공사 열차운행시각표 2026-09-01판). 러시 = 07:30~08:59, 18:00~19:29.",
     )
-    return [fs.save(fig, "headway_distribution_by_line")]
+    return [
+        fs.save(
+            fig,
+            _name(
+                "headway_distribution_by_line", *lines, day_type, long_headway_min, default=default
+            ),
+        )
+    ]
 
 
 # ── 12 ──
-def fig_line9(inp: Inputs) -> list[Path]:
+def fig_line9(inp: Inputs) -> list:
     try:
         from DATA_ENGINE.eda import report_crowd
     except Exception:  # noqa: BLE001
@@ -631,7 +865,7 @@ def fig_line9(inp: Inputs) -> list[Path]:
     ]
 
 
-FIGURES: dict[int, tuple[str, Callable[[Inputs], list[Path]]]] = {
+FIGURES: dict[int, tuple[str, Callable[[Inputs], list]]] = {
     1: ("panel_heatmap_station_slot", fig_panel_heatmap),
     2: ("panel_daily_total_by_line", fig_daily_total_by_line),
     3: ("direction_validation_scatter", fig_direction_validation),
@@ -641,7 +875,7 @@ FIGURES: dict[int, tuple[str, Callable[[Inputs], list[Path]]]] = {
     7: ("station_residual_timeseries", fig_station_residual_timeseries),
     8: ("feature_set_improvement_steps", fig_feature_set_steps),
     9: ("grade_threshold_sensitivity", fig_grade_threshold_sensitivity),
-    10: ("train_load_gangnam_rush", fig_train_load_gangnam_rush),
+    10: ("train_load_gangnam_rush", fig_train_load),
     11: ("headway_distribution_by_line", fig_headway_distribution),
     12: ("line9", fig_line9),
 }
