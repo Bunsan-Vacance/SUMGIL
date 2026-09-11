@@ -57,7 +57,7 @@ class RouteSearchIntegrationTest {
     @BeforeEach
     void setUp() {
         Map<String, Station> stations = new HashMap<>();
-        for (String id : List.of("A", "B", "C", "R1", "R2", "X")) {
+        for (String id : List.of("A", "B", "C", "R1", "R2", "R3", "X")) {
             stations.put(id, mockStation(id, id + "역"));
         }
         for (Map.Entry<String, Station> entry : stations.entrySet()) {
@@ -70,7 +70,9 @@ class RouteSearchIntegrationTest {
         infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
         infos.put("R1", new RouteMapper.StationInfo("R1", "대여소1", 37.5, 127.0));
         infos.put("R2", new RouteMapper.StationInfo("R2", "대여소2", 37.5, 127.0));
+        infos.put("R3", new RouteMapper.StationInfo("R3", "대여소3", 37.5, 127.0));
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
+        lenient().when(graphRegistry.rentalIds()).thenReturn(Set.of("R1", "R2", "R3"));
         lenient().when(graphRegistry.transferTimes()).thenReturn(Map.of(
                 new TransferRule.TransferKey("B", "L1", "L2"), 60));
         lenient().when(graphRegistry.bikeStock()).thenReturn(Map.of());
@@ -97,9 +99,10 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
-    @DisplayName("IT2: 역전 — 따릉이 지름길이 이기면 BIKE leg로 응답한다")
+    @DisplayName("IT2: 역전 — 따릉이 지름길이 이기면 BIKE legs로 응답한다 (대여소 경계 분할)")
     void it2_역전_따릉이우위() {
         // 지하철 A→C 직통 900초 vs 따릉이 A→R1→C 240초. 자전거가 이겨야 한다.
+        // 122 경계 분할로 대여소 양단이 보인다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 900),
                 bike("A", "R1", 120),
@@ -108,8 +111,12 @@ class RouteSearchIntegrationTest {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
-        assertEquals(1, result.get(0).legs().size());
-        assertEquals(TravelMode.BIKE, result.get(0).legs().get(0).mode());
+        assertEquals(2, result.get(0).legs().size());
+        assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.BIKE));
+        assertEquals("A", result.get(0).legs().get(0).fromNodeId());
+        assertEquals("R1", result.get(0).legs().get(0).toNodeId());
+        assertEquals("R1", result.get(0).legs().get(1).fromNodeId());
+        assertEquals("C", result.get(0).legs().get(1).toNodeId());
         assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes(), 1e-9);
     }
 
@@ -190,9 +197,10 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
-    @DisplayName("IT8: 도보 지름길이 이기면 WALK leg로 응답한다")
+    @DisplayName("IT8: 도보 지름길이 이기면 WALK legs로 응답한다 (대여소 경계 분할)")
     void it8_도보우위_WALK() {
         // 지하철 A→C 직통 900초 vs 도보 A→R1→C 240초. 도보가 이겨야 한다.
+        // 122 경계 분할로 대여소 양단이 보인다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 900),
                 walk("A", "R1", 120),
@@ -201,8 +209,12 @@ class RouteSearchIntegrationTest {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(1, result.size());
-        assertEquals(1, result.get(0).legs().size());
-        assertEquals(TravelMode.WALK, result.get(0).legs().get(0).mode());
+        assertEquals(2, result.get(0).legs().size());
+        assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.WALK));
+        assertEquals("A", result.get(0).legs().get(0).fromNodeId());
+        assertEquals("R1", result.get(0).legs().get(0).toNodeId());
+        assertEquals("R1", result.get(0).legs().get(1).fromNodeId());
+        assertEquals("C", result.get(0).legs().get(1).toNodeId());
         assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes(), 1e-9);
     }
 
@@ -223,6 +235,58 @@ class RouteSearchIntegrationTest {
         List<TravelMode> modes = result.get(0).legs().stream().map(leg -> leg.mode()).toList();
         assertTrue(modes.contains(TravelMode.WALK));
         assertTrue(modes.contains(TravelMode.SUBWAY));
+    }
+
+    @Test
+    @DisplayName("IT10: 122 접근 WALK+본선 BIKE 혼합에 대여소가 보인다")
+    void it10_122_접근WALK_본선BIKE() {
+        // 지하철 A→C 직통 900초 vs 도보 A→R1 + 자전거 R1→R2 + 도보 R2→C 360초+환승360초.
+        // 혼합(720초)이 이기고 대여소 양단이 보인다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "C", "L1", 900),
+                walk("A", "R1", 120),
+                bike("R1", "R2", 120),
+                walk("R2", "C", 120)));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+
+        assertEquals(1, result.size());
+        assertEquals(5, result.get(0).legs().size());
+        assertEquals(TravelMode.WALK, result.get(0).legs().get(0).mode());
+        assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(1).mode());
+        assertEquals(TravelMode.BIKE, result.get(0).legs().get(2).mode());
+        assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(3).mode());
+        assertEquals(TravelMode.WALK, result.get(0).legs().get(4).mode());
+        assertEquals("A", result.get(0).legs().get(0).fromNodeId());
+        assertEquals("R1", result.get(0).legs().get(0).toNodeId());
+        assertEquals("R1", result.get(0).legs().get(2).fromNodeId());
+        assertEquals("R2", result.get(0).legs().get(2).toNodeId());
+        assertEquals("R2", result.get(0).legs().get(4).fromNodeId());
+        assertEquals("C", result.get(0).legs().get(4).toNodeId());
+    }
+
+    @Test
+    @DisplayName("IT11: 122 복수 hop 본선도 중간 대여소가 보인다")
+    void it11_122_본선복수hop_가시성() {
+        // 지하철 A→C 직통 1500초 vs 도보+자전거2hop+도보 440초+환승360초.
+        // 혼합(800초)이 이기고 중간 대여소 R2가 보인다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "C", "L1", 1500),
+                walk("A", "R1", 120),
+                bike("R1", "R2", 100),
+                bike("R2", "R3", 100),
+                walk("R3", "C", 120)));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+
+        assertEquals(1, result.size());
+        assertEquals(6, result.get(0).legs().size());
+        assertEquals(TravelMode.BIKE, result.get(0).legs().get(2).mode());
+        assertEquals(TravelMode.BIKE, result.get(0).legs().get(3).mode());
+        assertEquals("R1", result.get(0).legs().get(2).fromNodeId());
+        assertEquals("R2", result.get(0).legs().get(2).toNodeId());
+        assertEquals("R2", result.get(0).legs().get(3).fromNodeId());
+        assertEquals("R3", result.get(0).legs().get(3).toNodeId());
     }
 
     private Station mockStation(String id, String name) {
