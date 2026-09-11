@@ -124,6 +124,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--params", default=None, help="LightGBM 파라미터 JSON(그리드 결과 반영용)")
     ap.add_argument("--out", default=None)
+    ap.add_argument(
+        "--save-cells",
+        default=None,
+        help="셀 표(actual/lookup/model 혼잡도)를 parquet로 저장 — 136 그림 입력",
+    )
     args = ap.parse_args(argv)
     params = json.loads(args.params) if args.params else None
     chunks: list[str] = []
@@ -178,6 +183,12 @@ def main(argv: list[str] | None = None) -> None:
         )
     valid = merged.dropna(subset=["actual", "lookup", "model"])
     print(f"[셀] 전체 {len(merged):,}, 배율 있는 셀 {len(valid):,}", flush=True)
+    if args.save_cells:
+        Path(args.save_cells).parent.mkdir(parents=True, exist_ok=True)
+        valid[[*CELL_KEY, "line", "actual", "lookup", "model"]].to_parquet(
+            args.save_cells, index=False
+        )
+        print(f"[저장] {args.save_cells}", flush=True)
 
     # 3. 혼잡도 % 자체의 오차 (등급 전 단계)
     rows = []

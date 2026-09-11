@@ -24,9 +24,12 @@
   이 파일부터 대조**(현재 매핑은 2026-09-06, 2026년 1~7월치 실물로 검증됨). CROWD는 컬럼이
   적고 고정적이라 여기 넣지 않고 `parsers_crowd.py` 안에 인라인 rename으로 처리한다 —
   따릉이처럼 헤더 드리프트 감지가 필요한 성격이 아니다.
+- `eda/` (CROWD, 보고서 그림 — 136) — `figstyle.py`(한글 폰트 탐색·호선 공식 색 팔레트·
+  PNG+SVG 저장 규약)와 `report_figures.py`(그림 함수 12개, `--only 5,10` 선택 실행). 88~135
+  분석 결과를 슬라이드·Notion·MR에 붙일 수 있는 그림으로 만든다. 아래 "보고서 그림 재생성" 참고.
 - `reports/` — `download_guide.md`(수동 다운로드 안내, 커밋 대상), `bike_weather_eda.md`·
-  `crowd_eda.md`·`figures/*.png`(생성 산출물, `.gitignore` 대상 — 코드만 커밋되고 리포트
-  자체는 재생성).
+  `crowd_eda.md`·`figures/*.png|svg`(생성 산출물, `.gitignore` 대상 — 코드만 커밋되고 리포트
+  자체는 재생성. 그림은 Drive `data/CROWD/reports/figures/` 미러와 Notion 실험실 첨부로 공유).
 - `scripts/` — 폴러 백그라운드 실행용 nohup 스크립트·systemd 유닛 템플릿.
 
 ## `data/` 하위 각 디렉터리가 뭔지
@@ -55,6 +58,39 @@
 | `data/CROWD/raw/` | 서울시 지하철혼잡도정보 CSV(1~8호선) + 9호선 xlsx 6개년 | 수동 다운로드 | "대표 1주" 스냅샷(날짜 아님) | 정적 프로파일 EDA |
 | `data/CROWD/interim/crowd_congestion_long.parquet` | `parsers_crowd.py` tidy long-format 결과 | 파서 실행 | 원본 그대로 | `report_crowd.py`가 직접 읽는 소스 |
 | `data/ROUTE/raw/transfer_info/` | 서울교통공사 환승정보(환승역 간 도보 소요시간) | 수동 다운로드 | - | A안(지하철) 경로 시간 계산 — 혼잡도 예측 피처 아님 |
+
+## 보고서 그림 재생성 (CROWD, 136)
+
+```bash
+cd AI
+python -m DATA_ENGINE.eda.report_figures                 # 전체 12종 → DATA_ENGINE/reports/figures/
+python -m DATA_ENGINE.eda.report_figures --only 5,10,11  # 번호 선택
+```
+
+수치를 그림 코드에 하드코딩하지 않는다 — 입력은 아래 표의 parquet이고, 없는 입력의 그림은 건너뛰고
+실행 끝에 인벤토리로 알린다. 8·9번 입력은 검증 스크립트가 만든다(각 5~10분):
+
+```bash
+python validation/CROWD/baseline-check/compare_models.py <세트 ...> --models=lightgbm,xgboost     --save-results=data/CROWD/interim/validation/compare_results.parquet
+python validation/CROWD/baseline-check/grade_sensitivity.py     --save-cells=data/CROWD/interim/validation/grade_cells.parquet
+```
+
+| # | 파일(`reports/figures/`) | 내용 | 입력 | 출처 절 |
+| --- | --- | --- | --- | --- |
+| 1 | `panel_heatmap_station_slot_<요일유형>` (4장) | 역(호선 순) × 20슬롯 승차 평균, log 스케일 | `processed/crowd_panel_2024_2025` | 88 |
+| 2 | `panel_daily_total_by_line` | 호선별 일 총 승차 7일 이동평균, 평일 공휴일 표시 | 패널 | 88 |
+| 3 | `direction_validation_scatter` | 재귀식 raw 평균 vs 실측 스냅샷, 호선·방향별 상관 | `processed/crowd_congestion_calibration` | 88 방향 검증 |
+| 4 | `calibration_ratio_heatmap` | 호선별 역 × 30분 배율(평일, 하선/내선) | 배율표 | 88 배율표 |
+| 5 | `half_hour_share_curve` | 시간대별 후반 30분 비중 평균 ± 1σ(평일/토/일) | 배율표 → `half_hour_shares` | 135 1층 |
+| 6 | `residual_concentration` | 잔차(실측 − 2024 lookup) 쏠림: 상위 15역·시간대·요일유형 | 패널 | 87·90 |
+| 7 | `station_residual_timeseries` | 서울역·종합운동장 2025 일별 잔차, 경기일 표시 | 패널 + `crowd_station_events` | 90 미해결 |
+| 8 | `feature_set_improvement_steps` | 세트별 RMSE/MAE 개선율, 실시간 필요 세트 색 구분 | `interim/validation/compare_results` | 89 |
+| 9 | `grade_threshold_sensitivity` | 임계치 후보별 등급 분포 + lookup/모델 일치율 | `interim/validation/grade_cells` | 90 |
+| 10 | `train_load_gangnam_rush` | 강남 내선 07:30~09:29 열차별 혼잡도 추정, 배차 주석 | `processed/crowd_load_by_train_*` | 135 2층 |
+| 11 | `headway_distribution_by_line` | 호선별 배차 간격 분포(러시/비러시), 12분 초과 비율 | `interim/timetable_long` | 135 |
+| 12 | `crowd_line9_*` (2장) | 9호선 히트맵·군집(기존 `report_crowd` 위임) | `interim/crowd_congestion_long` | 88 |
+
+그림의 숫자가 `validation/CROWD/**/RESULTS.md`와 어긋나면 RESULTS.md가 맞다 — 그림은 표를 옮긴 것이다.
 
 ## 하드 룰
 

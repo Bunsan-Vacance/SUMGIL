@@ -121,11 +121,12 @@ def build_congestion_long(raw_dir: Path = RAW_DIR) -> pd.DataFrame:
     """raw_dir 안의 서울시 CSV 1개 + 9호선 xlsx 전부를 읽어 하나의 tidy long-format으로 합친다."""
     frames = []
 
-    csv_candidates = sorted(raw_dir.glob("*.csv"))
+    # raw/에는 88 이후 승하차·환승·역사마스터 CSV/xlsx도 함께 있어 파일명으로 좁힌다.
+    csv_candidates = sorted(raw_dir.glob("*지하철혼잡도정보*.csv"))
     for csv_path in csv_candidates:
         frames.append(load_seoul_congestion_csv(csv_path))
 
-    xlsx_candidates = sorted(raw_dir.glob("*.xlsx"))
+    xlsx_candidates = sorted(raw_dir.glob("*9호선*혼잡도*.xlsx"))
     for xlsx_path in xlsx_candidates:
         frames.append(load_line9_workbook(xlsx_path))
 
