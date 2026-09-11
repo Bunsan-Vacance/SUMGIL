@@ -28,6 +28,16 @@ redis:
     - sumgil_redis_data:/data
 ```
 
+### `kafka` (S15P21A104-74, 2026-09-11 추가)
+
+수집기 → 컨슈머 사이의 버퍼. `apache/kafka:4.2.1` 단일 노드(KRaft — 4.x 에는 ZooKeeper 가 없다).
+리스너를 둘로 나눈다: 컨테이너끼리 `kafka:19092`(미공개), 호스트에서 `localhost:9092`.
+구성값의 의미·검증 절차·함정은 [kafka.md](kafka.md)에 따로 정리했다.
+
+```bash
+docker compose -f Infra/docker/docker-compose.yml up -d --wait kafka
+```
+
 `fe`, `be` 전체 스택 블록은 각 파트 Dockerfile이 없어 그대로 주석 처리해뒀다 (`Infra/README.md` 진행 순서 1~2번 참고). `db`라는 이름의 임시 플레이스홀더 서비스는 `postgres`로 대체했다 — BE 쪽 `.claude/skills/verify`와 이름을 맞추기 위함.
 
 ## 사용법

@@ -12,7 +12,7 @@
 
 | 파일 | 상태 |
 | --- | --- |
-| `docker/docker-compose.yml` | `postgres`·`redis`는 실행 가능 (BE 로컬 개발용, [BE/README.md](../BE/README.md) 참고). `fe`·`be`는 각 파트 Dockerfile이 생기기 전까지 주석 처리 |
+| `docker/docker-compose.yml` | `postgres`·`redis`·`kafka`는 실행 가능 (BE 로컬 개발용, [BE/README.md](../BE/README.md) 참고). `fe`·`be`는 각 파트 Dockerfile이 생기기 전까지 주석 처리 |
 | `nginx/nginx.conf` | 리버스 프록시 골격 (`server_name` 미지정) |
 
 ## 디렉터리 구조
@@ -20,10 +20,19 @@
 ```
 Infra/
 ├─ docker/
-│  └─ docker-compose.yml   로컬 통합 실행
+│  └─ docker-compose.yml   로컬 통합 실행 (postgres · redis · kafka)
 └─ nginx/
    └─ nginx.conf           리버스 프록시 설정
 ```
+
+## 로컬 기동
+
+```bash
+docker compose -f Infra/docker/docker-compose.yml up -d postgres redis      # BE 개발
+docker compose -f Infra/docker/docker-compose.yml up -d --wait kafka        # 수집기·스트림
+```
+
+Kafka 구성·검증 절차·함정은 [BE/docs/infra/kafka.md](../BE/docs/infra/kafka.md)에 있다.
 
 ## 진행 순서
 
@@ -45,6 +54,7 @@ Nginx가 80 포트를 받아 경로로 갈라 보낸다.
 ## 작업 규칙
 
 - **`.env`, `*.pem`, `*.key`는 절대 커밋하지 않는다.** 루트 `.gitignore`에 등록돼 있으나 `git add -f`로 우회하지 않도록 주의한다.
+- **EC2에서는 데이터 포트를 `ports:`로 공개하지 않는다.** 현재 `5432`·`6379`·`9092`가 열려 있는 건 로컬 개발 편의다. Docker가 UFW를 우회하므로 그대로 배포하면 인터넷에 노출된다. 배포 시 세 포트를 함께 내부 네트워크로 돌린다.
 - EC2 키페어와 DB 접속 정보는 팀 내 별도 채널로 공유한다.
 - `nginx.conf` 수정 후에는 `nginx -t`로 문법을 검증한 뒤 reload 한다.
 
