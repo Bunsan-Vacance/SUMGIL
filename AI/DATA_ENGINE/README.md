@@ -77,8 +77,10 @@ python -m DATA_ENGINE.eda.report_figures --only 5,10,11  # 번호 선택
 실행 끝에 인벤토리로 알린다. 8·9번 입력은 검증 스크립트가 만든다(각 5~10분):
 
 ```bash
-python validation/CROWD/baseline-check/compare_models.py <세트 ...> --models=lightgbm,xgboost     --save-results=data/CROWD/interim/validation/compare_results.parquet
-python validation/CROWD/baseline-check/grade_sensitivity.py     --save-cells=data/CROWD/interim/validation/grade_cells.parquet
+python validation/CROWD/baseline-check/compare_models.py <세트 ...> --models=lightgbm,xgboost \
+    --save-results=data/CROWD/interim/validation/compare_results.parquet
+python validation/CROWD/baseline-check/grade_sensitivity.py \
+    --save-cells=data/CROWD/interim/validation/grade_cells.parquet
 python validation/CROWD/sim-eval/evaluate.py --seeds 0,1       # 13·14번 입력(약 5분)
 ```
 
