@@ -79,7 +79,9 @@ def load_labels(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     return lab
 
 
-def build(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, dict]:
+def build(
+    start: pd.Timestamp, end: pd.Timestamp, mix_h0: float | None = None, mix_h1: float = 15.0
+) -> tuple[pd.DataFrame, dict]:
     labels = load_labels(start, end)
     # pass_time(도착, 없으면 출발)을 그 역을 지나는 시각으로 쓴다. 원본 arrival/departure 컬럼은 버린다.
     tt = (
@@ -124,7 +126,12 @@ def build(start: pd.Timestamp, end: pd.Timestamp) -> tuple[pd.DataFrame, dict]:
         ["station_no", "direction", "day_type", "train_id", "arrival_time", "express"]
     ]
     out = allocate_to_trains(
-        slot_loads, tt_alloc, load_col="onboard_30min_est", long_headway_min=LONG_HEADWAY_MIN
+        slot_loads,
+        tt_alloc,
+        load_col="onboard_30min_est",
+        long_headway_min=LONG_HEADWAY_MIN,
+        mix_h0=mix_h0,
+        mix_h1=mix_h1,
     )
     # allocate_to_trains는 배분에 필요한 컬럼만 돌려준다 — 급행 여부는 열차 키로 다시 붙인다.
     out = out.merge(
@@ -202,10 +209,18 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--start", default="2025-06-02")
     ap.add_argument("--end", default="2025-06-08")
+    ap.add_argument(
+        "--mix-h0",
+        type=float,
+        default=None,
+        help="배차 의존 도착 혼합(92): 이 분까지 무작위 도착 가중 1. 생략하면 간격 비례(135 기본)",
+    )
+    ap.add_argument("--mix-h1", type=float, default=15.0, help="이 분부터 무작위 도착 가중 0")
     args = ap.parse_args(argv)
     start, end = pd.Timestamp(args.start), pd.Timestamp(args.end)
-    out, stats = build(start, end)
-    path = CROWD_PROCESSED / f"crowd_load_by_train_{start:%Y%m%d}_{end:%Y%m%d}.parquet"
+    out, stats = build(start, end, mix_h0=args.mix_h0, mix_h1=args.mix_h1)
+    suffix = f"_mix{args.mix_h0:g}-{args.mix_h1:g}" if args.mix_h0 is not None else ""
+    path = CROWD_PROCESSED / f"crowd_load_by_train_{start:%Y%m%d}_{end:%Y%m%d}{suffix}.parquet"
     out.to_parquet(path, index=False)
     for k, v in stats.items():
         print(f"{k}: {v}")

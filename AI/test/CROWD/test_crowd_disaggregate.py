@@ -8,6 +8,7 @@ import pytest
 
 from app.CROWD.pipeline.disaggregate import (
     allocate_to_trains,
+    arrival_mix_weight,
     half_hour_shares,
     slot30_start_minutes,
     slots_in_order,
@@ -146,3 +147,76 @@ def test_after_midnight_slots_fold_to_end_of_service_day():
     assert slot30_start_minutes("00:30") == 24 * 60 + 30
     assert slots_in_order()[0] == "05:30" and slots_in_order()[-1] == "00:30"
     assert len(slots_in_order()) == 39
+
+
+# ── 92: 배차 의존 도착 혼합 ──
+def test_arrival_mix_weight_is_piecewise_linear():
+    w = arrival_mix_weight([3, 5, 10, 15, 20], h0=5, h1=15)
+    assert np.allclose(w, [1.0, 1.0, 0.5, 0.0, 0.0])
+    with pytest.raises(ValueError):
+        arrival_mix_weight(5, h0=10, h1=10)
+
+
+def _loads_one_slot(total=1200.0):
+    return pd.DataFrame(
+        {
+            "date": pd.Timestamp("2025-03-03"),
+            "station_no": 222,
+            "direction": "내선",
+            "day_type": "평일",
+            "time_slot_30min": ["08:00"],
+            "onboard_30min_est": [total],
+        }
+    )
+
+
+def _timetable_uneven():
+    # 08:00 슬롯에 열차 둘: 간격 5분(08:05)과 25분(08:29 → 실제 간격 24분)
+    return pd.DataFrame(
+        {
+            "station_no": 222,
+            "direction": "내선",
+            "day_type": "평일",
+            "train_id": ["A", "B", "C"],
+            "arrival_time": ["08:00", "08:05", "08:29"],
+        }
+    )
+
+
+def test_mix_none_keeps_headway_proportional_and_no_mix_column():
+    out = allocate_to_trains(_loads_one_slot(), _timetable_uneven())
+    assert "mix_w" not in out.columns
+    # A는 첫차(간격 30 기본) — 슬롯 08:00에 A(30)·B(5)·C(24)
+    assert out["load_est"].sum() == pytest.approx(1200.0)
+    assert np.allclose(out.set_index("train_id")["share"][["B", "C"]], [5 / 59, 24 / 59])
+
+
+def test_mix_moves_long_headway_trains_toward_equal_split_and_conserves_mass():
+    out = allocate_to_trains(_loads_one_slot(), _timetable_uneven(), mix_h0=5, mix_h1=15)
+    assert out["load_est"].sum() == pytest.approx(1200.0)
+    s = out.set_index("train_id")
+    # B(5분)는 가중 1 → 간격 비례 5/59, A(첫차, 기본 30분)·C(24분)는 가중 0 → 균등 1/3.
+    # 재정규화 후 간격이 가장 길던 A의 몫은 줄고(30/59 → C와 같음) B의 몫은 커진다.
+    assert s.loc["B", "mix_w"] == pytest.approx(1.0)
+    assert s.loc["C", "mix_w"] == pytest.approx(0.0)
+    assert s.loc["B", "share"] > 5 / 59
+    assert s.loc["A", "share"] < 30 / 59
+    assert s.loc["A", "share"] == pytest.approx(s.loc["C", "share"])
+    assert s["share"].sum() == pytest.approx(1.0)
+    assert s.loc["C", "headway_long"] and not s.loc["B", "headway_long"]
+
+
+def test_mix_with_short_headways_equals_proportional():
+    loads = pd.DataFrame(
+        {
+            "date": pd.Timestamp("2025-03-03"),
+            "station_no": 222,
+            "direction": "내선",
+            "day_type": "평일",
+            "time_slot_30min": ["08:00"],
+            "onboard_30min_est": [1800.0],
+        }
+    )
+    base = allocate_to_trains(loads, _timetable())
+    mixed = allocate_to_trains(loads, _timetable(), mix_h0=5, mix_h1=15)
+    assert np.allclose(base["share"], mixed["share"])  # 6분 간격 → w≈0.9지만 균등이라 몫 동일
