@@ -20,6 +20,8 @@ groupby 평균)만큼 정확히 재현하지 못해 세 모델 다 베이스라�
       --models=a,b      후보 지정. 기본은 models.DEFAULT_CANDIDATES(lightgbm,xgboost).
       --all-models      RandomForest까지 세 후보 전부(느리다 — 세트당 3~5분 추가).
       --rebuild-cache   파생 패널 캐시를 무시하고 다시 만든다(derived_features 참고).
+      --save-results=path.parquet   세트별 결과 표를 feature_set 컬럼을 붙여 parquet로 저장
+                        (136 그림 입력 — 수치를 그림 코드에 하드코딩하지 않기 위해).
 """
 
 from __future__ import annotations
@@ -160,4 +162,11 @@ if __name__ == "__main__":
         models = list(CANDIDATES)
     else:
         models = list(DEFAULT_CANDIDATES)
-    compare_many(feature_sets, models, rebuild_cache="rebuild-cache" in flags)
+    results = compare_many(feature_sets, models, rebuild_cache="rebuild-cache" in flags)
+    if "save-results" in opts:
+        out_path = Path(opts["save-results"])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.concat(
+            [r.assign(feature_set=fs) for fs, r in results.items()], ignore_index=True
+        ).to_parquet(out_path, index=False)
+        print(f"\n[저장] {out_path}")
