@@ -47,10 +47,12 @@ from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
 AI_ROOT = Path(__file__).resolve().parents[3]
 MODELS_DIR = AI_ROOT / "models" / "CROWD"
 
-# 87·89 비교에 쓴 값. 90의 그리드 탐색 결과로 갱신한다.
+# 90 그리드(num_leaves 31/63/127 × n_estimators 300/600, 시차 전용 세트, 2024/2025 분할)에서
+# 승차·하차 평균 RMSE 개선율 최고(23.05%)였던 조합. 차이는 1%p 안이라 더 작은 모델을 택했다.
+# 600그루는 전 조합에서 300그루보다 나빠 과적합 쪽이다(`evaluate_final.py` 3절).
 DEFAULT_PARAMS = {
     "n_estimators": 300,
-    "num_leaves": 63,
+    "num_leaves": 31,
     "learning_rate": 0.05,
     "random_state": 42,
     "n_jobs": -1,
@@ -159,8 +161,10 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    # 기본은 D-1 배포 세트. 전부 세트는 실시간 승하차 원천이 확보됐을 때 따로 학습한다 —
+    # 전부 세트로 학습하고 실시간 컬럼을 NaN으로 서빙하면 +4~8%에 그친다(evaluate_final 1절).
     ap.add_argument(
-        "--feature-set", default="festival_all_derived_resid", choices=sorted(FEATURE_SETS)
+        "--feature-set", default="festival_selflag_d1d7_resid", choices=sorted(FEATURE_SETS)
     )
     ap.add_argument("--group-col", default=None, help="예: line — 그룹별로 잔차 모델을 따로 fit")
     ap.add_argument("--params", default=None, help="JSON, 예: '{\"num_leaves\": 127}'")
