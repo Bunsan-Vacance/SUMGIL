@@ -99,6 +99,6 @@ ingress-nginx가 80 포트를 받아 경로로 갈라 보낸다. **Ingress는 �
 
 - **`.env`, `.env.secret`, `*.pem`, `*.key`는 절대 커밋하지 않는다.** `.gitignore`에 등록돼 있으나 `git add -f`로 우회하지 않도록 주의한다.
 - **비민감 설정은 `config.env`(커밋), 비밀은 `.env.secret`(gitignore).** kustomize `configMapGenerator`/`secretGenerator`가 각각 ConfigMap(`be-config`)·Secret(`be-secret`)으로 만든다.
-- **원격 레지스트리 포트가 막혀 있다.** lab.ssafy.com:5050은 egress가 차단돼(2026-09-11 실측) 클러스터 내장 레지스트리를 쓴다. 이미지 주소는 `k8s/scripts/env.sh`가 단일 소스다.
-- **EC2에서 데이터 포트를 외부로 공개하지 않는다.** 로컬 `docker-compose.yml`의 5432·6379·9092는 개발 편의용이다. 클러스터 안에서는 ClusterIP로만 노출한다.
+- **레지스트리는 클러스터 내장을 쓴다.** 이미지 주소는 `k8s/scripts/env.sh`가 단일 소스다.
+- **EC2에서 데이터 포트를 외부로 공개하지 않는다.** 클러스터 안에서는 ClusterIP로만 노출한다.
 - EC2 키페어·DB 접속 정보·VPN 인증키는 팀 내 별도 채널로 공유한다.

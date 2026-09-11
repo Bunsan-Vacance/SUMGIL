@@ -68,7 +68,7 @@ SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 
 1. **API 명세 불일치** — 지금 만든 `GET /api/routes/search`, `GET /api/stations/nearby`는 `BE/README.md` 2절에 이미 있던 API 초안(`/api/v1/escape` 등, `/api/v1/` 버전 프리픽스, 다른 응답 구조)과 형태가 다르다. FE 연동 전에 어느 쪽으로 갈지 정해야 한다. 자세한 건 [api/mock-endpoints.md](./api/mock-endpoints.md).
 2. **패키지 구조 전환 시점** — 지금의 평평한 `controller/`, `dto/`를 언제 도메인 단위(`domain.route`, `domain.station` ...)로 옮길지.
-3. **EC2 배포(CD)는 아직 준비 안 됨** — CI(테스트)는 생겼지만 배포는 별개다. `BE/Dockerfile`이 없고, `Infra/docker/docker-compose.yml`의 `fe`/`be` 블록도 주석 처리 상태다. 환경변수를 `.env`/`.env.example`로 분리하는 작업(`Infra/README.md` 3번 항목)도 안 됐다. EC2에 올리려면 이것들부터 해야 한다.
+3. **EC2 배포(CD)** — ~~아직 준비 안 됨~~ → **해소 (2026-09-11).** `BE/Dockerfile` 추가, k3s에 배포 완료. 클러스터 구성은 [Infra/README.md](../../Infra/README.md), 배포 매니페스트는 [BE/k8s/](../k8s/). (이 항목은 S60 초기 세팅 시점의 기록이며, 이후 infra 작업에서 해결됐다.)
 
 ## 6. CI
 
