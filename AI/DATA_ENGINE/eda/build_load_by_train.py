@@ -79,9 +79,10 @@ def load_labels(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     return lab
 
 
-def build(
-    start: pd.Timestamp, end: pd.Timestamp, mix_h0: float | None = None, mix_h1: float = 15.0
-) -> tuple[pd.DataFrame, dict]:
+def prepare_inputs(
+    start: pd.Timestamp, end: pd.Timestamp
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """(slot_loads, tt_alloc, labels, lab) — 배분·시뮬레이션(92)이 같은 입력을 쓰도록 분리."""
     labels = load_labels(start, end)
     # pass_time(도착, 없으면 출발)을 그 역을 지나는 시각으로 쓴다. 원본 arrival/departure 컬럼은 버린다.
     tt = (
@@ -125,6 +126,13 @@ def build(
     tt_alloc = tt.rename(columns={"day_type_tt": "day_type"})[
         ["station_no", "direction", "day_type", "train_id", "arrival_time", "express"]
     ]
+    return slot_loads, tt_alloc, labels, lab
+
+
+def build(
+    start: pd.Timestamp, end: pd.Timestamp, mix_h0: float | None = None, mix_h1: float = 15.0
+) -> tuple[pd.DataFrame, dict]:
+    slot_loads, tt_alloc, labels, lab = prepare_inputs(start, end)
     out = allocate_to_trains(
         slot_loads,
         tt_alloc,
