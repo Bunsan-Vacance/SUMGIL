@@ -26,11 +26,13 @@
     cd AI
     python -m DATA_ENGINE.eda.report_figures                 # 전체
     python -m DATA_ENGINE.eda.report_figures --only 5,10,11  # 번호 선택
+    python -m DATA_ENGINE.eda.report_figures --mirror        # + data/CROWD/reports/figures/ 복사(Drive)
 """
 
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -54,6 +56,8 @@ CALIBRATION = PROCESSED / "crowd_congestion_calibration.parquet"
 TIMETABLE = INTERIM / "timetable_long.parquet"
 COMPARE_RESULTS = VALIDATION_CACHE / "compare_results.parquet"
 GRADE_CELLS = VALIDATION_CACHE / "grade_cells.parquet"
+# Drive 동기화 스크립트는 AI/data/ 만 옮기므로 그림을 공유할 때는 여기로 복사한다(--mirror).
+DATA_MIRROR = AI_ROOT / "data" / "CROWD" / "reports" / "figures"
 
 LINE_ORDER = [f"{i}호선" for i in range(1, 9)]
 DAY_TYPES = ["평일", "토요일", "일요일", "휴일"]
@@ -617,7 +621,7 @@ def fig_line9(inp: Inputs) -> list[Path]:
     except Exception:  # noqa: BLE001
         return []
     try:
-        report_crowd.main()
+        report_crowd.generate()
     except Exception as e:  # noqa: BLE001
         print(f"[12] 9호선 그림 재생성 실패 — {type(e).__name__}: {e}")
         return []
@@ -648,6 +652,11 @@ def main(argv: list[str] | None = None) -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--only", default=None, help="예: 5,10,11")
+    ap.add_argument(
+        "--mirror",
+        action="store_true",
+        help="생성한 PNG를 data/CROWD/reports/figures/ 에도 복사(Drive 동기화 대상)",
+    )
     args = ap.parse_args(argv)
     wanted = [int(x) for x in args.only.split(",")] if args.only else sorted(FIGURES)
 
@@ -665,6 +674,11 @@ def main(argv: list[str] | None = None) -> None:
             skipped.append((n, name))
             print(f"[{n:>2}] {name}: 입력 없음 — 건너뜀")
     print(f"\n생성 {len(made)}장" + (f", 건너뜀 {len(skipped)}: {skipped}" if skipped else ""))
+    if args.mirror and made:
+        DATA_MIRROR.mkdir(parents=True, exist_ok=True)
+        for p in made:
+            shutil.copy2(p, DATA_MIRROR / p.name)
+        print(f"[미러] {len(made)}장 → {DATA_MIRROR}")
 
 
 if __name__ == "__main__":
