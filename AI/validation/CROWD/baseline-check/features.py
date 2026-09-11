@@ -63,7 +63,24 @@ FESTIVAL_SHAPE_COLS = [
 ]
 CATEGORICAL_COLS = ["station_no", "time_slot"]
 
+# ── 89번 파생 피처. 컬럼 이름은 `derived_features.py`(→ app/CROWD/pipeline/{adjacency,lags})가
+# 만드는 것과 같아야 한다. 어느 세트를 배포에 쓸 수 있는지는 예측 시점에 따라 갈린다
+# (`derived_features.py` docstring의 표). 여기서는 문자열로만 적어 features.py가 무거운
+# 모듈을 import하지 않게 한다.
+_SIDES = ("prev", "next")
+_RESID = ("boarding_resid", "alighting_resid")
+NEIGHBOR_RAW_COLS = [f"nb_{s}_{t}" for s in _SIDES for t in ("boarding", "alighting")]
+NEIGHBOR_RESID_COLS = [f"nb_{s}_{r}" for s in _SIDES for r in _RESID]
+TRANSFER_RESID_COLS = [f"nb_xfer_{r}" for r in _RESID]
+SELF_LAG_D1_COLS = [f"lag1d_{r}" for r in _RESID]
+SELF_LAG_D7_COLS = [f"lag7d_{r}" for r in _RESID]
+SELF_LAG_S1_COLS = [f"lag1s_{r}" for r in _RESID]
+NEIGHBOR_LAG_D1_COLS = [f"nb_{s}_{c}" for s in _SIDES for c in SELF_LAG_D1_COLS]
+NEIGHBOR_LAG_D7_COLS = [f"nb_{s}_{c}" for s in _SIDES for c in SELF_LAG_D7_COLS]
+NEIGHBOR_LAG_S1_COLS = [f"nb_{s}_{c}" for s in _SIDES for c in SELF_LAG_S1_COLS]
+
 _EVENT_INTERACTION = EVENT_COLS + ["station_no", "time_slot"]
+_FESTIVAL_SET = _EVENT_INTERACTION + FESTIVAL_SHAPE_COLS
 
 FEATURE_SETS: dict[str, list[str]] = {
     "weather": WEATHER_COLS,
@@ -72,9 +89,40 @@ FEATURE_SETS: dict[str, list[str]] = {
     "events_station": EVENT_COLS + ["station_no"],
     "events_station_time": _EVENT_INTERACTION,
     "events_station_time_attendance": _EVENT_INTERACTION + ATTENDANCE_COLS,
-    "events_station_time_festival": _EVENT_INTERACTION + FESTIVAL_SHAPE_COLS,
+    "events_station_time_festival": _FESTIVAL_SET,
     "events_station_time_attendance_festival": (
         _EVENT_INTERACTION + ATTENDANCE_COLS + FESTIVAL_SHAPE_COLS
+    ),
+    # ── 89번: 파생 피처. 전부 87 권장 세트(_FESTIVAL_SET) 위에 얹어 증분을 본다.
+    # (a) 같은 시간대 이웃 — 실시간 보정 전용
+    "neighbors_resid": NEIGHBOR_RESID_COLS,
+    "neighbors_raw": NEIGHBOR_RAW_COLS,
+    "festival_neighbors_resid": _FESTIVAL_SET + NEIGHBOR_RESID_COLS,
+    "festival_neighbors_raw": _FESTIVAL_SET + NEIGHBOR_RAW_COLS,
+    "festival_neighbors_xfer_resid": _FESTIVAL_SET + NEIGHBOR_RESID_COLS + TRANSFER_RESID_COLS,
+    # (b) 직전 시간대 — 실시간 보정, 1시간 지연 허용
+    "festival_slotlag_resid": (_FESTIVAL_SET + SELF_LAG_S1_COLS + NEIGHBOR_LAG_S1_COLS),
+    # (c) 전날·1주 전 — 사전 예측용. d7만 쓰는 세트는 일별 CSV 지연에도 안전한 하한.
+    "festival_lag_d7_resid": _FESTIVAL_SET + SELF_LAG_D7_COLS + NEIGHBOR_LAG_D7_COLS,
+    "festival_lag_d1d7_resid": (
+        _FESTIVAL_SET
+        + SELF_LAG_D1_COLS
+        + SELF_LAG_D7_COLS
+        + NEIGHBOR_LAG_D1_COLS
+        + NEIGHBOR_LAG_D7_COLS
+    ),
+    "festival_selflag_d1d7_resid": _FESTIVAL_SET + SELF_LAG_D1_COLS + SELF_LAG_D7_COLS,
+    # (d) 전부 — 실시간 보정에서 얻을 수 있는 상한
+    "festival_all_derived_resid": (
+        _FESTIVAL_SET
+        + NEIGHBOR_RESID_COLS
+        + TRANSFER_RESID_COLS
+        + SELF_LAG_S1_COLS
+        + NEIGHBOR_LAG_S1_COLS
+        + SELF_LAG_D1_COLS
+        + SELF_LAG_D7_COLS
+        + NEIGHBOR_LAG_D1_COLS
+        + NEIGHBOR_LAG_D7_COLS
     ),
 }
 
