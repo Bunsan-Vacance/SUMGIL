@@ -14,6 +14,7 @@ import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper.StationInfo;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -230,5 +231,62 @@ class RouteMapperTest {
         assertEquals(TravelMode.BIKE, response.legs().get(0).mode());
         assertEquals("1001", response.legs().get(0).fromNodeId());
         assertEquals("1003", response.legs().get(0).toNodeId());
+    }
+
+    @Test
+    @DisplayName("122-T4: 동일 BIKE 구간도 대여소 경계에서 나뉜다")
+    void t122_BIKE구간_대여소경계_분할() {
+        Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
+        mixed.put("R1", new StationInfo("R1", "대여소1", 37.5000, 127.0045));
+        mixed.put("R2", new StationInfo("R2", "대여소2", 37.5000, 127.0090));
+        mixed.put("R3", new StationInfo("R3", "대여소3", 37.5000, 127.0135));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "R1", "WALK", 120, TravelMode.WALK),
+                new EngineSegment("R1", "R2", "BIKE", 240, TravelMode.BIKE),
+                new EngineSegment("R2", "R3", "BIKE", 240, TravelMode.BIKE),
+                new EngineSegment("R3", "1003", "WALK", 120, TravelMode.WALK)
+        ), 1080, 2);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, mixed,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM,
+                        List.of(180L, 180L), Set.of("R1", "R2", "R3"))
+                .orElseThrow();
+
+        assertEquals(6, response.legs().size());
+        assertEquals(TravelMode.WALK, response.legs().get(0).mode());
+        assertEquals(TravelMode.TRANSFER, response.legs().get(1).mode());
+        assertEquals(TravelMode.BIKE, response.legs().get(2).mode());
+        assertEquals(TravelMode.BIKE, response.legs().get(3).mode());
+        assertEquals(TravelMode.TRANSFER, response.legs().get(4).mode());
+        assertEquals(TravelMode.WALK, response.legs().get(5).mode());
+        assertEquals("R1", response.legs().get(2).fromNodeId());
+        assertEquals("R2", response.legs().get(2).toNodeId());
+        assertEquals("R2", response.legs().get(3).fromNodeId());
+        assertEquals("R3", response.legs().get(3).toNodeId());
+    }
+
+    @Test
+    @DisplayName("122-T5: 대여소 집합 없으면 기존 합침 유지")
+    void t122_집합없음_기존합침() {
+        Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
+        mixed.put("R1", new StationInfo("R1", "대여소1", 37.5000, 127.0045));
+        mixed.put("R2", new StationInfo("R2", "대여소2", 37.5000, 127.0090));
+        mixed.put("R3", new StationInfo("R3", "대여소3", 37.5000, 127.0135));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "R1", "WALK", 120, TravelMode.WALK),
+                new EngineSegment("R1", "R2", "BIKE", 240, TravelMode.BIKE),
+                new EngineSegment("R2", "R3", "BIKE", 240, TravelMode.BIKE),
+                new EngineSegment("R3", "1003", "WALK", 120, TravelMode.WALK)
+        ), 1080, 2);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, mixed,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L, 180L))
+                .orElseThrow();
+
+        assertEquals(5, response.legs().size());
+        assertEquals("R1", response.legs().get(2).fromNodeId());
+        assertEquals("R3", response.legs().get(2).toNodeId());
     }
 }
