@@ -1,7 +1,15 @@
 # CROWD
 
-이 자리는 `AI/README.md` §2.1의 **착석 기회 지수**(혼잡도% → 착석 확률 변환, 분위수 회귀) 모델
-PoC 전용이다. `validation/README.md`의 컨벤션을 따른다.
+혼잡도 도메인의 검증·PoC 코드. `validation/README.md`의 컨벤션을 따른다. 수치 원본은 각 폴더의
+`RESULTS.md`, 팀 요약은 Notion `실험실 / [CROWD] 혼잡도` 하위 페이지.
+
+| 폴더 | 티켓 | 무엇을 검증했나 |
+| --- | --- | --- |
+| `baseline-check/` | 87·89·90 | lookup 베이스라인, 후보 모델·피처 세트 비교, 배포 세트 확정, 등급 전달·임계치 민감도 |
+| `time-resolution-check/` | 135 | 1시간→30분 비중 홀드아웃, 30분→열차 배분의 내부 일관성 |
+| `sim-eval/` | 92 | 시뮬레이션 정답 위 열차·5분 단위 예측기 비교, 생성기 가정 민감도, 모델 계열(LightGBM·Chronos·LLM) 비교. 결과 노트북 `sim_eval.ipynb`(출력 포함) |
+
+`AI/README.md` §2.1의 **착석 기회 지수**(혼잡도% → 착석 확률 변환) PoC는 아직 이 폴더에 없다.
 
 ## 혼잡도 스냅샷 EDA는 여기 없다
 

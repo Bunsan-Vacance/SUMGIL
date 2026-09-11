@@ -79,6 +79,7 @@ python -m DATA_ENGINE.eda.report_figures --only 5,10,11  # 번호 선택
 ```bash
 python validation/CROWD/baseline-check/compare_models.py <세트 ...> --models=lightgbm,xgboost     --save-results=data/CROWD/interim/validation/compare_results.parquet
 python validation/CROWD/baseline-check/grade_sensitivity.py     --save-cells=data/CROWD/interim/validation/grade_cells.parquet
+python validation/CROWD/sim-eval/evaluate.py --seeds 0,1       # 13·14번 입력(약 5분)
 ```
 
 | # | 파일(`reports/figures/`) | 내용 | 입력 | 출처 절 |
@@ -95,6 +96,8 @@ python validation/CROWD/baseline-check/grade_sensitivity.py     --save-cells=dat
 | 10 | `train_load_gangnam_rush` | 강남 내선 07:30~09:29 열차별 혼잡도 추정, 배차 주석 | `processed/crowd_load_by_train_*` | 135 2층 |
 | 11 | `headway_distribution_by_line` | 호선별 배차 간격 분포(러시/비러시), 12분 초과 비율 | `interim/timetable_long` | 135 |
 | 12 | `crowd_line9_*` (2장) | 9호선 히트맵·군집(기존 `report_crowd` 위임) | `interim/crowd_congestion_long` | 88 |
+| 13 | `sim_predictor_comparison` | 시뮬레이션 정답 위 예측기 4종 등급 일치율·MAE, 시나리오별 | `interim/validation/sim_eval_base` | 92 |
+| 14 | `sim_sensitivity_grid` | 생성기 가정(σ_shape × 도착 혼합) 격자에서 도착 혼합 − 30분 그대로 | `interim/validation/sim_eval_grid` | 92 |
 
 그림의 숫자가 `validation/CROWD/**/RESULTS.md`와 어긋나면 RESULTS.md가 맞다 — 그림은 표를 옮긴 것이다.
 
