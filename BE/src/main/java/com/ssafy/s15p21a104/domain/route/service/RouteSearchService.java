@@ -93,7 +93,7 @@ public class RouteSearchService {
             Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
                     new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
                     graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM,
-                    transferSecs);
+                    transferSecs, graphRegistry.rentalIds());
             return response.map(this::withGeometry)
                     .filter(r -> BikeStockGate.passesEdges(
                             found.edges().stream().map(Edge::fromNode).toList(),

@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bike.BikeRentalEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
@@ -45,6 +46,7 @@ public class RouteGraphRegistry {
     private RouteGraph graph;
     private Map<String, RouteMapper.StationInfo> stationInfos = Map.of();
     private Map<TransferRule.TransferKey, Integer> transferTimes = Map.of();
+    private java.util.Set<String> rentalIds = java.util.Set.of();
 
     public RouteGraphRegistry(RouteEdgeTimeRepository edgeTimeRepository,
                               StationRepository stationRepository,
@@ -87,14 +89,15 @@ public class RouteGraphRegistry {
                 infos.put(rental.getRentalId(), new RouteMapper.StationInfo(
                         rental.getRentalId(), rental.getName(), rental.getLat(), rental.getLng()));
             }
-            List<Edge> bikeEdges = BikeEdgeBuilder.build(stops, rentals);
+            List<Edge> rentalEdges = BikeRentalEdgeBuilder.build(rentals);
             List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals);
-            List<Edge> extraEdges = new java.util.ArrayList<>(bikeEdges);
-            extraEdges.addAll(walkEdges);
+            List<Edge> extraEdges = new java.util.ArrayList<>(walkEdges);
+            extraEdges.addAll(rentalEdges);
             RouteGraphLoader.LoadResult result = RouteGraphLoader.load(
                     new RouteGraphRawData(rows, stationNames, lineNames), extraEdges);
             this.graph = result.graph();
             this.stationInfos = Map.copyOf(infos);
+            this.rentalIds = java.util.Set.copyOf(rentals.keySet());
             Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
             for (TransferMeta meta : transferMetaRepository.findAll()) {
                 times.put(new TransferRule.TransferKey(
@@ -105,7 +108,7 @@ public class RouteGraphRegistry {
             this.transferTimes = Map.copyOf(times);
             log.info("탐색 그래프 로드 완료: 역 {}개, 엣지 {}개, 환승 실측 {}건, 대여소 {}곳·자전거 엣지 {}개·도보 엣지 {}개",
                     graph.nodeCount(), graph.edgeCount(), transferTimes.size(),
-                    rentalTotal, bikeEdges.size(), walkEdges.size());
+                    rentalTotal, rentalEdges.size(), walkEdges.size());
         } catch (DomainException e) {
             log.warn("탐색 그래프 없음(미적재). 그래프 로드 후 재기동하면 알고리즘 경로로 동작한다: {}",
                     e.getMessage());
@@ -131,6 +134,13 @@ public class RouteGraphRegistry {
      */
     public Map<TransferRule.TransferKey, Integer> transferTimes() {
         return transferTimes;
+    }
+
+    /**
+     * @return 대여소 ID 집합(leg 경계 분할용). 미적재 시 빈 집합
+     */
+    public java.util.Set<String> rentalIds() {
+        return rentalIds;
     }
 
     /**
