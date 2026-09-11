@@ -1,0 +1,20 @@
+# FE 라우팅 (S15P21A104-126/128). FE 소유 — 나머지 경로 / 를 선언한다.
+# /api/ 는 BE/k8s/prod/ingress.yaml 이 소유한다 (nginx가 더 긴 prefix 우선).
+# 단일 호스트 고정 (와일드카드 등록 불가). 클러스터 내부는 HTTP (상위 TLS 종결).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fe
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: j15a104.p.ssafy.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fe
+                port:
+                  number: 80

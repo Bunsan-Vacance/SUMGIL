@@ -1,0 +1,54 @@
+# BE 워크로드 (S15P21A104-126). 비민감은 ConfigMap(be-config), 비밀은 Secret(be-secret).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: be
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: be
+  template:
+    metadata:
+      labels:
+        app: be
+    spec:
+      containers:
+        - name: be
+          image: sumgil-be:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: be-config
+            - secretRef:
+                name: be-secret
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: 2000m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: be
+spec:
+  selector:
+    app: be
+  ports:
+    - port: 8080

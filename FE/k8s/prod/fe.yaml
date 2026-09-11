@@ -1,0 +1,49 @@
+# FE 워크로드 (S15P21A104-126). namespace 생성 없음 (BE 소유 prod 참조).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fe
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fe
+  template:
+    metadata:
+      labels:
+        app: fe
+    spec:
+      containers:
+        - name: fe
+          image: sumgil-fe:latest
+          ports:
+            - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fe
+spec:
+  selector:
+    app: fe
+  ports:
+    - port: 80
