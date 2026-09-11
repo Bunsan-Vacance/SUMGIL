@@ -63,4 +63,18 @@ class BikeRentalEdgeBuilderTest {
         assertTrue(BikeRentalEdgeBuilder.build(null).isEmpty());
         assertTrue(BikeRentalEdgeBuilder.build(Map.of()).isEmpty());
     }
+
+    @Test
+    @DisplayName("G6: 반경 경계 999m는 포함, 1001m는 제외")
+    void g6_반경경계_999_1001() {
+        // 위도 37.5에서 999m ≈ 0.01132437도, 1001m ≈ 0.01134704도.
+        Stop r1 = new Stop("R1", 37.5000, 127.0000);
+        Stop inside = new Stop("R2", 37.5000, 127.01132437);
+        Stop outside = new Stop("R2", 37.5000, 127.01134704);
+
+        assertTrue(BikeEdgeBuilder.distanceM(r1, inside) <= BikeEdgeBuilder.RADIUS_M);
+        assertTrue(BikeEdgeBuilder.distanceM(r1, outside) > BikeEdgeBuilder.RADIUS_M);
+        assertEquals(2, BikeRentalEdgeBuilder.build(Map.of("R1", r1, "R2", inside)).size());
+        assertTrue(BikeRentalEdgeBuilder.build(Map.of("R1", r1, "R2", outside)).isEmpty());
+    }
 }

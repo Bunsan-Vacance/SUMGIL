@@ -73,4 +73,18 @@ class WalkEdgeBuilderTest {
         assertTrue(edges.stream().noneMatch(e ->
                 e.fromNode().equals("S2") || e.toNode().equals("S2")));
     }
+
+    @Test
+    @DisplayName("G5: 반경 경계 499m는 포함, 501m는 제외")
+    void g5_반경경계_499_501() {
+        // 위도 37.5에서 499m ≈ 0.00565651도, 501m ≈ 0.00567919도.
+        Map<String, Stop> inside = Map.of("S1", new Stop("S1", 37.5000, 127.0000));
+        Map<String, Stop> r499 = Map.of("R1", new Stop("R1", 37.5000, 127.00565651));
+        Map<String, Stop> r501 = Map.of("R1", new Stop("R1", 37.5000, 127.00567919));
+
+        assertTrue(WalkEdgeBuilder.distanceM(inside.get("S1"), r499.get("R1")) <= WalkEdgeBuilder.RADIUS_M);
+        assertTrue(WalkEdgeBuilder.distanceM(inside.get("S1"), r501.get("R1")) > WalkEdgeBuilder.RADIUS_M);
+        assertEquals(2, WalkEdgeBuilder.build(inside, r499).size());
+        assertTrue(WalkEdgeBuilder.build(inside, r501).isEmpty());
+    }
 }

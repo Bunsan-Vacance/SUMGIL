@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
@@ -7,17 +8,22 @@ import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
+import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
+import com.ssafy.s15p21a104.domain.route.service.RouteSearchService;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
+import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -229,5 +235,37 @@ public final class RouteTestFixtures {
                 subway("A", "B", "L1", 100),
                 subway("B", "C", "L1", 100),
                 subway("A", "C", "L2", 250));
+    }
+
+    // 서비스 조립
+
+    /**
+     * 그래프와 대여소 집합을 주입한 {@link RouteSearchService}를 만든다.
+     *
+     * <p>역 조회는 임의 ID에 대해 mock 역을 돌려주고, 표시 정보는 그래프 정점에서 파생한다.
+     * 통합 테스트의 setUp 중복을 없애려는 공용 헬퍼다.
+     *
+     * @param graph 인메모리 그래프
+     * @param rentalIds leg 경계 분할용 대여소 ID 집합
+     * @return DB·Redis 없이 동작하는 서비스
+     */
+    public static RouteSearchService serviceWith(RouteGraph graph, Set<String> rentalIds) {
+        StationRepository stationRepository = mock(StationRepository.class);
+        lenient().when(stationRepository.findById(anyString())).thenAnswer(invocation -> {
+            String id = invocation.getArgument(0);
+            return Optional.of(mockStation(id, id + "역"));
+        });
+        RouteGraphRegistry registry = mock(RouteGraphRegistry.class);
+        lenient().when(registry.graph()).thenReturn(graph);
+        lenient().when(registry.rentalIds()).thenReturn(rentalIds == null ? Set.of() : rentalIds);
+        lenient().when(registry.bikeStock()).thenReturn(Map.of());
+        lenient().when(registry.transferTimes()).thenReturn(Map.of());
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        for (String node : graph.nodes()) {
+            infos.put(node, new RouteMapper.StationInfo(node, node + "역", LAT, LNG));
+        }
+        lenient().when(registry.stationInfos()).thenReturn(infos);
+        return new RouteSearchService(stationRepository, registry, new TransferRule(180),
+                new RailGeometryRegistry(null, null));
     }
 }
