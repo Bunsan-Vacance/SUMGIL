@@ -30,8 +30,9 @@
   모든 `fig_*`는 호선·역·요일유형·타깃 선택 인자를 받고, 기본값이 아니면 파일명에 접미가 붙는다(141).
 - `eda/crowd_eda.ipynb` (CROWD, 탐색 노트북 — 141) — 위 그림 함수를 **호출만** 하는 셀과 결론 마크다운,
   그리고 아직 그림으로 굳지 않은 탐색 셀(서울역 1·4호선 잔차 비교, 호선별 잔차/산포, 요일유형×시간대
-  잔차). 역·호선을 바꿔 보며 확인하는 용도라 공유 산출물은 여기서 만들지 않는다. 커밋 전 출력 비움,
-  `ruff check DATA_ENGINE/eda/crowd_eda.ipynb` 통과(CI가 ipynb도 검사).
+  잔차). 역·호선을 바꿔 보며 확인하는 용도라 공유 산출물은 여기서 만들지 않는다. **출력을 넣은 채로
+  커밋한다**(실행 없이 바로 보고 설명하기 위해 — 지우지 않는다). `ruff check
+  DATA_ENGINE/eda/crowd_eda.ipynb` 통과(CI가 ipynb 코드 셀을 검사).
 - `reports/` — `download_guide.md`(수동 다운로드 안내, 커밋 대상), `bike_weather_eda.md`·
   `crowd_eda.md`·`figures/*.png|svg`(생성 산출물, `.gitignore` 대상 — 코드만 커밋되고 리포트
   자체는 재생성. 그림은 Drive `data/CROWD/reports/figures/` 미러와 Notion 실험실 첨부로 공유).
