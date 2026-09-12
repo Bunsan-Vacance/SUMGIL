@@ -164,7 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     # 기본은 D-1 배포 세트. 전부 세트는 실시간 승하차 원천이 확보됐을 때 따로 학습한다 —
     # 전부 세트로 학습하고 실시간 컬럼을 NaN으로 서빙하면 +4~8%에 그친다(evaluate_final 1절).
     ap.add_argument(
-        "--feature-set", default="festival_selflag_d1d7_resid", choices=sorted(FEATURE_SETS)
+        "--feature-set", default="festival_selflag_d1sd_d7_resid", choices=sorted(FEATURE_SETS)
     )
     ap.add_argument("--group-col", default=None, help="예: line — 그룹별로 잔차 모델을 따로 fit")
     ap.add_argument("--params", default=None, help="JSON, 예: '{\"num_leaves\": 127}'")

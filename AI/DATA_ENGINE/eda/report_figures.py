@@ -20,6 +20,7 @@
 | 12 | line9_* | 기존 9호선 히트맵·군집 재생성(report_crowd 위임) | 88 |
 | 13 | sim_predictor_comparison | 시뮬레이션 정답 위 예측기 4종 등급 일치율·MAE, 시나리오별 | 92 |
 | 14 | sim_sensitivity_grid | 생성기 가정(σ_shape × 도착 혼합) 격자에서 mix−flat 일치율 차이 | 92 |
+| 15 | split_by_line | 전역 vs 호선별·6호선 분리·군집 모델의 호선별 RMSE 개선율 | 93 |
 
 8번 입력(`compare_results.parquet`)은 `compare_models.py --save-results`로 만든다. 9번은
 `grade_sensitivity.py --save-cells`의 셀 표.
@@ -66,6 +67,7 @@ COMPARE_RESULTS = VALIDATION_CACHE / "compare_results.parquet"
 GRADE_CELLS = VALIDATION_CACHE / "grade_cells.parquet"
 SIM_EVAL_BASE = VALIDATION_CACHE / "sim_eval_base.parquet"
 SIM_EVAL_GRID = VALIDATION_CACHE / "sim_eval_grid.parquet"
+SPLIT_RESULTS = VALIDATION_CACHE / "split_results.parquet"
 # Drive 동기화 스크립트는 AI/data/ 만 옮기므로 그림을 공유할 때는 여기로 복사한다(--mirror).
 DATA_MIRROR = AI_ROOT / "data" / "CROWD" / "reports" / "figures"
 
@@ -165,6 +167,10 @@ class Inputs:
     @property
     def sim_eval_grid(self):
         return self._load("sim_grid", SIM_EVAL_GRID)
+
+    @property
+    def split_results(self):
+        return self._load("split", SPLIT_RESULTS)
 
     def load_by_train(self) -> pd.DataFrame | None:
         files = sorted(PROCESSED.glob("crowd_load_by_train_*.parquet"))
@@ -1005,6 +1011,82 @@ def fig_sim_sensitivity_grid(inp: Inputs, metric: str = "등급일치_%") -> lis
     return [fs.save(fig, _name("sim_sensitivity_grid", metric, default=default))]
 
 
+# ── 15 분할 검토(93) ──
+RUN_LABELS = {
+    "global": "전역(90)",
+    "line": "호선별 8모델",
+    "line6": "6호선만 분리",
+    "cluster": "군집별",
+    "cluster_feat": "전역+군집 피처",
+    "sameday": "B′ 같은 요일유형 시차",
+    "d1sd": "전날+같은 유형+1주",
+    "global_no150": "전역(서울역 제외)",
+    "line1_no150": "1호선 분리(서울역 제외)",
+}
+
+
+def fig_split_by_line(
+    inp: Inputs,
+    runs: Sequence[str] = ("global", "line", "line6", "cluster", "d1sd"),
+    target: str = "boarding",
+    metric: str = "RMSE_개선율_%",
+) -> list:
+    """호선별 lookup 대비 개선율 — 전역 모델과 분할·대안 세트를 나란히. 오른쪽은 전역 대비 차이."""
+    res = inp.split_results
+    if res is None:
+        return []
+    default = tuple(runs) == ("global", "line", "line6", "cluster", "d1sd") and target == "boarding"
+    r = res[(res["axis"] == "line") & (res["target"] == target) & res["run"].isin(runs)]
+    piv = r.pivot_table(index="group", columns="run", values=metric).reindex(LINE_ORDER)
+    runs = [x for x in runs if x in piv.columns]
+    palette = [
+        fs.COLOR_BASELINE,
+        fs.COLOR_MODEL,
+        fs.LINE_COLORS["4호선"],
+        fs.LINE_COLORS["5호선"],
+        fs.COLOR_ACCENT,
+        fs.COLOR_REALTIME,
+    ]
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5.5), gridspec_kw={"width_ratios": [1.3, 1]})
+    width = 0.8 / len(runs)
+    x = np.arange(len(piv))
+    for i, run in enumerate(runs):
+        axes[0].bar(
+            x + i * width,
+            piv[run],
+            width=width,
+            color=palette[i % len(palette)],
+            label=RUN_LABELS.get(run, run),
+        )
+    axes[0].set_xticks(x + width * (len(runs) - 1) / 2)
+    axes[0].set_xticklabels(piv.index)
+    axes[0].set_ylabel(f"{metric} ({TARGET_LABEL[target]}, lookup 대비)")
+    axes[0].set_title("호선별 개선율 — 실행별")
+    axes[0].legend(frameon=False, fontsize=9)
+    if "global" in runs:
+        others = [x for x in runs if x != "global"]
+        for i, run in enumerate(others):
+            d = piv[run] - piv["global"]
+            axes[1].plot(
+                piv.index,
+                d,
+                marker="o",
+                color=palette[(runs.index(run)) % len(palette)],
+                label=RUN_LABELS.get(run, run),
+            )
+        axes[1].axhline(0, color=fs.PALETTE_NEUTRAL[1], lw=0.8)
+        axes[1].axhline(-2, color=fs.COLOR_ACCENT, lw=0.8, ls="--")
+        axes[1].set_ylabel("전역 대비 차이 (%p)")
+        axes[1].set_title("전역 대비 — 빨간 점선(-2%p) 아래면 그 호선이 악화")
+        axes[1].legend(frameon=False, fontsize=9)
+    fig.tight_layout()
+    fs.caption(
+        fig,
+        "출처: split_results.parquet (validation/CROWD/split-check/compare_split.py, 2024 학습 / 2025 평가, 같은 파라미터).",
+    )
+    return [fs.save(fig, _name("split_by_line", *runs, target, default=default))]
+
+
 FIGURES: dict[int, tuple[str, Callable[[Inputs], list]]] = {
     1: ("panel_heatmap_station_slot", fig_panel_heatmap),
     2: ("panel_daily_total_by_line", fig_daily_total_by_line),
@@ -1020,6 +1102,7 @@ FIGURES: dict[int, tuple[str, Callable[[Inputs], list]]] = {
     12: ("line9", fig_line9),
     13: ("sim_predictor_comparison", fig_sim_predictor_comparison),
     14: ("sim_sensitivity_grid", fig_sim_sensitivity_grid),
+    15: ("split_by_line", fig_split_by_line),
 }
 
 

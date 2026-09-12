@@ -41,14 +41,22 @@ from app.CROWD.pipeline.adjacency import (
     build_transfer_map,
     neighbor_feature_names,
 )
-from app.CROWD.pipeline.lags import attach_day_lags, attach_slot_lag, day_lag_names, slot_lag_names
+from app.CROWD.pipeline.lags import (
+    attach_day_lags,
+    attach_same_day_type_lag,
+    attach_slot_lag,
+    day_lag_names,
+    same_day_type_lag_names,
+    slot_lag_names,
+)
 from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
 
 # 패널의 20개 운행일 슬롯 순서. 사전순이 아니다(`~06`이 첫 슬롯, `24~`가 마지막).
 SLOT_ORDER = ["~06"] + [f"{h:02d}-{h + 1:02d}" for h in range(6, 24)] + ["24~"]
 DAY_LAGS = (1, 7)
 # 파생 규칙이 바뀌면 올린다 — 캐시·아티팩트 메타에 기록돼 불일치를 잡는다.
-DERIVED_VERSION = 1
+# 2: 같은 요일유형 직전 날 시차(lagsd_*) 추가(93).
+DERIVED_VERSION = 2
 
 RESID_COLS = [f"{t}_resid" for t in TARGETS]
 
@@ -61,6 +69,7 @@ _FESTIVAL_SET = EVENT_COLS + CATEGORICAL_COLS + FESTIVAL_SHAPE_COLS
 SELF_LAG_D1_COLS = day_lag_names(RESID_COLS, (1,))
 SELF_LAG_D7_COLS = day_lag_names(RESID_COLS, (7,))
 SELF_LAG_S1_COLS = slot_lag_names(RESID_COLS)
+SELF_LAG_SD_COLS = same_day_type_lag_names(RESID_COLS)  # 같은 요일유형 직전 날(93 B′)
 NEIGHBOR_RESID_COLS = neighbor_feature_names(RESID_COLS)
 TRANSFER_RESID_COLS = neighbor_feature_names(RESID_COLS, sides=("xfer",))
 NEIGHBOR_LAG_D1_COLS = neighbor_feature_names(SELF_LAG_D1_COLS)
@@ -73,10 +82,17 @@ REALTIME_COLS = NEIGHBOR_RESID_COLS + TRANSFER_RESID_COLS + SELF_LAG_S1_COLS + N
 FEATURE_SETS: dict[str, list[str]] = {
     # 87 권장 — 외부 요인만. 비교 기준선.
     "events_station_time_festival": _FESTIVAL_SET,
-    # 사전 예측(D−1 원천) — 전날 집계가 확보될 때
+    # 사전 예측(D−1 원천) — 전날 집계가 확보될 때. 90 배포 세트(93에서 d1sd로 교체)
     "festival_selflag_d1d7_resid": _FESTIVAL_SET + SELF_LAG_D1_COLS + SELF_LAG_D7_COLS,
     # 사전 예측 — 일별 CSV 지연에도 안전한 하한
     "festival_lag_d7_resid": _FESTIVAL_SET + SELF_LAG_D7_COLS + NEIGHBOR_LAG_D7_COLS,
+    # 93 B′ — 전날 대신 "같은 요일유형의 직전 날"(평일은 전날과 같고 토·일·공휴일에서 다르다) + 1주 전
+    "festival_selflag_sameday_d7_resid": _FESTIVAL_SET + SELF_LAG_SD_COLS + SELF_LAG_D7_COLS,
+    # 93 B″ — 전날·같은 요일유형 직전 날·1주 전 셋 다. **현재 배포 세트**(93: 전체 +1.4%p, 휴일 +3.6%p)
+    "festival_selflag_d1sd_d7_resid": _FESTIVAL_SET
+    + SELF_LAG_D1_COLS
+    + SELF_LAG_SD_COLS
+    + SELF_LAG_D7_COLS,
     # 실시간 집계가 있을 때의 상한. D−1 서빙에서는 REALTIME_COLS가 NaN.
     "festival_all_derived_resid": (
         _FESTIVAL_SET
@@ -112,6 +128,7 @@ def add_derived_columns(
         out[c] = resid[c].to_numpy()
 
     out = attach_day_lags(out, RESID_COLS, DAY_LAGS)
+    out = attach_same_day_type_lag(out, RESID_COLS)
     out = attach_slot_lag(out, RESID_COLS, SLOT_ORDER)
 
     line_map = build_neighbor_map(segments)
