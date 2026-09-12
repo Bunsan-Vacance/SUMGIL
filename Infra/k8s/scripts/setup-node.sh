@@ -4,8 +4,8 @@
 #   sudo bash scripts/setup-node.sh
 #
 # 하는 일:
-#   1. ufw 비활성 — k3s·tailscale 네트워킹과 충돌 방지. 외부 경계는 AWS SG가 담당.
-#      파드 오버레이(VXLAN, UDP 8472)가 VPC(ens5)를 타므로 ufw를 켜면 노드 간 파드 통신이 막힌다.
+#   1. ufw 정책 적용(활성 고정) — 외부 허용 22/80/443, 내부 VPC VXLAN 8472만 추가.
+#      ufw disable 금지. 파드 오버레이(VXLAN, UDP 8472)가 VPC(ens5)를 타므로 내부 허용이 필요하다.
 #   2. Docker insecure 레지스트리 등록 — 호스트 docker로 레지스트리에 push하기 위함.
 #   3. build/push 사용자를 docker 그룹에 추가.
 #
@@ -19,10 +19,17 @@ source "${SCRIPT_DIR}/env.sh"
 
 TARGET_USER="${SUDO_USER:-ubuntu}"
 
-echo "--- 1. ufw 비활성 ---"
+echo "--- 1. ufw 정책(활성, 외부 22/80/443 + 내부 VXLAN) ---"
 if command -v ufw >/dev/null 2>&1; then
-  ufw disable || true
-  ufw status | head -1
+  ufw default deny incoming
+  ufw default allow outgoing
+  ufw default allow routed
+  ufw allow 22/tcp
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+  ufw allow from "${VPC_CIDR}" to any port 8472 proto udp comment 'flannel vxlan'
+  ufw --force enable
+  ufw status verbose | head -1
 else
   echo "ufw 없음, 건너뜀"
 fi

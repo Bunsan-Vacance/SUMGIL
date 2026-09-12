@@ -5,6 +5,8 @@
 # 레지스트리는 클러스터 내장(NodePort). 노드 containerd가 이미지를 pull할 때
 # 클러스터 DNS(*.svc.cluster.local)는 노드에서 해석되지 않으므로 NodePort 주소를 쓴다.
 
+# 노드 ufw 정책용 VPC 대역 (내부 VXLAN 8472 허용 범위). 노드 교체/VPC 변경 시 여기만 바꾼다.
+export VPC_CIDR="${VPC_CIDR:-172.26.0.0/20}"
 export REGISTRY_HOST="${REGISTRY_HOST:-100.103.156.53:30500}"
 export REGISTRY_NAMESPACE="${REGISTRY_NAMESPACE:-prod}"
 export REGISTRY_ENDPOINT="${REGISTRY_ENDPOINT:-http://${REGISTRY_HOST}}"

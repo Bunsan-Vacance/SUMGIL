@@ -34,7 +34,7 @@ Infra/
 │     ├─ init-k3s.sh          control-plane 설치 (disable traefik, flannel-iface ens5)
 │     ├─ init-k3s-worker.sh   worker join
 │     ├─ setup-ingress.sh     ingress-nginx 설치 (traefik 비활성)
-│     ├─ setup-node.sh        ufw off · docker insecure (양쪽)
+│     ├─ setup-node.sh        ufw 22/80/443 + 내부 VXLAN · docker insecure (양쪽)
 │     ├─ setup-insecure-registry.sh  노드 containerd 레지스트리 등록
 │     ├─ apply.sh             매니페스트 적용·rollout (2단계 멱등)
 │     ├─ build-push.sh        BE·FE 이미지 빌드·push
@@ -57,7 +57,7 @@ Infra/
 # 개발 PC: 소스·산출물을 노드로 동기화
 bash Infra/k8s/scripts/sync-to-nodes.sh
 
-# 각 노드: 사전 설정 (ufw off, docker insecure)
+# 각 노드: 사전 설정 (ufw 22/80/443 + 내부 VXLAN, docker insecure)
 sudo bash ~/sumgil/Infra/k8s/scripts/setup-node.sh
 
 # node1: cluster / node2: worker  (VPN join 선행)
@@ -96,7 +96,7 @@ ingress-nginx가 80 포트를 받아 경로로 갈라 보낸다. **Ingress는 �
 
 - **평면 분리**: 관리(제어: API·etcd·kubelet)=VPN(`--node-ip`), 데이터(파드 VXLAN 오버레이)=VPC(`--flannel-iface ens5`, 파드 MTU 8951).
 - 외부 사용자 트래픽(80/443)은 공개 NIC로 직접 들어오며 VPN을 타지 않는다.
-- 노드 `ufw`는 비활성. 외부 경계는 AWS SG(22/80/443/8080)가 담당한다.
+- 노드 `ufw`는 **활성** — 외부 허용 `22/80/443`, 내부 VPC VXLAN(`8472`)만 추가. **`ufw disable` 금지.** (SG를 관리할 수 없어 노드 ufw가 실질 경계)
 
 ## 작업 규칙
 
