@@ -29,6 +29,22 @@
   자체는 재생성).
 - `scripts/` — 폴러 백그라운드 실행용 nohup 스크립트·systemd 유닛 템플릿.
 
+## Redis 연동 상태
+
+Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
+소유 작업으로 분리되어 있다.
+
+- `S15P21A104-61` — `[INFRA | BE] Redis 캐싱 전략 설계 및 연동`: Redis key 네이밍·TTL
+  정책 문서화, Spring Data Redis 기본 연동. 실제 캐시 갱신 로직은 데이터 파이프라인 연동 후
+  별도 작업으로 제외되어 있다.
+- `S15P21A104-127` — `[INFRA | Infra] Postgres·Redis StatefulSet`: k3s 환경의
+  PostgreSQL·Redis StatefulSet 구성 작업.
+- `S15P21A104-123` — `[INFRA | Infra] VPN 네트워크 구성`: AI EC2와 k3s Redis 간 접근이
+  필요하면 이 네트워크 구성과 함께 확인해야 한다.
+
+따라서 이 폴더의 수집기는 Redis key/TTL을 임의로 확정하지 않는다. BE/Infra Redis 컨벤션과
+네트워크 접근 방식이 확정되기 전까지는 `latest.parquet`를 최신값 fallback으로 사용한다.
+
 ## `data/` 하위 각 디렉터리가 뭔지
 
 `AI/data/`는 이 폴더와 이름이 비슷해 보이지만 별개 위치다(`.gitignore`가 `AI/data/**` 기준으로
