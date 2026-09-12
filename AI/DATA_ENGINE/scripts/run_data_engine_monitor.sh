@@ -30,18 +30,41 @@ WEATHER_MAX_AGE_MIN="${WEATHER_MAX_AGE_MIN:-20}"
 PARTITION_HOURS="${PARTITION_HOURS:-1}"
 BIKE_MIN_COUNT="${BIKE_MIN_COUNT:-10}"
 WEATHER_MIN_COUNT="${WEATHER_MIN_COUNT:-5}"
+DISCORD_NOTIFY_ON_FAILURE="${DISCORD_NOTIFY_ON_FAILURE:-1}"
 
 status=0
+MONITOR_OUTPUT=""
 
 cd "${AI_ROOT}"
 
+append_output() {
+  local text="$1"
+  if [[ -z "${MONITOR_OUTPUT}" ]]; then
+    MONITOR_OUTPUT="${text}"
+  else
+    MONITOR_OUTPUT="${MONITOR_OUTPUT}"$'\n'"${text}"
+  fi
+}
+
+print_and_capture() {
+  local text="$1"
+  printf '%s\n' "${text}"
+  append_output "${text}"
+}
+
 run_check() {
   local title="$1"
+  local output
+  local check_status
   shift
 
-  printf '\n%s\n' "${title}"
-  "$@"
-  local check_status=$?
+  print_and_capture ""
+  print_and_capture "${title}"
+  output="$("$@" 2>&1)"
+  check_status=$?
+  if [[ -n "${output}" ]]; then
+    print_and_capture "${output}"
+  fi
   if [[ "${check_status}" -ne 0 ]]; then
     status=1
   fi
@@ -62,9 +85,13 @@ run_check "[2/2] partition count check" \
 
 printf '\n'
 if [[ "${status}" -eq 0 ]]; then
-  printf '%s\n' "DATA_ENGINE monitor OK"
+  print_and_capture "DATA_ENGINE monitor OK"
 else
-  printf '%s\n' "DATA_ENGINE monitor FAILED"
+  print_and_capture "DATA_ENGINE monitor FAILED"
+  if [[ "${DISCORD_NOTIFY_ON_FAILURE}" != "0" ]]; then
+    "${PYTHON}" -m DATA_ENGINE.monitor.notify_discord \
+      --message "${MONITOR_OUTPUT}"
+  fi
 fi
 
 exit "${status}"
