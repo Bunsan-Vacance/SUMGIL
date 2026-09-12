@@ -129,6 +129,20 @@ def resolve_split_path(args: argparse.Namespace, split: str) -> list[Path]:
     return [Path(args.data_dir) / f"{split}_netflow_q3_mapped_{args.file_tag}.csv.gz"]
 
 
+def downcast_memory(df: pd.DataFrame) -> pd.DataFrame:
+    """메모리 절감 — float64->float32, int64는 저정밀 정수로 다운캐스트.
+
+    Phase 2.5(10-horizon, 스케일 큰 train/valid/test)에서 phase2 스크립트가
+    historical profile merge 도중 메모리 부족으로 강제 종료되는 문제 때문에 추가함.
+    """
+    for col in df.columns:
+        if df[col].dtype == "float64":
+            df[col] = df[col].astype("float32")
+        elif df[col].dtype == "int64":
+            df[col] = pd.to_numeric(df[col], downcast="integer")
+    return df
+
+
 def read_split(
     data_dir: Path, split: str, file_tag: str = "top300", path: Path | list[Path] | None = None
 ) -> pd.DataFrame:
@@ -136,21 +150,43 @@ def read_split(
     if isinstance(paths, Path):
         paths = [paths]
     usecols = ["od_station_id", *FEATURE_COLS, TARGET_COL]
-    df = pd.concat((pd.read_csv(p, usecols=usecols) for p in paths), ignore_index=True)
+    # pyarrow 엔진 — chunksize 없는 전체 로드에서만 사용 가능(청크 읽기와는 비호환).
+    # gzip CSV 파싱이 병목이라 여기서 속도 이득이 큼.
+    df = pd.concat((pd.read_csv(p, usecols=usecols, engine="pyarrow") for p in paths), ignore_index=True)
     df["od_station_id"] = df["od_station_id"].astype(str)
+    return downcast_memory(df)
+
+
+def build_station_dtype(*sources: pd.DataFrame | set[str]) -> pd.CategoricalDtype:
+    """DataFrame과 station id set을 섞어서 받아 합집합으로 dtype을 만든다.
+
+    큰 파일(test 등)은 DataFrame 전체 대신 scan_station_ids()로 뽑은 set을 넘기면
+    전체를 메모리에 올리지 않고도 dtype 구성 범위에 포함시킬 수 있다.
+    """
+    ids: set[str] = set()
+    for src in sources:
+        if isinstance(src, pd.DataFrame):
+            ids |= set(src["od_station_id"])
+        else:
+            ids |= set(src)
+    return pd.CategoricalDtype(categories=sorted(ids))
+
+
+def apply_station_code(df: pd.DataFrame, dtype: pd.CategoricalDtype, label: str = "df") -> pd.DataFrame:
+    codes = df["od_station_id"].astype(dtype).cat.codes
+    unknown = int((codes == -1).sum())
+    assert unknown == 0, f"{label}: station_code 매핑 안 된 station {unknown}건 — dtype 구성 범위 확인 필요"
+    df["station_code"] = codes
     return df
 
 
 def add_station_code(
     train: pd.DataFrame, valid: pd.DataFrame, test: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
-    categories = sorted(
-        set(train["od_station_id"]) | set(valid["od_station_id"]) | set(test["od_station_id"])
-    )
-    dtype = pd.CategoricalDtype(categories=categories)
-    for df in (train, valid, test):
-        df["station_code"] = df["od_station_id"].astype(dtype).cat.codes
-    return train, valid, test, categories
+    dtype = build_station_dtype(train, valid, test)
+    for df, label in ((train, "train"), (valid, "valid"), (test, "test")):
+        apply_station_code(df, dtype, label)
+    return train, valid, test, list(dtype.categories)
 
 
 def make_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
@@ -184,6 +220,9 @@ def fit_xgboost(train_df: pd.DataFrame, valid_df: pd.DataFrame, random_state: in
         colsample_bytree=0.8,
         objective="reg:squarederror",
         tree_method="hist",
+        # GPU(device="cuda") 비활성화 — 06m(121M행, feature matrix 약 9.7GB)에서
+        # VRAM(6GB) 초과로 GPU<->CPU thrashing 발생, 학습시간이 15배(159s->2449s)로
+        # 폭증하는 걸 실측 확인함. 09m/12m은 더 커서 위험이 더 큼 — CPU로 되돌림.
         random_state=random_state,
         n_jobs=-1,
     )
@@ -320,6 +359,193 @@ def evaluate_by_horizon(model_name: str, model: Any, df: pd.DataFrame, train_tim
         metrics["horizon_min"] = horizon
         rows.append(metrics)
     return rows
+
+
+CHUNK_SIZE = 2_000_000
+
+
+class ChunkedMetricAccumulator:
+    """test를 청크 단위로 순회하며 지표를 계산하기 위한 누적기.
+
+    Phase 2.5(10-horizon, test 최대 7,900만행)에서 test 전체를 한 번에 메모리에
+    올리다가 스왑 thrashing으로 5시간 넘게 멈추는 문제가 있어서 도입했다.
+    MAE/RMSE/WAPE/R²/direction/decrease/shortage 전부 sufficient statistics로
+    누적 가능한 형태라, 청크로 나눠 계산해도 전체를 한 번에 계산한 것과
+    수학적으로 동일한 결과가 나온다(근사 아님).
+    """
+
+    def __init__(self) -> None:
+        self.n = 0
+        self.sum_abs_err = 0.0
+        self.sum_sq_err = 0.0
+        self.sum_y = 0.0
+        self.sum_y2 = 0.0
+        self.sum_abs_y = 0.0
+        self.dir_counts: dict[tuple[str, str], int] = {}
+        self.decrease_tp = self.decrease_fp = self.decrease_fn = 0
+        self.shortage_tp = self.shortage_fp = self.shortage_fn = 0
+        self.infer_time_sec = 0.0
+
+    def update(self, y_true: np.ndarray, y_pred: np.ndarray, stock_anchor: np.ndarray, infer_time_sec: float) -> None:
+        if len(y_true) == 0:
+            return
+        err = y_true - y_pred
+        self.n += len(y_true)
+        self.sum_abs_err += float(np.sum(np.abs(err)))
+        self.sum_sq_err += float(np.sum(err**2))
+        self.sum_y += float(np.sum(y_true))
+        self.sum_y2 += float(np.sum(y_true**2))
+        self.sum_abs_y += float(np.sum(np.abs(y_true)))
+        self.infer_time_sec += infer_time_sec
+
+        true_c = direction_class(y_true)
+        pred_c = direction_class(y_pred)
+        for tc, pc in zip(true_c, pred_c):
+            key = (tc, pc)
+            self.dir_counts[key] = self.dir_counts.get(key, 0) + 1
+
+        true_dec = y_true < 0
+        pred_dec = y_pred < 0
+        self.decrease_tp += int(np.sum(true_dec & pred_dec))
+        self.decrease_fp += int(np.sum(~true_dec & pred_dec))
+        self.decrease_fn += int(np.sum(true_dec & ~pred_dec))
+
+        true_stock = stock_anchor + y_true
+        pred_stock = stock_anchor + y_pred
+        true_short = true_stock <= SHORTAGE_THRESHOLD
+        pred_short = pred_stock <= SHORTAGE_THRESHOLD
+        self.shortage_tp += int(np.sum(true_short & pred_short))
+        self.shortage_fp += int(np.sum(pred_short & ~true_short))
+        self.shortage_fn += int(np.sum(~pred_short & true_short))
+
+    @staticmethod
+    def _prf(tp: int, fp: int, fn: int) -> tuple[float, float, float]:
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        return precision, recall, f1
+
+    def finalize(self, model_name: str, train_time_sec: float) -> dict[str, Any]:
+        mae = self.sum_abs_err / self.n if self.n else float("nan")
+        rmse = math.sqrt(self.sum_sq_err / self.n) if self.n else float("nan")
+        wape = self.sum_abs_err / self.sum_abs_y if self.sum_abs_y else float("nan")
+        ss_tot = self.sum_y2 - (self.sum_y**2) / self.n if self.n else 0.0
+        r2 = 1 - self.sum_sq_err / ss_tot if ss_tot else float("nan")
+
+        labels = ["decrease", "stable", "increase"]
+        correct = sum(self.dir_counts.get((c, c), 0) for c in labels)
+        direction_accuracy = correct / self.n if self.n else float("nan")
+        f1s = []
+        for c in labels:
+            tp = self.dir_counts.get((c, c), 0)
+            fp = sum(v for (t, p), v in self.dir_counts.items() if p == c and t != c)
+            fn = sum(v for (t, p), v in self.dir_counts.items() if t == c and p != c)
+            f1s.append(self._prf(tp, fp, fn)[2])
+        direction_macro_f1 = float(np.mean(f1s))
+
+        decrease_precision, decrease_recall, decrease_f1 = self._prf(self.decrease_tp, self.decrease_fp, self.decrease_fn)
+        shortage_precision, shortage_recall, shortage_f1 = self._prf(self.shortage_tp, self.shortage_fp, self.shortage_fn)
+
+        return {
+            "model": model_name,
+            "mae": mae,
+            "rmse": rmse,
+            "wape": wape,
+            "r2": r2,
+            "direction_accuracy": direction_accuracy,
+            "direction_macro_f1": direction_macro_f1,
+            "train_time_sec": train_time_sec,
+            "infer_time_sec": self.infer_time_sec,
+            "infer_rows_per_sec": self.n / self.infer_time_sec if self.infer_time_sec > 0 else float("inf"),
+            "decrease_precision": decrease_precision,
+            "decrease_recall": decrease_recall,
+            "decrease_f1": decrease_f1,
+            "shortage_precision": shortage_precision,
+            "shortage_recall": shortage_recall,
+            "shortage_f1": shortage_f1,
+        }
+
+
+def iter_csv_chunks(paths: list[Path], usecols: list[str], chunk_size: int = CHUNK_SIZE):
+    for p in paths:
+        for chunk in pd.read_csv(p, usecols=usecols, chunksize=chunk_size):
+            yield chunk
+
+
+def scan_station_ids(paths: list[Path], chunk_size: int = CHUNK_SIZE) -> set[str]:
+    """od_station_id 컬럼만 청크로 훑어서 고유 station id 집합을 반환한다.
+
+    train∪valid만으로 station dtype을 만들면 stratified300처럼 train/valid 기간에
+    등장하지 않는 station이 test에만 있는 경우 apply_station_code()가 unknown으로
+    실패한다(top300은 Phase 0에서 train=valid=test station 집합 동일이 확인됐지만,
+    stratified300은 그 전제가 깨짐 — 06m/stratified300 이전 단계에서 실측 확인됨).
+    test 전체를 메모리에 올리지 않고도 dtype 구성 범위를 test까지 포함하도록 이 함수로
+    1개 컬럼만 청크 스캔한다.
+    """
+    ids: set[str] = set()
+    for chunk in iter_csv_chunks(paths, ["od_station_id"], chunk_size):
+        ids |= set(chunk["od_station_id"].astype(str))
+    return ids
+
+
+def evaluate_test_chunked(
+    fit_results: list[FitResult],
+    test_paths: list[Path],
+    usecols: list[str],
+    station_dtype: pd.CategoricalDtype,
+    transform_fn=lambda df: df,
+    chunk_size: int = CHUNK_SIZE,
+    tally_col: str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[Any, int]]:
+    """test를 청크로 순회하며 comparison/by_horizon을 한 번에 계산한다.
+
+    기존 evaluate_model+evaluate_by_horizon을 test 전체 로드 없이 대체한다.
+    predict()도 청크당 1회만 호출하고 horizon별로는 배열을 슬라이싱만 해서
+    (원래 evaluate_by_horizon처럼 horizon마다 다시 predict하지 않음) 오히려
+    더 효율적이다.
+    """
+    active = [r for r in fit_results if not r.skipped_reason]
+    accs = {r.name: ChunkedMetricAccumulator() for r in active}
+    accs_by_horizon: dict[str, dict[int, ChunkedMetricAccumulator]] = {r.name: {} for r in active}
+
+    tally: dict[Any, int] = {}
+    n_seen = 0
+    for chunk in iter_csv_chunks(test_paths, usecols, chunk_size):
+        chunk["od_station_id"] = chunk["od_station_id"].astype(str)
+        chunk = downcast_memory(chunk)
+        apply_station_code(chunk, station_dtype, "test-chunk")
+        chunk = transform_fn(chunk)
+
+        if tally_col is not None:
+            for k, v in chunk[tally_col].value_counts().items():
+                tally[k] = tally.get(k, 0) + int(v)
+
+        y_true = chunk[TARGET_COL].fillna(0).to_numpy()
+        stock_anchor = chunk["stock_anchor_hour"].fillna(0).to_numpy()
+        horizon_values = chunk["horizon_min"].to_numpy()
+        n_seen += len(chunk)
+
+        for result in active:
+            started = time.perf_counter()
+            pred = predict_model(result.model, chunk)
+            infer_time = time.perf_counter() - started
+            accs[result.name].update(y_true, pred, stock_anchor, infer_time)
+            for h in np.unique(horizon_values):
+                mask = horizon_values == h
+                bucket = accs_by_horizon[result.name].setdefault(int(h), ChunkedMetricAccumulator())
+                bucket.update(y_true[mask], pred[mask], stock_anchor[mask], 0.0)
+        del chunk
+    print(f"  (chunked eval: 총 {n_seen:,}행 처리)")
+
+    comparison = pd.DataFrame([accs[r.name].finalize(r.name, r.train_time_sec) for r in active]).sort_values("mae")
+    horizon_rows = []
+    for r in active:
+        for h, acc in sorted(accs_by_horizon[r.name].items()):
+            row = acc.finalize(r.name, r.train_time_sec)
+            row["horizon_min"] = h
+            horizon_rows.append(row)
+    by_horizon = pd.DataFrame(horizon_rows).sort_values(["horizon_min", "mae"])
+    return comparison, by_horizon, tally
 
 
 def feature_importance_rows(model_name: str, model: Any) -> list[dict[str, Any]]:

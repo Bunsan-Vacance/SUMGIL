@@ -380,6 +380,33 @@ AI/validation/BYC/q3-seasonal-dataset-check/
                               Phase 1부터 Phase 2까지 해소되지 않음 → 데이터 기간만 늘리는
                               Phase 2.5로 저절로 해결될지 불확실하며, 별도 원인 분석이
                               필요할 수 있음
+  Phase 2.5 (스케일 확장)   : 8개 조합(top300/stratified300 × 03/06/09/12개월) 중 7개 완료,
+                              12m/stratified300만 미완료(OOM·hang 반복으로 다음 세션 재시도
+                              필요). 상세 실행 로그는
+                              AI/validation/BYC/q3-seasonal-dataset-check/outputs/phase2.5/progress_report.md.
+
+                              direction_accuracy 격차(트리모델-Naive_Profile) 추이:
+                                top300         : 03m -0.0053 → 06m -0.0016 → 09m +0.0014
+                                                 (첫 역전) → 12m +0.0004 (역전 유지)
+                                stratified300  : 03m -0.1275 → 06m -0.0941 → 09m -0.0862
+                                                 (12m 미완료)
+
+                              결론 — top300은 가설(스케일 확장이 격차를 줄인다) 지지: 09m에서
+                              트리 모델이 처음 Naive_Profile을 direction_accuracy에서 앞섬.
+                              stratified300은 같은 방향으로 줄어들지만 훨씬 느리고 09m까지도
+                              역전 못 함 — **같은 03m 스케일에서도 top300(-0.0053)과
+                              stratified300(-0.1275) 격차가 24배 차이 나는 게 핵심 발견.**
+                              "스케일이 격차를 줄인다"는 가설만으론 불충분하고, station 표본
+                              구성(활동량 낮은/희소한 station 포함 여부)이 스케일보다
+                              direction_accuracy에 더 큰 영향을 줄 수 있음을 시사 — Phase 3
+                              station 정적 feature와 연결해 추가 분석 여지 있음.
+
+                              부수적으로 고친 버그 3건(다음 실험에도 적용됨): XGBoost GPU가
+                              VRAM 초과로 대규모에서 급격히 느려지는 문제(CPU로 전환),
+                              stratified300 station dtype이 train∩valid만으로 부족해 test
+                              매칭 실패하던 문제(train∪valid∪test 스캔으로 수정), 대규모에서
+                              station id를 문자열로 다루면 메모리 폭발하던 문제(category
+                              dtype + 고정 카테고리 강제 지정으로 수정).
 ```
 
 ## 10. 참고 진단 실험 — Sequence 모델 상한 성능 (Phase 순서 밖, A안)
