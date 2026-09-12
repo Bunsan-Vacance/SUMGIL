@@ -54,3 +54,16 @@ def save_partitioned_parquet(df: pd.DataFrame, base_dir: Path, collected_at: dat
     out_path = out_dir / filename
     df.to_parquet(out_path, index=False)
     return out_path
+
+
+def save_latest_parquet(df: pd.DataFrame, latest_path: Path) -> Path:
+    """최신 스냅샷을 고정 경로에 atomic하게 저장한다."""
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = latest_path.with_name(f".{latest_path.name}.{os.getpid()}.tmp")
+    try:
+        df.to_parquet(tmp_path, index=False)
+        os.replace(tmp_path, latest_path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+    return latest_path

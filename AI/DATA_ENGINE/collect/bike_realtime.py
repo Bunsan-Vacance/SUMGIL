@@ -23,6 +23,7 @@ from DATA_ENGINE.collect.common import (
     env,
     http_retry,
     now_kst,
+    save_latest_parquet,
     save_partitioned_parquet,
 )
 
@@ -102,6 +103,11 @@ def run_once() -> None:
         return
     out_path = save_partitioned_parquet(df, BIKE_RAW / "realtime", df["collected_at"].iloc[0])
     logger.info("저장 완료: %s (%d개소)", out_path, len(df))
+    try:
+        latest_path = save_latest_parquet(df, BIKE_RAW / "realtime" / "latest.parquet")
+        logger.info("latest 갱신 완료: %s", latest_path)
+    except Exception:
+        logger.exception("latest 갱신 실패: snapshot 저장은 유지")
 
 
 def run_forever(interval: int = POLL_INTERVAL_SEC) -> None:
