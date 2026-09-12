@@ -24,6 +24,14 @@ from DATA_ENGINE.monitor.check_partition_counts import (
     partition_path,
 )
 from DATA_ENGINE.monitor.check_partition_counts import main as partition_main
+from DATA_ENGINE.monitor.notify_discord import (
+    DISCORD_CONTENT_LIMIT,
+    build_discord_message,
+    resolve_server_name,
+    send_discord_notification,
+    truncate_message,
+)
+from DATA_ENGINE.monitor.notify_discord import main as discord_main
 
 
 def touch_with_age(path: Path, age_min: float, now_ts: float) -> None:
@@ -288,3 +296,128 @@ def test_partition_main_returns_one_when_any_partition_fails(tmp_path, capsys):
     assert exit_code == 1
     assert "OK bike partition count" in captured.out
     assert "FAIL weather partition missing" in captured.out
+
+
+def test_truncate_message_keeps_discord_content_under_limit():
+    message = "x" * (DISCORD_CONTENT_LIMIT + 100)
+
+    truncated = truncate_message(message)
+
+    assert len(truncated) == DISCORD_CONTENT_LIMIT
+    assert truncated.endswith("... (truncated)")
+
+
+def test_build_discord_message_includes_server_status_and_detail():
+    message = build_discord_message("FAIL weather latest stale", server_name="J15A104A")
+
+    assert "[DATA_ENGINE] 수집 상태 이상 감지" in message
+    assert "server=J15A104A" in message
+    assert "status=FAIL" in message
+    assert "FAIL weather latest stale" in message
+
+
+def test_resolve_server_name_prefers_argument(monkeypatch):
+    monkeypatch.setenv("DATA_ENGINE_SERVER_NAME", "env-server")
+
+    assert resolve_server_name("arg-server") == "arg-server"
+
+
+def test_resolve_server_name_uses_environment(monkeypatch):
+    monkeypatch.setenv("DATA_ENGINE_SERVER_NAME", "J15A104A")
+
+    assert resolve_server_name() == "J15A104A"
+
+
+def test_send_discord_notification_skips_when_webhook_url_is_missing(monkeypatch):
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+
+    result = send_discord_notification("message")
+
+    assert result.ok is True
+    assert result.status == "skipped"
+    assert "DISCORD_WEBHOOK_URL is empty" in result.message
+
+
+def test_send_discord_notification_dry_run_does_not_post(monkeypatch):
+    def fail_post(*args, **kwargs):
+        raise AssertionError("requests.post should not be called")
+
+    monkeypatch.setattr("DATA_ENGINE.monitor.notify_discord.requests.post", fail_post)
+
+    result = send_discord_notification(
+        "message",
+        webhook_url="https://discord.example/webhook",
+        dry_run=True,
+    )
+
+    assert result.ok is True
+    assert result.status == "dry_run"
+    assert "DRY_RUN discord notification skipped" in result.message
+
+
+def test_send_discord_notification_posts_payload(monkeypatch):
+    calls = []
+
+    class Response:
+        status_code = 204
+        text = ""
+
+    def fake_post(url, json, timeout):
+        calls.append((url, json, timeout))
+        return Response()
+
+    monkeypatch.setattr("DATA_ENGINE.monitor.notify_discord.requests.post", fake_post)
+
+    result = send_discord_notification("message", webhook_url="https://discord.example/webhook")
+
+    assert result.ok is True
+    assert result.status == "sent"
+    assert calls == [("https://discord.example/webhook", {"content": "message"}, 10.0)]
+
+
+def test_send_discord_notification_fails_on_http_error(monkeypatch):
+    class Response:
+        status_code = 400
+        text = "bad request"
+
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.notify_discord.requests.post",
+        lambda *args, **kwargs: Response(),
+    )
+
+    result = send_discord_notification("message", webhook_url="https://discord.example/webhook")
+
+    assert result.ok is False
+    assert result.status == "failed"
+    assert "status_code=400" in result.message
+
+
+def test_send_discord_notification_fails_on_request_exception(monkeypatch):
+    import requests
+
+    def raise_timeout(*args, **kwargs):
+        raise requests.Timeout("timeout")
+
+    monkeypatch.setattr("DATA_ENGINE.monitor.notify_discord.requests.post", raise_timeout)
+
+    result = send_discord_notification("message", webhook_url="https://discord.example/webhook")
+
+    assert result.ok is False
+    assert result.status == "failed"
+    assert "timeout" in result.message
+
+
+def test_discord_main_dry_run_returns_zero(capsys):
+    exit_code = discord_main(
+        [
+            "--message",
+            "FAIL bike partition missing",
+            "--server-name",
+            "J15A104A",
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "DRY_RUN discord notification skipped" in captured.out
