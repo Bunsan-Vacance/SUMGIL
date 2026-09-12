@@ -1,0 +1,109 @@
+# Kafka — 데이터 계층(Infra 소유, 앱 비의존). KRaft 단독, 파티션 1.
+# 리스너는 클러스터 내부(ClusterIP)만 노출한다. 외부 프로듀서(노드 호스트)는 별도 티켓에서 연다.
+# 계약(토픽·컨슈머 그룹)은 project/BE/docs/infra/kafka.md §4. 4.x라 ZooKeeper가 없다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/part-of: sumgil-data
+    app.kubernetes.io/component: kafka
+spec:
+  selector:
+    app: kafka
+  ports:
+    - name: plaintext
+      port: 9092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/part-of: sumgil-data
+    app.kubernetes.io/component: kafka
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+        - name: kafka
+          image: apache/kafka:4.2.1
+          ports:
+            - containerPort: 9092
+            - containerPort: 9093
+          env:
+            # KRaft: 브로커와 컨트롤러를 한 프로세스에서 겸한다 (단일 노드).
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            # 단일 파드가 브로커·컨트롤러를 겸하므로 컨트롤러는 localhost로 붙는다.
+            # (Service는 9092만 노출하므로 kafka:9093은 닿지 않는다 — 로컬 compose와 동일)
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@localhost:9093"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            # 볼륨 메타데이터와 어긋나면 기동 실패하므로 고정값을 쓴다.
+            - name: CLUSTER_ID
+              value: "MkU3OEVBNTcwNTJENDM2Qk"
+            # 내부 전용: 클라이언트는 kafka:9092로 붙는다. advertised가 실제 접속 주소다.
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:9092,CONTROLLER://:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            # 단일 브로커라 복제본은 1. 기본값 3이면 내부 토픽 생성이 막힌다.
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "1"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xmx512m -Xms512m"
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+          readinessProbe:
+            exec:
+              command:
+                - /opt/kafka/bin/kafka-broker-api-versions.sh
+                - --bootstrap-server
+                - localhost:9092
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

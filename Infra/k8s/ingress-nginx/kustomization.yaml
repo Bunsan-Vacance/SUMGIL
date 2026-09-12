@@ -1,0 +1,7 @@
+# ingress-nginx 매니페스트 (S15P21A104-124). vendored — controller v1.15.1 cloud(LoadBalancer).
+# k3s ServiceLB가 80/443을 노출한다. k3s 내장 Traefik은 `--disable traefik`으로 꺼둔다.
+# 갱신 시: curl -sL https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-vX.Y.Z/deploy/static/provider/cloud/deploy.yaml > deploy.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deploy.yaml
