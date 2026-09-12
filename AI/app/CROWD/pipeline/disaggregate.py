@@ -25,6 +25,18 @@
 슬롯 첫 열차의 "직전 열차"는 슬롯 경계 이전 마지막 열차다(경계를 넘어 계산). 슬롯에 열차가 없으면
 그 슬롯 재차인원은 배분할 곳이 없어 NaN으로 남긴다(운행 없음 = 혼잡도 정의 불가).
 
+### 배차 의존 도착 혼합 (92)
+
+간격 비례는 "승객이 시각표를 보지 않고 온다"는 가정이고, 문헌상 배차 5분까지는 확실하고 10~15분에서는
+승객이 시각표에 맞춰 온다(Luethi·Weidmann·Nash 2007, Bowman·Turnquist 1981). 시각표에 맞춰 오는
+승객은 **간격이 아니라 열차를 고른다** — 간격이 5분·25분인 두 열차가 한 슬롯에 있을 때 무작위 도착은
+1:5로 나누지만 시각표 도착은 1:1에 가깝다. 그래서 `mix_h0`를 주면 열차 몫을
+
+    share_i ∝ w(h_i) · h_i / Σh  +  (1 − w(h_i)) · 1 / n_slot,   w(h) = 1 (h ≤ h0), 선형 감소, 0 (h ≥ h1)
+
+로 섞고 슬롯 안에서 다시 정규화한다(질량 보존). `mix_h0=None`(기본)이면 기존 간격 비례 그대로다.
+`headway_long` 플래그는 혼합과 무관하게 `long_headway_min` 기준으로 남긴다(91 API 소비자 호환).
+
 ## 검증 가능성
 
 - 1층: 두 30분 추정치의 합 = 1시간 원본(질량 보존). 요일유형 홀드아웃으로 모양 오차 측정.
@@ -45,6 +57,9 @@ from app.CROWD.pipeline.lookup import TARGETS
 
 SLOT_MINUTES = 30
 LONG_HEADWAY_MIN = 12.0
+# 도착 혼합 기본 임계(분): h0까지 무작위 도착 가중 1, h1부터 0. 문헌(5분 확실, 10~15분 시각표 의존).
+MIX_H0_DEFAULT = 5.0
+MIX_H1_DEFAULT = 15.0
 
 
 # ── 1층 ──
@@ -124,17 +139,28 @@ def slot30_start_minutes(slot30: str) -> int:
     return m + 24 * 60 if hh < 4 else m
 
 
+def arrival_mix_weight(headway_min, h0: float = MIX_H0_DEFAULT, h1: float = MIX_H1_DEFAULT):
+    """무작위 도착 가중 w(h): h ≤ h0 → 1, h ≥ h1 → 0, 사이는 선형. 배열·스칼라 모두 받는다."""
+    if h1 <= h0:
+        raise ValueError(f"h1({h1})은 h0({h0})보다 커야 한다")
+    h = np.asarray(headway_min, dtype=float)
+    return np.clip((h1 - h) / (h1 - h0), 0.0, 1.0)
+
+
 def allocate_to_trains(
     slot_loads: pd.DataFrame,
     timetable: pd.DataFrame,
     load_col: str = "onboard_30min_est",
     long_headway_min: float = LONG_HEADWAY_MIN,
+    mix_h0: float | None = None,
+    mix_h1: float = MIX_H1_DEFAULT,
 ) -> pd.DataFrame:
-    """30분 슬롯 재차인원을 그 슬롯의 열차에 간격 비례로 배분한다.
+    """30분 슬롯 재차인원을 그 슬롯의 열차에 배분한다 — 기본은 간격 비례, `mix_h0`를 주면 도착 혼합.
 
     `slot_loads`: date, station_no, direction, day_type, time_slot_30min, `load_col`.
     `timetable`: station_no, direction, day_type, train_id, arrival_time('HH:MM[:SS]').
-    반환: 열차 한 대 = 한 행. `load_est`(몫), `headway_min`, `headway_long`, `share`.
+    반환: 열차 한 대 = 한 행. `load_est`(몫), `headway_min`, `headway_long`, `share`,
+    혼합을 썼으면 `mix_w`(그 열차의 무작위 도착 가중).
     슬롯에 열차가 없으면 그 슬롯은 반환에 나오지 않는다(호출자가 NaN으로 취급).
     """
     tt = timetable.copy()
@@ -149,15 +175,20 @@ def allocate_to_trains(
     tt["time_slot_30min"] = tt["slot_start"].map(_minutes_to_slot30)
 
     key = ["station_no", "direction", "day_type", "time_slot_30min"]
-    slot_total = tt.groupby(key, observed=True)["headway_min"].transform("sum")
-    tt["share"] = tt["headway_min"] / slot_total
+    grp = tt.groupby(key, observed=True)
+    tt["share"] = tt["headway_min"] / grp["headway_min"].transform("sum")
+    cols = [*key, "train_id", "arrival_time", "headway_min", "share", "headway_long"]
+    if mix_h0 is not None:
+        w = arrival_mix_weight(tt["headway_min"].to_numpy(), mix_h0, mix_h1)
+        n_slot = grp["train_id"].transform("count").to_numpy()
+        raw = w * tt["share"].to_numpy() + (1.0 - w) / n_slot
+        tt["share"] = raw
+        tt["share"] = tt["share"] / grp["share"].transform("sum")  # 슬롯 안 재정규화(질량 보존)
+        tt["mix_w"] = w
+        cols.append("mix_w")
     tt["headway_long"] = tt["headway_min"] > long_headway_min
 
-    merged = slot_loads.merge(
-        tt[[*key, "train_id", "arrival_time", "headway_min", "share", "headway_long"]],
-        on=key,
-        how="inner",
-    )
+    merged = slot_loads.merge(tt[cols], on=key, how="inner")
     merged["load_est"] = merged[load_col] * merged["share"]
     return merged
 
