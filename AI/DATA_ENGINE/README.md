@@ -38,6 +38,78 @@
   자체는 재생성. 그림은 Drive `data/CROWD/reports/figures/` 미러와 Notion 실험실 첨부로 공유).
 - `scripts/` — 폴러 백그라운드 실행용 nohup 스크립트·systemd 유닛 템플릿.
 
+## 실시간 수집기 운영
+
+따릉이와 날씨 nowcast 수집기는 서버에서 상시 실행해야 하므로 운영 환경에서는 systemd를
+기본으로 사용한다. `start_*.sh`는 수동 테스트나 임시 실행용으로만 쓴다.
+
+사전 준비:
+
+```bash
+cd <REPO_ROOT>/AI
+python -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+mkdir -p logs
+```
+
+`AI/.env`에는 최소 아래 키가 필요하다.
+
+```text
+SEOUL_BIKE_KEY 또는 SEOUL_API_KEY
+KMA_API_KEY
+```
+
+서비스 파일 설치:
+
+```bash
+bash DATA_ENGINE/scripts/install_data_engine_services.sh
+```
+
+기본 실행은 서비스 파일 설치와 `daemon-reload`까지만 수행한다. 설치와 동시에 자동 실행까지
+하려면 명시적으로 `--enable-now`를 붙인다.
+
+```bash
+bash DATA_ENGINE/scripts/install_data_engine_services.sh --enable-now
+```
+
+수동으로 시작·확인할 때는 아래 명령을 사용한다.
+
+```bash
+sudo systemctl enable --now bike-realtime-poller.service
+sudo systemctl enable --now weather-nowcast-poller.service
+
+sudo systemctl status bike-realtime-poller.service
+sudo systemctl status weather-nowcast-poller.service
+
+tail -n 100 AI/logs/bike_realtime.log
+tail -n 100 AI/logs/weather_nowcast.log
+```
+
+정상 동작 기준:
+
+- `bike-realtime-poller.service`, `weather-nowcast-poller.service`가 `active` 상태다.
+- `AI/logs/bike_realtime.log`, `AI/logs/weather_nowcast.log`가 생성된다.
+- `AI/data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet`가 생성된다.
+- `AI/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet`가 생성된다.
+- `AI/data/BIKE/raw/realtime/latest.parquet`가 갱신된다.
+- `AI/data/EXTERNAL/weather/raw/nowcast/latest.parquet`가 갱신된다.
+
+## Redis 연동 상태
+
+Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
+소유 작업으로 분리되어 있다.
+
+- `S15P21A104-61` — `[INFRA | BE] Redis 캐싱 전략 설계 및 연동`: Redis key 네이밍·TTL
+  정책 문서화, Spring Data Redis 기본 연동. 실제 캐시 갱신 로직은 데이터 파이프라인 연동 후
+  별도 작업으로 제외되어 있다.
+- `S15P21A104-127` — `[INFRA | Infra] Postgres·Redis StatefulSet`: k3s 환경의
+  PostgreSQL·Redis StatefulSet 구성 작업.
+- `S15P21A104-123` — `[INFRA | Infra] VPN 네트워크 구성`: AI EC2와 k3s Redis 간 접근이
+  필요하면 이 네트워크 구성과 함께 확인해야 한다.
+
+따라서 이 폴더의 수집기는 Redis key/TTL을 임의로 확정하지 않는다. BE/Infra Redis 컨벤션과
+네트워크 접근 방식이 확정되기 전까지는 `latest.parquet`를 최신값 fallback으로 사용한다.
+
 ## `data/` 하위 각 디렉터리가 뭔지
 
 `AI/data/`는 이 폴더와 이름이 비슷해 보이지만 별개 위치다(`.gitignore`가 `AI/data/**` 기준으로
@@ -51,11 +123,13 @@
 | 경로 | 내용 | 출처 | 시간 해상도 | 쓰이는 곳 |
 | --- | --- | --- | --- | --- |
 | `data/BIKE/raw/realtime/` | 대여소별 실시간 재고 스냅샷 | `bike_realtime.py` 폴링 (소급 불가, 지금부터 쌓는 것만 존재) | 5분 | 재고 분포·시간패턴·공간구조 (1·2·4번 섹션) |
+| `data/BIKE/raw/realtime/latest.parquet` | 최신 따릉이 재고 스냅샷 | `bike_realtime.py`가 매 폴링마다 atomic replace로 갱신 | 최신 1회 | Redis 연동 전 latest fallback |
 | `data/BIKE/raw/rental_history/` | 대여소별 이용정보 **월별 집계** (OA-15182) | 수동 다운로드 | 월 단위 | 정류소/자치구 월간 총량 참고용 — **날씨 분석엔 미사용** |
 | `data/BIKE/raw/station_5min/` | 대여소별 5분단위 이용현황 O-D (OA-21229) | 수동 다운로드 | 5분(집계 시 시간 단위로 묶음) | **날씨-수요 핵심 분석 (3번 섹션)** |
 | `data/BIKE/raw/station_master/` | 대여소 좌표 (OA-21235) | 수동 다운로드 | - | 공간분석 좌표 조인 (4번 섹션) |
 | `data/EXTERNAL/weather/raw/asos/` | 종관기상관측 시간자료 2년 백필 (지점 108) | `weather_asos_backfill.py` | 시간 | 날씨-수요 핵심 분석 (3번 섹션) |
 | `data/EXTERNAL/weather/raw/nowcast/` | 초단기실황/예보 스냅샷 | `weather_nowcast.py` 폴링 | 10분 | 재고 쪽 보조 분석(향후, 데이터 쌓이는 대로) |
+| `data/EXTERNAL/weather/raw/nowcast/latest.parquet` | 최신 초단기실황/예보 스냅샷 | `weather_nowcast.py`가 매 폴링마다 atomic replace로 갱신 | 최신 1회 | Redis 연동 전 latest fallback |
 | `data/EXTERNAL/station/raw/` | 서울시 역사마스터(역사_ID·역사명·호선·위경도, 지하철 전 노선) | 수동 다운로드 | - | CROWD 역 군집화·ROUTE 라우팅·BIKE 역-대여소 거리 등 여러 도메인이 참조 |
 | `data/EXTERNAL/population/raw/` | 서울 생활인구 250M 격자, 일별 zip(시간대·연령·성별) | 수동 다운로드 | 시간 | 역 반경 집계 후 CROWD/BIKE 수요 보조 피처 (아직 집계 코드 없음) |
 | `data/EXTERNAL/holiday/raw/` | 사립학교교직원연금공단 공휴일 관리 정보 | 수동 다운로드 | 일 단위 | 공휴일 파생변수(is_holiday) — CROWD/BIKE 이벤트 피처 |

@@ -1,9 +1,7 @@
 
-# systemd 유닛 템플릿. /etc/systemd/system/bike-realtime-poller.service 로 복사 후
-# WorkingDirectory / ExecStart의 <REPO_ROOT>, <VENV_PATH>를 실제 경로로 바꿔서 쓴다.
+# systemd 유닛 템플릿. scripts/install_data_engine_services.sh 로 placeholder를 치환해 설치한다.
 #
-#   sudo cp AI/DATA_ENGINE/scripts/bike-realtime-poller.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
+#   bash AI/DATA_ENGINE/scripts/install_data_engine_services.sh
 #   sudo systemctl enable --now bike-realtime-poller
 #   sudo systemctl status bike-realtime-poller
 
