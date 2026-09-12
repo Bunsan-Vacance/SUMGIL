@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import phase1_baseline as p1  # noqa: E402
+import phase1_baseline as p1
 
 TARGET_COL = p1.TARGET_COL
 HORIZONS = p1.HORIZONS
@@ -41,7 +41,9 @@ PROFILE_STAT_COLS = [
 HISTORICAL_FEATURE_COLS = PROFILE_STAT_COLS + ["historical_profile_fallback_level"]
 FEATURE_COLS = p1.FEATURE_COLS + HISTORICAL_FEATURE_COLS
 MODEL_FEATURE_COLS = FEATURE_COLS + ["station_code"]
-BASE_COLS = [c for c in FEATURE_COLS if c not in HISTORICAL_FEATURE_COLS]  # historical_* 붙기 전 원본 컬럼
+BASE_COLS = [
+    c for c in FEATURE_COLS if c not in HISTORICAL_FEATURE_COLS
+]  # historical_* 붙기 전 원본 컬럼
 
 # phase1_baseline의 make_xy/fit_*/feature_importance_rows는 모듈 전역 FEATURE_COLS/
 # MODEL_FEATURE_COLS를 호출 시점에 참조한다 — Phase 2 feature셋으로 확장해서 그대로 재사용한다.
@@ -110,9 +112,17 @@ def parse_args() -> argparse.Namespace:
     default_output_dir = script_dir.parents[1] / "outputs" / "phase2"
     parser.add_argument("--data-dir", default=str(default_data_dir))
     parser.add_argument("--output-dir", default=str(default_output_dir))
-    parser.add_argument("--train-path", nargs="+", help="train CSV 경로. 여러 개 지정하면 순서대로 합쳐 읽는다.")
-    parser.add_argument("--valid-path", nargs="+", help="valid CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
-    parser.add_argument("--test-path", nargs="+", help="test CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
+    parser.add_argument(
+        "--train-path", nargs="+", help="train CSV 경로. 여러 개 지정하면 순서대로 합쳐 읽는다."
+    )
+    parser.add_argument(
+        "--valid-path",
+        nargs="+",
+        help="valid CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.",
+    )
+    parser.add_argument(
+        "--test-path", nargs="+", help="test CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다."
+    )
     parser.add_argument("--rf-max-rows", type=int, default=2_000_000)
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("--file-tag", default="top300")
@@ -169,9 +179,15 @@ def main() -> None:
     # test를 통째로 메모리에 올리지 않고 station id 컬럼만 청크 스캔해서(scan_station_ids)
     # dtype 구성 범위에 포함시킨다 — 메모리 절감 설계는 그대로 유지된다.
     print("split 로드 (train/valid)...")
-    train_df = read_split_with_targets(data_dir, "train", args.file_tag, resolve_split_path(args, "train"))
-    valid_df = read_split_with_targets(data_dir, "valid", args.file_tag, resolve_split_path(args, "valid"))
-    test_paths = resolve_split_path(args, "test") or [data_dir / f"test_netflow_q3_mapped_{args.file_tag}.csv.gz"]
+    train_df = read_split_with_targets(
+        data_dir, "train", args.file_tag, resolve_split_path(args, "train")
+    )
+    valid_df = read_split_with_targets(
+        data_dir, "valid", args.file_tag, resolve_split_path(args, "valid")
+    )
+    test_paths = resolve_split_path(args, "test") or [
+        data_dir / f"test_netflow_q3_mapped_{args.file_tag}.csv.gz"
+    ]
     print("test station id 스캔 (dtype 구성용, 전체 로드 아님)...")
     test_station_ids = p1.scan_station_ids(test_paths)
     station_dtype = p1.build_station_dtype(train_df, valid_df, test_station_ids)
@@ -228,8 +244,12 @@ def main() -> None:
     print("test 청크 단위 평가...")
     test_usecols = ["od_station_id", *BASE_COLS, TARGET_COL]
     comparison, by_horizon, fallback_tally = p1.evaluate_test_chunked(
-        fit_results, test_paths, test_usecols, station_dtype,
-        transform_fn=profile.transform, tally_col="historical_profile_fallback_level",
+        fit_results,
+        test_paths,
+        test_usecols,
+        station_dtype,
+        transform_fn=profile.transform,
+        tally_col="historical_profile_fallback_level",
     )
     test_rows = sum(fallback_tally.values())
     fallback_dist = {str(k): v / test_rows for k, v in fallback_tally.items()} if test_rows else {}
@@ -237,7 +257,9 @@ def main() -> None:
 
     feature_importance = pd.DataFrame(importance_rows)
     if not feature_importance.empty:
-        feature_importance = feature_importance.sort_values(["model", "importance"], ascending=[True, False])
+        feature_importance = feature_importance.sort_values(
+            ["model", "importance"], ascending=[True, False]
+        )
 
     best_model_name, best_reason = p1.select_best(comparison)
     best_model = fitted_models[best_model_name]
@@ -276,13 +298,15 @@ def main() -> None:
             "train": int(train_rows),
             "valid": int(valid_rows),
             "test": int(test_rows),
-            "station_categories": int(len(station_categories)),
+            "station_categories": len(station_categories),
         },
         "test_fallback_level_distribution": {k: float(v) for k, v in fallback_dist.items()},
         "comparison": comparison.to_dict(orient="records"),
         "by_horizon": by_horizon.to_dict(orient="records"),
     }
-    (output_dir / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "metrics.json").write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     print(f"Best model: {best_model_name} (Phase 2 통과 여부: {passed})")
     print(best_reason)

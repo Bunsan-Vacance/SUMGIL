@@ -71,20 +71,67 @@ HORIZON_BALANCE_WARN_PCT = 0.05
 EXCEPTION_FLAG_PERCENTILE = 0.95
 
 FEATURE_AVAILABILITY = [
-    {"feature": "stock_anchor_hour", "trainable": "가능", "servable": "가능(실시간 API로 대체)", "used_in_baseline": "포함"},
-    {"feature": "minutes_since_stock_anchor", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
-    {"feature": "stock_ratio_hour", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
-    {"feature": "is_empty_anchor / is_full_anchor", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
-    {"feature": "sin/cos_hour, sin/cos_slot", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함"},
-    {"feature": "district, lat_stock, lon_stock, rack_count", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함(Phase 3 조기 사용)"},
-    {"feature": "rent_count_5m / return_count_5m / net_flow_5m", "trainable": "가능", "servable": "불가", "used_in_baseline": "제외 (A안 감사용)"},
-    {"feature": "historical_profile_net (Phase 2)", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함 예정"},
-    {"feature": "weather_current (Phase 4)", "trainable": "가능", "servable": "가능", "used_in_baseline": "포함 예정"},
+    {
+        "feature": "stock_anchor_hour",
+        "trainable": "가능",
+        "servable": "가능(실시간 API로 대체)",
+        "used_in_baseline": "포함",
+    },
+    {
+        "feature": "minutes_since_stock_anchor",
+        "trainable": "가능",
+        "servable": "가능",
+        "used_in_baseline": "포함",
+    },
+    {
+        "feature": "stock_ratio_hour",
+        "trainable": "가능",
+        "servable": "가능",
+        "used_in_baseline": "포함",
+    },
+    {
+        "feature": "is_empty_anchor / is_full_anchor",
+        "trainable": "가능",
+        "servable": "가능",
+        "used_in_baseline": "포함",
+    },
+    {
+        "feature": "sin/cos_hour, sin/cos_slot",
+        "trainable": "가능",
+        "servable": "가능",
+        "used_in_baseline": "포함",
+    },
+    {
+        "feature": "district, lat_stock, lon_stock, rack_count",
+        "trainable": "가능",
+        "servable": "가능",
+        "used_in_baseline": "포함(Phase 3 조기 사용)",
+    },
+    {
+        "feature": "rent_count_5m / return_count_5m / net_flow_5m",
+        "trainable": "가능",
+        "servable": "불가",
+        "used_in_baseline": "제외 (A안 감사용)",
+    },
+    {
+        "feature": "historical_profile_net (Phase 2)",
+        "trainable": "가능",
+        "servable": "가능",
+        "used_in_baseline": "포함 예정",
+    },
+    {
+        "feature": "weather_current (Phase 4)",
+        "trainable": "가능",
+        "servable": "가능",
+        "used_in_baseline": "포함 예정",
+    },
 ]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="q3_mapped_netflow_v5 데이터셋 Phase 0 검증 리포트를 만든다.")
+    parser = argparse.ArgumentParser(
+        description="q3_mapped_netflow_v5 데이터셋 Phase 0 검증 리포트를 만든다."
+    )
     script_dir = Path(__file__).resolve()
     ai_dir = script_dir.parents[4]
     default_dataset_dir = ai_dir / "data" / "processed" / "BYC" / "stock_q3_mapped_netflow_v5"
@@ -160,7 +207,9 @@ def check_split_boundaries(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 
 def check_station_coverage(splits: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, list[str]]:
-    all_stations = sorted(set().union(*[set(df["od_station_id"].unique()) for df in splits.values()]))
+    all_stations = sorted(
+        set().union(*[set(df["od_station_id"].unique()) for df in splits.values()])
+    )
     max_timestamps = {name: df["base_time"].nunique() for name, df in splits.items()}
 
     rows = []
@@ -189,7 +238,12 @@ def horizon_distribution(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
         for h in HORIZONS:
             c = int(counts.get(h, 0))
             rows.append(
-                {"split": name, "horizon_min": h, "row_count": c, "ratio_within_split": c / total if total else 0.0}
+                {
+                    "split": name,
+                    "horizon_min": h,
+                    "row_count": c,
+                    "ratio_within_split": c / total if total else 0.0,
+                }
             )
     return pd.DataFrame(rows)
 
@@ -245,9 +299,13 @@ def leakage_check(splits: dict[str, pd.DataFrame]) -> list[str]:
         future_anchor = anchor_time > df["base_time"]
         negative_minutes = df["minutes_since_stock_anchor"] < 0
         if future_anchor.any():
-            issues.append(f"[{name}] anchor 시점이 base_time보다 미래인 row {int(future_anchor.sum())}건")
+            issues.append(
+                f"[{name}] anchor 시점이 base_time보다 미래인 row {int(future_anchor.sum())}건"
+            )
         if negative_minutes.any():
-            issues.append(f"[{name}] minutes_since_stock_anchor 음수 row {int(negative_minutes.sum())}건")
+            issues.append(
+                f"[{name}] minutes_since_stock_anchor 음수 row {int(negative_minutes.sum())}건"
+            )
     return issues
 
 
@@ -295,7 +353,12 @@ def build_quality_flags(
         station = row["od_station_id"]
         if station not in intersection_stations:
             flags.append(
-                {"od_station_id": station, "flag_type": "missing_in_some_split", "detail_value": "", "recommendation": "exclude"}
+                {
+                    "od_station_id": station,
+                    "flag_type": "missing_in_some_split",
+                    "detail_value": "",
+                    "recommendation": "exclude",
+                }
             )
             continue
         for name in ("train", "valid", "test"):
@@ -359,7 +422,9 @@ def main() -> None:
     coverage_df.to_csv(output_dir / "station_coverage.csv", index=False)
     anchor_df.to_csv(output_dir / "stock_anchor_coverage.csv", index=False)
     quality_flags_df.to_csv(output_dir / "data_quality_flags.csv", index=False)
-    pd.DataFrame(FEATURE_AVAILABILITY).to_csv(output_dir / "feature_availability_matrix.csv", index=False)
+    pd.DataFrame(FEATURE_AVAILABILITY).to_csv(
+        output_dir / "feature_availability_matrix.csv", index=False
+    )
 
     verdicts = []
     verdicts.append(("스키마 검증", "PASS" if bool(schema_df["ok"].all()) else "FAIL"))
@@ -377,7 +442,9 @@ def main() -> None:
         )
     )
 
-    horizon_spread = horizon_df.groupby("split")["ratio_within_split"].agg(lambda s: s.max() - s.min())
+    horizon_spread = horizon_df.groupby("split")["ratio_within_split"].agg(
+        lambda s: s.max() - s.min()
+    )
     horizon_ok = bool((horizon_spread <= HORIZON_BALANCE_WARN_PCT).all())
     verdicts.append(("horizon 분포 균형", "PASS" if horizon_ok else "WARN"))
 
@@ -392,10 +459,16 @@ def main() -> None:
     verdicts.append(("feature leakage 점검", "PASS" if not leakage_issues else "WARN"))
 
     max_missing = anchor_df["stock_anchor_missing_rate"].max()
-    verdicts.append((f"stock anchor 결측률 (최대 {max_missing:.2%})", "PASS" if max_missing < 0.05 else "WARN"))
+    verdicts.append(
+        (f"stock anchor 결측률 (최대 {max_missing:.2%})", "PASS" if max_missing < 0.05 else "WARN")
+    )
 
     outlier_count = int(
-        (outlier_df["high_variance_flag"] | outlier_df["high_empty_flag"] | outlier_df["high_full_flag"]).sum()
+        (
+            outlier_df["high_variance_flag"]
+            | outlier_df["high_empty_flag"]
+            | outlier_df["high_full_flag"]
+        ).sum()
     )
     verdicts.append((f"이상치 station flag ({outlier_count}개)", "INFO"))
 
@@ -411,7 +484,8 @@ def main() -> None:
 
     report_lines += ["", "## split별 row 수", ""]
     report_lines += [
-        f"- {name}: {len(df):,} rows, station {df['od_station_id'].nunique()}개" for name, df in splits.items()
+        f"- {name}: {len(df):,} rows, station {df['od_station_id'].nunique()}개"
+        for name, df in splits.items()
     ]
 
     report_lines += [

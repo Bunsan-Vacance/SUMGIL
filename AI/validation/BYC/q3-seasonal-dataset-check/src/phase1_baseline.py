@@ -22,7 +22,13 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import accuracy_score, f1_score, mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+)
 
 FEATURE_COLS = [
     "horizon_min",
@@ -72,7 +78,10 @@ class NaiveProfileModel:
 
     def fit(self, df: pd.DataFrame) -> None:
         self.profile_full = (
-            df.groupby(PROFILE_KEYS_FULL)[TARGET_COL].mean().reset_index().rename(columns={TARGET_COL: "_pred"})
+            df.groupby(PROFILE_KEYS_FULL)[TARGET_COL]
+            .mean()
+            .reset_index()
+            .rename(columns={TARGET_COL: "_pred"})
         )
         self.profile_station_horizon = (
             df.groupby(PROFILE_KEYS_STATION_HORIZON)[TARGET_COL]
@@ -81,7 +90,10 @@ class NaiveProfileModel:
             .rename(columns={TARGET_COL: "_pred_sh"})
         )
         self.profile_global = (
-            df.groupby(PROFILE_KEYS_GLOBAL)[TARGET_COL].mean().reset_index().rename(columns={TARGET_COL: "_pred_g"})
+            df.groupby(PROFILE_KEYS_GLOBAL)[TARGET_COL]
+            .mean()
+            .reset_index()
+            .rename(columns={TARGET_COL: "_pred_g"})
         )
 
     def predict(self, df: pd.DataFrame) -> np.ndarray:
@@ -109,9 +121,17 @@ def parse_args() -> argparse.Namespace:
     default_output_dir = script_dir.parents[1] / "outputs" / "phase1"
     parser.add_argument("--data-dir", default=str(default_data_dir))
     parser.add_argument("--output-dir", default=str(default_output_dir))
-    parser.add_argument("--train-path", nargs="+", help="train CSV 경로. 여러 개 지정하면 순서대로 합쳐 읽는다.")
-    parser.add_argument("--valid-path", nargs="+", help="valid CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
-    parser.add_argument("--test-path", nargs="+", help="test CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.")
+    parser.add_argument(
+        "--train-path", nargs="+", help="train CSV 경로. 여러 개 지정하면 순서대로 합쳐 읽는다."
+    )
+    parser.add_argument(
+        "--valid-path",
+        nargs="+",
+        help="valid CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다.",
+    )
+    parser.add_argument(
+        "--test-path", nargs="+", help="test CSV 경로. 지정하면 --data-dir/--file-tag보다 우선한다."
+    )
     parser.add_argument("--rf-max-rows", type=int, default=2_000_000)
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument(
@@ -152,7 +172,9 @@ def read_split(
     usecols = ["od_station_id", *FEATURE_COLS, TARGET_COL]
     # pyarrow 엔진 — chunksize 없는 전체 로드에서만 사용 가능(청크 읽기와는 비호환).
     # gzip CSV 파싱이 병목이라 여기서 속도 이득이 큼.
-    df = pd.concat((pd.read_csv(p, usecols=usecols, engine="pyarrow") for p in paths), ignore_index=True)
+    df = pd.concat(
+        (pd.read_csv(p, usecols=usecols, engine="pyarrow") for p in paths), ignore_index=True
+    )
     df["od_station_id"] = df["od_station_id"].astype(str)
     return downcast_memory(df)
 
@@ -172,10 +194,14 @@ def build_station_dtype(*sources: pd.DataFrame | set[str]) -> pd.CategoricalDtyp
     return pd.CategoricalDtype(categories=sorted(ids))
 
 
-def apply_station_code(df: pd.DataFrame, dtype: pd.CategoricalDtype, label: str = "df") -> pd.DataFrame:
+def apply_station_code(
+    df: pd.DataFrame, dtype: pd.CategoricalDtype, label: str = "df"
+) -> pd.DataFrame:
     codes = df["od_station_id"].astype(dtype).cat.codes
     unknown = int((codes == -1).sum())
-    assert unknown == 0, f"{label}: station_code 매핑 안 된 station {unknown}건 — dtype 구성 범위 확인 필요"
+    assert (
+        unknown == 0
+    ), f"{label}: station_code 매핑 안 된 station {unknown}건 — dtype 구성 범위 확인 필요"
     df["station_code"] = codes
     return df
 
@@ -194,7 +220,11 @@ def make_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
 
 
 def fit_random_forest(train_df: pd.DataFrame, rf_max_rows: int, random_state: int) -> FitResult:
-    fit_df = train_df.sample(n=rf_max_rows, random_state=random_state) if len(train_df) > rf_max_rows else train_df
+    fit_df = (
+        train_df.sample(n=rf_max_rows, random_state=random_state)
+        if len(train_df) > rf_max_rows
+        else train_df
+    )
     x_train, y_train = make_xy(fit_df)
     model = RandomForestRegressor(
         n_estimators=150, max_depth=18, min_samples_leaf=3, n_jobs=-1, random_state=random_state
@@ -228,7 +258,9 @@ def fit_xgboost(train_df: pd.DataFrame, valid_df: pd.DataFrame, random_state: in
     )
     started_at = time.perf_counter()
     try:
-        model.fit(x_train, y_train, eval_set=[(x_valid, y_valid)], verbose=False, early_stopping_rounds=30)
+        model.fit(
+            x_train, y_train, eval_set=[(x_valid, y_valid)], verbose=False, early_stopping_rounds=30
+        )
     except TypeError:
         model.fit(x_train, y_train)
     return FitResult("XGBoost", model, time.perf_counter() - started_at)
@@ -281,7 +313,9 @@ def direction_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> tuple[float, fl
     true_c = direction_class(y_true)
     pred_c = direction_class(y_pred)
     acc = accuracy_score(true_c, pred_c)
-    macro_f1 = f1_score(true_c, pred_c, average="macro", labels=["decrease", "stable", "increase"], zero_division=0)
+    macro_f1 = f1_score(
+        true_c, pred_c, average="macro", labels=["decrease", "stable", "increase"], zero_division=0
+    )
     return float(acc), float(macro_f1)
 
 
@@ -317,7 +351,11 @@ def predict_model(model: Any, df: pd.DataFrame) -> np.ndarray:
 
 
 def evaluate_predictions(
-    model_name: str, df: pd.DataFrame, pred: np.ndarray, train_time_sec: float, infer_time_sec: float
+    model_name: str,
+    df: pd.DataFrame,
+    pred: np.ndarray,
+    train_time_sec: float,
+    infer_time_sec: float,
 ) -> dict[str, Any]:
     y_true = df[TARGET_COL].fillna(0).to_numpy()
     true_stock = df["stock_anchor_hour"].fillna(0).to_numpy() + y_true
@@ -342,14 +380,18 @@ def evaluate_predictions(
     return metrics
 
 
-def evaluate_model(model_name: str, model: Any, df: pd.DataFrame, train_time_sec: float) -> dict[str, Any]:
+def evaluate_model(
+    model_name: str, model: Any, df: pd.DataFrame, train_time_sec: float
+) -> dict[str, Any]:
     started_at = time.perf_counter()
     pred = predict_model(model, df)
     infer_time_sec = time.perf_counter() - started_at
     return evaluate_predictions(model_name, df, pred, train_time_sec, infer_time_sec)
 
 
-def evaluate_by_horizon(model_name: str, model: Any, df: pd.DataFrame, train_time_sec: float) -> list[dict[str, Any]]:
+def evaluate_by_horizon(
+    model_name: str, model: Any, df: pd.DataFrame, train_time_sec: float
+) -> list[dict[str, Any]]:
     rows = []
     for horizon in HORIZONS:
         sub = df[df["horizon_min"] == horizon]
@@ -386,7 +428,13 @@ class ChunkedMetricAccumulator:
         self.shortage_tp = self.shortage_fp = self.shortage_fn = 0
         self.infer_time_sec = 0.0
 
-    def update(self, y_true: np.ndarray, y_pred: np.ndarray, stock_anchor: np.ndarray, infer_time_sec: float) -> None:
+    def update(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        stock_anchor: np.ndarray,
+        infer_time_sec: float,
+    ) -> None:
         if len(y_true) == 0:
             return
         err = y_true - y_pred
@@ -443,8 +491,12 @@ class ChunkedMetricAccumulator:
             f1s.append(self._prf(tp, fp, fn)[2])
         direction_macro_f1 = float(np.mean(f1s))
 
-        decrease_precision, decrease_recall, decrease_f1 = self._prf(self.decrease_tp, self.decrease_fp, self.decrease_fn)
-        shortage_precision, shortage_recall, shortage_f1 = self._prf(self.shortage_tp, self.shortage_fp, self.shortage_fn)
+        decrease_precision, decrease_recall, decrease_f1 = self._prf(
+            self.decrease_tp, self.decrease_fp, self.decrease_fn
+        )
+        shortage_precision, shortage_recall, shortage_f1 = self._prf(
+            self.shortage_tp, self.shortage_fp, self.shortage_fn
+        )
 
         return {
             "model": model_name,
@@ -456,7 +508,9 @@ class ChunkedMetricAccumulator:
             "direction_macro_f1": direction_macro_f1,
             "train_time_sec": train_time_sec,
             "infer_time_sec": self.infer_time_sec,
-            "infer_rows_per_sec": self.n / self.infer_time_sec if self.infer_time_sec > 0 else float("inf"),
+            "infer_rows_per_sec": (
+                self.n / self.infer_time_sec if self.infer_time_sec > 0 else float("inf")
+            ),
             "decrease_precision": decrease_precision,
             "decrease_recall": decrease_recall,
             "decrease_f1": decrease_f1,
@@ -468,8 +522,7 @@ class ChunkedMetricAccumulator:
 
 def iter_csv_chunks(paths: list[Path], usecols: list[str], chunk_size: int = CHUNK_SIZE):
     for p in paths:
-        for chunk in pd.read_csv(p, usecols=usecols, chunksize=chunk_size):
-            yield chunk
+        yield from pd.read_csv(p, usecols=usecols, chunksize=chunk_size)
 
 
 def scan_station_ids(paths: list[Path], chunk_size: int = CHUNK_SIZE) -> set[str]:
@@ -537,7 +590,9 @@ def evaluate_test_chunked(
         del chunk
     print(f"  (chunked eval: 총 {n_seen:,}행 처리)")
 
-    comparison = pd.DataFrame([accs[r.name].finalize(r.name, r.train_time_sec) for r in active]).sort_values("mae")
+    comparison = pd.DataFrame(
+        [accs[r.name].finalize(r.name, r.train_time_sec) for r in active]
+    ).sort_values("mae")
     horizon_rows = []
     for r in active:
         for h, acc in sorted(accs_by_horizon[r.name].items()):
@@ -568,16 +623,23 @@ def feature_importance_rows(model_name: str, model: Any) -> list[dict[str, Any]]
 
 def select_best(comparison: pd.DataFrame) -> tuple[str, str]:
     naive_mae = comparison.loc[comparison["model"] == "Naive_Profile", "mae"].min()
-    eligible = comparison[(comparison["model"] != "Naive_Profile") & (comparison["mae"] < naive_mae)].copy()
+    eligible = comparison[
+        (comparison["model"] != "Naive_Profile") & (comparison["mae"] < naive_mae)
+    ].copy()
 
     if eligible.empty:
         fallback = comparison.sort_values(
             ["mae", "decrease_recall", "infer_time_sec"], ascending=[True, False, True]
         ).iloc[0]
-        return str(fallback["model"]), "Naive_Profile을 이긴 모델이 없음. 전체 중 최선을 저장(Phase 2 필요성의 근거)."
+        return (
+            str(fallback["model"]),
+            "Naive_Profile을 이긴 모델이 없음. 전체 중 최선을 저장(Phase 2 필요성의 근거).",
+        )
 
     eligible["mae_rank_key"] = eligible["mae"].round(4)
-    best = eligible.sort_values(["mae_rank_key", "decrease_recall", "infer_time_sec"], ascending=[True, False, True]).iloc[0]
+    best = eligible.sort_values(
+        ["mae_rank_key", "decrease_recall", "infer_time_sec"], ascending=[True, False, True]
+    ).iloc[0]
     return str(best["model"]), "Naive_Profile을 이긴 모델 중 최선을 선택."
 
 
@@ -626,15 +688,21 @@ def main() -> None:
             continue
         print(f"Evaluating {result.name} (test)...")
         fitted_models[result.name] = result.model
-        comparison_rows.append(evaluate_model(result.name, result.model, test_df, result.train_time_sec))
-        horizon_rows.extend(evaluate_by_horizon(result.name, result.model, test_df, result.train_time_sec))
+        comparison_rows.append(
+            evaluate_model(result.name, result.model, test_df, result.train_time_sec)
+        )
+        horizon_rows.extend(
+            evaluate_by_horizon(result.name, result.model, test_df, result.train_time_sec)
+        )
         importance_rows.extend(feature_importance_rows(result.name, result.model))
 
     comparison = pd.DataFrame(comparison_rows).sort_values("mae")
     by_horizon = pd.DataFrame(horizon_rows).sort_values(["horizon_min", "mae"])
     feature_importance = pd.DataFrame(importance_rows)
     if not feature_importance.empty:
-        feature_importance = feature_importance.sort_values(["model", "importance"], ascending=[True, False])
+        feature_importance = feature_importance.sort_values(
+            ["model", "importance"], ascending=[True, False]
+        )
 
     best_model_name, best_reason = select_best(comparison)
     best_model = fitted_models[best_model_name]
@@ -659,15 +727,17 @@ def main() -> None:
         "best_reason": best_reason,
         "skipped_models": skipped,
         "row_counts": {
-            "train": int(len(train_df)),
-            "valid": int(len(valid_df)),
-            "test": int(len(test_df)),
-            "station_categories": int(len(station_categories)),
+            "train": len(train_df),
+            "valid": len(valid_df),
+            "test": len(test_df),
+            "station_categories": len(station_categories),
         },
         "comparison": comparison.to_dict(orient="records"),
         "by_horizon": by_horizon.to_dict(orient="records"),
     }
-    (output_dir / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "metrics.json").write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     print(f"Best model: {best_model_name}")
     print(best_reason)

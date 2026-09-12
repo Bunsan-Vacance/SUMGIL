@@ -14,7 +14,6 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-
 FEATURE_COLS = [
     "horizon_min",
     "current_stock",
@@ -62,8 +61,12 @@ class NaiveTrendModel:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train and compare 5-minute stock delta baselines.")
-    parser.add_argument("--data-dir", required=True, help="Directory containing train/valid/test CSV files.")
+    parser = argparse.ArgumentParser(
+        description="Train and compare 5-minute stock delta baselines."
+    )
+    parser.add_argument(
+        "--data-dir", required=True, help="Directory containing train/valid/test CSV files."
+    )
     default_output_dir = Path(__file__).resolve().parents[1] / "outputs"
     parser.add_argument("--output-dir", default=str(default_output_dir))
     parser.add_argument("--sample-frac", type=float, default=1.0)
@@ -106,9 +109,7 @@ def maybe_sample_train(df: pd.DataFrame, sample_frac: float, random_state: int) 
     return df.sample(frac=sample_frac, random_state=random_state).sort_index()
 
 
-def fit_random_forest(
-    train_df: pd.DataFrame, rf_max_rows: int, random_state: int
-) -> FitResult:
+def fit_random_forest(train_df: pd.DataFrame, rf_max_rows: int, random_state: int) -> FitResult:
     if len(train_df) > rf_max_rows:
         fit_df = train_df.sample(n=rf_max_rows, random_state=random_state)
     else:
@@ -247,7 +248,9 @@ def predict_model(model: Any, df: pd.DataFrame) -> np.ndarray:
     return model.predict(x)
 
 
-def evaluate_model(model_name: str, model: Any, df: pd.DataFrame, train_time_sec: float) -> dict[str, Any]:
+def evaluate_model(
+    model_name: str, model: Any, df: pd.DataFrame, train_time_sec: float
+) -> dict[str, Any]:
     started_at = time.perf_counter()
     pred_delta = predict_model(model, df)
     infer_time_sec = time.perf_counter() - started_at
@@ -297,7 +300,10 @@ def select_best(comparison: pd.DataFrame) -> tuple[str, str]:
             ["mae_stock", "shortage_recall", "infer_time_sec"],
             ascending=[True, False, True],
         ).iloc[0]
-        return str(fallback["model"]), "No ML model beat the best naive baseline; saved best overall."
+        return (
+            str(fallback["model"]),
+            "No ML model beat the best naive baseline; saved best overall.",
+        )
 
     eligible["mae_rank_key"] = eligible["mae_stock"].round(4)
     best = eligible.sort_values(
@@ -368,8 +374,12 @@ def main() -> None:
             continue
         print(f"Evaluating {result.name}...")
         fitted_models[result.name] = result.model
-        comparison_rows.append(evaluate_model(result.name, result.model, test_df, result.train_time_sec))
-        horizon_rows.extend(evaluate_by_horizon(result.name, result.model, test_df, result.train_time_sec))
+        comparison_rows.append(
+            evaluate_model(result.name, result.model, test_df, result.train_time_sec)
+        )
+        horizon_rows.extend(
+            evaluate_by_horizon(result.name, result.model, test_df, result.train_time_sec)
+        )
         importance_rows.extend(feature_importance_rows(result.name, result.model))
 
     comparison = pd.DataFrame(comparison_rows).sort_values("mae_stock")
@@ -404,10 +414,10 @@ def main() -> None:
         "best_reason": best_reason,
         "skipped_models": skipped,
         "row_counts": {
-            "train": int(len(train_df)),
-            "valid": int(len(valid_df)),
-            "test": int(len(test_df)),
-            "station_categories": int(len(station_categories)),
+            "train": len(train_df),
+            "valid": len(valid_df),
+            "test": len(test_df),
+            "station_categories": len(station_categories),
         },
         "comparison": comparison.to_dict(orient="records"),
         "by_horizon": by_horizon.to_dict(orient="records"),

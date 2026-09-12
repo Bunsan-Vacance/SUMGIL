@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import build_station_distance_features as base  # noqa: E402
+import build_station_distance_features as base
 
 K_SUBWAY_STRESS = 50
 K_BUS_STRESS = 50
@@ -37,7 +37,6 @@ def build_k50_comparison(stations, facilities, base_df, kind: str, id_cols: list
 
     prefix = kind  # "subway" or "bus"
     base_dist_col = f"dist_{prefix}_m"
-    base_id_col = "nearest_subway_id" if kind == "subway" else None
 
     out = pd.DataFrame({"od_station_id": stations["od_station_id"]})
     out[f"{prefix}_m_base"] = base_df[base_dist_col].to_numpy()
@@ -47,7 +46,9 @@ def build_k50_comparison(stations, facilities, base_df, kind: str, id_cols: list
     if kind == "subway":
         out["nearest_subway_id_base"] = base_df["nearest_subway_id"].to_numpy()
         out["nearest_subway_id_k50"] = k50_result["nearest_id"].to_numpy()
-        out["subway_nearest_changed"] = out["nearest_subway_id_base"] != out["nearest_subway_id_k50"]
+        out["subway_nearest_changed"] = (
+            out["nearest_subway_id_base"] != out["nearest_subway_id_k50"]
+        )
     else:
         out["nearest_bus_ars_id_base"] = base_df["nearest_bus_ars_id"].to_numpy()
         out["nearest_bus_ars_id_k50"] = k50_result["nearest_ars_id"].to_numpy()
@@ -62,8 +63,10 @@ def summarize(delta: pd.Series, n_total: int) -> dict:
     n_gt50 = int((delta > 50).sum())
     n_gt100 = int((delta > 100).sum())
     return {
-        "n_gt50": n_gt50, "pct_gt50": 100 * n_gt50 / n_total,
-        "n_gt100": n_gt100, "pct_gt100": 100 * n_gt100 / n_total,
+        "n_gt50": n_gt50,
+        "pct_gt50": 100 * n_gt50 / n_total,
+        "n_gt100": n_gt100,
+        "pct_gt100": 100 * n_gt100 / n_total,
     }
 
 
@@ -77,7 +80,9 @@ def main() -> None:
     print("지하철 K=50 재계산 중...")
     subway_cmp = build_k50_comparison(stations, subway, base_df, "subway", ["id"], K_SUBWAY_STRESS)
     print("버스 K=50 재계산 중...")
-    bus_cmp = build_k50_comparison(stations, bus, base_df, "bus", ["ars_id", "node_id"], K_BUS_STRESS)
+    bus_cmp = build_k50_comparison(
+        stations, bus, base_df, "bus", ["ars_id", "node_id"], K_BUS_STRESS
+    )
 
     validation = subway_cmp.merge(bus_cmp, on="od_station_id")
     validation.to_csv(K_VALIDATION_PATH, index=False, encoding="utf-8-sig")

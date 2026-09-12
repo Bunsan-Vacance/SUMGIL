@@ -46,12 +46,17 @@ KOREA_LAT_RANGE = (33.0, 43.5)
 KOREA_LON_RANGE = (124.0, 132.0)
 
 
-def haversine_matrix(lat1: np.ndarray, lon1: np.ndarray, lat2: np.ndarray, lon2: np.ndarray) -> np.ndarray:
+def haversine_matrix(
+    lat1: np.ndarray, lon1: np.ndarray, lat2: np.ndarray, lon2: np.ndarray
+) -> np.ndarray:
     """station(lat1,lon1) x 후보(lat2,lon2) 전체 쌍의 직선거리(m) 행렬을 벡터 연산으로 계산."""
     lat1r, lon1r, lat2r, lon2r = (np.radians(a) for a in (lat1, lon1, lat2, lon2))
     dlat = lat2r[None, :] - lat1r[:, None]
     dlon = lon2r[None, :] - lon1r[:, None]
-    a = np.sin(dlat / 2) ** 2 + np.cos(lat1r[:, None]) * np.cos(lat2r[None, :]) * np.sin(dlon / 2) ** 2
+    a = (
+        np.sin(dlat / 2) ** 2
+        + np.cos(lat1r[:, None]) * np.cos(lat2r[None, :]) * np.sin(dlon / 2) ** 2
+    )
     c = 2 * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
     return EARTH_RADIUS_M * c
 
@@ -93,15 +98,27 @@ def load_subway() -> pd.DataFrame:
 
 def load_bus() -> pd.DataFrame:
     df = pd.read_excel(BUS_PATH)
-    df = df.rename(columns={"NODE_ID": "node_id", "ARS_ID": "ars_id", "정류소명": "name", "X좌표": "lon", "Y좌표": "lat"})
+    df = df.rename(
+        columns={
+            "NODE_ID": "node_id",
+            "ARS_ID": "ars_id",
+            "정류소명": "name",
+            "X좌표": "lon",
+            "Y좌표": "lat",
+        }
+    )
     return df[["node_id", "ars_id", "name", "lat", "lon"]]
 
 
-def nearest_walk_distance(stations: pd.DataFrame, facilities: pd.DataFrame, k: int, id_cols: list[str]):
+def nearest_walk_distance(
+    stations: pd.DataFrame, facilities: pd.DataFrame, k: int, id_cols: list[str]
+):
     """station마다 haversine top-k 후보를 뽑고 OSRM /table로 실제 도보거리를 구한다."""
     dist_mat = haversine_matrix(
-        stations["lat"].to_numpy(), stations["lon"].to_numpy(),
-        facilities["lat"].to_numpy(), facilities["lon"].to_numpy(),
+        stations["lat"].to_numpy(),
+        stations["lon"].to_numpy(),
+        facilities["lat"].to_numpy(),
+        facilities["lon"].to_numpy(),
     )
     topk_idx = np.argsort(dist_mat, axis=1)[:, :k]
 
@@ -112,8 +129,10 @@ def nearest_walk_distance(stations: pd.DataFrame, facilities: pd.DataFrame, k: i
         haversine_cands = dist_mat[i, cand_idx]
 
         osrm_dists, status = query_osrm_table(
-            stations["lat"].iloc[i], stations["lon"].iloc[i],
-            cand["lat"].to_numpy(), cand["lon"].to_numpy(),
+            stations["lat"].iloc[i],
+            stations["lon"].iloc[i],
+            cand["lat"].to_numpy(),
+            cand["lon"].to_numpy(),
         )
 
         if osrm_dists is not None:
@@ -167,18 +186,29 @@ def main() -> None:
     bus_result = nearest_walk_distance(stations, bus, K_BUS, id_cols=["ars_id", "node_id"])
     print(f"  완료 ({time.time() - t0:.1f}s)")
 
-    subway_result = subway_result.rename(columns={
-        "dist_m": "dist_subway_m", "dist_source": "dist_subway_source",
-        "osrm_distance_m": "subway_osrm_distance_m", "osrm_status": "subway_osrm_status",
-        "haversine_m": "subway_haversine_m", "nearest_name": "nearest_subway_name",
-        "nearest_id": "nearest_subway_id",
-    })
-    bus_result = bus_result.rename(columns={
-        "dist_m": "dist_bus_m", "dist_source": "dist_bus_source",
-        "osrm_distance_m": "bus_osrm_distance_m", "osrm_status": "bus_osrm_status",
-        "haversine_m": "bus_haversine_m", "nearest_name": "nearest_bus_name",
-        "nearest_ars_id": "nearest_bus_ars_id", "nearest_node_id": "nearest_bus_node_id",
-    })
+    subway_result = subway_result.rename(
+        columns={
+            "dist_m": "dist_subway_m",
+            "dist_source": "dist_subway_source",
+            "osrm_distance_m": "subway_osrm_distance_m",
+            "osrm_status": "subway_osrm_status",
+            "haversine_m": "subway_haversine_m",
+            "nearest_name": "nearest_subway_name",
+            "nearest_id": "nearest_subway_id",
+        }
+    )
+    bus_result = bus_result.rename(
+        columns={
+            "dist_m": "dist_bus_m",
+            "dist_source": "dist_bus_source",
+            "osrm_distance_m": "bus_osrm_distance_m",
+            "osrm_status": "bus_osrm_status",
+            "haversine_m": "bus_haversine_m",
+            "nearest_name": "nearest_bus_name",
+            "nearest_ars_id": "nearest_bus_ars_id",
+            "nearest_node_id": "nearest_bus_node_id",
+        }
+    )
 
     merged = stations.merge(subway_result, on="od_station_id").merge(bus_result, on="od_station_id")
     merged.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
