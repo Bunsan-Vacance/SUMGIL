@@ -29,6 +29,8 @@ CROWD_INTERIM = AI_ROOT / "data" / "CROWD" / "interim"
 PANEL_NAME = "crowd_panel_2024_2025.parquet"
 EVENTS_NAME = "crowd_station_events_2024_2025.parquet"
 DERIVED_CACHE = CROWD_INTERIM / "crowd_panel_derived_2024_2025.parquet"
+# D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`)가 쌓는 최근 승하차 롱 포맷. 학습 패널과 별개.
+RECENT_LONG_PATH = CROWD_INTERIM / "crowd_recent_ridership_long.parquet"
 
 SPLIT_DATE = pd.Timestamp("2025-01-01")
 
@@ -49,6 +51,70 @@ def load_panel(
             if col in panel.columns:
                 panel[col] = panel[col].fillna(0).astype(int)
     return panel.reset_index(drop=True)
+
+
+def load_recent_long(path: Path = RECENT_LONG_PATH) -> pd.DataFrame | None:
+    """수집기가 쌓은 최근 승하차 롱 포맷(`date, line, station_no, station_name, direction, passengers, time_slot`).
+
+    파일이 없으면 None — 서빙은 그대로 패널만으로 동작한다(시차 결측은 상태로 노출)."""
+    if not Path(path).exists():
+        return None
+    df = pd.read_parquet(path)
+    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    return df
+
+
+def extend_panel_with_recent(
+    panel: pd.DataFrame,
+    recent_long: pd.DataFrame,
+    holidays: pd.DataFrame | None = None,
+    events: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, list[str]]:
+    """패널 **마지막 날짜 이후**의 최근 실측(D−1 수집)을 패널 스키마로 바꿔 뒤에 이어 붙인다(143).
+
+    배치 예측의 이력 창(직전 7일)을 채우는 용도다 — 학습 데이터는 바꾸지 않는다. 패널 역 집합만 남기고(타 운영기관
+    구간·환승역 중복 코드 제외), 역 메타(이름·호선·좌표)는 패널 것을 쓴다. 기상 컬럼은 모델이 쓰지 않아 NaN으로 둔다.
+    이벤트는 `load_panel`과 같은 규칙(개수 컬럼만 0). 돌려주는 두 번째 값은 붙인 날짜 목록(ISO).
+    """
+    from app.CROWD.pipeline.calendar import attach_calendar
+
+    last = panel["date"].max()
+    rec = recent_long[recent_long["date"] > last]
+    stations = panel[["station_no", "station_name", "line", "lat", "lon"]].drop_duplicates(
+        "station_no"
+    )
+    rec = rec[rec["station_no"].isin(stations["station_no"])]
+    if rec.empty:
+        return panel, []
+    wide = (
+        rec.pivot_table(
+            index=["date", "station_no", "time_slot"],
+            columns="direction",
+            values="passengers",
+            aggfunc="sum",
+        )
+        .reset_index()
+        .rename_axis(columns=None)
+    )
+    wide["station_no"] = wide["station_no"].astype("int64")
+    wide = wide.merge(stations, on="station_no", how="left")
+    wide = attach_calendar(wide, holidays)
+    if events is not None:
+        wide = wide.merge(events, on=["date", "station_no"], how="left")
+        for col in EVENT_COUNT_COLS:
+            if col in wide.columns:
+                wide[col] = wide[col].fillna(0).astype(int)
+    wide = wide.reindex(columns=panel.columns)  # 기상 등 없는 컬럼은 NaN
+    for (
+        col
+    ) in (
+        EVENT_COUNT_COLS
+    ):  # 이벤트 표가 없거나 그 날짜를 안 덮어도 "개수 0"이 맞다(load_panel과 같은 규칙)
+        if col in wide.columns:
+            wide[col] = wide[col].fillna(0).astype(int)
+    dates = [str(pd.Timestamp(d).date()) for d in sorted(wide["date"].unique())]
+    out = pd.concat([panel, wide], ignore_index=True, sort=False)
+    return out, dates
 
 
 def time_split(
