@@ -29,6 +29,62 @@
   자체는 재생성).
 - `scripts/` — 폴러 백그라운드 실행용 nohup 스크립트·systemd 유닛 템플릿.
 
+## 실시간 수집기 운영
+
+따릉이와 날씨 nowcast 수집기는 서버에서 상시 실행해야 하므로 운영 환경에서는 systemd를
+기본으로 사용한다. `start_*.sh`는 수동 테스트나 임시 실행용으로만 쓴다.
+
+사전 준비:
+
+```bash
+cd <REPO_ROOT>/AI
+python -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+mkdir -p logs
+```
+
+`AI/.env`에는 최소 아래 키가 필요하다.
+
+```text
+SEOUL_BIKE_KEY 또는 SEOUL_API_KEY
+KMA_API_KEY
+```
+
+서비스 파일 설치:
+
+```bash
+bash DATA_ENGINE/scripts/install_data_engine_services.sh
+```
+
+기본 실행은 서비스 파일 설치와 `daemon-reload`까지만 수행한다. 설치와 동시에 자동 실행까지
+하려면 명시적으로 `--enable-now`를 붙인다.
+
+```bash
+bash DATA_ENGINE/scripts/install_data_engine_services.sh --enable-now
+```
+
+수동으로 시작·확인할 때는 아래 명령을 사용한다.
+
+```bash
+sudo systemctl enable --now bike-realtime-poller.service
+sudo systemctl enable --now weather-nowcast-poller.service
+
+sudo systemctl status bike-realtime-poller.service
+sudo systemctl status weather-nowcast-poller.service
+
+tail -n 100 AI/logs/bike_realtime.log
+tail -n 100 AI/logs/weather_nowcast.log
+```
+
+정상 동작 기준:
+
+- `bike-realtime-poller.service`, `weather-nowcast-poller.service`가 `active` 상태다.
+- `AI/logs/bike_realtime.log`, `AI/logs/weather_nowcast.log`가 생성된다.
+- `AI/data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet`가 생성된다.
+- `AI/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet`가 생성된다.
+- `AI/data/BIKE/raw/realtime/latest.parquet`가 갱신된다.
+- `AI/data/EXTERNAL/weather/raw/nowcast/latest.parquet`가 갱신된다.
+
 ## Redis 연동 상태
 
 Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
