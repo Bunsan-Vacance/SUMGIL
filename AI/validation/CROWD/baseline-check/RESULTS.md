@@ -281,7 +281,7 @@ num_leaves {31, 63, 127} × n_estimators {300, 600}, 시차 전용 세트. 승�
 
 ## 7. 미해결 · 다음
 
-- [ ] `getStnPsgr` 실제 지연 확인(어제까지 vs 오늘 오전까지) → 일별 수집 스크립트(91 전)
+- [x] `getStnPsgr` 실제 지연 확인 → D−1·보존 7일, 일 배치 수집기 `DATA_ENGINE/collect/subway_ridership_daily.py`(143, `recent-source-check/RESULTS.md`)
 - [ ] 배차 간격 실시간화(혼잡도 분모) — 실시간 도착정보 API, 91 또는 별도 티켓
 - [ ] 주말·공휴일 개선폭이 평일의 60% — "같은 요일유형 직전 날" 시차 피처 후보
 - [ ] 6호선 최저(+11%) — 93에서 호선별 모델 후보 1순위. 1호선은 후보에서 내려도 됨
