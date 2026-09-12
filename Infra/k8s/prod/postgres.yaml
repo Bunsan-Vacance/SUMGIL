@@ -1,8 +1,12 @@
-# Postgres (S15P21A104-127). BE 소유, local-path, 노드 귀속.
+# Postgres — 데이터 계층(Infra 소유, 앱 비의존). local-path, 노드 귀속 (S15P21A104-127).
+# 자격증명은 자기 Secret(data-secret)을 소유한다. 앱의 Secret을 읽지 않는다.
 apiVersion: v1
 kind: Service
 metadata:
   name: postgres
+  labels:
+    app.kubernetes.io/part-of: sumgil-data
+    app.kubernetes.io/component: postgres
 spec:
   selector:
     app: postgres
@@ -13,6 +17,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres
+  labels:
+    app.kubernetes.io/part-of: sumgil-data
+    app.kubernetes.io/component: postgres
 spec:
   serviceName: postgres
   replicas: 1
@@ -37,7 +44,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: be-secret
+                  name: data-secret
                   key: DB_PASSWORD
           volumeMounts:
             - name: data

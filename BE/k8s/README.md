@@ -21,10 +21,10 @@
 | 구분 | 파일 | 주입 | 키 |
 |---|---|---|---|
 | 비민감 | `k8s/prod/config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
-| 비밀(데이터) | 데이터 계층 소유(`Infra/k8s/prod/`) | Secret `data-secret` | `DB_PASSWORD` |
-| 비밀(앱) | `k8s/prod/.env.secret` (gitignore) | Secret `be-secret` | 앱 고유 비밀만 |
+| 비밀(데이터) | 데이터 계층 소유(`Infra/k8s/prod/.env.secret`) | Secret `data-secret` | `DB_PASSWORD` |
 
-- `DB_PASSWORD`는 데이터 계층(Infra)이 소유한다. BE는 소비만 한다. 배포용 환경변수는 로컬용 `BE/.env`와 별개 파일이다.
+- `DB_PASSWORD`는 데이터 계층(Infra)이 소유한다. BE는 `data-secret`을 소비만 한다. 배포용 환경변수는 로컬용 `BE/.env`와 별개 파일이다.
+- BE 고유 비밀은 아직 없다. 생기면 `k8s/prod/.env.secret`(gitignore) + secretGenerator `be-secret`로 추가한다.
 
 ## 이미지 만들기
 

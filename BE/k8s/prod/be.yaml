@@ -1,4 +1,4 @@
-# BE 워크로드 (S15P21A104-126). 비민감은 ConfigMap(be-config), 비밀은 Secret(be-secret).
+# BE 워크로드 (S15P21A104-126). 비민감은 ConfigMap(be-config), 데이터 비밀은 Secret(data-secret, Infra 소유).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,7 +22,7 @@ spec:
             - configMapRef:
                 name: be-config
             - secretRef:
-                name: be-secret
+                name: data-secret
           livenessProbe:
             httpGet:
               path: /actuator/health

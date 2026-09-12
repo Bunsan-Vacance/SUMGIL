@@ -31,9 +31,10 @@ for node in ${NODES}; do
 done
 
 cd "${PROJECT_ROOT}"
-# 시크릿은 절대 노드로 보내지 않는다 (BE/.env·BE/k8s/prod/.env.secret). config.env는 비민감이라 포함.
+# 시크릿은 절대 노드로 보내지 않는다 (BE/.env·BE/k8s/prod/.env.secret·Infra/k8s/prod/.env.secret). config.env는 비민감이라 포함.
 tar czf "${TARBALL}" \
   --exclude='BE/.env' --exclude='BE/k8s/prod/.env.secret' --exclude='BE/k8s/prod/.env' \
+  --exclude='Infra/k8s/prod/.env.secret' --exclude='Infra/k8s/prod/.env' \
   --exclude='BE/build' --exclude='BE/.gradle' --exclude='BE/logs' \
   --exclude='FE/node_modules' --exclude='FE/dist' \
   Infra/k8s BE FE

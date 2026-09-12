@@ -1,10 +1,13 @@
-# 프라이빗 레지스트리 (S15P21A104-125). 클러스터 내장, BE 소유.
+# 프라이빗 레지스트리 — 플랫폼 서비스(데이터 아님). 클러스터 내장 (S15P21A104-125).
 # 글랩 5050 차단(2026-09-11 실측) 대체. VPN 평문 경유라 평문 HTTP로 둔다.
 # 데이터는 PVC (local-path 20Gi). 레지스트리 유실 시 이미지 재push면 되니 백업 제외.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: registry-data
+  labels:
+    app.kubernetes.io/part-of: sumgil-platform
+    app.kubernetes.io/component: registry
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: local-path
@@ -16,6 +19,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: registry
+  labels:
+    app.kubernetes.io/part-of: sumgil-platform
+    app.kubernetes.io/component: registry
 spec:
   replicas: 1
   selector:
@@ -54,6 +60,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: registry
+  labels:
+    app.kubernetes.io/part-of: sumgil-platform
+    app.kubernetes.io/component: registry
 spec:
   selector:
     app: registry

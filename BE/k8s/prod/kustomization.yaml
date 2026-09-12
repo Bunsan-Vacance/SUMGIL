@@ -1,13 +1,12 @@
 # BE Kustomize (S15P21A104-125/126). namespace prod 참조 (생성은 Infra 소유).
-# 비민감 설정은 configMapGenerator(config.env → be-config), 비밀은 secretGenerator(.env.secret → be-secret).
+# 비민감 설정은 configMapGenerator(config.env → be-config).
+# 비밀은 데이터 계층이 소유한 data-secret(DB_PASSWORD)을 소비한다 (앱 → 데이터 방향).
+# 데이터 계층 매니페스트는 Infra/k8s/prod/로 이관했다 (Postgres·Redis·Kafka·Registry).
 # 레지스트리: 클러스터 내장. 노드가 클러스터 DNS를 못 풀어 NodePort 주소로 pull한다.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: prod
 resources:
-  - postgres.yaml
-  - redis.yaml
-  - registry.yaml
   - be.yaml
   - ingress.yaml
 images:
@@ -18,7 +17,3 @@ configMapGenerator:
   - name: be-config
     envs:
       - config.env
-secretGenerator:
-  - name: be-secret
-    envs:
-      - .env.secret

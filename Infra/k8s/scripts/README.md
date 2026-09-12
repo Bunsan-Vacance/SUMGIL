@@ -43,9 +43,9 @@
 ## 인자
 
 - `init-k3s.sh`·`init-k3s-worker.sh` — `--node-ip`=VPN, `--flannel-iface ens5`, `--disable traefik`.
-- `apply.sh` — `Infra/k8s/namespaces` → BE → FE 순서. 이미지가 없으면 안내 후 종료. 전제: `BE/k8s/prod/.env.secret`.
+- `apply.sh` — `Infra/k8s`(네임스페이스·데이터 계층) → BE → FE 순서(데이터 rollout 후 앱). 이미지가 없으면 안내 후 종료. 전제: `Infra/k8s/prod/.env.secret`.
 - `build-push.sh` — `bash build-push.sh`(둘 다) / `be` / `fe`.
-- `sync-to-nodes.sh` — `BE/.env`·`BE/k8s/prod/.env.secret` 제외, `config.env` 포함.
+- `sync-to-nodes.sh` — `BE/.env`·`BE/k8s/prod/.env.secret`·`Infra/k8s/prod/.env.secret` 제외, `config.env` 포함.
 
 ## 규칙
 

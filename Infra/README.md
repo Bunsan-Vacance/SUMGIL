@@ -15,8 +15,8 @@
 | 클러스터 스코프 매니페스트·스크립트 | `k8s/` | 운영 중 (Kustomize) |
 | 네임스페이스 (`prod`) | `k8s/namespaces/` | 운영 중 (클러스터 스코프, Infra 소유) |
 | Ingress 컨트롤러 (nginx) | `k8s/ingress-nginx/` | 운영 중 (vendored v1.15.1) |
-| 데이터 계층 (Postgres·Redis·Kafka) | `k8s/prod/` | 설계 확정, 이관 예정 (Infra 소유) |
-| 플랫폼 서비스 (Registry) | `k8s/prod/registry.yaml` | 이관 예정 |
+| 데이터 계층 (Postgres·Redis·Kafka) | `k8s/prod/` | 운영 (Infra 소유, 앱 비의존) |
+| 플랫폼 서비스 (Registry) | `k8s/prod/registry.yaml` | 운영 (Infra 소유) |
 | 로컬 개발용 DB·캐시·버퍼 | `docker/docker-compose.yml` | postgres·redis·kafka 기동 가능 |
 | 리버스 프록시 (구안) | `nginx/nginx.conf` | **미사용 (legacy)** — Ingress 객체 + ingress-nginx가 담당 |
 
@@ -101,7 +101,7 @@ ingress-nginx가 80 포트를 받아 경로로 갈라 보낸다. **Ingress는 �
 ## 작업 규칙
 
 - **`.env`, `.env.secret`, `*.pem`, `*.key`는 절대 커밋하지 않는다.** `.gitignore`에 등록돼 있으나 `git add -f`로 우회하지 않도록 주의한다.
-- **비민감 설정은 `config.env`(커밋), 비밀은 `.env.secret`(gitignore).** kustomize `configMapGenerator`/`secretGenerator`가 각각 ConfigMap(`be-config`)·Secret(`be-secret`)으로 만든다.
+- **비민감 앱 설정은 `config.env`(커밋), 데이터 비밀은 `Infra/k8s/prod/.env.secret`(gitignore).** kustomize가 ConfigMap(`be-config`)·Secret(`data-secret`, 데이터 계층 소유)으로 만든다. 앱 고유 비밀은 생기면 `BE/k8s/prod/.env.secret` → `be-secret`.
 - **레지스트리는 클러스터 내장을 쓴다.** 이미지 주소는 `k8s/scripts/env.sh`가 단일 소스다.
 - **EC2에서 데이터 포트를 외부로 공개하지 않는다.** 클러스터 안에서는 ClusterIP로만 노출한다.
 - EC2 키페어·DB 접속 정보·VPN 인증키는 팀 내 별도 채널로 공유한다.
