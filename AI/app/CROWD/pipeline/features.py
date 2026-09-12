@@ -82,13 +82,13 @@ REALTIME_COLS = NEIGHBOR_RESID_COLS + TRANSFER_RESID_COLS + SELF_LAG_S1_COLS + N
 FEATURE_SETS: dict[str, list[str]] = {
     # 87 권장 — 외부 요인만. 비교 기준선.
     "events_station_time_festival": _FESTIVAL_SET,
-    # 사전 예측(D−1 원천) — 전날 집계가 확보될 때
+    # 사전 예측(D−1 원천) — 전날 집계가 확보될 때. 90 배포 세트(93에서 d1sd로 교체)
     "festival_selflag_d1d7_resid": _FESTIVAL_SET + SELF_LAG_D1_COLS + SELF_LAG_D7_COLS,
     # 사전 예측 — 일별 CSV 지연에도 안전한 하한
     "festival_lag_d7_resid": _FESTIVAL_SET + SELF_LAG_D7_COLS + NEIGHBOR_LAG_D7_COLS,
     # 93 B′ — 전날 대신 "같은 요일유형의 직전 날"(평일은 전날과 같고 토·일·공휴일에서 다르다) + 1주 전
     "festival_selflag_sameday_d7_resid": _FESTIVAL_SET + SELF_LAG_SD_COLS + SELF_LAG_D7_COLS,
-    # 93 B″ — 전날·같은 요일유형 직전 날·1주 전 셋 다(모델이 고르게)
+    # 93 B″ — 전날·같은 요일유형 직전 날·1주 전 셋 다. **현재 배포 세트**(93: 전체 +1.4%p, 휴일 +3.6%p)
     "festival_selflag_d1sd_d7_resid": _FESTIVAL_SET
     + SELF_LAG_D1_COLS
     + SELF_LAG_SD_COLS

@@ -1027,7 +1027,7 @@ RUN_LABELS = {
 
 def fig_split_by_line(
     inp: Inputs,
-    runs: Sequence[str] = ("global", "line", "line6", "cluster", "sameday"),
+    runs: Sequence[str] = ("global", "line", "line6", "cluster", "d1sd"),
     target: str = "boarding",
     metric: str = "RMSE_개선율_%",
 ) -> list:
@@ -1035,9 +1035,7 @@ def fig_split_by_line(
     res = inp.split_results
     if res is None:
         return []
-    default = (
-        tuple(runs) == ("global", "line", "line6", "cluster", "sameday") and target == "boarding"
-    )
+    default = tuple(runs) == ("global", "line", "line6", "cluster", "d1sd") and target == "boarding"
     r = res[(res["axis"] == "line") & (res["target"] == target) & res["run"].isin(runs)]
     piv = r.pivot_table(index="group", columns="run", values=metric).reindex(LINE_ORDER)
     runs = [x for x in runs if x in piv.columns]
@@ -1079,7 +1077,7 @@ def fig_split_by_line(
         axes[1].axhline(0, color=fs.PALETTE_NEUTRAL[1], lw=0.8)
         axes[1].axhline(-2, color=fs.COLOR_ACCENT, lw=0.8, ls="--")
         axes[1].set_ylabel("전역 대비 차이 (%p)")
-        axes[1].set_title("전역 대비 — 빨간 점선(−2%p) 아래면 그 호선이 악화")
+        axes[1].set_title("전역 대비 — 빨간 점선(-2%p) 아래면 그 호선이 악화")
         axes[1].legend(frameon=False, fontsize=9)
     fig.tight_layout()
     fs.caption(
