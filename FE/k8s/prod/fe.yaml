@@ -1,4 +1,4 @@
-# FE 워크로드 (S15P21A104-126). namespace 생성 없음 (BE 소유 prod 참조).
+# FE 워크로드 (S15P21A104-126). namespace 생성 없음 (Infra 소유 prod 참조).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -15,6 +15,8 @@
 | 클러스터 스코프 매니페스트·스크립트 | `k8s/` | 운영 중 (Kustomize) |
 | 네임스페이스 (`prod`) | `k8s/namespaces/` | 운영 중 (클러스터 스코프, Infra 소유) |
 | Ingress 컨트롤러 (nginx) | `k8s/ingress-nginx/` | 운영 중 (vendored v1.15.1) |
+| 데이터 계층 (Postgres·Redis·Kafka) | `k8s/prod/` | 설계 확정, 이관 예정 (Infra 소유) |
+| 플랫폼 서비스 (Registry) | `k8s/prod/registry.yaml` | 이관 예정 |
 | 로컬 개발용 DB·캐시·버퍼 | `docker/docker-compose.yml` | postgres·redis·kafka 기동 가능 |
 | 리버스 프록시 (구안) | `nginx/nginx.conf` | **미사용 (legacy)** — Ingress 객체 + ingress-nginx가 담당 |
 
@@ -26,6 +28,7 @@ Infra/
 │  ├─ kustomization.yaml      클러스터 스코프 루트
 │  ├─ namespaces/             앱 네임스페이스 (prod) — 클러스터 스코프라 Infra 소유
 │  ├─ ingress-nginx/          ingress 컨트롤러 매니페스트 (vendored)
+│  ├─ prod/                   데이터 계층(PG·Redis·Kafka)·플랫폼 서비스(Registry) — Infra 소유
 │  └─ scripts/                부트스트랩·동기화·이미지 스크립트
 │     ├─ init-vpn.sh          VPN join (순서 0)
 │     ├─ init-k3s.sh          control-plane 설치 (disable traefik, flannel-iface ens5)
@@ -87,7 +90,7 @@ ingress-nginx가 80 포트를 받아 경로로 갈라 보낸다. **Ingress는 �
 | `/` | 프론트엔드 (`fe:80`) | `FE/k8s/prod/ingress.yaml` |
 
 - 호스트는 `j15a104.p.ssafy.io` 단일 (와일드카드 서브도메인 등록 불가). 서비스 추가는 경로로만.
-- 외부 HTTPS는 상위에서 종료되고, 클러스터는 HTTP만 서빙한다.
+- HTTPS는 교육기관이 제공한 도메인·자체 인증서를 그대로 사용한다 (별도 인증서 발급 없음).
 
 ## 네트워크
 

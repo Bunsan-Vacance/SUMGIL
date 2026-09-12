@@ -7,11 +7,14 @@
 | 대상 | 소유 | 위치 |
 |---|---|---|
 | `Dockerfile`, `.dockerignore` | 앱(개발자) | `BE/` · `FE/` |
-| `k8s/**` (Deployment·Service·Ingress·config·secret) | 플랫폼(리드) | `BE/k8s/` · `FE/k8s/` · `Infra/k8s/` |
+| 앱 워크로드 `k8s/**` (Deployment·Service·Ingress·config·secret) | 플랫폼(리드) | `BE/k8s/` · `FE/k8s/` |
+| 데이터 계층 (Postgres·Redis·Kafka) | 플랫폼(리드) | `Infra/k8s/prod/` |
+| 플랫폼 서비스 (Registry·Ingress 컨트롤러·Namespace) | 플랫폼(리드) | `Infra/k8s/` |
 
 - 개발자는 `k8s/**`를 수정하지 않는다. 계약값 변경은 플랫폼에 요청한다.
 - 매니페스트 커밋은 플랫폼(리드)이 한다.
 - 매니페스트는 앱 저장소 `k8s/`에 둔다 (ArgoCD 추적 경로).
+- **데이터 계층은 어떤 앱에도 의존하지 않는다.** 의존 방향은 `앱 → 데이터`. 데이터 계층은 자기 자격증명·스토리지를 소유하고 앱의 Secret·설정을 읽지 않는다.
 
 ## 2. 앱 계약값
 
@@ -40,18 +43,23 @@
 |---|---|---|
 | 클러스터 | k3s 1 control-plane + 1 worker | `Infra/k8s/` |
 | 네임스페이스 | `prod` | `Infra/k8s/namespaces/prod.yaml` |
-| 레지스트리 | 클러스터 내장 `registry:2` (NodePort 30500) | `BE/k8s/prod/registry.yaml` |
+| 데이터 계층 | Postgres·Redis·Kafka (Infra 소유, 앱 비의존) | `Infra/k8s/prod/` |
+| 레지스트리 | 클러스터 내장 `registry:2` (NodePort 30500) | `Infra/k8s/prod/registry.yaml` |
 | Ingress 컨트롤러 | ingress-nginx | `Infra/k8s/ingress-nginx/` |
 | 라우팅 | `/api/`→BE, `/`→FE (호스트 `j15a104.p.ssafy.io`) | `BE/k8s/prod/ingress.yaml` · `FE/k8s/prod/ingress.yaml` |
 | 환경변수 주입 | ConfigMap(비민감) + Secret(비밀) | 각 앱 `kustomization.yaml` |
-| 스토리지 | local-path PVC | `BE/k8s/prod/*.yaml` |
+| 스토리지 | local-path PVC | `Infra/k8s/prod/*.yaml` (데이터) · `BE/k8s/prod/*.yaml` |
 
 ## 4. 환경변수
 
 | 구분 | 파일 | 주입 | 키 |
 |---|---|---|---|
-| 비민감 | `BE/k8s/prod/config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
-| 비밀 | `BE/k8s/prod/.env.secret` (gitignore) | Secret `be-secret` | `DB_PASSWORD` |
+| 비민감(앱) | `BE/k8s/prod/config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
+| 비밀(데이터) | 데이터 계층 소유 | Secret `data-secret` | `DB_PASSWORD` |
+| 비밀(앱) | `BE/k8s/prod/.env.secret` (gitignore) | Secret `be-secret` | 앱 고유 비밀만 (데이터 자격증명 제외) |
+
+- `DB_PASSWORD`는 **데이터 계층이 소유**한다(`data-secret`). Postgres와 앱이 각자 이 Secret을 소비한다 — 앱이 데이터에 의존하는 방향을 지킨다.
+- 앱은 데이터 접속 포인터(`DB_URL`·`REDIS_HOST`)를 자기 `config.env`에서 유지한다.
 
 - FE는 배포 런타임 환경변수가 없다 (`VITE_*`는 빌드 타임).
 - 배포용과 로컬용(`BE/.env`)은 별개다.
