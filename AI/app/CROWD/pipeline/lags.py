@@ -54,6 +54,45 @@ def attach_day_lags(
     return out
 
 
+def same_day_type_lag_names(value_cols: Sequence[str]) -> list[str]:
+    return [f"lagsd_{c}" for c in value_cols]
+
+
+def attach_same_day_type_lag(
+    panel: pd.DataFrame,
+    value_cols: Sequence[str],
+    keys: Sequence[str] = ("station_no", "time_slot"),
+    date_col: str = "date",
+    day_type_col: str = "day_type",
+    max_gap_days: int = 14,
+) -> pd.DataFrame:
+    """각 행에 **같은 요일유형의 직전 날** `value_cols`를 `lagsd_{col}`로 붙인다(93 B′).
+
+    전날 시차(`lag1d_*`)는 토요일 행에 금요일을, 월요일 행에 일요일을 가리켜 요일유형이 갈린다 —
+    90에서 주말·공휴일 개선폭이 평일의 60%였던 원인 후보. 이 시차는 (역, 시간대, 요일유형) 안에서
+    바로 이전 날짜의 값을 쓴다: 평일은 전날(월요일은 금요일), 토요일은 지난 토요일, 일요일·공휴일은
+    직전 일요일 또는 공휴일. `lagsd_gap_days`에 며칠 전인지 남기고, `max_gap_days`를 넘으면 NaN으로
+    둔다(연휴 뒤 첫 공휴일이 몇 주 전 공휴일을 끌어오는 것을 막는다 — 원칙 8).
+
+    같은 (역, 시간대, 요일유형) 그룹 안의 날짜 순 직전 행이라 위치 shift를 쓰지만, 그룹이 요일유형으로
+    나뉘어 있어 "빠진 날을 이전 날로 오해"하는 문제가 없다 — 빠진 날은 gap_days로 드러난다.
+    """
+    keys = list(keys)
+    value_cols = list(value_cols)
+    out = panel.copy()
+    order = out.sort_values([*keys, day_type_col, date_col]).index
+    grp_cols = [*keys, day_type_col]
+    src = out.loc[order, [*grp_cols, date_col, *value_cols]]
+    g = src.groupby(grp_cols, observed=True, sort=False)
+    prev_date = g[date_col].shift(1)
+    gap = (src[date_col] - prev_date).dt.days
+    valid = gap <= max_gap_days
+    out["lagsd_gap_days"] = gap.where(valid).reindex(out.index)
+    for c in value_cols:
+        out[f"lagsd_{c}"] = g[c].shift(1).where(valid).reindex(out.index)
+    return out
+
+
 def attach_slot_lag(
     panel: pd.DataFrame,
     value_cols: Sequence[str],
