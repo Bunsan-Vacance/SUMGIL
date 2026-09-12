@@ -142,6 +142,28 @@ class _FakeInputs(rf.Inputs):
         sim = pd.DataFrame(rows)
         self._cache["sim_base"] = sim[(sim["cfg_sigma_shape"] == 0.05) & (sim["cfg_mix_h0"] == 5.0)]
         self._cache["sim_grid"] = sim
+        # 93 분할 비교 표(compare_split.py 출력 스키마)
+        srows = []
+        for run, base in (("global", 22.0), ("line", 22.5), ("line6", 22.2), ("sameday", 23.0)):
+            for axis, groups in (
+                ("전체", ["전체"]),
+                ("line", ["1호선", "2호선"]),
+                ("day_type", ["평일", "휴일"]),
+            ):
+                for g in groups:
+                    for t in ("boarding", "alighting"):
+                        srows.append(
+                            {
+                                "run": run,
+                                "axis": axis,
+                                "group": g,
+                                "target": t,
+                                "n": 100,
+                                "RMSE_개선율_%": base,
+                                "MAE_개선율_%": base + 3,
+                            }
+                        )
+        self._cache["split"] = pd.DataFrame(srows)
 
     def load_by_train(self):
         return self._lbt
