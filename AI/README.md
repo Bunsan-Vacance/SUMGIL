@@ -91,6 +91,7 @@ B안 (내려서 따릉이) = 출구→대여소 도보 + 대여 1분 + 주행 + 
 | --- | --- | --- |
 | ⑤ | [지하철혼잡도정보](https://data.seoul.go.kr/dataList/OA-12928/F/1/datasetView.do) · [포털판](https://www.data.go.kr/data/15071311/fileData.do) | 30분 단위 요일별·역별 혼잡도(%). **1~8호선만** 제공, 분기 갱신 |
 | ⑥ | [호선별 역별 시간대별 승하차](https://data.seoul.go.kr/dataList/OA-12252/S/1/datasetView.do) (`CardSubwayTime`) | 자리 회전 예측 · 1~8호선 외 혼잡도 추정 · 따릉이 수요 입력 |
+| ⑥′ | [서울교통공사 역별 시간대별 승하차인원(일별)](https://data.seoul.go.kr/dataList/OA-22723/A/1/datasetView.do) (`getStnPsgr`) | **D−1 갱신·최근 7일만 제공.** 배치 예측의 시차 피처 이력 창을 채우는 일 배치 원천(`DATA_ENGINE/collect/subway_ridership_daily.py`, 143). 1~8호선 273역 = 패널과 동일 |
 
 ### 따릉이
 

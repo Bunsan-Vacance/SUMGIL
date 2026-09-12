@@ -95,14 +95,19 @@ install_service() {
 
 install_service "bike-realtime-poller.service" "bike-realtime-poller.service"
 install_service "weather-nowcast-poller.service" "weather-nowcast-poller.service"
+# 143: D−1 승하차 수집은 폴러가 아니라 하루 두 번 oneshot — timer 로 띄운다.
+install_service "subway-ridership-daily.service" "subway-ridership-daily.service"
+install_service "subway-ridership-daily.timer" "subway-ridership-daily.timer"
 
 sudo systemctl daemon-reload
 
 if [[ "${ENABLE_NOW}" -eq 1 ]]; then
   sudo systemctl enable --now bike-realtime-poller.service
   sudo systemctl enable --now weather-nowcast-poller.service
+  sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl status --no-pager bike-realtime-poller.service
   sudo systemctl status --no-pager weather-nowcast-poller.service
+  sudo systemctl list-timers --no-pager subway-ridership-daily.timer
 else
   cat <<'EOF'
 
@@ -111,7 +116,9 @@ else
 
   sudo systemctl enable --now bike-realtime-poller.service
   sudo systemctl enable --now weather-nowcast-poller.service
+  sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl status bike-realtime-poller.service
   sudo systemctl status weather-nowcast-poller.service
+  sudo systemctl list-timers subway-ridership-daily.timer
 EOF
 fi
