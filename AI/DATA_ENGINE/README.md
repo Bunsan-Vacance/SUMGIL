@@ -323,7 +323,8 @@ AI/data/EXTERNAL/weather/interim/nowcast_features/dt=YYYY-MM-DD/part.parquet
 - 필수 컬럼이 모두 존재해야 한다.
 - 따릉이 `station_id`, `collected_at`은 결측이면 실패한다.
 - 따릉이 `current_bike_count`, `rack_total_count`는 음수이면 실패한다.
-- 따릉이 `stock_ratio`는 0~2 범위를 벗어나면 실패한다.
+- 따릉이 `stock_ratio`는 음수이면 실패한다. 상한은 `rack_total_count` 기준 차이와 초과 거치가
+  실제 데이터에 자주 나타나므로 실패 조건으로 두지 않고, `max_stock_ratio` 참고 통계로 출력한다.
 - 따릉이 `collected_at + station_id` 중복 row가 있으면 실패한다.
 - 날씨 `weather_source`는 `observed`, `forecast`만 허용한다.
 - 날씨 `t1h`, `rn1`, `reh`, `wsd`, `pty`가 모두 비어 있으면 실패한다.
@@ -332,7 +333,7 @@ AI/data/EXTERNAL/weather/interim/nowcast_features/dt=YYYY-MM-DD/part.parquet
 정상 출력 예:
 
 ```text
-OK bike batch output: rows=733575 stations=2737 snapshots=268 path=...
+OK bike batch output: rows=733575 stations=2737 snapshots=268 max_stock_ratio=12.14 path=...
 OK weather batch output: rows=938 path=...
 DATA_ENGINE batch output quality OK
 ```

@@ -189,9 +189,13 @@ def check_bike_output(check: BatchOutputCheck) -> BatchOutputResult:
         )
 
     stock_ratio = pd.to_numeric(df["stock_ratio"], errors="coerce").dropna()
-    if ((stock_ratio < 0) | (stock_ratio > 2)).any():
+    if (stock_ratio < 0).any():
         return fail(
-            check.name, check.path, "invalid_stock_ratio", "stock_ratio outside 0..2 found", rows
+            check.name,
+            check.path,
+            "negative_stock_ratio",
+            "stock_ratio negative found",
+            rows,
         )
 
     duplicate_count = int(df.duplicated(["collected_at", "station_id"]).sum())
@@ -206,10 +210,12 @@ def check_bike_output(check: BatchOutputCheck) -> BatchOutputResult:
 
     stations = df["station_id"].nunique()
     snapshots = df["collected_at"].nunique()
+    max_stock_ratio = stock_ratio.max() if not stock_ratio.empty else None
+    ratio_text = f" max_stock_ratio={max_stock_ratio:.2f}" if max_stock_ratio is not None else ""
     return ok(
         check.name,
         check.path,
-        f"batch output: rows={rows} stations={stations} snapshots={snapshots} path={check.path}",
+        f"batch output: rows={rows} stations={stations} snapshots={snapshots}{ratio_text} path={check.path}",
         rows,
     )
 

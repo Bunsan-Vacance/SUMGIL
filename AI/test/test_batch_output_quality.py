@@ -150,6 +150,30 @@ def test_bike_output_negative_current_count_fails(tmp_path):
     assert result.status == "negative_current_bike_count"
 
 
+def test_bike_output_negative_stock_ratio_fails(tmp_path):
+    path = tmp_path / "bike.parquet"
+    df = bike_frame()
+    df.loc[0, "stock_ratio"] = -0.1
+    df.to_parquet(path, index=False)
+
+    result = check_bike_output(BatchOutputCheck("bike", path, min_rows=1))
+
+    assert result.ok is False
+    assert result.status == "negative_stock_ratio"
+
+
+def test_bike_output_high_stock_ratio_is_reported_not_failed(tmp_path):
+    path = tmp_path / "bike.parquet"
+    df = bike_frame()
+    df.loc[0, "stock_ratio"] = 12.14
+    df.to_parquet(path, index=False)
+
+    result = check_bike_output(BatchOutputCheck("bike", path, min_rows=1))
+
+    assert result.ok is True
+    assert "max_stock_ratio=12.14" in result.message
+
+
 def test_bike_output_duplicate_station_snapshot_fails(tmp_path):
     path = tmp_path / "bike.parquet"
     df = pd.concat([bike_frame(), bike_frame().head(1)], ignore_index=True)
