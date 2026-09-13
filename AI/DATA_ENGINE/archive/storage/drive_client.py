@@ -7,6 +7,8 @@ from pathlib import Path
 
 DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+DRIVE_AUTH_MODE_SERVICE_ACCOUNT = "service_account"
+DRIVE_AUTH_MODE_OAUTH = "oauth"
 
 
 @dataclass(frozen=True)
@@ -26,7 +28,7 @@ def _media_file_upload(local_file: Path):
     return MediaFileUpload(str(local_file), resumable=True)
 
 
-def build_drive_service(service_account_file: Path):
+def build_service_account_drive_service(service_account_file: Path):
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
@@ -35,6 +37,31 @@ def build_drive_service(service_account_file: Path):
         scopes=[DRIVE_SCOPE],
     )
     return build("drive", "v3", credentials=credentials)
+
+
+def build_oauth_drive_service(token_file: Path):
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    credentials = Credentials.from_authorized_user_file(str(token_file), scopes=[DRIVE_SCOPE])
+    return build("drive", "v3", credentials=credentials)
+
+
+def build_drive_service(
+    service_account_file: Path | None = None,
+    *,
+    auth_mode: str = DRIVE_AUTH_MODE_SERVICE_ACCOUNT,
+    oauth_token_file: Path | None = None,
+):
+    if auth_mode == DRIVE_AUTH_MODE_SERVICE_ACCOUNT:
+        if service_account_file is None:
+            raise RuntimeError("service_account_file is required")
+        return build_service_account_drive_service(service_account_file)
+    if auth_mode == DRIVE_AUTH_MODE_OAUTH:
+        if oauth_token_file is None:
+            raise RuntimeError("oauth_token_file is required")
+        return build_oauth_drive_service(oauth_token_file)
+    raise ValueError("auth_mode must be one of: service_account, oauth")
 
 
 def find_child(
@@ -60,6 +87,8 @@ def find_child(
         .list(
             q=" and ".join(clauses),
             spaces="drive",
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
             fields="files(id,name,mimeType)",
             pageSize=1,
         )
@@ -78,6 +107,7 @@ def create_folder(service, parent_folder_id: str, name: str) -> str:
                 "mimeType": DRIVE_FOLDER_MIME_TYPE,
                 "parents": [parent_folder_id],
             },
+            supportsAllDrives=True,
             fields="id",
         )
         .execute()
@@ -117,6 +147,7 @@ def upload_file(
         .create(
             body={"name": local_file.name, "parents": [parent_folder_id]},
             media_body=_media_file_upload(local_file),
+            supportsAllDrives=True,
             fields="id,name",
         )
         .execute()

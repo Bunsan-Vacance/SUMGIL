@@ -18,10 +18,12 @@ class FakeFilesResource:
         self.uploads = []
         self.next_id = 1
 
-    def list(self, *, q, spaces, fields, pageSize):
+    def list(self, *, q, spaces, includeItemsFromAllDrives, supportsAllDrives, fields, pageSize):
         self.last_list = {
             "q": q,
             "spaces": spaces,
+            "includeItemsFromAllDrives": includeItemsFromAllDrives,
+            "supportsAllDrives": supportsAllDrives,
             "fields": fields,
             "pageSize": pageSize,
         }
@@ -36,14 +38,21 @@ class FakeFilesResource:
                 )
         return FakeRequest({"files": []})
 
-    def create(self, *, body, fields, media_body=None):
+    def create(self, *, body, supportsAllDrives, fields, media_body=None):
         file_id = f"id-{self.next_id}"
         self.next_id += 1
         name = body["name"]
         mime_type = body.get("mimeType")
         parent = body["parents"][0]
         self.children[(parent, name, mime_type)] = file_id
-        self.created.append({"body": body, "fields": fields, "media_body": media_body})
+        self.created.append(
+            {
+                "body": body,
+                "fields": fields,
+                "media_body": media_body,
+                "supportsAllDrives": supportsAllDrives,
+            }
+        )
         if media_body is not None:
             self.uploads.append({"body": body, "media_body": media_body})
         return FakeRequest({"id": file_id, "name": name})
@@ -75,6 +84,8 @@ def test_find_child_returns_existing_item():
         "name": "BIKE",
         "mimeType": drive_client.DRIVE_FOLDER_MIME_TYPE,
     }
+    assert service.files_resource.last_list["includeItemsFromAllDrives"] is True
+    assert service.files_resource.last_list["supportsAllDrives"] is True
 
 
 def test_ensure_folder_path_reuses_existing_and_creates_missing_folders():
@@ -88,6 +99,7 @@ def test_ensure_folder_path_reuses_existing_and_creates_missing_folders():
     assert folder_id == "id-2"
     created_names = [item["body"]["name"] for item in service.files_resource.created]
     assert created_names == ["raw", "realtime"]
+    assert all(item["supportsAllDrives"] is True for item in service.files_resource.created)
 
 
 def test_upload_file_skips_existing_by_default(tmp_path):
@@ -114,3 +126,31 @@ def test_upload_file_creates_file_when_missing(tmp_path, monkeypatch):
     assert result.name == "snapshot.parquet"
     assert result.uploaded is True
     assert service.files_resource.uploads[0]["media_body"] == "media:snapshot.parquet"
+    assert service.files_resource.created[0]["supportsAllDrives"] is True
+
+
+def test_build_drive_service_requires_service_account_file():
+    try:
+        drive_client.build_drive_service()
+    except RuntimeError as exc:
+        assert str(exc) == "service_account_file is required"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_build_drive_service_requires_oauth_token_file():
+    try:
+        drive_client.build_drive_service(auth_mode="oauth")
+    except RuntimeError as exc:
+        assert str(exc) == "oauth_token_file is required"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_build_drive_service_rejects_unknown_auth_mode(tmp_path):
+    try:
+        drive_client.build_drive_service(tmp_path / "service-account.json", auth_mode="unknown")
+    except ValueError as exc:
+        assert str(exc) == "auth_mode must be one of: service_account, oauth"
+    else:
+        raise AssertionError("expected ValueError")

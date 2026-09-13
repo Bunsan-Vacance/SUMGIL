@@ -26,6 +26,34 @@ from DATA_ENGINE.archive.targets import (
 )
 from DATA_ENGINE.collect.common import AI_ROOT, KST
 
+DATASET_ROOT_ENV_KEYS = {
+    "bike": "GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID",
+    "weather": "GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_FOLDER_ID",
+}
+
+DATASET_ARCHIVE_PREFIXES = {
+    "bike": "BIKE/",
+    "weather": "EXTERNAL/weather/",
+}
+
+DATASET_ROOT_LEVEL_ENV_KEYS = {
+    "bike": "GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL",
+    "weather": "GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_LEVEL",
+}
+
+DATASET_ROOT_LEVEL_PREFIXES = {
+    "bike": {
+        "domain": "BIKE/",
+        "raw": "BIKE/raw/",
+        "realtime": "BIKE/raw/realtime/",
+    },
+    "weather": {
+        "domain": "EXTERNAL/weather/",
+        "raw": "EXTERNAL/weather/raw/",
+        "nowcast": "EXTERNAL/weather/raw/nowcast/",
+    },
+}
+
 
 def format_bytes(size_bytes: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
@@ -54,6 +82,7 @@ def build_manifest_record(
     *,
     ai_root: Path,
     backend: str,
+    archive_path: str | None = None,
     status: str,
     error: str | None = None,
 ) -> ArchiveManifestRecord:
@@ -67,7 +96,7 @@ def build_manifest_record(
         hh=target.hh,
         local_path=local_path,
         archive_backend=backend,
-        archive_path=target.archive_path,
+        archive_path=archive_path or target.archive_path,
         file_count=target.file_count,
         total_bytes=target.total_bytes,
         status=status,
@@ -82,6 +111,7 @@ def print_targets(
     dry_run: bool,
     backend: str,
     skipped_success: int,
+    drive_root_folder_ids: dict[str, str],
 ) -> None:
     print(
         "DATA_ENGINE archive upload "
@@ -91,6 +121,7 @@ def print_targets(
         f"skipped_success={skipped_success}"
     )
     for target in targets:
+        _, archive_path = drive_destination_for_target(target, drive_root_folder_ids)
         prefix = "DRY_RUN" if dry_run else "UPLOAD"
         print(
             f"{prefix} {target.dataset} "
@@ -98,8 +129,48 @@ def print_targets(
             f"files={target.file_count} "
             f"size={format_bytes(target.total_bytes)} "
             f"local={target.local_path} "
-            f"archive={target.archive_path}"
+            f"archive={archive_path}"
         )
+
+
+def strip_archive_prefix(archive_path: str, prefix: str) -> str:
+    return archive_path.removeprefix(prefix)
+
+
+def dataset_root_level(dataset: str) -> str:
+    env_key = DATASET_ROOT_LEVEL_ENV_KEYS[dataset]
+    return os.environ.get(env_key, "domain")
+
+
+def dataset_archive_prefix(dataset: str) -> str:
+    root_level = dataset_root_level(dataset)
+    try:
+        return DATASET_ROOT_LEVEL_PREFIXES[dataset][root_level]
+    except KeyError as exc:
+        allowed = ", ".join(sorted(DATASET_ROOT_LEVEL_PREFIXES[dataset]))
+        raise ValueError(
+            f"{DATASET_ROOT_LEVEL_ENV_KEYS[dataset]} must be one of: {allowed}"
+        ) from exc
+
+
+def drive_destination_for_target(
+    target: ArchiveTarget,
+    drive_root_folder_ids: dict[str, str],
+) -> tuple[str, str]:
+    dataset_root = drive_root_folder_ids.get(target.dataset, "")
+    if dataset_root:
+        prefix = dataset_archive_prefix(target.dataset)
+        return dataset_root, strip_archive_prefix(target.archive_path, prefix)
+    return drive_root_folder_ids.get("default", ""), target.archive_path
+
+
+def build_drive_root_folder_ids() -> dict[str, str]:
+    root_ids = {"default": os.environ.get("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID", "")}
+    for dataset, env_key in DATASET_ROOT_ENV_KEYS.items():
+        value = os.environ.get(env_key, "")
+        if value:
+            root_ids[dataset] = value
+    return root_ids
 
 
 def upload_targets(
@@ -107,8 +178,10 @@ def upload_targets(
     *,
     ai_root: Path,
     manifest_path: Path,
-    service_account_file: Path,
-    drive_root_folder_id: str,
+    drive_auth_mode: str,
+    service_account_file: Path | None,
+    oauth_token_file: Path | None,
+    drive_root_folder_ids: dict[str, str],
     backend: str,
 ) -> int:
     from DATA_ENGINE.archive.storage.drive_client import (
@@ -117,16 +190,31 @@ def upload_targets(
         upload_file,
     )
 
-    service = build_drive_service(service_account_file)
+    service = build_drive_service(
+        auth_mode=drive_auth_mode,
+        service_account_file=service_account_file,
+        oauth_token_file=oauth_token_file,
+    )
     failures = 0
     for target in targets:
+        drive_root_folder_id, archive_path = drive_destination_for_target(
+            target, drive_root_folder_ids
+        )
         try:
-            folder_id = ensure_folder_path(service, drive_root_folder_id, target.archive_path)
+            if not drive_root_folder_id:
+                raise RuntimeError(f"Drive root folder id is empty for dataset={target.dataset}")
+            folder_id = ensure_folder_path(service, drive_root_folder_id, archive_path)
             for file_path in snapshot_files(target):
                 upload_file(service, folder_id, file_path)
             append_manifest_record(
                 manifest_path,
-                build_manifest_record(target, ai_root=ai_root, backend=backend, status="success"),
+                build_manifest_record(
+                    target,
+                    ai_root=ai_root,
+                    backend=backend,
+                    archive_path=archive_path,
+                    status="success",
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             # One failed partition should be recorded and let the remaining partitions continue.
@@ -137,13 +225,14 @@ def upload_targets(
                     target,
                     ai_root=ai_root,
                     backend=backend,
+                    archive_path=archive_path,
                     status="failed",
                     error=str(exc),
                 ),
             )
             print(
                 f"FAIL {target.dataset} dt={target.dt} hh={target.hh} "
-                f"archive={target.archive_path} error={exc}",
+                f"archive={archive_path} error={exc}",
                 file=sys.stderr,
             )
     return failures
@@ -198,23 +287,36 @@ def main(argv: list[str] | None = None) -> int:
         if len(targets) >= args.max_partitions:
             break
 
-    print_targets(targets, dry_run=not args.yes, backend=backend, skipped_success=skipped_success)
+    drive_root_folder_ids = build_drive_root_folder_ids()
+
+    print_targets(
+        targets,
+        dry_run=not args.yes,
+        backend=backend,
+        skipped_success=skipped_success,
+        drive_root_folder_ids=drive_root_folder_ids,
+    )
     if not args.yes:
         return 0
 
+    drive_auth_mode = os.environ.get("DATA_ENGINE_DRIVE_AUTH_MODE", "service_account")
     service_account = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "")
-    drive_root = os.environ.get("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID", "")
-    if not service_account:
+    oauth_token = os.environ.get("GOOGLE_OAUTH_TOKEN_FILE", "")
+    if drive_auth_mode == "service_account" and not service_account:
         raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_FILE is empty")
-    if not drive_root:
+    if drive_auth_mode == "oauth" and not oauth_token:
+        raise RuntimeError("GOOGLE_OAUTH_TOKEN_FILE is empty")
+    if not any(drive_root_folder_ids.values()):
         raise RuntimeError("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID is empty")
 
     failures = upload_targets(
         targets,
         ai_root=ai_root,
         manifest_path=manifest_path,
-        service_account_file=Path(service_account),
-        drive_root_folder_id=drive_root,
+        drive_auth_mode=drive_auth_mode,
+        service_account_file=Path(service_account) if service_account else None,
+        oauth_token_file=Path(oauth_token) if oauth_token else None,
+        drive_root_folder_ids=drive_root_folder_ids,
         backend=backend,
     )
     return 1 if failures else 0

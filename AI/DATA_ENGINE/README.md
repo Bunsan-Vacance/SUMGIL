@@ -264,33 +264,59 @@ SUMGIL/data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
 SUMGIL/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
 ```
 
-EC2 cron/systemd에서 무인 업로드가 가능해야 하므로 인증은 Google Cloud 서비스 계정 JSON을
-사용한다. 개인 계정 OAuth refresh token 방식은 이번 단계에서 사용하지 않는다.
+EC2 cron/systemd에서 무인 업로드가 가능해야 하므로 인증은 Google OAuth token 방식을 사용한다.
+서비스 계정 방식은 개인 Drive나 `Shared with me` 폴더에서 저장 용량 문제로 실패할 수 있어
+현재 운영 경로에서 제외한다.
 
-서비스 계정 준비:
+OAuth token 생성:
 
-- Google Cloud 서비스 계정 생성.
-- 서비스 계정 JSON 키 발급.
-- 서비스 계정 이메일에 Drive 백업 루트 폴더(`SUMGIL/data`) 공유 권한 부여.
-- JSON 키는 repo 밖에 배치한다.
+```bash
+cd <REPO_ROOT>/AI
+python -m DATA_ENGINE.archive.authorize_drive_oauth \
+  --client-secret-file /path/to/google-oauth-client-secret.json \
+  --token-file /path/to/google-drive-token.json
+```
 
-EC2 권장 배치:
+생성된 token 파일은 EC2의 repo 밖에 배치한다.
 
 ```bash
 mkdir -p /home/ubuntu/secrets
 chmod 700 /home/ubuntu/secrets
-chmod 600 /home/ubuntu/secrets/soomgil-drive-service-account.json
+chmod 600 /home/ubuntu/secrets/google-drive-token.json
 ```
 
 `AI/.env` 설정:
 
 ```text
-GOOGLE_SERVICE_ACCOUNT_FILE=/home/ubuntu/secrets/soomgil-drive-service-account.json
+DATA_ENGINE_DRIVE_AUTH_MODE=oauth
+GOOGLE_OAUTH_TOKEN_FILE=/home/ubuntu/secrets/google-drive-token.json
 GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID=<SUMGIL/data folder id>
 DATA_ENGINE_ARCHIVE_STORAGE=drive
 ```
 
-서비스 계정 JSON, `.env`, Drive Webhook/토큰류는 Git에 커밋하지 않는다. 업로드 성공 여부는
+이미 Drive에 도메인별 폴더가 있는 경우에는 dataset별 root folder ID를 우선 사용할 수 있다.
+예를 들어 기존 `BIKE` 폴더에 따릉이 raw만 올리고 싶다면 `GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID`
+를 지정한다. 이 경우 Drive에는 `BIKE/raw/realtime/...`가 아니라 해당 `BIKE` 폴더 아래
+`raw/realtime/...`만 생성된다.
+
+```text
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID=<existing BIKE folder id>
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL=domain
+GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_FOLDER_ID=<existing weather folder id>
+GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_LEVEL=domain
+```
+
+root folder ID가 이미 더 깊은 폴더라면 root level을 같이 바꾼다.
+
+```text
+# root가 BIKE/raw 폴더인 경우 → realtime/dt=.../hh=... 생성
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL=raw
+
+# root가 BIKE/raw/realtime 폴더인 경우 → dt=.../hh=... 생성
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL=realtime
+```
+
+OAuth client secret, token 파일, `.env`, Drive Webhook/토큰류는 Git에 커밋하지 않는다. 업로드 성공 여부는
 다음 단계에서 파티션 단위 manifest로 기록하고, retention cleanup은 archive success가 확인된
 파티션만 삭제하도록 확장한다.
 
