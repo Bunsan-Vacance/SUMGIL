@@ -294,6 +294,65 @@ base_datetime, forecast_datetime, nx, ny, t1h, rn1, reh, wsd, pty
 10 4 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && bash DATA_ENGINE/scripts/run_data_engine_batch.sh --date "$(TZ=Asia/Seoul date -d 'yesterday' +\%F)" --yes >> logs/data_engine_batch.log 2>&1
 ```
 
+### 배치 산출물 품질 점검
+
+배치가 `part.parquet` 파일을 만들었더라도 row 수, 필수 컬럼, 결측·중복·이상값이 깨질 수
+있다. `check_batch_outputs.py`는 배치 결과가 모델·분석 입력으로 쓸 수 있는 최소 품질을
+만족하는지 확인한다. 기본 날짜는 KST 기준 어제다.
+
+수동 실행:
+
+```bash
+cd <REPO_ROOT>/AI
+
+python -m DATA_ENGINE.monitor.check_batch_outputs
+python -m DATA_ENGINE.monitor.check_batch_outputs --date 2026-09-13
+```
+
+점검 대상:
+
+```text
+AI/data/BIKE/interim/realtime_stock_5min/dt=YYYY-MM-DD/part.parquet
+AI/data/EXTERNAL/weather/interim/nowcast_features/dt=YYYY-MM-DD/part.parquet
+```
+
+기본 기준:
+
+- 따릉이 row 수 최소 100,000.
+- 날씨 row 수 최소 100.
+- 필수 컬럼이 모두 존재해야 한다.
+- 따릉이 `station_id`, `collected_at`은 결측이면 실패한다.
+- 따릉이 `current_bike_count`, `rack_total_count`는 음수이면 실패한다.
+- 따릉이 `stock_ratio`는 음수이면 실패한다. 상한은 `rack_total_count` 기준 차이와 초과 거치가
+  실제 데이터에 자주 나타나므로 실패 조건으로 두지 않고, `max_stock_ratio` 참고 통계로 출력한다.
+- 따릉이 `collected_at + station_id` 중복 row가 있으면 실패한다.
+- 날씨 `weather_source`는 `observed`, `forecast`만 허용한다.
+- 날씨 `t1h`, `rn1`, `reh`, `wsd`, `pty`가 모두 비어 있으면 실패한다.
+- 날씨 `rn1`, `reh`, `wsd`, `pty`는 음수이면 실패하고, `reh`는 0~100 범위여야 한다.
+
+정상 출력 예:
+
+```text
+OK bike batch output: rows=733575 stations=2737 snapshots=268 max_stock_ratio=12.14 path=...
+OK weather batch output: rows=938 path=...
+DATA_ENGINE batch output quality OK
+```
+
+실패 출력 예:
+
+```text
+FAIL bike batch output missing: path=...
+FAIL weather invalid weather_source: values=['bad']
+DATA_ENGINE batch output quality FAILED
+```
+
+운영에서는 배치가 끝난 뒤 한 번 실행한다. 예를 들어 전날 데이터 배치가 04:10에 돈다면,
+품질 점검은 04:30 이후에 등록한다.
+
+```cron
+30 4 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.check_batch_outputs --date "$(TZ=Asia/Seoul date -d 'yesterday' +\%F)" >> logs/data_engine_batch_quality.log 2>&1
+```
+
 ## 데이터 보관 정책
 
 따릉이·날씨 실시간 수집기는 서버 로컬에 `snapshot_*.parquet`를 계속 쌓는다. 로컬 디스크가
