@@ -253,6 +253,47 @@ python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes
 20 3 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes >> logs/data_engine_retention.log 2>&1
 ```
 
+## Drive 임시 백업 인증
+
+Spark/HDFS/S3 도입 전까지는 EC2 로컬 raw snapshot을 삭제하기 전에 Google Drive에 임시
+백업할 수 있다. 이 백업은 최종 저장소가 아니라 임시 archive backend이며, Drive에는
+`AI/data/` 구조를 그대로 미러링한다.
+
+```text
+SUMGIL/data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
+SUMGIL/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
+```
+
+EC2 cron/systemd에서 무인 업로드가 가능해야 하므로 인증은 Google Cloud 서비스 계정 JSON을
+사용한다. 개인 계정 OAuth refresh token 방식은 이번 단계에서 사용하지 않는다.
+
+서비스 계정 준비:
+
+- Google Cloud 서비스 계정 생성.
+- 서비스 계정 JSON 키 발급.
+- 서비스 계정 이메일에 Drive 백업 루트 폴더(`SUMGIL/data`) 공유 권한 부여.
+- JSON 키는 repo 밖에 배치한다.
+
+EC2 권장 배치:
+
+```bash
+mkdir -p /home/ubuntu/secrets
+chmod 700 /home/ubuntu/secrets
+chmod 600 /home/ubuntu/secrets/soomgil-drive-service-account.json
+```
+
+`AI/.env` 설정:
+
+```text
+GOOGLE_SERVICE_ACCOUNT_FILE=/home/ubuntu/secrets/soomgil-drive-service-account.json
+GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID=<SUMGIL/data folder id>
+DATA_ENGINE_ARCHIVE_BACKEND=drive
+```
+
+서비스 계정 JSON, `.env`, Drive Webhook/토큰류는 Git에 커밋하지 않는다. 업로드 성공 여부는
+다음 단계에서 파티션 단위 manifest로 기록하고, retention cleanup은 archive success가 확인된
+파티션만 삭제하도록 확장한다.
+
 ## Redis 연동 상태
 
 Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
