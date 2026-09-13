@@ -128,6 +128,86 @@ python -m DATA_ENGINE.collect.subway_ridership_daily                  # dry-run:
 python -m DATA_ENGINE.collect.subway_ridership_daily --days 7 --yes
 ```
 
+## 데이터 수집 모니터링
+
+systemd 서비스가 `active`여도 API 오류, 저장 실패, 일부 시간대 누락이 생길 수 있으므로
+별도 모니터링 스크립트로 실제 산출물 갱신 상태를 확인한다. 정상 상태에서는 알림을 보내지
+않고, 실패 상태에서만 Discord Webhook 알림을 보낼 수 있다.
+
+수동 실행:
+
+```bash
+cd <REPO_ROOT>/AI
+bash DATA_ENGINE/scripts/run_data_engine_monitor.sh
+```
+
+개별 점검:
+
+```bash
+python -m DATA_ENGINE.monitor.check_collection_freshness
+python -m DATA_ENGINE.monitor.check_partition_counts
+```
+
+점검 기준:
+
+- 따릉이 `latest.parquet`: 10분 초과 미갱신 시 실패.
+- 날씨 `latest.parquet`: 20분 초과 미갱신 시 실패.
+- 따릉이 완료 시간대 파티션: `snapshot_*.parquet` 최소 10개/hour.
+- 날씨 완료 시간대 파티션: `snapshot_*.parquet` 최소 5개/hour.
+- 현재 진행 중인 KST 시간대는 파티션 파일 수 검사에서 제외한다.
+
+기준값은 실행 시 환경변수로 조정할 수 있다.
+
+```bash
+BIKE_MAX_AGE_MIN=15 WEATHER_MAX_AGE_MIN=30 PARTITION_HOURS=3 \
+  bash DATA_ENGINE/scripts/run_data_engine_monitor.sh
+```
+
+Discord 알림을 사용하려면 `AI/.env`에 아래 값을 추가한다. 실제 Webhook URL은 Git에
+커밋하지 않는다.
+
+```text
+DISCORD_WEBHOOK_URL=<discord webhook url>
+DATA_ENGINE_SERVER_NAME=J15A104A
+```
+
+알림 전송 없이 점검만 실행하려면 아래처럼 실행한다.
+
+```bash
+DISCORD_NOTIFY_ON_FAILURE=0 bash DATA_ENGINE/scripts/run_data_engine_monitor.sh
+```
+
+Discord dry-run:
+
+```bash
+python -m DATA_ENGINE.monitor.notify_discord \
+  --message "DATA_ENGINE Discord 알림 테스트" \
+  --server-name J15A104A \
+  --dry-run
+```
+
+cron 등록 예시:
+
+```cron
+*/5 * * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && bash DATA_ENGINE/scripts/run_data_engine_monitor.sh >> logs/data_engine_monitor.log 2>&1
+```
+
+장애 확인 순서:
+
+```bash
+sudo systemctl status bike-realtime-poller.service --no-pager
+sudo systemctl status weather-nowcast-poller.service --no-pager
+
+tail -n 100 logs/bike_realtime.log
+tail -n 100 logs/weather_nowcast.log
+tail -n 100 logs/data_engine_monitor.log
+
+find data/BIKE/raw/realtime -type f | tail
+find data/EXTERNAL/weather/raw/nowcast -type f | tail
+
+df -h
+```
+
 ## Redis 연동 상태
 
 Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
