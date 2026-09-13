@@ -186,6 +186,10 @@ _RENTAL_COLUMNS = [
 def _read_rental_day(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """하루치 파일 → (rent 집계, return 집계). 파일별로 즉시 group-by해서 원본 행은 버린다."""
     df = read_csv_any_encoding(path)
+    # 일부 파일은 각 줄 끝에 trailing comma가 있어 빈 열이 하나 더 잡힌다(확인됨,
+    # 20240102 등) — 마지막 열이 전부 결측이면 그 열만 버리고 계속 진행한다.
+    if len(df.columns) == len(_RENTAL_COLUMNS) + 1 and df.iloc[:, -1].isna().all():
+        df = df.iloc[:, :-1]
     if len(df.columns) != len(_RENTAL_COLUMNS):
         raise ValueError(
             f"{path}: 예상 컬럼 수({len(_RENTAL_COLUMNS)})와 다름({len(df.columns)}) — "
@@ -194,7 +198,13 @@ def _read_rental_day(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     df.columns = _RENTAL_COLUMNS
     df["기준_시간대"] = df["기준_시간대"].astype("int32")
     df["date"] = pd.to_datetime(df["기준_날짜"].astype(str), format="%Y%m%d")
-    df["slot_5m"] = df["기준_시간대"] // SLOT_MINUTES
+    # 기준_시간대는 HHMM 형식(예: 1750 = 17:50)이다 — 그냥 5로 나누면 시(hour)가 0일 때만
+    # 우연히 맞고 그 외엔 다 틀린다(예: 1750//5=350, 정답은 (17*60+50)//5=214). 시/분을
+    # 분리해서 하루 5분 슬롯(0~287)으로 정확히 계산한다. (버그로 확인됨 — 시간대별
+    # 대여량이 새벽에 튀고 낮에 꺼지는 등 실제 이용 패턴과 안 맞았음)
+    hh = df["기준_시간대"] // 100
+    mm = df["기준_시간대"] % 100
+    df["slot_5m"] = hh * 12 + mm // SLOT_MINUTES
 
     rent = (
         df[df["집계_기준"] == "출발시간"]
