@@ -31,23 +31,50 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_full_station_netflow import PeakMemoryTracker  # noqa: E402
+from build_full_station_netflow import PeakMemoryTracker
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "q3-seasonal-dataset-check" / "src")
-)
-import phase2_historical_profile as p2  # noqa: E402  (import 시점에 p1의 전역을 patch함)
-import phase1_baseline as p1  # noqa: E402
-
-from sklearn.metrics import mean_absolute_error, r2_score  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "q3-seasonal-dataset-check" / "src"))
+import phase1_baseline as p1
+import phase2_historical_profile as p2
+from sklearn.metrics import mean_absolute_error, r2_score
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "outputs" / "full-run"
 AI_DIR = Path(__file__).resolve().parents[4]
 MODELS_DIR = AI_DIR / "models" / "BIKE"
+HOLIDAY_PATH = AI_DIR / "data" / "EXTERNAL" / "holiday" / "interim" / "holiday_calendar.parquet"
 
 TARGET_COL = p1.TARGET_COL
-BASE_READ_COLS = ["od_station_id", *p2.BASE_COLS, TARGET_COL]
+BASE_READ_COLS = ["od_station_id", "date", *p2.BASE_COLS, TARGET_COL]
 TRAIN_READ_COLS = [*BASE_READ_COLS, "target_rent_count", "target_return_count"]
+
+
+def apply_feature_cols(use_holiday: bool) -> list[str]:
+    """is_holiday 포함 여부에 따라 p1의 전역 FEATURE_COLS/MODEL_FEATURE_COLS를 맞춘다.
+
+    재튜닝 1순위(사용자 지시) — 원래 day_of_week/is_weekend만으로는 평일에 낀 공휴일
+    (신정·삼일절·추석 등)을 못 잡았다. 사립학교교직원연금공단 공휴일 캘린더는 토요일도
+    함께 Y로 잡는 최신 5일제 기준이라(1980년대 자료는 토 N, 확인됨 — 이 파일은 그 시기별
+    변화를 그대로 반영), day_of_week로 토요일을 이미 구분하는 우리 feature와 겹쳐도
+    문제없다(공휴일 자체가 새 정보를 주는 게 핵심). --no-holiday로 A/B 비교 가능.
+    """
+    p1.FEATURE_COLS = p2.FEATURE_COLS + (["is_holiday"] if use_holiday else [])
+    p1.MODEL_FEATURE_COLS = p1.FEATURE_COLS + ["station_code"]
+    return p1.MODEL_FEATURE_COLS
+
+
+def load_holiday_calendar() -> pd.DataFrame:
+    if not HOLIDAY_PATH.exists():
+        raise FileNotFoundError(f"{HOLIDAY_PATH} 없음 — holiday_calendar.parquet 먼저 준비")
+    hol = pd.read_parquet(HOLIDAY_PATH)[["date", "is_holiday"]]
+    hol["date"] = pd.to_datetime(hol["date"]).dt.normalize()
+    return hol
+
+
+def attach_holiday(df: pd.DataFrame, holidays: pd.DataFrame) -> pd.DataFrame:
+    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    merged = df.merge(holidays, on="date", how="left")
+    merged["is_holiday"] = merged["is_holiday"].fillna(False).astype("int8")
+    return merged
 
 
 def _monthly_paths(prefix: str, months: list[str] | None = None) -> list[Path]:
@@ -106,15 +133,65 @@ def evaluate(model, df: pd.DataFrame, label: str) -> dict:
     }
 
 
+def fit_lightgbm_tuned(
+    train_df: pd.DataFrame,
+    valid_df: pd.DataFrame,
+    random_state: int,
+    n_estimators: int,
+    learning_rate: float,
+    num_leaves: int,
+    early_stopping_rounds: int,
+):
+    """p1.fit_lightgbm과 같은 구조지만 하이퍼파라미터를 CLI로 받는다.
+
+    조기종료가 25~33라운드에서 걸린 것(기본 learning_rate=0.05, 500라운드 중)이
+    이 스케일엔 너무 높다는 신호일 수 있어 재튜닝 대상으로 삼았다 — n_estimators를
+    늘리고 patience(early_stopping_rounds)도 같이 늘려야 learning_rate를 낮춘
+    효과를 볼 수 있다.
+    """
+    from lightgbm import LGBMRegressor, early_stopping, log_evaluation
+
+    x_train, y_train = p1.make_xy(train_df)
+    x_valid, y_valid = p1.make_xy(valid_df)
+    model = LGBMRegressor(
+        n_estimators=n_estimators,
+        learning_rate=learning_rate,
+        num_leaves=num_leaves,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=random_state,
+        n_jobs=-1,
+    )
+    started_at = time.time()
+    model.fit(
+        x_train,
+        y_train,
+        eval_set=[(x_valid, y_valid)],
+        callbacks=[early_stopping(early_stopping_rounds), log_evaluation(0)],
+    )
+    return p1.FitResult("LightGBM", model, time.time() - started_at)
+
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--train-months", nargs="+", default=None)
     p.add_argument("--valid-months", nargs="+", default=None)
     p.add_argument("--test-months", nargs="+", default=None)
     p.add_argument("--random-state", type=int, default=42)
-    p.add_argument("--sample-frac", type=float, default=None, help="train만 파일별 샘플링(예: 0.45)")
+    p.add_argument(
+        "--sample-frac", type=float, default=None, help="train만 파일별 샘플링(예: 0.45)"
+    )
+    p.add_argument("--n-estimators", type=int, default=500)
+    p.add_argument("--learning-rate", type=float, default=0.05)
+    p.add_argument("--num-leaves", type=int, default=63)
+    p.add_argument("--early-stopping-rounds", type=int, default=30)
+    p.add_argument("--no-holiday", action="store_true", help="is_holiday feature 끄기(비교용)")
     p.add_argument("--tag", default="v2-full")
-    p.add_argument("--out-dir", default=str(Path(__file__).resolve().parents[1] / "outputs" / "lightgbm-full"))
+    p.add_argument(
+        "--out-dir", default=str(Path(__file__).resolve().parents[1] / "outputs" / "lightgbm-full")
+    )
     return p.parse_args()
 
 
@@ -122,11 +199,16 @@ def main() -> None:
     args = parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    use_holiday = not args.no_holiday
+    apply_feature_cols(use_holiday)
+    holidays = load_holiday_calendar()
 
     train_paths = _monthly_paths("train", args.train_months)
     valid_paths = _monthly_paths("valid", args.valid_months)
     test_paths = _monthly_paths("test", args.test_months)
-    print(f"train {len(train_paths)}개 파일, valid {len(valid_paths)}개, test {len(test_paths)}개")
+    print(
+        f"train {len(train_paths)}개 파일, valid {len(valid_paths)}개, test {len(test_paths)}개, is_holiday={use_holiday}"
+    )
 
     with PeakMemoryTracker() as mem:
         t0 = time.time()
@@ -136,10 +218,13 @@ def main() -> None:
             | scan_station_ids_parquet(test_paths)
         )
         station_dtype = p1.build_station_dtype(station_ids)
-        print(f"station dtype: {len(station_dtype.categories):,}개 ({time.time() - t0:.1f}초, {mem.peak_mb}MB)")
+        print(
+            f"station dtype: {len(station_dtype.categories):,}개 ({time.time() - t0:.1f}초, {mem.peak_mb}MB)"
+        )
 
         t0 = time.time()
         train_df = load_paths(train_paths, TRAIN_READ_COLS, args.sample_frac, args.random_state)
+        train_df = attach_holiday(train_df, holidays)
         print(f"train 로드: {len(train_df):,}행 ({time.time() - t0:.1f}초, {mem.peak_mb}MB)")
 
         t0 = time.time()
@@ -151,12 +236,23 @@ def main() -> None:
 
         t0 = time.time()
         valid_df = load_paths(valid_paths, BASE_READ_COLS)
+        valid_df = attach_holiday(valid_df, holidays)
         valid_df = profile.transform(valid_df)
         p1.apply_station_code(valid_df, station_dtype, "valid")
-        print(f"valid 로드+transform: {len(valid_df):,}행 ({time.time() - t0:.1f}초, {mem.peak_mb}MB)")
+        print(
+            f"valid 로드+transform: {len(valid_df):,}행 ({time.time() - t0:.1f}초, {mem.peak_mb}MB)"
+        )
 
         t0 = time.time()
-        result = p1.fit_lightgbm(train_df, valid_df, args.random_state)
+        result = fit_lightgbm_tuned(
+            train_df,
+            valid_df,
+            args.random_state,
+            args.n_estimators,
+            args.learning_rate,
+            args.num_leaves,
+            args.early_stopping_rounds,
+        )
         if result.model is None:
             raise RuntimeError(result.skipped_reason)
         print(f"LightGBM 학습 완료: {time.time() - t0:.1f}초, {mem.peak_mb}MB")
@@ -167,6 +263,7 @@ def main() -> None:
         for p in test_paths:
             t0 = time.time()
             test_df = load_paths([p], BASE_READ_COLS)
+            test_df = attach_holiday(test_df, holidays)
             test_df = profile.transform(test_df)
             p1.apply_station_code(test_df, station_dtype, f"test:{p.stem}")
             r = evaluate(result.model, test_df, f"test:{p.stem[-6:]}")
@@ -189,14 +286,21 @@ def main() -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     result.model.booster_.save_model(str(artifact_dir / "model.txt"))
     profile.full.to_parquet(artifact_dir / "profile_full.parquet", index=False)
-    profile.station_horizon.to_parquet(artifact_dir / "profile_station_horizon.parquet", index=False)
+    profile.station_horizon.to_parquet(
+        artifact_dir / "profile_station_horizon.parquet", index=False
+    )
     profile.global_.to_parquet(artifact_dir / "profile_global.parquet", index=False)
     meta = {
         "tag": args.tag,
         "train_months": [p.stem[-6:] for p in train_paths],
         "valid_months": [p.stem[-6:] for p in valid_paths],
         "test_months": [p.stem[-6:] for p in test_paths],
-        "model_feature_cols": p2.MODEL_FEATURE_COLS,
+        "model_feature_cols": p1.MODEL_FEATURE_COLS,
+        "use_holiday": use_holiday,
+        "n_estimators": args.n_estimators,
+        "learning_rate": args.learning_rate,
+        "num_leaves": args.num_leaves,
+        "early_stopping_rounds": args.early_stopping_rounds,
         "station_categories": len(station_dtype.categories),
         "sample_frac": args.sample_frac,
         "train_time_sec": result.train_time_sec,

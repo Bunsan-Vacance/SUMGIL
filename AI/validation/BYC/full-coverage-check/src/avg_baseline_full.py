@@ -23,10 +23,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "q3-seasonal-dataset-check" / "src")
-)
-from phase1_baseline import (  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "q3-seasonal-dataset-check" / "src"))
+from phase1_baseline import (
     PROFILE_KEYS_FULL,
     PROFILE_KEYS_GLOBAL,
     PROFILE_KEYS_STATION_HORIZON,
@@ -130,7 +128,9 @@ def evaluate(model: NaiveProfileModel, paths: list[Path], label: str) -> dict:
     for c in classes:
         precision = tp[c] / (tp[c] + fp[c]) if (tp[c] + fp[c]) else 0.0
         recall = tp[c] / (tp[c] + fn[c]) if (tp[c] + fn[c]) else 0.0
-        f1_scores.append(2 * precision * recall / (precision + recall) if (precision + recall) else 0.0)
+        f1_scores.append(
+            2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        )
     direction_macro_f1 = sum(f1_scores) / len(f1_scores)
     variance = y_sq_sum / n - y_mean**2
     r2 = 1 - mse / variance if variance > 0 else float("nan")
@@ -176,7 +176,9 @@ def main() -> None:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     model.profile_full.to_parquet(OUT_DIR / "profile_full.parquet", index=False)
-    model.profile_station_horizon.to_parquet(OUT_DIR / "profile_station_horizon.parquet", index=False)
+    model.profile_station_horizon.to_parquet(
+        OUT_DIR / "profile_station_horizon.parquet", index=False
+    )
     model.profile_global.to_parquet(OUT_DIR / "profile_global.parquet", index=False)
     pd.DataFrame(results).to_csv(OUT_DIR / "eval_report.csv", index=False)
     print(f"\n저장 완료: {OUT_DIR}")

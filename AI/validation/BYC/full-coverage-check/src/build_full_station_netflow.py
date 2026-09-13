@@ -45,6 +45,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 import numpy as np
 import pandas as pd
@@ -81,9 +82,9 @@ def read_csv_any_encoding(path: Path, **kwargs) -> pd.DataFrame:
 def load_od_master(path: Path) -> pd.DataFrame:
     """OD 마스터(ST-xxx + 위경도). 좌표 0.000000(결측) 행은 제외한다."""
     df = pd.read_csv(path, encoding="cp949")
-    df = df.rename(
-        columns={"대여소_ID": "od_station_id", "위도": "od_lat", "경도": "od_lon"}
-    )[["od_station_id", "od_lat", "od_lon"]]
+    df = df.rename(columns={"대여소_ID": "od_station_id", "위도": "od_lat", "경도": "od_lon"})[
+        ["od_station_id", "od_lat", "od_lon"]
+    ]
     before = len(df)
     df = df[(df["od_lat"] != 0.0) & (df["od_lon"] != 0.0)].reset_index(drop=True)
     dropped = before - len(df)
@@ -125,14 +126,38 @@ def build_station_mapping(
     od_left = od[~od["od_station_id"].isin(matched_od_ids)].copy()
     info_left = info[~info["station_no"].isin(merged6["station_no"])].copy()
 
-    od_left["key5"] = od_left["od_lat"].round(5).astype(str) + "," + od_left["od_lon"].round(5).astype(str)
-    info_left["key5"] = info_left["lat"].round(5).astype(str) + "," + info_left["lon"].round(5).astype(str)
+    od_left["key5"] = (
+        od_left["od_lat"].round(5).astype(str) + "," + od_left["od_lon"].round(5).astype(str)
+    )
+    info_left["key5"] = (
+        info_left["lat"].round(5).astype(str) + "," + info_left["lon"].round(5).astype(str)
+    )
     merged5 = od_left.merge(info_left, on="key5", how="inner", suffixes=("", "_info"))
 
     mapping = pd.concat(
         [
-            merged6[["od_station_id", "station_no", "station_name", "district", "rack_count", "lat", "lon"]],
-            merged5[["od_station_id", "station_no", "station_name", "district", "rack_count", "lat", "lon"]],
+            merged6[
+                [
+                    "od_station_id",
+                    "station_no",
+                    "station_name",
+                    "district",
+                    "rack_count",
+                    "lat",
+                    "lon",
+                ]
+            ],
+            merged5[
+                [
+                    "od_station_id",
+                    "station_no",
+                    "station_name",
+                    "district",
+                    "rack_count",
+                    "lat",
+                    "lon",
+                ]
+            ],
         ],
         ignore_index=True,
     ).drop_duplicates(subset=["od_station_id"])
@@ -228,7 +253,9 @@ def aggregate_rental_history(
 ) -> pd.DataFrame:
     paths = _daily_rental_paths(rental_dir, start, end)
     if not paths:
-        raise FileNotFoundError(f"rental_history 파일 없음: {rental_dir}, {start.date()}~{end.date()}")
+        raise FileNotFoundError(
+            f"rental_history 파일 없음: {rental_dir}, {start.date()}~{end.date()}"
+        )
     rent_parts, return_parts = [], []
     for p in paths:
         rent, ret = _read_rental_day(p)
@@ -258,7 +285,9 @@ def _quarter_stock_paths(stock_dir: Path, start: pd.Timestamp, end: pd.Timestamp
 def load_stock_hourly(stock_dir: Path, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     paths = _quarter_stock_paths(stock_dir, start, end)
     if not paths:
-        raise FileNotFoundError(f"station_stock_hourly 파일 없음: {stock_dir}, {start.date()}~{end.date()}")
+        raise FileNotFoundError(
+            f"station_stock_hourly 파일 없음: {stock_dir}, {start.date()}~{end.date()}"
+        )
     parts = []
     for p in paths:
         df = read_csv_any_encoding(
@@ -290,10 +319,14 @@ def build_target_dataset(
     stock_hourly: pd.DataFrame,
 ) -> pd.DataFrame:
     """rental_agg(5분 슬롯 단위) + station 매핑 + stock_hourly(1시간 anchor) → target_net_flow 표."""
-    stock_hourly = stock_hourly.merge(mapping[["od_station_id", "station_no"]], on="station_no", how="inner")
+    stock_hourly = stock_hourly.merge(
+        mapping[["od_station_id", "station_no"]], on="station_no", how="inner"
+    )
     panel = rental_agg.merge(mapping, on="od_station_id", how="inner")
 
-    panel["datetime_5m"] = panel["date"] + pd.to_timedelta(panel["slot_5m"] * SLOT_MINUTES, unit="m")
+    panel["datetime_5m"] = panel["date"] + pd.to_timedelta(
+        panel["slot_5m"] * SLOT_MINUTES, unit="m"
+    )
     panel["hour"] = panel["datetime_5m"].dt.hour
     panel["minute"] = panel["datetime_5m"].dt.minute
     panel["datetime_hour"] = panel["datetime_5m"].dt.floor("h")
@@ -311,7 +344,9 @@ def build_target_dataset(
     # (station마다 파이썬 for문을 돌리지 않는다 — AI/CLAUDE.md "반복은 벡터화" 원칙).
     # merge_asof는 양쪽 다 on 컬럼 기준 정렬만 요구하고, by가 station 단위 정확 일치를 맡는다.
     stock_hourly = stock_hourly.copy()
-    stock_hourly["datetime_hour"] = stock_hourly["date"] + pd.to_timedelta(stock_hourly["hour"], unit="h")
+    stock_hourly["datetime_hour"] = stock_hourly["date"] + pd.to_timedelta(
+        stock_hourly["hour"], unit="h"
+    )
     stock_sorted = stock_hourly.sort_values("datetime_hour")
     panel_sorted = panel.sort_values("datetime_5m")
 
@@ -330,11 +365,13 @@ def build_target_dataset(
         direction="backward",
         suffixes=("", "_anchor"),
     )
-    panel = panel.rename(columns={"stock": "stock_anchor_hour", "datetime_hour_anchor": "stock_anchor_time"})
+    panel = panel.rename(
+        columns={"stock": "stock_anchor_hour", "datetime_hour_anchor": "stock_anchor_time"}
+    )
 
     panel["minutes_since_stock_anchor"] = (
-        (panel["datetime_5m"] - panel.get("stock_anchor_time", pd.NaT)).dt.total_seconds() / 60
-    )
+        panel["datetime_5m"] - panel.get("stock_anchor_time", pd.NaT)
+    ).dt.total_seconds() / 60
     panel["stock_ratio_hour"] = panel["stock_anchor_hour"] / panel["rack_count"].replace(0, np.nan)
     panel["is_empty_anchor"] = panel["stock_anchor_hour"] == 0
     panel["is_full_anchor"] = panel["stock_anchor_hour"] >= panel["rack_count"]
@@ -348,8 +385,15 @@ def build_target_dataset(
     for h in HORIZONS:
         steps = h // SLOT_MINUTES
         g = panel.groupby("od_station_id")
-        target_rent = g["rent_count_5m"].transform(lambda s: s.shift(-1).rolling(steps, min_periods=1).sum())
-        target_return = g["return_count_5m"].transform(lambda s: s.shift(-1).rolling(steps, min_periods=1).sum())
+        # ruff B023: steps가 루프 변수라고 경고하지만 .transform()은 즉시 실행되므로 안전하다
+        # (같은 시각 여러 horizon의 target_return_count가 0/1/2/2로 증가하는 걸 실측 확인함 —
+        # steps가 매 반복마다 제대로 갈렸다는 뜻).
+        target_rent = g["rent_count_5m"].transform(
+            lambda s: s.shift(-1).rolling(steps, min_periods=1).sum()  # noqa: B023
+        )
+        target_return = g["return_count_5m"].transform(
+            lambda s: s.shift(-1).rolling(steps, min_periods=1).sum()  # noqa: B023
+        )
         sub = panel.copy()
         sub["horizon_min"] = h
         sub["target_rent_count"] = target_rent
@@ -424,7 +468,7 @@ class PeakMemoryTracker:
                 pass
             self._stop.wait(self._interval)
 
-    def __enter__(self) -> "PeakMemoryTracker":
+    def __enter__(self) -> Self:
         self._thread.start()
         return self
 
@@ -445,7 +489,9 @@ class SplitSpec:
     station_info_path: Path
 
 
-def _month_chunks(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+def _month_chunks(
+    start: pd.Timestamp, end: pd.Timestamp
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
     """[start, end]를 달력 월 경계로 쪼갠다. 양끝 달은 요청 범위로 잘린다."""
     chunks = []
     cur = start.replace(day=1)
@@ -515,7 +561,9 @@ def build_split(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--train-start", default="2024-01-01")
     p.add_argument("--train-end", default="2024-11-30")
     p.add_argument("--valid-start", default="2024-12-01")
@@ -527,7 +575,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--station-info-2025", default=str(DEFAULT_STATION_INFO_2025))
     p.add_argument("--max-stations", type=int, default=None, help="스모크 테스트용 station 수 제한")
     p.add_argument("--out-dir", default=str(Path(__file__).resolve().parents[1] / "outputs"))
-    p.add_argument("--tag", default="full", help="출력 파일명 태그: {split}_netflow_q3_mapped_{tag}.parquet")
+    p.add_argument(
+        "--tag", default="full", help="출력 파일명 태그: {split}_netflow_q3_mapped_{tag}.parquet"
+    )
     p.add_argument(
         "--splits",
         default="train,valid,test",
@@ -545,9 +595,24 @@ def main() -> None:
     od_master = load_od_master(Path(args.od_master))
 
     all_specs = {
-        "train": SplitSpec("train", pd.Timestamp(args.train_start), pd.Timestamp(args.train_end), Path(args.station_info_2024)),
-        "valid": SplitSpec("valid", pd.Timestamp(args.valid_start), pd.Timestamp(args.valid_end), Path(args.station_info_2024)),
-        "test": SplitSpec("test", pd.Timestamp(args.test_start), pd.Timestamp(args.test_end), Path(args.station_info_2025)),
+        "train": SplitSpec(
+            "train",
+            pd.Timestamp(args.train_start),
+            pd.Timestamp(args.train_end),
+            Path(args.station_info_2024),
+        ),
+        "valid": SplitSpec(
+            "valid",
+            pd.Timestamp(args.valid_start),
+            pd.Timestamp(args.valid_end),
+            Path(args.station_info_2024),
+        ),
+        "test": SplitSpec(
+            "test",
+            pd.Timestamp(args.test_start),
+            pd.Timestamp(args.test_end),
+            Path(args.station_info_2025),
+        ),
     }
     wanted = [s.strip() for s in args.splits.split(",") if s.strip()]
     specs = [all_specs[s] for s in wanted]

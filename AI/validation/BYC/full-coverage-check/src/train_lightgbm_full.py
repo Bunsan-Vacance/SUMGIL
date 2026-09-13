@@ -32,12 +32,10 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_full_station_netflow import PeakMemoryTracker  # noqa: E402
+from build_full_station_netflow import PeakMemoryTracker
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "q3-seasonal-dataset-check" / "src")
-)
-from phase1_baseline import (  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "q3-seasonal-dataset-check" / "src"))
+from phase1_baseline import (
     FEATURE_COLS,
     MODEL_FEATURE_COLS,
     TARGET_COL,
@@ -50,7 +48,7 @@ from phase1_baseline import (  # noqa: E402
     rmse,
     wape,
 )
-from sklearn.metrics import mean_absolute_error, r2_score  # noqa: E402
+from sklearn.metrics import mean_absolute_error, r2_score
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "outputs" / "full-run"
 AI_DIR = Path(__file__).resolve().parents[4]
@@ -119,8 +117,12 @@ def evaluate(model, df: pd.DataFrame, label: str) -> dict:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--train-months", nargs="+", default=None, help="예: 202401 202402 (생략 시 전체 11개월)")
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "--train-months", nargs="+", default=None, help="예: 202401 202402 (생략 시 전체 11개월)"
+    )
     p.add_argument("--valid-months", nargs="+", default=None, help="생략 시 전체(2024-12)")
     p.add_argument("--test-months", nargs="+", default=None, help="생략 시 전체(2025 Q3 3개월)")
     p.add_argument("--random-state", type=int, default=42)
@@ -132,8 +134,12 @@ def parse_args() -> argparse.Namespace:
         "메모리 역산 ~47GB라 그대로 못 태움(5개월/77.3M행 실측 19.7GB). 12개월 계절성은 "
         "유지한 채 밀도만 줄인다.",
     )
-    p.add_argument("--tag", default="full", help="아티팩트 디렉터리 태그: models/BIKE/<tag>_<시각>/")
-    p.add_argument("--out-dir", default=str(Path(__file__).resolve().parents[1] / "outputs" / "lightgbm-full"))
+    p.add_argument(
+        "--tag", default="full", help="아티팩트 디렉터리 태그: models/BIKE/<tag>_<시각>/"
+    )
+    p.add_argument(
+        "--out-dir", default=str(Path(__file__).resolve().parents[1] / "outputs" / "lightgbm-full")
+    )
     return p.parse_args()
 
 
@@ -164,15 +170,21 @@ def main() -> None:
         )
 
         t0 = time.time()
-        train_df = load_paths(train_paths, sample_frac=args.sample_frac, random_state=args.random_state)
+        train_df = load_paths(
+            train_paths, sample_frac=args.sample_frac, random_state=args.random_state
+        )
         apply_station_code(train_df, station_dtype, "train")
         frac_note = f", sample_frac={args.sample_frac}" if args.sample_frac else ""
-        print(f"train 로드: {len(train_df):,}행 ({time.time() - t0:.1f}초, 피크메모리 {mem.peak_mb}MB{frac_note})")
+        print(
+            f"train 로드: {len(train_df):,}행 ({time.time() - t0:.1f}초, 피크메모리 {mem.peak_mb}MB{frac_note})"
+        )
 
         t0 = time.time()
         valid_df = load_paths(valid_paths)
         apply_station_code(valid_df, station_dtype, "valid")
-        print(f"valid 로드: {len(valid_df):,}행 ({time.time() - t0:.1f}초, 피크메모리 {mem.peak_mb}MB)")
+        print(
+            f"valid 로드: {len(valid_df):,}행 ({time.time() - t0:.1f}초, 피크메모리 {mem.peak_mb}MB)"
+        )
 
         t0 = time.time()
         result = fit_lightgbm(train_df, valid_df, args.random_state)

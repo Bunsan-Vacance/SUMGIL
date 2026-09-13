@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     crowd_llm_api_key: str | None = None
     crowd_llm_model: str | None = None
 
+    # ── BIKE 서빙 ──
+    # bike_stock_pred 표가 놓이는 곳. CROWD와 달리 날짜별 파일이 아니라 **단일 최신 표**다
+    # (bike_stock_pred의 기본키가 rental_id·dow_type·time_slot이라 날짜 축이 없음 — 주기적으로
+    # 통째로 갱신되는 정적 표). API는 이 디렉터리에서 가장 최신 파일 하나만 읽는다.
+    bike_serving_dir: Path = AI_ROOT / "data" / "BIKE" / "serving"
+    bike_models_dir: Path = AI_ROOT / "models" / "BIKE"
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]
