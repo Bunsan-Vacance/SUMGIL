@@ -91,6 +91,13 @@ def evaluate(model: NaiveProfileModel, paths: list[Path], label: str) -> dict:
     y_sq_sum = 0.0
     n = 0
     n_dropped_nan = 0
+    classes = ["decrease", "stable", "increase"]
+    # macro-F1을 스트리밍으로 내려고 클래스별 TP/FP/FN을 파일마다 누적한다
+    # (phase1_baseline.direction_class와 동일 기준: <0 decrease, >0 increase, ==0 stable).
+    tp = dict.fromkeys(classes, 0)
+    fp = dict.fromkeys(classes, 0)
+    fn = dict.fromkeys(classes, 0)
+    correct = 0
     for p in paths:
         df = pd.read_parquet(p, columns=NEEDED_COLS)
         actual = df[TARGET_COL].to_numpy(dtype="float64")
@@ -105,11 +112,26 @@ def evaluate(model: NaiveProfileModel, paths: list[Path], label: str) -> dict:
         y_sum += actual.sum()
         y_sq_sum += (actual**2).sum()
         n += len(df)
+
+        actual_c = np.where(actual < 0, "decrease", np.where(actual > 0, "increase", "stable"))
+        pred_c = np.where(pred < 0, "decrease", np.where(pred > 0, "increase", "stable"))
+        correct += int((actual_c == pred_c).sum())
+        for c in classes:
+            tp[c] += int(((actual_c == c) & (pred_c == c)).sum())
+            fp[c] += int(((actual_c != c) & (pred_c == c)).sum())
+            fn[c] += int(((actual_c == c) & (pred_c != c)).sum())
         del df
     mae = abs_err_sum / n
     mse = sq_err_sum / n
     rmse = mse**0.5
     y_mean = y_sum / n
+    direction_accuracy = correct / n
+    f1_scores = []
+    for c in classes:
+        precision = tp[c] / (tp[c] + fp[c]) if (tp[c] + fp[c]) else 0.0
+        recall = tp[c] / (tp[c] + fn[c]) if (tp[c] + fn[c]) else 0.0
+        f1_scores.append(2 * precision * recall / (precision + recall) if (precision + recall) else 0.0)
+    direction_macro_f1 = sum(f1_scores) / len(f1_scores)
     variance = y_sq_sum / n - y_mean**2
     r2 = 1 - mse / variance if variance > 0 else float("nan")
     return {
@@ -119,6 +141,8 @@ def evaluate(model: NaiveProfileModel, paths: list[Path], label: str) -> dict:
         "mae": mae,
         "rmse": rmse,
         "r2": r2,
+        "direction_accuracy": direction_accuracy,
+        "direction_macro_f1": direction_macro_f1,
     }
 
 
@@ -145,7 +169,9 @@ def main() -> None:
         results.append(result)
         print(
             f"[{label}] rows={result['rows']:,} mae={result['mae']:.4f} "
-            f"rmse={result['rmse']:.4f} r2={result['r2']:.4f} ({result['elapsed_sec']}초)"
+            f"rmse={result['rmse']:.4f} r2={result['r2']:.4f} "
+            f"dir_acc={result['direction_accuracy']:.4f} "
+            f"dir_f1={result['direction_macro_f1']:.4f} ({result['elapsed_sec']}초)"
         )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
