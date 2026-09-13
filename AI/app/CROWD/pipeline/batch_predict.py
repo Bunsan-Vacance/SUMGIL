@@ -16,7 +16,11 @@ API는 요청 시점에 모델을 돌리지 않고 이 표만 읽는다(`AI/CLAU
   `actual_*` 컬럼도 같이 남겨 API가 "예측 vs 실측"을 보여줄 수 있다.
 - **패널에 없는 날짜**(오늘·내일 — 실제 운영): 역 × 20슬롯 골격을 만들고 달력에서 day_type, 이벤트
   테이블에서 경기·축제(없으면 0), 승하차는 NaN으로 둔다. 시차 피처는 창에 든 과거 행에서 채워진다.
-  내일은 `lag1d`(전날)가 비어 `lag7d`만으로 예측되는데 이 사실을 `lag1d_available`로 표시한다.
+  패널(연간 CSV, 2025-12까지) 뒤에는 D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`)가 쌓은
+  `data/CROWD/interim/crowd_recent_ridership_long.parquet`을 이어 붙여 이력 창을 채운다(143). 내일은 `lag1d`
+  (전날)가 비어 `lag7d`만으로 예측되는데 이 사실을 `lag1d_available`로 표시한다. 이력이 하나도 없으면
+  LightGBM 대신 lookup으로 예측하고 `predictor_fallback="no_history"`를 남긴다 — 시차가 전부 NaN인
+  LightGBM은 lookup보다 RMSE가 37~41% 나쁘다(143 RESULTS).
 
 ## 결측은 상태로 노출한다
 
@@ -49,7 +53,9 @@ from app.CROWD.pipeline.dataset import (
     CROWD_PROCESSED,
     EVENT_COUNT_COLS,
     EVENTS_NAME,
+    extend_panel_with_recent,
     load_panel,
+    load_recent_long,
     resolved_segments,
 )
 from app.CROWD.pipeline.features import SLOT_ORDER
@@ -143,8 +149,14 @@ def predict_day(
     segments: list[dict],
     holidays: pd.DataFrame,
     events: pd.DataFrame | None,
+    fallback: Predictor | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """대상 날짜 한 날의 승하차 예측(대상 날짜 행만). 메타(lag 가용성 등)도 돌려준다."""
+    """대상 날짜 한 날의 승하차 예측(대상 날짜 행만). 메타(lag 가용성 등)도 돌려준다.
+
+    이력 창(직전 7일)에 실측이 **하나도 없으면** `fallback`(lookup)으로 예측한다 — 143 검증에서 시차 컬럼이
+    전부 NaN인 채로 LightGBM을 돌리면 lookup보다 RMSE가 37~41% 나빠졌다(학습 때 본 적 없는 결측). 이 경우
+    meta에 `predictor_fallback="no_history"`를 남긴다.
+    """
     target_date = pd.Timestamp(target_date).normalize()
     history = panel[
         (panel["date"] >= target_date - pd.Timedelta(days=HISTORY_DAYS))
@@ -152,16 +164,25 @@ def predict_day(
     ]
     target = build_target_skeleton(panel, target_date, holidays, events)
     window = pd.concat([history, target], ignore_index=True, sort=False)
-    pred = predictor.predict(window, segments)
+    have_dates = set(history["date"].unique())
+    used = predictor
+    fallback_reason = None
+    if not have_dates and fallback is not None and predictor.kind != fallback.kind:
+        used = fallback
+        fallback_reason = "no_history"
+    pred = used.predict(window, segments)
     pred = pred[pred["date"] == target_date].reset_index(drop=True)
 
-    have_dates = set(history["date"].unique())
     meta = {
         "target_date": str(target_date.date()),
         "in_panel": bool(len(panel[panel["date"] == target_date])),
         "history_days_present": len(have_dates),
+        "history_dates": sorted(str(pd.Timestamp(d).date()) for d in have_dates),
         "lag1d_available": (target_date - pd.Timedelta(days=1)) in have_dates,
         "lag7d_available": (target_date - pd.Timedelta(days=7)) in have_dates,
+        "predictor": used.kind,
+        "predictor_version": used.version,
+        "predictor_fallback": fallback_reason,
     }
     out = target[
         ["date", "station_no", "station_name", "line", "time_slot", "day_type", *TARGETS]
@@ -214,6 +235,7 @@ def run(
     target_dates: list[pd.Timestamp],
     predictor_kind: str | None = None,
     out_dir: Path | None = None,
+    use_recent: bool = True,
 ) -> list[Path]:
     settings = get_settings()
     out_dir = Path(out_dir or settings.crowd_serving_dir)
@@ -223,23 +245,36 @@ def run(
     holidays = load_holidays()
     events_path = CROWD_PROCESSED / EVENTS_NAME
     events = pd.read_parquet(events_path) if events_path.exists() else None
+    # 143: D−1 수집기가 쌓은 최근 실측을 패널 뒤에 이어 붙여 이력 창(시차 피처)을 채운다. 파일이 없으면 패널만.
+    recent_dates: list[str] = []
+    recent = load_recent_long() if use_recent else None
+    if recent is not None:
+        panel, recent_dates = extend_panel_with_recent(panel, recent, holidays, events)
+        print(
+            f"[배치] 최근 실측 {len(recent_dates)}일 이어붙임: {recent_dates[:1]} ~ {recent_dates[-1:]}",
+            flush=True,
+        )
     segments, gaps = resolved_segments(panel)
     capacity = load_capacity()
     calibration = pd.read_parquet(CROWD_PROCESSED / CALIBRATION_NAME)
     predictor = resolve_predictor(predictor_kind or settings.crowd_predictor, panel, settings)
+    fallback = (
+        predictor if predictor.kind == "lookup" else build_predictor("lookup", train_panel=panel)
+    )
     thresholds = settings.grade_thresholds
 
     written = []
     for d in target_dates:
         d = pd.Timestamp(d).normalize()
-        predicted, meta = predict_day(predictor, panel, d, segments, holidays, events)
+        predicted, meta = predict_day(
+            predictor, panel, d, segments, holidays, events, fallback=fallback
+        )
         table = to_congestion_table(predicted, segments, capacity, calibration, thresholds)
         path = out_dir / f"predictions_{d:%Y-%m-%d}.parquet"
         table.to_parquet(path, index=False)
         meta.update(
             {
-                "predictor": predictor.kind,
-                "predictor_version": predictor.version,
+                "recent_dates_available": recent_dates,
                 "grade_thresholds": thresholds,
                 "rows": len(table),
                 "status_counts": table["data_status"].value_counts().to_dict(),
@@ -256,8 +291,8 @@ def run(
             json.dumps(meta, ensure_ascii=False, indent=1, default=str), encoding="utf-8"
         )
         print(
-            f"[배치] {d:%Y-%m-%d} → {path.name} ({len(table):,}행, {predictor.version}, "
-            f"상태 {meta['status_counts']})",
+            f"[배치] {d:%Y-%m-%d} → {path.name} ({len(table):,}행, {meta['predictor_version']}, "
+            f"이력 {meta['history_days_present']}일, 상태 {meta['status_counts']})",
             flush=True,
         )
         written.append(path)
@@ -273,6 +308,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--tomorrow", action="store_true")
     ap.add_argument("--predictor", default=None, help="auto|lookup|lightgbm|llm (기본: 설정값)")
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument(
+        "--no-recent", action="store_true", help="D−1 수집 파일을 이어붙이지 않는다(패널만)"
+    )
     args = ap.parse_args(argv)
 
     today = pd.Timestamp.now().normalize()
@@ -283,7 +321,12 @@ def main(argv: list[str] | None = None) -> None:
         dates.append(today + pd.Timedelta(days=1))
     if not dates:
         ap.error("--date, --today, --tomorrow 중 하나는 필요하다")
-    run(dates, args.predictor, Path(args.out_dir) if args.out_dir else None)
+    run(
+        dates,
+        args.predictor,
+        Path(args.out_dir) if args.out_dir else None,
+        use_recent=not args.no_recent,
+    )
 
 
 if __name__ == "__main__":

@@ -8,8 +8,9 @@
 
 - `collect/` — 외부 API 수집 스크립트. `bike_realtime.py`(5min 폴링), `weather_nowcast.py`
   (초단기실황/예보, 10min 폴링), `weather_asos_backfill.py`(과거 백필, 기본 dry-run),
-  `common.py`(재시도·시각·parquet 저장 공용). CROWD 원본은 API 폴링이 아니라 수동 다운로드
-  파일이라 이 폴더에 수집 스크립트가 없다.
+  `common.py`(재시도·시각·parquet 저장 공용), `subway_ridership_daily.py`(CROWD: 서울교통공사 역별
+  시간대별 승하차 D−1 일 배치, `getStnPsgr`, 143). CROWD의 **학습** 원본(연간·일별 CSV, 혼잡도 스냅샷)은
+  수동 다운로드 파일이고, 수집기는 배치 예측의 이력 창(시차 피처)을 채우는 최근 실측만 받는다.
 - `eda/` (따릉이·날씨) — `parsers.py`(파일형 원본 → `data/BIKE/interim`), `analysis.py`
   (재고·날씨 분석 함수), `report.py`(`reports/bike_weather_eda.md` 생성).
 - `eda/` (CROWD, 1단계 정적 프로파일) — `parsers_crowd.py`(서울시 CSV + 9호선 xlsx →
@@ -41,7 +42,8 @@
 ## 실시간 수집기 운영
 
 따릉이와 날씨 nowcast 수집기는 서버에서 상시 실행해야 하므로 운영 환경에서는 systemd를
-기본으로 사용한다. `start_*.sh`는 수동 테스트나 임시 실행용으로만 쓴다.
+기본으로 사용한다. `start_*.sh`는 수동 테스트나 임시 실행용으로만 쓴다. 지하철 D−1 승하차
+수집기는 폴러가 아니라 **하루 두 번 실행되는 oneshot**이라 `.timer`로 띄운다(아래 별도 절).
 
 사전 준비:
 
@@ -56,6 +58,7 @@ mkdir -p logs
 
 ```text
 SEOUL_BIKE_KEY 또는 SEOUL_API_KEY
+SEOUL_SUBWAY_KEY 또는 SEOUL_API_KEY   # getStnPsgr(D−1 승하차)
 KMA_API_KEY
 ```
 
@@ -93,6 +96,37 @@ tail -n 100 AI/logs/weather_nowcast.log
 - `AI/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet`가 생성된다.
 - `AI/data/BIKE/raw/realtime/latest.parquet`가 갱신된다.
 - `AI/data/EXTERNAL/weather/raw/nowcast/latest.parquet`가 갱신된다.
+
+### 지하철 D−1 승하차 수집(`subway_ridership_daily`, 143)
+
+원천 `getStnPsgr`(OA-22723)는 **어제치를 오전 중에 올리고 최근 7일만 남긴다** — 하루라도 놓치면 그 날은
+영구 결손이다. 그래서 상시 폴링이 아니라 `subway-ridership-daily.timer`가 09:00·13:00에
+`subway-ridership-daily.service`(oneshot)를 띄우고, 서비스는 어제부터 7일 중 **누적 파일에 없는 날짜만**
+받는다(하루 ≈67회 호출, 첫 실행 ≈460회; 둘째 회차에 이미 있으면 호출 0회). `Persistent=true`라 서버가
+꺼져 있던 회차도 켜지면 바로 실행한다. 설치는 위 스크립트가 함께 한다.
+
+```bash
+sudo systemctl enable --now subway-ridership-daily.timer
+sudo systemctl list-timers subway-ridership-daily.timer
+sudo systemctl start subway-ridership-daily.service      # 지금 한 번 실행
+tail -n 50 AI/logs/subway_ridership_daily.log
+```
+
+정상 동작 기준:
+
+- `AI/data/CROWD/raw/ridership_daily/dt=YYYY-MM-DD/getStnPsgr.parquet`가 날짜별로 쌓인다(원문, 카드·사용자 구분 그대로).
+- `AI/data/CROWD/interim/crowd_recent_ridership_long.parquet`의 최대 `date`가 어제다(오전 회차 뒤 아직이면 13:00 회차 뒤).
+- `python -m app.CROWD.pipeline.batch_predict --today`의 meta에 `history_days_present` 7, `lag1d_available` true.
+- 로그에 `totalCount 0 — 보존 창(7일) 밖이거나 아직 갱신되지 않았습니다`가 **어제 날짜**로 13:00 회차에도 남으면 원천 지연 — 확인 필요.
+
+수동 실행(로컬 확인):
+
+```bash
+cd AI
+python -m DATA_ENGINE.collect.subway_ridership_daily --check-schema   # 5건만 받아 원문 저장
+python -m DATA_ENGINE.collect.subway_ridership_daily                  # dry-run: 새로 받을 날짜·호출 수만 출력
+python -m DATA_ENGINE.collect.subway_ridership_daily --days 7 --yes
+```
 
 ## Redis 연동 상태
 
@@ -137,6 +171,8 @@ Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전
 | `data/BIKE/processed/`, `data/EXTERNAL/*/processed/` | (아직 미사용) 도메인·출처별 가공·피처 산출물 자리 | - | - | - |
 | `data/CROWD/raw/` | 서울시 지하철혼잡도정보 CSV(1~8호선) + 9호선 xlsx 6개년 | 수동 다운로드 | "대표 1주" 스냅샷(날짜 아님) | 정적 프로파일 EDA |
 | `data/CROWD/interim/crowd_congestion_long.parquet` | `parsers_crowd.py` tidy long-format 결과 | 파서 실행 | 원본 그대로 | `report_crowd.py`가 직접 읽는 소스 |
+| `data/CROWD/raw/ridership_daily/dt=*/getStnPsgr.parquet` | 역별 시간대별 승하차 D−1 원문(카드·사용자 구분 포함, OA-22723) | `subway_ridership_daily.py` 일 배치 (원천은 최근 7일만 제공 — 소급 불가) | 1시간 | 아래 롱 포맷의 원본 보존 |
+| `data/CROWD/interim/crowd_recent_ridership_long.parquet` | 위 원문을 역×슬롯 합산한 롱 포맷(`crowd_daily_ridership_long`과 같은 스키마) 누적 | `subway_ridership_daily.py`가 같은 날짜는 교체하며 누적 | 20슬롯 | `batch_predict`가 패널 뒤에 이어붙여 시차 피처 이력 창을 채움 |
 | `data/ROUTE/raw/transfer_info/` | 서울교통공사 환승정보(환승역 간 도보 소요시간) | 수동 다운로드 | - | A안(지하철) 경로 시간 계산 — 혼잡도 예측 피처 아님 |
 
 ## 보고서 그림 재생성 (CROWD, 136)
