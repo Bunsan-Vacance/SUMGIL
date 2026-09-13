@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # 통째로 갱신되는 정적 표). API는 이 디렉터리에서 가장 최신 파일 하나만 읽는다.
     bike_serving_dir: Path = AI_ROOT / "data" / "BIKE" / "serving"
     bike_models_dir: Path = AI_ROOT / "models" / "BIKE"
+    # 예측기 종류: avg | lightgbm. lightgbm은 아직 미구현(predictor.py의 LightGBMPredictor
+    # 참고 — B4 model 소스 변환 미검증)이라 auto 분기 없이 기본값을 avg로 고정한다.
+    bike_predictor: str = "avg"
 
     @property
     def grade_thresholds(self) -> list[float]:
