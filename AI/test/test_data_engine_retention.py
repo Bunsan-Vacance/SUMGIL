@@ -13,6 +13,7 @@ from DATA_ENGINE.monitor.cleanup_retention import (
     format_bytes,
     is_safe_snapshot_path,
     main,
+    parse_snapshot_partition,
     run_cleanup,
 )
 
@@ -53,6 +54,9 @@ def test_find_cleanup_candidates_includes_only_old_snapshots(tmp_path):
     )
 
     assert [candidate.path for candidate in candidates] == [old_path]
+    assert candidates[0].dataset == "bike"
+    assert candidates[0].dt == "2026-09-11"
+    assert candidates[0].hh == "03"
 
 
 def test_latest_parquet_is_not_a_cleanup_candidate(tmp_path):
@@ -121,10 +125,33 @@ def test_safe_snapshot_path_requires_dt_hh_layout(tmp_path):
     assert is_safe_snapshot_path(target, wrong_layout, current_slot=("2026-09-13", "04")) is False
 
 
+def test_parse_snapshot_partition_extracts_dt_hh(tmp_path):
+    target = RetentionTarget("bike", tmp_path / "data/BIKE/raw/realtime")
+    path = snapshot_path(target.base_path, dt="2026-09-11", hh="03")
+
+    assert parse_snapshot_partition(target, path) == ("2026-09-11", "03")
+
+
+def test_parse_snapshot_partition_rejects_outside_path(tmp_path):
+    target = RetentionTarget("bike", tmp_path / "data/BIKE/raw/realtime")
+    outside = tmp_path / "data/BIKE/processed/dt=2026-09-11/hh=03/snapshot_a.parquet"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"x")
+
+    assert parse_snapshot_partition(target, outside) is None
+
+
 def test_cleanup_candidates_dry_run_keeps_files(tmp_path):
     path = tmp_path / "snapshot.parquet"
     path.write_bytes(b"abcd")
-    candidate = CleanupCandidate("bike", path, size_bytes=4, age_hours=49)
+    candidate = CleanupCandidate(
+        dataset="bike",
+        dt="2026-09-11",
+        hh="03",
+        path=path,
+        size_bytes=4,
+        age_hours=49,
+    )
 
     deleted_count, deleted_bytes = cleanup_candidates([candidate], yes=False)
 
@@ -138,7 +165,14 @@ def test_cleanup_candidates_yes_deletes_only_candidates(tmp_path):
     keep_path = tmp_path / "keep.parquet"
     candidate_path.write_bytes(b"abcd")
     keep_path.write_bytes(b"keep")
-    candidate = CleanupCandidate("bike", candidate_path, size_bytes=4, age_hours=49)
+    candidate = CleanupCandidate(
+        dataset="bike",
+        dt="2026-09-11",
+        hh="03",
+        path=candidate_path,
+        size_bytes=4,
+        age_hours=49,
+    )
 
     deleted_count, deleted_bytes = cleanup_candidates([candidate], yes=True)
 

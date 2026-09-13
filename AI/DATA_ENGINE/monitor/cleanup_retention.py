@@ -27,10 +27,16 @@ class RetentionTarget:
 
 @dataclass(frozen=True)
 class CleanupCandidate:
-    target_name: str
+    dataset: str
+    dt: str
+    hh: str
     path: Path
     size_bytes: int
     age_hours: float
+
+    @property
+    def target_name(self) -> str:
+        return self.dataset
 
 
 @dataclass(frozen=True)
@@ -99,6 +105,27 @@ def is_safe_snapshot_path(
     return not (current_slot is not None and (dt, hh) == current_slot)
 
 
+def parse_snapshot_partition(
+    target: RetentionTarget,
+    path: Path,
+) -> tuple[str, str] | None:
+    try:
+        relative = path.resolve().relative_to(target.base_path.resolve())
+    except ValueError:
+        return None
+
+    if len(relative.parts) != 3:
+        return None
+
+    dt_part, hh_part, filename = relative.parts
+    if filename != path.name:
+        return None
+    if not (dt_part.startswith("dt=") and hh_part.startswith("hh=")):
+        return None
+
+    return dt_part.removeprefix("dt="), hh_part.removeprefix("hh=")
+
+
 def build_retention_targets(ai_root: Path) -> list[RetentionTarget]:
     return [
         RetentionTarget("bike", ai_root / DEFAULT_BIKE_BASE),
@@ -130,6 +157,10 @@ def find_cleanup_candidates(
                 continue
             if not is_safe_snapshot_path(target, path, current_slot=current_slot):
                 continue
+            partition = parse_snapshot_partition(target, path)
+            if partition is None:
+                continue
+            dt, hh = partition
 
             stat = path.stat()
             age_hours = max(0.0, (now_ts - stat.st_mtime) / 3600)
@@ -138,7 +169,9 @@ def find_cleanup_candidates(
 
             candidates.append(
                 CleanupCandidate(
-                    target_name=target.name,
+                    dataset=target.name,
+                    dt=dt,
+                    hh=hh,
                     path=path,
                     size_bytes=stat.st_size,
                     age_hours=age_hours,
@@ -202,7 +235,9 @@ def print_cleanup_result(result: CleanupResult) -> None:
     for candidate in result.candidates:
         print(
             f"{'DRY_RUN' if result.dry_run else 'DELETE'} "
-            f"{candidate.target_name} "
+            f"{candidate.dataset} "
+            f"dt={candidate.dt} "
+            f"hh={candidate.hh} "
             f"age={candidate.age_hours:.1f}h "
             f"size={format_bytes(candidate.size_bytes)} "
             f"path={candidate.path}"
