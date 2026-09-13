@@ -253,6 +253,98 @@ python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes
 20 3 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes >> logs/data_engine_retention.log 2>&1
 ```
 
+## Drive 임시 백업 인증
+
+Spark/HDFS/S3 도입 전까지는 EC2 로컬 raw snapshot을 삭제하기 전에 Google Drive에 임시
+백업할 수 있다. 이 백업은 최종 저장소가 아니라 임시 archive storage이며, Drive에는
+`AI/data/` 구조를 그대로 미러링한다.
+
+```text
+SUMGIL/data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
+SUMGIL/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
+```
+
+EC2 cron/systemd에서 무인 업로드가 가능해야 하므로 인증은 Google OAuth token 방식을 사용한다.
+서비스 계정 방식은 개인 Drive나 `Shared with me` 폴더에서 저장 용량 문제로 실패할 수 있어
+현재 운영 경로에서 제외한다.
+
+OAuth token 생성:
+
+```bash
+cd <REPO_ROOT>/AI
+python -m DATA_ENGINE.archive.authorize_drive_oauth \
+  --client-secret-file /path/to/google-oauth-client-secret.json \
+  --token-file /path/to/google-drive-token.json
+```
+
+생성된 token 파일은 EC2의 repo 밖에 배치한다.
+
+```bash
+mkdir -p /home/ubuntu/secrets
+chmod 700 /home/ubuntu/secrets
+chmod 600 /home/ubuntu/secrets/google-drive-token.json
+```
+
+`AI/.env` 설정:
+
+```text
+DATA_ENGINE_DRIVE_AUTH_MODE=oauth
+GOOGLE_OAUTH_TOKEN_FILE=/home/ubuntu/secrets/google-drive-token.json
+GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID=<SUMGIL/data folder id>
+DATA_ENGINE_ARCHIVE_STORAGE=drive
+```
+
+이미 Drive에 도메인별 폴더가 있는 경우에는 dataset별 root folder ID를 우선 사용할 수 있다.
+예를 들어 기존 `BIKE` 폴더에 따릉이 raw만 올리고 싶다면 `GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID`
+를 지정한다. 이 경우 Drive에는 `BIKE/raw/realtime/...`가 아니라 해당 `BIKE` 폴더 아래
+`raw/realtime/...`만 생성된다.
+
+```text
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID=<existing BIKE folder id>
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL=domain
+GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_FOLDER_ID=<existing weather folder id>
+GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_LEVEL=domain
+```
+
+root folder ID가 이미 더 깊은 폴더라면 root level을 같이 바꾼다.
+
+```text
+# root가 BIKE/raw 폴더인 경우 → realtime/dt=.../hh=... 생성
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL=raw
+
+# root가 BIKE/raw/realtime 폴더인 경우 → dt=.../hh=... 생성
+GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL=realtime
+```
+
+OAuth client secret, token 파일, `.env`, Drive Webhook/토큰류는 Git에 커밋하지 않는다. 업로드 성공 여부는
+다음 단계에서 파티션 단위 manifest로 기록하고, retention cleanup은 archive success가 확인된
+파티션만 삭제하도록 확장한다.
+
+Drive 업로드 대상 확인(dry-run):
+
+```bash
+cd <REPO_ROOT>/AI
+python -m DATA_ENGINE.archive.upload_raw_partitions
+```
+
+실제 업로드:
+
+```bash
+python -m DATA_ENGINE.archive.upload_raw_partitions --yes
+```
+
+주요 옵션:
+
+```text
+--dataset bike|weather|all
+--older-than-hours 1
+--max-partitions 24
+--manifest-path data/manifest/archive_uploads.jsonl
+```
+
+기본값은 dry-run이라 Drive API를 호출하지 않고 manifest도 기록하지 않는다. `--yes`를 붙이면
+완료된 시간대 파티션만 Drive에 올리고, 결과를 `data/manifest/archive_uploads.jsonl`에 기록한다.
+
 ## Redis 연동 상태
 
 Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra

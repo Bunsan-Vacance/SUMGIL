@@ -23,6 +23,10 @@ tenacity
 requests
 beautifulsoup4
 pyyaml
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
 
 # ── 테스트 도구 ──
 ruff
