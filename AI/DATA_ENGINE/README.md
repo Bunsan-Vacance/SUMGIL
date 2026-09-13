@@ -11,6 +11,9 @@
   `common.py`(재시도·시각·parquet 저장 공용), `subway_ridership_daily.py`(CROWD: 서울교통공사 역별
   시간대별 승하차 D−1 일 배치, `getStnPsgr`, 143). CROWD의 **학습** 원본(연간·일별 CSV, 혼잡도 스냅샷)은
   수동 다운로드 파일이고, 수집기는 배치 예측의 이력 창(시차 피처)을 채우는 최근 실측만 받는다.
+- `batch/` — 상시 수집 raw parquet을 모델·분석에서 쓰기 쉬운 interim parquet으로 정규화한다.
+  `build_bike_stock_5min.py`는 따릉이 재고 snapshot을 5분 단위 대여소 재고 테이블로 만들고,
+  `build_weather_nowcast_features.py`는 기상청 초단기실황/예보 long row를 날씨 피처 컬럼으로 피벗한다.
 - `eda/` (따릉이·날씨) — `parsers.py`(파일형 원본 → `data/BIKE/interim`), `analysis.py`
   (재고·날씨 분석 함수), `report.py`(`reports/bike_weather_eda.md` 생성).
 - `eda/` (CROWD, 1단계 정적 프로파일) — `parsers_crowd.py`(서울시 CSV + 9호선 xlsx →
@@ -37,7 +40,7 @@
 - `reports/` — `download_guide.md`(수동 다운로드 안내, 커밋 대상), `bike_weather_eda.md`·
   `crowd_eda.md`·`figures/*.png|svg`(생성 산출물, `.gitignore` 대상 — 코드만 커밋되고 리포트
   자체는 재생성. 그림은 Drive `data/CROWD/reports/figures/` 미러와 Notion 실험실 첨부로 공유).
-- `scripts/` — 폴러 백그라운드 실행용 nohup 스크립트·systemd 유닛 템플릿.
+- `scripts/` — 폴러 백그라운드 실행용 nohup 스크립트·systemd 유닛 템플릿, 모니터링·배치 통합 실행 스크립트.
 
 ## 실시간 수집기 운영
 
@@ -206,6 +209,89 @@ find data/BIKE/raw/realtime -type f | tail
 find data/EXTERNAL/weather/raw/nowcast -type f | tail
 
 df -h
+```
+
+## 수집 데이터 배치 파이프라인
+
+상시 수집기는 API 응답을 최대한 원본에 가깝게 `raw`에 쌓고, 배치 파이프라인은 이를 하루 단위
+`interim` 산출물로 정규화한다. 지금 단계에서는 따릉이와 날씨를 서로 조인하지 않고, 도메인별
+중간 테이블만 만든다. 모델 학습용 최종 feature join은 실험/서비스 명세가 확정된 뒤 별도
+`processed` 단계에서 다룬다.
+
+입력:
+
+```text
+AI/data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
+AI/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet
+```
+
+출력:
+
+```text
+AI/data/BIKE/interim/realtime_stock_5min/dt=YYYY-MM-DD/part.parquet
+AI/data/EXTERNAL/weather/interim/nowcast_features/dt=YYYY-MM-DD/part.parquet
+```
+
+배치 모듈:
+
+```text
+DATA_ENGINE.batch.build_bike_stock_5min
+DATA_ENGINE.batch.build_weather_nowcast_features
+```
+
+통합 실행:
+
+```bash
+cd <REPO_ROOT>/AI
+
+# dry-run: raw를 읽고 변환 가능 여부와 예상 row 수만 확인한다.
+bash DATA_ENGINE/scripts/run_data_engine_batch.sh --date 2026-09-13
+
+# 실제 저장: interim parquet을 쓴다.
+bash DATA_ENGINE/scripts/run_data_engine_batch.sh --date 2026-09-13 --yes
+```
+
+개별 실행:
+
+```bash
+python -m DATA_ENGINE.batch.build_bike_stock_5min --date 2026-09-13
+python -m DATA_ENGINE.batch.build_weather_nowcast_features --date 2026-09-13
+```
+
+정상 산출물 확인:
+
+```bash
+ls -lh data/BIKE/interim/realtime_stock_5min/dt=2026-09-13/part.parquet
+ls -lh data/EXTERNAL/weather/interim/nowcast_features/dt=2026-09-13/part.parquet
+```
+
+EC2 검증 예시(2026-09-13 데이터 기준):
+
+```text
+bike snapshots=268 rows=733575 output=data/BIKE/interim/realtime_stock_5min/dt=2026-09-13/part.parquet
+weather snapshots=134 rows=938 output=data/EXTERNAL/weather/interim/nowcast_features/dt=2026-09-13/part.parquet
+```
+
+따릉이 interim 주요 컬럼:
+
+```text
+station_id, station_name, rack_total_count, current_bike_count, shared, stock_ratio,
+station_latitude, station_longitude, collected_at, collected_date, collected_hour,
+collected_minute, source
+```
+
+날씨 interim 주요 컬럼:
+
+```text
+collected_at, collected_date, collected_hour, collected_minute, weather_source,
+base_datetime, forecast_datetime, nx, ny, t1h, rn1, reh, wsd, pty
+```
+
+주기 실행은 EC2에서 수동 실행 결과를 확인한 뒤 등록한다. 예를 들어 전날 데이터 기준으로 매일
+새벽 04:10에 배치를 돌리려면 아래처럼 등록할 수 있다.
+
+```cron
+10 4 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && bash DATA_ENGINE/scripts/run_data_engine_batch.sh --date "$(TZ=Asia/Seoul date -d 'yesterday' +\%F)" --yes >> logs/data_engine_batch.log 2>&1
 ```
 
 ## 데이터 보관 정책
