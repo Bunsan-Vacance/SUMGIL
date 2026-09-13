@@ -171,10 +171,14 @@ uvicorn app.main:app --port 8000
 - 예측기는 `app/CROWD/pipeline/predictor.py`의 `Predictor` 인터페이스로 갈아 끼운다. `CROWD_PREDICTOR`
   설정값 `auto`(기본)는 아티팩트가 있으면 `lightgbm`, 없으면 `lookup`(요일유형×역×시간대 평균)이다.
   `llm`은 자리만 있고 `CROWD_LLM_API_KEY`가 설정되면 구현한다.
+- **피처 세트·아티팩트·예측기 코드가 각각 무엇인지**(어느 티켓, 수치, 현재 배포 세트 `festival_selflag_d1sd_d7_resid`)는
+  [`app/CROWD/pipeline/MODEL_REGISTRY.md`](app/CROWD/pipeline/MODEL_REGISTRY.md)에 있다.
 - 등급 임계치는 `CROWD_GRADE_THRESHOLDS`(기본 `50,100`, %). 값을 낼 수 없는 셀은 0으로 채우지 않고
   `data_status`(`no_lookup` / `no_calibration`)로 응답한다. 그 날짜 표가 없으면 404(배치 미실행).
-- 미래 날짜는 달력(요일유형)·이벤트 골격 위에 최근 7일 시차로 예측한다. 전날 실측이 없으면
-  `lag1d_available=false`로 표시된다(1주 전 시차만 사용).
+- 미래 날짜는 달력(요일유형)·이벤트 골격 위에 최근 7일 시차로 예측한다. 최근 7일 실측은 패널(2025-12까지) 뒤에
+  D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`, 매일 09:00·13:00)가 쌓은 파일을 이어붙여 채운다(143).
+  전날 실측이 없으면 `lag1d_available=false`로 표시되고, 이력이 하나도 없으면 LightGBM 대신 lookup으로 예측한다
+  (`predictor_fallback="no_history"`) — 시차가 전부 비면 LightGBM이 lookup보다 나쁘기 때문이다.
 
 ## 7. 디렉터리 구조
 
