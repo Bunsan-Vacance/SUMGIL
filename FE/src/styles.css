@@ -431,6 +431,19 @@ small {
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+.map-place-info-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  color: #566473;
+  font-size: 12px;
+}
+.map-picker-station-meta {
+  margin-top: 6px;
+  color: #566473;
+  font-size: 12px;
+}
 .map-place-info .icon-button {
   flex-shrink: 0;
   width: 32px;

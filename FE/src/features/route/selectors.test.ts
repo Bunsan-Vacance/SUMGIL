@@ -7,6 +7,9 @@ describe('경로 선택과 안내 데이터', () => {
     expect(getRoutes(routes, ['walk', 'bus'], 'fast').map((r) => r.id)).toEqual(['bus'])
     expect(getRoutes(routes, ['bike'], 'fast')).toEqual([])
   })
+  it('도보는 연결 구간으로 항상 허용한다', () => {
+    expect(getRoutes([routes[0]], ['subway'], 'fast').map((route) => route.id)).toEqual(['fast'])
+  })
   it('대표 경로 두 개 뒤에 대안을 이어 붙이고 우선순위를 반영한다', () => {
     expect(getRoutes(routes, ['walk', 'bus', 'subway'], 'calm').map((r) => r.id)).toEqual([
       'calm',

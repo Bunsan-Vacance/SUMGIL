@@ -7,6 +7,8 @@ export interface BikeStation {
   address: string
   lat: number
   lng: number
+  dockCount?: number
+  distanceMeters?: number
 }
 
 export interface NearbyBikeStationLike {
@@ -15,6 +17,8 @@ export interface NearbyBikeStationLike {
   address?: string
   lat: number
   lng: number
+  dockCount?: number
+  distanceMeters?: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,6 +80,8 @@ export function stationToPlace(station: BikeStation): Place {
     kind: '따릉이 대여소',
     lat: station.lat,
     lng: station.lng,
+    ...(station.dockCount !== undefined ? { dockCount: station.dockCount } : {}),
+    ...(station.distanceMeters !== undefined ? { distanceMeters: station.distanceMeters } : {}),
   }
 }
 
@@ -86,5 +92,7 @@ export function nearbyStationToBikeStation(station: NearbyBikeStationLike): Bike
     address: station.address?.trim() || '',
     lat: station.lat,
     lng: station.lng,
+    ...(station.dockCount !== undefined ? { dockCount: station.dockCount } : {}),
+    ...(station.distanceMeters !== undefined ? { distanceMeters: station.distanceMeters } : {}),
   }
 }

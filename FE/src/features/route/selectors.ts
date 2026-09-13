@@ -10,7 +10,9 @@ export function getRoutes(routes: Route[], enabled: Mode[], priority: Priority) 
             ? 1
             : a.minutes - b.minutes
       : a.minutes - b.minutes
-  const visible = routes.filter((route) => route.modes.every((mode) => enabled.includes(mode)))
+  const visible = routes.filter((route) =>
+    route.modes.every((mode) => mode === 'walk' || enabled.includes(mode)),
+  )
   return [
     ...visible.filter((r) => r.id === 'fast' || r.id === 'calm').sort(compare),
     ...visible.filter((r) => r.id !== 'fast' && r.id !== 'calm').sort(compare),

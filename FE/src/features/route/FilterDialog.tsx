@@ -13,17 +13,20 @@ export default function FilterDialog({
   onApply: (modes: Mode[]) => void
   onClose: () => void
 }) {
-  const [draft, setDraft] = useState([...enabled])
+  const [draft, setDraft] = useState(() => [...new Set<Mode>(['walk', ...enabled])])
   return (
     <Modal title="이동수단 선택" onClose={onClose}>
       <div className="mode-options">
         {modes.map((mode) => {
           const Icon = modeIcons[mode.id]
+          const required = mode.id === 'walk'
           return (
             <button
               key={mode.id}
               role="switch"
               aria-checked={draft.includes(mode.id)}
+              aria-disabled={required}
+              disabled={required}
               onClick={() =>
                 setDraft(
                   draft.includes(mode.id)
@@ -35,6 +38,7 @@ export default function FilterDialog({
               <span className="row">
                 <Icon size={21} />
                 {mode.label}
+                {required && <small>(항상 포함)</small>}
               </span>
               <span className={`switch ${draft.includes(mode.id) ? 'on' : ''}`} />
             </button>

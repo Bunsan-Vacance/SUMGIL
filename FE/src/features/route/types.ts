@@ -9,6 +9,8 @@ export interface Place {
   lat?: number
   lng?: number
   placeUrl?: string
+  dockCount?: number
+  distanceMeters?: number
 }
 export type GeometryLineString = [number, number][]
 export interface RouteGeometry {

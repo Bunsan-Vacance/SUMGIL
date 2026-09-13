@@ -30,10 +30,7 @@ export default function KakaoMap({
   )
   const mapPlaces = places ?? routePlaces
   const mapFocus = focusedPlace === undefined ? selectedPlace : focusedPlace
-  const showSelectedPlaceInfo =
-    showPlaceInfo &&
-    selectedPlace &&
-    (selectedPlace.kind !== '따릉이 대여소' || Boolean(selectedPlace.address))
+  const showSelectedPlaceInfo = showPlaceInfo && selectedPlace
   const selectPlace = (place: Place) => {
     setSelectedPlace(place)
     onPlaceSelect?.(place)
@@ -101,7 +98,19 @@ export default function KakaoMap({
                 )}
                 <strong>{selectedPlace.name}</strong>
               </div>
-              <p>{selectedPlace.address}</p>
+              {selectedPlace.address && <p>{selectedPlace.address}</p>}
+              {selectedPlace.kind === '따릉이 대여소' &&
+                (selectedPlace.dockCount !== undefined ||
+                  selectedPlace.distanceMeters !== undefined) && (
+                  <div className="map-place-info-meta">
+                    {selectedPlace.dockCount !== undefined && (
+                      <span>거치대 총 {selectedPlace.dockCount}개</span>
+                    )}
+                    {selectedPlace.distanceMeters !== undefined && (
+                      <span>조회한 지도 중심에서 {Math.round(selectedPlace.distanceMeters)}m</span>
+                    )}
+                  </div>
+                )}
             </div>
             <button
               className="icon-button"

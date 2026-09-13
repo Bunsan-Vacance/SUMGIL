@@ -45,6 +45,7 @@ describe('경로와 안내 화면의 수명', () => {
     act(() => result.current.findRoutes(places[2]))
     await waitFor(() => expect(result.current.trip.status).toBe('success'))
     act(() => result.current.applyFilter(['walk', 'subway']))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
     act(() => result.current.selectRoute(routes[1].id))
 
     expect(result.current.trip.selected).toBe(routes[1])
@@ -55,6 +56,7 @@ describe('경로와 안내 화면의 수명', () => {
     act(() => result.current.choosePlace(places[3]))
     await waitFor(() => expect(result.current.trip.status).toBe('success'))
     act(() => result.current.applyFilter(['bike']))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
     expect(result.current.trip).toMatchObject({
       status: 'success',
       origin: places[3],
@@ -222,7 +224,13 @@ describe('경로와 안내 화면의 수명', () => {
     })
     await waitFor(() => expect(result.current.trip.status).toBe('success'))
 
-    expect(search.mock.calls.at(-1)?.[0]).toEqual({ origin: places[1], destination: places[0] })
+    expect(search.mock.calls.at(-1)?.[0]).toEqual({
+      origin: places[1],
+      destination: places[0],
+      modes: ['walk', 'bike', 'bus', 'subway'],
+      priority: 'fast',
+      departedAt: expect.any(String),
+    })
     expect(result.current.guidance).toMatchObject({ route: routes[0], step: 1 })
   })
 })

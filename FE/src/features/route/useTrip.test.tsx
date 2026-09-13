@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RouteRepository } from '../../api/contracts'
 import { RepositoryError } from '../../api/errors'
@@ -28,6 +28,100 @@ function deferred<T>() {
 }
 
 describe('경로 검색 요청 수명', () => {
+  it('검색 요청에 현재 선택한 이동수단을 전달한다', async () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(previewTrip, repository))
+
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+
+    expect(repository.search).toHaveBeenCalledWith(
+      {
+        origin: previewTrip.origin,
+        destination: places[1],
+        modes: previewTrip.enabled,
+        priority: 'fast',
+        departedAt: expect.any(String),
+      },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('성공한 검색 뒤 필터를 바꾸면 도보를 포함해 재검색한다', async () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+
+    act(() => result.current.setModes(['bike']))
+    await waitFor(() => expect(repository.search).toHaveBeenCalledOnce())
+
+    expect(repository.search).toHaveBeenCalledWith(
+      {
+        origin: loadedTrip.origin,
+        destination: loadedTrip.destination,
+        modes: ['walk', 'bike'],
+        priority: 'fast',
+        departedAt: expect.any(String),
+      },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('필터 재검색은 진행 중인 이전 요청을 취소하고 늦은 결과를 무시한다', async () => {
+    const first = deferred<typeof routes>()
+    const second = deferred<typeof routes>()
+    const repository: RouteRepository = {
+      search: vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise),
+    }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+
+    act(() => result.current.setModes(['bike']))
+    act(() => result.current.setModes(['bus']))
+
+    expect(vi.mocked(repository.search).mock.calls[0][1].aborted).toBe(true)
+    await act(async () => {
+      first.resolve(routes)
+      await Promise.resolve()
+    })
+    expect(result.current).toMatchObject({ candidates: [], status: 'loading' })
+
+    await act(async () => {
+      second.resolve([])
+      await Promise.resolve()
+    })
+    expect(result.current).toMatchObject({ candidates: [], selected: null, status: 'success' })
+  })
+
+  it('idle 상태에서 필터 변경은 검색하지 않는다', () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(previewTrip, repository))
+
+    act(() => result.current.setModes(['bike']))
+
+    expect(repository.search).not.toHaveBeenCalled()
+    expect(result.current).toMatchObject({ enabled: ['walk', 'bike'], status: 'idle' })
+  })
+
+  it('resetModes는 검색된 상태에서 모든 수단으로 다시 요청한다', async () => {
+    const filteredTrip: TripState = { ...loadedTrip, enabled: ['walk', 'bike'] }
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(filteredTrip, repository))
+
+    act(() => result.current.resetModes())
+    await waitFor(() => expect(repository.search).toHaveBeenCalledOnce())
+
+    expect(repository.search).toHaveBeenCalledWith(
+      {
+        origin: filteredTrip.origin,
+        destination: filteredTrip.destination,
+        modes: ['walk', 'bike', 'bus', 'subway'],
+        priority: 'fast',
+        departedAt: expect.any(String),
+      },
+      expect.any(AbortSignal),
+    )
+  })
+
   it('실패한 검색을 같은 조건으로 재시도하면 오류를 지우고 새 결과를 선택한다', async () => {
     const repository: RouteRepository = {
       search: vi
@@ -158,7 +252,13 @@ describe('경로 검색 요청 수명', () => {
     })
 
     expect(repository.search).toHaveBeenCalledWith(
-      { origin: places[3], destination: places[1] },
+      {
+        origin: places[3],
+        destination: places[1],
+        modes: loadedTrip.enabled,
+        priority: 'fast',
+        departedAt: expect.any(String),
+      },
       expect.any(AbortSignal),
     )
     expect(result.current).toMatchObject({ origin: places[3], destination: places[1] })

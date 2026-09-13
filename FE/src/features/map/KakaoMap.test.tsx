@@ -193,7 +193,12 @@ function fakeMaps(
 }
 
 function renderMap(
-  options: { places?: Place[]; route?: Route | null; onPlaceSelect?: (place: Place) => void } = {},
+  options: {
+    origin?: Place | null
+    places?: Place[]
+    route?: Route | null
+    onPlaceSelect?: (place: Place) => void
+  } = {},
 ) {
   const markerClickHandlers: Array<() => void> = []
   const markers: FakeMarker[] = []
@@ -202,7 +207,7 @@ function renderMap(
   mocks.loadKakaoMaps.mockResolvedValue(maps)
   const rendered = render(
     <KakaoMap
-      origin={origin}
+      origin={options.origin === undefined ? origin : options.origin}
       destination={null}
       places={options.places}
       route={options.route}
@@ -235,6 +240,47 @@ afterEach(() => {
 })
 
 describe('일반 지도 장소 마커', () => {
+  it('주소가 없어도 대여소 메타데이터를 정보 카드에 표시한다', async () => {
+    const station: Place = {
+      id: 'bike-station:ST-0',
+      name: '대여소',
+      address: '',
+      kind: '따릉이 대여소',
+      lat: 37.5,
+      lng: 127,
+      dockCount: 0,
+      distanceMeters: 42.5,
+    }
+    renderMap({ origin: station })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '출발 장소 정보' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+
+    const card = screen.getByRole('region', { name: '선택한 장소 정보' })
+    expect(card.textContent).toContain('대여소')
+    expect(card.textContent).toContain('거치대 총 0개')
+    expect(card.textContent).toContain('지도 중심에서 43m')
+  })
+
+  it('대여소 메타데이터가 없으면 해당 항목을 숨긴다', async () => {
+    const station: Place = {
+      id: 'bike-station:ST-1',
+      name: '정보 없는 대여소',
+      address: '',
+      kind: '따릉이 대여소',
+      lat: 37.5,
+      lng: 127,
+    }
+    renderMap({ origin: station })
+
+    fireEvent.click(await screen.findByRole('button', { name: '출발 장소 정보' }))
+
+    const card = screen.getByRole('region', { name: '선택한 장소 정보' })
+    expect(card.textContent).toContain('정보 없는 대여소')
+    expect(card.textContent).not.toContain('거치대 총')
+    expect(card.textContent).not.toContain('지도 중심에서')
+  })
+
   it('마커 선택 정보를 표시하고 버튼과 Escape로 닫는다', async () => {
     const { markerClickHandlers } = renderMap()
     await waitFor(() => expect(markerClickHandlers).toHaveLength(1))
@@ -375,7 +421,17 @@ describe('일반 지도 장소 마커', () => {
       minutes: 10,
       transfers: 0,
       modes: ['subway'],
-      legs: [],
+      legs: [
+        {
+          mode: 'subway',
+          title: '2호선',
+          note: '2호선',
+          minutes: 10,
+          routeId: '1002',
+          from: { id: 'start', name: '승차역', lat: 37.5, lng: 127 },
+          to: { id: 'end', name: '하차역', lat: 37.51, lng: 127.01 },
+        },
+      ],
       geometry,
     }
     const rendered = renderMap({ route })
@@ -400,6 +456,13 @@ describe('일반 지도 장소 마커', () => {
     )
     expect(FakeAbstractOverlay.instances[0].setMap).toHaveBeenCalledWith(null)
     expect(document.querySelectorAll('.route-svg-overlay')).toHaveLength(1)
+
+    expect(rendered.customOverlays).toHaveLength(4)
+    rendered.rerender(
+      <KakaoMap origin={origin} destination={null} route={null} onMessage={vi.fn()} />,
+    )
+    await waitFor(() => expect(document.querySelectorAll('.route-svg-overlay')).toHaveLength(0))
+    rendered.customOverlays.forEach((overlay) => expect(overlay.setMap).toHaveBeenCalledWith(null))
 
     rendered.unmount()
     expect(FakeAbstractOverlay.instances.at(-1)?.setMap).toHaveBeenCalledWith(null)

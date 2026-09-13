@@ -333,7 +333,13 @@ describe('백엔드 repository', () => {
     }))
     vi.stubGlobal('fetch', fetchMock)
     const result = await createBackendRouteRepository('http://be.test').search(
-      { origin: station('역삼'), destination: station('강변'), priority: 'fast' },
+      {
+        origin: station('역삼'),
+        destination: station('강변'),
+        modes: ['walk', 'subway'],
+        priority: 'fast',
+        departedAt: '2026-09-11T00:30:00.000Z',
+      },
       new AbortController().signal,
     )
 
@@ -356,9 +362,12 @@ describe('백엔드 repository', () => {
       lng: 127.04,
     })
     expect(result[0].legs[0].geometry?.coordinates).toHaveLength(2)
+    expect(result[0].departedAt).toBe('2026-09-11T00:30:00.000Z')
     expect(
       String((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0]),
-    ).toContain('originStationId=%EC%97%AD%EC%82%BC')
+    ).toContain(
+      'originStationId=%EC%97%AD%EC%82%BC&destStationId=%EA%B0%95%EB%B3%80&modes=WALK%2CSUBWAY&priority=TIME&departureTime=2026-09-11T09%3A30%3A00',
+    )
   })
 
   it('일반 장소를 역으로 추정하지 않고 안전한 오류를 반환한다', async () => {

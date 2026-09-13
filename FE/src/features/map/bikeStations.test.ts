@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { bikeStations, parseBikeStations, stationToPlace } from './bikeStations'
+import {
+  bikeStations,
+  nearbyStationToBikeStation,
+  parseBikeStations,
+  stationToPlace,
+} from './bikeStations'
 
 describe('따릉이 대여소 데이터', () => {
   it('정적 데이터는 좌표가 있는 3,353개 대여소를 제공한다', () => {
@@ -29,5 +34,19 @@ describe('따릉이 대여소 데이터', () => {
     }
 
     expect(stationToPlace(station).name).toBe('따릉이 대여소')
+  })
+
+  it('nearby 메타데이터의 0과 거리 값을 지도 장소까지 보존한다', () => {
+    const station = nearbyStationToBikeStation({
+      id: 'ST-0',
+      name: '대여소',
+      lat: 37.51,
+      lng: 126.98,
+      dockCount: 0,
+      distanceMeters: 42.5,
+    })
+
+    expect(station).toMatchObject({ dockCount: 0, distanceMeters: 42.5 })
+    expect(stationToPlace(station)).toMatchObject({ dockCount: 0, distanceMeters: 42.5 })
   })
 })
