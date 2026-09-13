@@ -256,7 +256,7 @@ python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes
 ## Drive 임시 백업 인증
 
 Spark/HDFS/S3 도입 전까지는 EC2 로컬 raw snapshot을 삭제하기 전에 Google Drive에 임시
-백업할 수 있다. 이 백업은 최종 저장소가 아니라 임시 archive backend이며, Drive에는
+백업할 수 있다. 이 백업은 최종 저장소가 아니라 임시 archive storage이며, Drive에는
 `AI/data/` 구조를 그대로 미러링한다.
 
 ```text
@@ -287,12 +287,37 @@ chmod 600 /home/ubuntu/secrets/soomgil-drive-service-account.json
 ```text
 GOOGLE_SERVICE_ACCOUNT_FILE=/home/ubuntu/secrets/soomgil-drive-service-account.json
 GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID=<SUMGIL/data folder id>
-DATA_ENGINE_ARCHIVE_BACKEND=drive
+DATA_ENGINE_ARCHIVE_STORAGE=drive
 ```
 
 서비스 계정 JSON, `.env`, Drive Webhook/토큰류는 Git에 커밋하지 않는다. 업로드 성공 여부는
 다음 단계에서 파티션 단위 manifest로 기록하고, retention cleanup은 archive success가 확인된
 파티션만 삭제하도록 확장한다.
+
+Drive 업로드 대상 확인(dry-run):
+
+```bash
+cd <REPO_ROOT>/AI
+python -m DATA_ENGINE.archive.upload_raw_partitions
+```
+
+실제 업로드:
+
+```bash
+python -m DATA_ENGINE.archive.upload_raw_partitions --yes
+```
+
+주요 옵션:
+
+```text
+--dataset bike|weather|all
+--older-than-hours 1
+--max-partitions 24
+--manifest-path data/manifest/archive_uploads.jsonl
+```
+
+기본값은 dry-run이라 Drive API를 호출하지 않고 manifest도 기록하지 않는다. `--yes`를 붙이면
+완료된 시간대 파티션만 Drive에 올리고, 결과를 `data/manifest/archive_uploads.jsonl`에 기록한다.
 
 ## Redis 연동 상태
 
