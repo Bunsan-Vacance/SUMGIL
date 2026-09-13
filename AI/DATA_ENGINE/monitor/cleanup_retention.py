@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from DATA_ENGINE.archive.manifest import (
+    DEFAULT_ARCHIVE_BACKEND,
+    DEFAULT_MANIFEST_PATH,
+    has_successful_archive,
+)
 from DATA_ENGINE.collect.common import KST
 
 AI_ROOT = Path(__file__).resolve().parents[2]
@@ -40,10 +45,21 @@ class CleanupCandidate:
 
 
 @dataclass(frozen=True)
+class CleanupSkip:
+    dataset: str
+    dt: str
+    hh: str
+    path: Path
+    reason: str
+
+
+@dataclass(frozen=True)
 class CleanupResult:
     dry_run: bool
     retention_hours: float
+    require_archive_success: bool
     candidates: list[CleanupCandidate]
+    skips: list[CleanupSkip]
     deleted_count: int
     deleted_bytes: int
 
@@ -137,11 +153,16 @@ def find_cleanup_candidates(
     targets: Iterable[RetentionTarget],
     *,
     retention_hours: float,
+    require_archive_success: bool = False,
+    manifest_path: Path | None = None,
+    archive_backend: str = DEFAULT_ARCHIVE_BACKEND,
     now_ts: float | None = None,
     current_slot: tuple[str, str] | None = None,
-) -> list[CleanupCandidate]:
+) -> tuple[list[CleanupCandidate], list[CleanupSkip]]:
     if retention_hours <= 0:
         raise ValueError("retention_hours must be positive")
+    if require_archive_success and manifest_path is None:
+        raise ValueError("manifest_path is required when require_archive_success is true")
 
     if now_ts is None:
         now_ts = time.time()
@@ -149,6 +170,7 @@ def find_cleanup_candidates(
         current_slot = current_kst_partition()
 
     candidates: list[CleanupCandidate] = []
+    skips: list[CleanupSkip] = []
     for target in targets:
         if not target.base_path.exists():
             continue
@@ -166,6 +188,23 @@ def find_cleanup_candidates(
             age_hours = max(0.0, (now_ts - stat.st_mtime) / 3600)
             if age_hours <= retention_hours:
                 continue
+            if require_archive_success and not has_successful_archive(
+                manifest_path,
+                target.name,
+                dt,
+                hh,
+                backend=archive_backend,
+            ):
+                skips.append(
+                    CleanupSkip(
+                        dataset=target.name,
+                        dt=dt,
+                        hh=hh,
+                        path=path,
+                        reason="archive_not_success",
+                    )
+                )
+                continue
 
             candidates.append(
                 CleanupCandidate(
@@ -178,7 +217,10 @@ def find_cleanup_candidates(
                 )
             )
 
-    return sorted(candidates, key=lambda candidate: str(candidate.path))
+    return (
+        sorted(candidates, key=lambda candidate: str(candidate.path)),
+        sorted(skips, key=lambda skip: str(skip.path)),
+    )
 
 
 def cleanup_candidates(
@@ -203,12 +245,18 @@ def run_cleanup(
     *,
     retention_hours: float,
     yes: bool,
+    require_archive_success: bool = False,
+    manifest_path: Path | None = None,
+    archive_backend: str = DEFAULT_ARCHIVE_BACKEND,
     now_ts: float | None = None,
     current_slot: tuple[str, str] | None = None,
 ) -> CleanupResult:
-    candidates = find_cleanup_candidates(
+    candidates, skips = find_cleanup_candidates(
         targets,
         retention_hours=retention_hours,
+        require_archive_success=require_archive_success,
+        manifest_path=manifest_path,
+        archive_backend=archive_backend,
         now_ts=now_ts,
         current_slot=current_slot,
     )
@@ -216,7 +264,9 @@ def run_cleanup(
     return CleanupResult(
         dry_run=not yes,
         retention_hours=retention_hours,
+        require_archive_success=require_archive_success,
         candidates=candidates,
+        skips=skips,
         deleted_count=deleted_count,
         deleted_bytes=deleted_bytes,
     )
@@ -227,7 +277,9 @@ def print_cleanup_result(result: CleanupResult) -> None:
         "DATA_ENGINE retention cleanup "
         f"dry_run={str(result.dry_run).lower()} "
         f"retention_hours={result.retention_hours:g} "
+        f"require_archive_success={str(result.require_archive_success).lower()} "
         f"candidates={len(result.candidates)} "
+        f"skipped={len(result.skips)} "
         f"candidate_size={format_bytes(result.candidate_bytes)} "
         f"deleted={result.deleted_count} "
         f"deleted_size={format_bytes(result.deleted_bytes)}"
@@ -241,6 +293,14 @@ def print_cleanup_result(result: CleanupResult) -> None:
             f"age={candidate.age_hours:.1f}h "
             f"size={format_bytes(candidate.size_bytes)} "
             f"path={candidate.path}"
+        )
+    for skip in result.skips:
+        print(
+            f"SKIP {skip.dataset} "
+            f"dt={skip.dt} "
+            f"hh={skip.hh} "
+            f"reason={skip.reason} "
+            f"path={skip.path}"
         )
 
 
@@ -265,16 +325,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Actually delete cleanup candidates. Omitted by default for dry-run.",
     )
+    parser.add_argument(
+        "--require-archive-success",
+        action="store_true",
+        help="Delete only partitions whose latest archive manifest status is success.",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        type=Path,
+        default=DEFAULT_MANIFEST_PATH,
+        help="Archive upload manifest path. Relative paths are resolved from --ai-root.",
+    )
+    parser.add_argument(
+        "--archive-backend",
+        default=DEFAULT_ARCHIVE_BACKEND,
+        help="Archive backend name to match in the manifest.",
+    )
     return parser.parse_args(argv)
+
+
+def resolve_project_path(ai_root: Path, path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return ai_root / path
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     targets = build_retention_targets(args.ai_root)
+    manifest_path = resolve_project_path(args.ai_root, args.manifest_path)
     result = run_cleanup(
         targets,
         retention_hours=args.retention_hours,
         yes=args.yes,
+        require_archive_success=args.require_archive_success,
+        manifest_path=manifest_path,
+        archive_backend=args.archive_backend,
     )
     print_cleanup_result(result)
     return 0
