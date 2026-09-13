@@ -46,3 +46,6 @@ statsmodels
 fastapi
 uvicorn[standard]
 pydantic-settings
+
+# ── 진단 ──
+psutil  # 대규모 배치 스크립트 피크 메모리 측정용(BYC full-coverage-check 실측)
