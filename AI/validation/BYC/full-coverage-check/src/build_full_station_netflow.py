@@ -23,7 +23,9 @@ station_no ↔ ST-xxx는 숫자로 직접 조인하면 안 된다(대여소 재�
 
 출력 스키마는 `q3-seasonal-dataset-check/src/dataset_report_v5.py`의 EXPECTED_COLUMNS와
 동일하게 맞춰, 기존 phase1_baseline.py/phase2_historical_profile.py가 `--train-path` 등
-직접 경로 지정 옵션으로 그대로 읽을 수 있게 한다.
+직접 경로 지정 옵션으로 그대로 읽게 할 수 있다 — 단 출력 포맷이 parquet이라(gzip CSV 대비
+쓰기 27배·읽기 15배 빠름, scale-probe 실측) 그 스크립트들의 `read_split()`이 확장자를 보고
+`pd.read_parquet`도 타게 소폭 patch해야 한다(아직 안 함 — pipeline 승격 단계에서 처리).
 
 실행 예 (스모크 테스트 — 며칠치·소수 station으로 먼저 확인):
     python build_full_station_netflow.py \
@@ -38,12 +40,15 @@ station_no ↔ ST-xxx는 숫자로 직접 조인하면 안 된다(대여소 재�
 from __future__ import annotations
 
 import argparse
+import gc
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import psutil
 
 AI_DIR = Path(__file__).resolve().parents[4]
 RAW_DIR = AI_DIR / "data" / "BIKE" / "raw"
@@ -158,23 +163,35 @@ def _daily_rental_paths(rental_dir: Path, start: pd.Timestamp, end: pd.Timestamp
     return paths
 
 
-# rental_history 헤더가 기간별로 두 가지다 — 2024년 등은 한글 헤더(cp949),
-# 2025년 일부는 영문 헤더(stdr_de 등, utf-8)로 내려받아졌다(확인됨). 값(dvcd의
-# "출발시간"/"도착시간")은 두 스키마 모두 한글 그대로다.
-_RENTAL_COLUMN_ALIASES = {
-    "stdr_de": "기준_날짜",
-    "dvcd": "집계_기준",
-    "tmzon": "기준_시간대",
-    "start_statn_id": "시작_대여소_ID",
-    "end_statn_id": "종료_대여소_ID",
-    "cnt": "전체_건수",
-}
+# rental_history 헤더 텍스트가 월마다 최소 3가지로 다르게 내려받아졌다(확인됨) —
+#   ① 기준_날짜,집계_기준,기준_시간대,시작_대여소_ID,시작_대여소명,종료_대여소_ID,종료_대여소명,전체_건수,...
+#   ② stdr_de,dvcd,tmzon,start_statn_id,start_statn_nm,end_statn_id,end_statn_nm,cnt,... (영문, utf-8)
+#   ③ 기준_날짜,집계_기준,기준_시간,시작_대여소,시작_대여소명,종료_대여소,종료_대여소명,전체건수,... (밑줄 일부 빠짐)
+# 이름 매칭은 새 변형이 또 나오면 계속 깨진다 — 세 버전 다 컬럼 "순서"는 동일해서
+# 위치 기반으로 고정한다(10개 컬럼: 날짜,집계기준,시간,시작ID,시작명,종료ID,종료명,건수,분,거리).
+_RENTAL_COLUMNS = [
+    "기준_날짜",
+    "집계_기준",
+    "기준_시간대",
+    "시작_대여소_ID",
+    "시작_대여소명",
+    "종료_대여소_ID",
+    "종료_대여소명",
+    "전체_건수",
+    "전체_이용_분",
+    "전체_이용_거리",
+]
 
 
 def _read_rental_day(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """하루치 파일 → (rent 집계, return 집계). 파일별로 즉시 group-by해서 원본 행은 버린다."""
     df = read_csv_any_encoding(path)
-    df = df.rename(columns=_RENTAL_COLUMN_ALIASES)
+    if len(df.columns) != len(_RENTAL_COLUMNS):
+        raise ValueError(
+            f"{path}: 예상 컬럼 수({len(_RENTAL_COLUMNS)})와 다름({len(df.columns)}) — "
+            f"실제 헤더: {list(df.columns)}"
+        )
+    df.columns = _RENTAL_COLUMNS
     df["기준_시간대"] = df["기준_시간대"].astype("int32")
     df["date"] = pd.to_datetime(df["기준_날짜"].astype(str), format="%Y%m%d")
     df["slot_5m"] = df["기준_시간대"] // SLOT_MINUTES
@@ -280,31 +297,30 @@ def build_target_dataset(
     panel["sin_slot"] = np.sin(2 * np.pi * panel["slot_5m"] / n_slots_per_day)
     panel["cos_slot"] = np.cos(2 * np.pi * panel["slot_5m"] / n_slots_per_day)
 
-    # known_stock_at_request: station별로 시간 정렬 후 merge_asof(직전 anchor)
+    # known_stock_at_request: merge_asof(by=)로 station별 as-of 조인을 한 번에 벡터화한다
+    # (station마다 파이썬 for문을 돌리지 않는다 — AI/CLAUDE.md "반복은 벡터화" 원칙).
+    # merge_asof는 양쪽 다 on 컬럼 기준 정렬만 요구하고, by가 station 단위 정확 일치를 맡는다.
     stock_hourly = stock_hourly.copy()
     stock_hourly["datetime_hour"] = stock_hourly["date"] + pd.to_timedelta(stock_hourly["hour"], unit="h")
-    stock_sorted = stock_hourly.sort_values(["od_station_id", "datetime_hour"])
-    panel_sorted = panel.sort_values(["od_station_id", "datetime_5m"])
+    stock_sorted = stock_hourly.sort_values("datetime_hour")
+    panel_sorted = panel.sort_values("datetime_5m")
 
-    joined_parts = []
-    for station, sub in panel_sorted.groupby("od_station_id", sort=False):
-        anchors = stock_sorted[stock_sorted["od_station_id"] == station]
-        if anchors.empty:
-            sub = sub.copy()
-            sub["stock_anchor_hour"] = np.nan
-            sub["stock_anchor_time"] = pd.NaT
-        else:
-            sub = pd.merge_asof(
-                sub,
-                anchors[["datetime_hour", "stock"]],
-                left_on="datetime_5m",
-                right_on="datetime_hour",
-                direction="backward",
-                suffixes=("", "_anchor"),
-            )
-            sub = sub.rename(columns={"stock": "stock_anchor_hour", "datetime_hour_anchor": "stock_anchor_time"})
-        joined_parts.append(sub)
-    panel = pd.concat(joined_parts, ignore_index=True)
+    # pandas 3.x는 문자열 컬럼을 상황에 따라 object 또는 새 StringDtype으로 다르게
+    # 추론한다 — merge_asof(by=)는 두 쪽 dtype이 다르면 에러를 낸다(2024-11 데이터에서
+    # 실제로 발생, 이전 달들은 우연히 같은 dtype이라 안 걸렸을 뿐). 둘 다 object로 강제한다.
+    panel_sorted["od_station_id"] = panel_sorted["od_station_id"].astype(object)
+    stock_sorted["od_station_id"] = stock_sorted["od_station_id"].astype(object)
+
+    panel = pd.merge_asof(
+        panel_sorted,
+        stock_sorted[["od_station_id", "datetime_hour", "stock"]],
+        left_on="datetime_5m",
+        right_on="datetime_hour",
+        by="od_station_id",
+        direction="backward",
+        suffixes=("", "_anchor"),
+    )
+    panel = panel.rename(columns={"stock": "stock_anchor_hour", "datetime_hour_anchor": "stock_anchor_time"})
 
     panel["minutes_since_stock_anchor"] = (
         (panel["datetime_5m"] - panel.get("stock_anchor_time", pd.NaT)).dt.total_seconds() / 60
@@ -375,6 +391,42 @@ def build_target_dataset(
 # ── 5. 실행 ───────────────────────────────────────────────────────────────────
 
 
+class PeakMemoryTracker:
+    """백그라운드 스레드로 이 프로세스의 RSS를 주기적으로 재서 최댓값을 남긴다.
+
+    Phase 2.5에서 300개 station만으로도 OOM이 반복됐던 전례가 있어, 전체 대여소로
+    스케일업하기 전에 station 수별 피크 메모리를 실측하는 용도(scale-probe)다.
+    """
+
+    def __init__(self, interval_sec: float = 1.0) -> None:
+        self._interval = interval_sec
+        self._peak_bytes = 0
+        self._stop = threading.Event()
+        self._proc = psutil.Process()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                rss = self._proc.memory_info().rss
+                self._peak_bytes = max(self._peak_bytes, rss)
+            except psutil.Error:
+                pass
+            self._stop.wait(self._interval)
+
+    def __enter__(self) -> "PeakMemoryTracker":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        self._thread.join(timeout=self._interval * 2)
+
+    @property
+    def peak_mb(self) -> float:
+        return round(self._peak_bytes / (1024 * 1024), 1)
+
+
 @dataclass
 class SplitSpec:
     name: str
@@ -383,29 +435,73 @@ class SplitSpec:
     station_info_path: Path
 
 
-def build_split(spec: SplitSpec, od_master: pd.DataFrame, max_stations: int | None) -> tuple[pd.DataFrame, dict]:
-    t0 = time.time()
+def _month_chunks(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    """[start, end]를 달력 월 경계로 쪼갠다. 양끝 달은 요청 범위로 잘린다."""
+    chunks = []
+    cur = start.replace(day=1)
+    while cur <= end:
+        month_end = cur + pd.offsets.MonthEnd(0)
+        chunks.append((max(cur, start), min(month_end, end)))
+        cur = cur + pd.DateOffset(months=1)
+    return chunks
+
+
+def build_split(
+    spec: SplitSpec, od_master: pd.DataFrame, max_stations: int | None, out_dir: Path, tag: str
+) -> list[dict]:
+    """월 단위로 쪼개 처리하고 달마다 즉시 parquet으로 쓴다.
+
+    안 쪼개면 요청 기간 전체(예: 12개월)의 패널 + horizon 4종 복사본이 동시에 메모리에
+    있어야 해서 역산 ~43GB까지 커진다(500 station·1개월 실측 703MB 기준). 월 단위로
+    쪼개면 매 순간 메모리 사용량이 "한 달치"에 고정된다 — 총 처리 시간은 그대로지만
+    (같은 양을 처리하는 건 똑같다) OOM 없이 끝까지 도는 게 목적이다.
+    station 매핑은 split당 한 번만 계산해 매달 재사용한다(좌표 매칭은 기간과 무관).
+    """
     station_info = load_station_info(spec.station_info_path)
     mapping, mapping_report = build_station_mapping(od_master, station_info)
     if max_stations:
         mapping = mapping.head(max_stations)
 
-    rental_agg = aggregate_rental_history(DEFAULT_RENTAL_HISTORY_DIR, spec.start, spec.end)
-    rental_agg = rental_agg[rental_agg["od_station_id"].isin(mapping["od_station_id"])]
+    chunk_reports = []
+    for chunk_start, chunk_end in _month_chunks(spec.start, spec.end):
+        t0 = time.time()
+        rental_agg = aggregate_rental_history(DEFAULT_RENTAL_HISTORY_DIR, chunk_start, chunk_end)
+        rental_agg = rental_agg[rental_agg["od_station_id"].isin(mapping["od_station_id"])]
 
-    stock_hourly = load_stock_hourly(DEFAULT_STOCK_HOURLY_DIR, spec.start, spec.end)
-    stock_hourly = stock_hourly[stock_hourly["station_no"].isin(mapping["station_no"])]
+        stock_hourly = load_stock_hourly(DEFAULT_STOCK_HOURLY_DIR, chunk_start, chunk_end)
+        stock_hourly = stock_hourly[stock_hourly["station_no"].isin(mapping["station_no"])]
 
-    dataset = build_target_dataset(mapping, rental_agg, stock_hourly)
-    elapsed = time.time() - t0
-    report = {
-        "split": spec.name,
-        "elapsed_sec": round(elapsed, 1),
-        "rows": len(dataset),
-        "stations": dataset["od_station_id"].nunique(),
-        **mapping_report,
-    }
-    return dataset, report
+        dataset = build_target_dataset(mapping, rental_agg, stock_hourly)
+        elapsed = time.time() - t0
+
+        out_path = out_dir / f"{spec.name}_netflow_q3_mapped_{tag}_{chunk_start:%Y%m}.parquet"
+        t_write0 = time.time()
+        dataset.to_parquet(out_path, index=False)
+        write_sec = time.time() - t_write0
+
+        chunk_report = {
+            "split": spec.name,
+            "month": f"{chunk_start:%Y-%m}",
+            "elapsed_sec": round(elapsed, 1),
+            "write_sec": round(write_sec, 1),
+            "rows": len(dataset),
+            "stations": dataset["od_station_id"].nunique(),
+            "out_path": str(out_path),
+            **mapping_report,
+        }
+        chunk_reports.append(chunk_report)
+        print(
+            f"  [{spec.name} {chunk_start:%Y-%m}] {out_path.name}: {chunk_report['rows']:,}행, "
+            f"{chunk_report['stations']}station, 처리 {chunk_report['elapsed_sec']}초 + "
+            f"parquet쓰기 {chunk_report['write_sec']}초"
+        )
+
+        # 다음 달로 넘어가기 전에 이번 달치를 메모리에서 확실히 내린다
+        # (Phase 2.5: "train_df는 학습 끝나면 del+gc.collect()로 즉시 해제" 관례).
+        del rental_agg, stock_hourly, dataset
+        gc.collect()
+
+    return chunk_reports
 
 
 def parse_args() -> argparse.Namespace:
@@ -421,7 +517,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--station-info-2025", default=str(DEFAULT_STATION_INFO_2025))
     p.add_argument("--max-stations", type=int, default=None, help="스모크 테스트용 station 수 제한")
     p.add_argument("--out-dir", default=str(Path(__file__).resolve().parents[1] / "outputs"))
-    p.add_argument("--tag", default="full", help="출력 파일명 태그: {split}_netflow_q3_mapped_{tag}.csv.gz")
+    p.add_argument("--tag", default="full", help="출력 파일명 태그: {split}_netflow_q3_mapped_{tag}.parquet")
+    p.add_argument(
+        "--splits",
+        default="train,valid,test",
+        help="처리할 split만 골라서 실행 (예: --splits train). 전체 실행 시 프로세스를 "
+        "월별로 새로 띄워 메모리를 리셋하려고 train만 반복 호출할 때 쓴다.",
+    )
     return p.parse_args()
 
 
@@ -432,22 +534,34 @@ def main() -> None:
 
     od_master = load_od_master(Path(args.od_master))
 
-    specs = [
-        SplitSpec("train", pd.Timestamp(args.train_start), pd.Timestamp(args.train_end), Path(args.station_info_2024)),
-        SplitSpec("valid", pd.Timestamp(args.valid_start), pd.Timestamp(args.valid_end), Path(args.station_info_2024)),
-        SplitSpec("test", pd.Timestamp(args.test_start), pd.Timestamp(args.test_end), Path(args.station_info_2025)),
-    ]
+    all_specs = {
+        "train": SplitSpec("train", pd.Timestamp(args.train_start), pd.Timestamp(args.train_end), Path(args.station_info_2024)),
+        "valid": SplitSpec("valid", pd.Timestamp(args.valid_start), pd.Timestamp(args.valid_end), Path(args.station_info_2024)),
+        "test": SplitSpec("test", pd.Timestamp(args.test_start), pd.Timestamp(args.test_end), Path(args.station_info_2025)),
+    }
+    wanted = [s.strip() for s in args.splits.split(",") if s.strip()]
+    specs = [all_specs[s] for s in wanted]
 
     reports = []
-    for spec in specs:
-        print(f"[{spec.name}] {spec.start.date()} ~ {spec.end.date()} 처리 중...")
-        dataset, report = build_split(spec, od_master, args.max_stations)
-        out_path = out_dir / f"{spec.name}_netflow_q3_mapped_{args.tag}.csv.gz"
-        dataset.to_csv(out_path, index=False, compression="gzip")
-        reports.append(report)
-        print(f"  → {out_path.name}: {report['rows']:,}행, {report['stations']}station, {report['elapsed_sec']}초")
+    t_total0 = time.time()
+    with PeakMemoryTracker() as mem:
+        for spec in specs:
+            print(f"[{spec.name}] {spec.start.date()} ~ {spec.end.date()} 처리 중 (월 단위)...")
+            chunk_reports = build_split(spec, od_master, args.max_stations, out_dir, args.tag)
+            for r in chunk_reports:
+                r["peak_memory_mb_so_far"] = mem.peak_mb
+            reports.extend(chunk_reports)
+    total_elapsed = round(time.time() - t_total0, 1)
+    print(f"\n전체 처리 시간: {total_elapsed}초, 피크 메모리: {mem.peak_mb}MB")
 
+    # parquet — gzip CSV 대비 쓰기 27배·읽기 15배 빠르고 크기도 44% 작음(실측,
+    # scale-probe/500 참고). phase1_baseline.py 등 기존 스크립트는 --train-path로
+    # 직접 넘길 때 read_split()이 확장자를 보고 parquet도 읽게 소폭 patch가 필요하다.
+    # 산출물은 split당 여러 개(월별) 파일이라, 그 스크립트들의 nargs="+" 경로 옵션에
+    # 그대로 나열해서 넘기면 된다.
     report_df = pd.DataFrame(reports)
+    report_df["peak_memory_mb"] = mem.peak_mb
+    report_df["total_elapsed_sec"] = total_elapsed
     report_df.to_csv(out_dir / "build_report.csv", index=False)
     print(f"\n완료. 산출물: {out_dir}")
     print(report_df.to_string(index=False))
