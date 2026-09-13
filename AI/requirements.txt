@@ -13,7 +13,7 @@ pyarrow
 scikit-learn
 lightgbm
 xgboost
-torch
+torch  # PyPI 기본은 CPU 빌드 — GPU 학습 PC는 README 6절대로 cu130 인덱스에서 덮어쓴다
 chronos-forecasting  # 92 모델 계열 비교(Chronos zero-shot) — CI 제외
 
 # ── 지리 공간 (격자·공간 조인) ──

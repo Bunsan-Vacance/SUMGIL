@@ -140,6 +140,10 @@ source .venv/Scripts/activate   # Windows Git Bash
 # 의존성 (개발 도구 포함)
 pip install -r requirements-dev.txt
 
+# NVIDIA GPU가 있는 학습 PC — PyPI 기본 torch는 CPU 빌드라 CUDA 빌드로 덮어쓴다(드라이버 CUDA 13.x 기준)
+pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu130
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"   # '...+cu130 True'
+
 # 설치 후 버전 고정 (최초 1회, 팀 공유)
 pip freeze > requirements.lock.txt
 
