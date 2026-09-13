@@ -212,7 +212,8 @@ df -h
 
 따릉이·날씨 실시간 수집기는 서버 로컬에 `snapshot_*.parquet`를 계속 쌓는다. 로컬 디스크가
 무한히 커지지 않도록, 재생성 불가능한 수동 원천과 가공 산출물은 건드리지 않고 상시 폴링 raw
-snapshot만 48시간 기준으로 정리한다.
+snapshot만 48시간 기준으로 정리한다. 운영 삭제는 Drive 업로드 manifest에서 백업 성공이 확인된
+파티션만 대상으로 한다.
 
 삭제 대상은 아래 두 경로로만 제한한다.
 
@@ -234,23 +235,32 @@ AI/data/EXTERNAL/weather/raw/nowcast/dt=*/hh=*/snapshot_*.parquet
 - `AI/logs/`, `AI/.env`, `*.pem`
 
 기본 실행은 dry-run이다. 삭제 후보 파일 수·총 용량·경로만 출력하고 파일은 지우지 않는다.
+`--require-archive-success`를 함께 사용하면 `data/manifest/archive_uploads.jsonl`에서
+해당 `dataset/dt/hh`의 최신 기록이 `status=success`인 경우만 삭제 후보에 포함한다.
+백업 성공 기록이 없거나 최신 기록이 실패라면 `SKIP ... reason=archive_not_success`로 출력하고
+삭제하지 않는다.
 
 ```bash
 cd <REPO_ROOT>/AI
-python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48
+python -m DATA_ENGINE.monitor.cleanup_retention \
+  --retention-hours 48 \
+  --require-archive-success
 ```
 
 실제 삭제는 `--yes`를 명시한 경우에만 수행한다.
 
 ```bash
-python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes
+python -m DATA_ENGINE.monitor.cleanup_retention \
+  --retention-hours 48 \
+  --require-archive-success \
+  --yes
 ```
 
 운영 주기 실행은 EC2 dry-run 결과가 안전한지 확인한 뒤 등록한다. 등록한다면 하루 1회 새벽처럼
 수집 부하가 낮은 시간대를 권장한다.
 
 ```cron
-20 3 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes >> logs/data_engine_retention.log 2>&1
+20 3 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --require-archive-success --yes >> logs/data_engine_retention.log 2>&1
 ```
 
 ## Drive 임시 백업 인증
