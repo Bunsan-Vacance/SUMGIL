@@ -20,6 +20,7 @@ npm run dev
 - [상태 소유와 화면 흐름](docs/state.md)
 - [데이터 접근과 API 연결](docs/data-integration.md)
 - [개발·검증·문서 갱신 기준](docs/development.md)
+- [실제 FE 이미지 배포](docs/deployment.md)
 
 AI 작업 지침은 [AGENTS.md](AGENTS.md)를 참고한다. 과거 기획은 [초기 기록](docs/history/initial-frontend-plan.md)에 보관했다.
 
