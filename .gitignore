@@ -54,6 +54,7 @@ venv/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
+AI/.tmp/
 
 # ── 데이터 · 모델 산출물 (용량이 커 저장소에 올리지 않음) ──
 # raw/processed뿐 아니라 도메인별 서브폴더(AI/data/CROWD/, AI/data/BIKE/, AI/data/EXTERNAL/ 등)도 전부 대상.

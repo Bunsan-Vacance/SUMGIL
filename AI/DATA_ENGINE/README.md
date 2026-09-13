@@ -208,6 +208,51 @@ find data/EXTERNAL/weather/raw/nowcast -type f | tail
 df -h
 ```
 
+## 데이터 보관 정책
+
+따릉이·날씨 실시간 수집기는 서버 로컬에 `snapshot_*.parquet`를 계속 쌓는다. 로컬 디스크가
+무한히 커지지 않도록, 재생성 불가능한 수동 원천과 가공 산출물은 건드리지 않고 상시 폴링 raw
+snapshot만 48시간 기준으로 정리한다.
+
+삭제 대상은 아래 두 경로로만 제한한다.
+
+```text
+AI/data/BIKE/raw/realtime/dt=*/hh=*/snapshot_*.parquet
+AI/data/EXTERNAL/weather/raw/nowcast/dt=*/hh=*/snapshot_*.parquet
+```
+
+삭제 제외 대상:
+
+- `AI/data/BIKE/raw/realtime/latest.parquet`
+- `AI/data/EXTERNAL/weather/raw/nowcast/latest.parquet`
+- `AI/data/BIKE/raw/station_5min/`, `AI/data/BIKE/raw/rental_history/`,
+  `AI/data/BIKE/raw/station_master/`
+- `AI/data/BIKE/interim/`, `AI/data/BIKE/processed/`
+- `AI/data/CROWD/`, `AI/data/ROUTE/`
+- `AI/data/EXTERNAL/weather/raw/asos/`, `AI/data/EXTERNAL/weather/raw/forecast/`
+- `AI/data/EXTERNAL/station/`, `AI/data/EXTERNAL/population/`, `AI/data/EXTERNAL/holiday/`
+- `AI/logs/`, `AI/.env`, `*.pem`
+
+기본 실행은 dry-run이다. 삭제 후보 파일 수·총 용량·경로만 출력하고 파일은 지우지 않는다.
+
+```bash
+cd <REPO_ROOT>/AI
+python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48
+```
+
+실제 삭제는 `--yes`를 명시한 경우에만 수행한다.
+
+```bash
+python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes
+```
+
+운영 주기 실행은 EC2 dry-run 결과가 안전한지 확인한 뒤 등록한다. 등록한다면 하루 1회 새벽처럼
+수집 부하가 낮은 시간대를 권장한다.
+
+```cron
+20 3 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --yes >> logs/data_engine_retention.log 2>&1
+```
+
 ## Redis 연동 상태
 
 Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
