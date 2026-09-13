@@ -45,6 +45,14 @@
   - `data/`(원본·중간·가공 저장소)는 이름이 비슷해 보이지만 `AI/data/`에 그대로 있다 —
     `.gitignore`가 이 경로를 기준으로 걸려 있어 옮기지 않았다.
 
+## 딥러닝 학습 — GPU 우선
+
+torch 학습 코드(`train_dl` 등)는 장치를 `--device auto`(기본)로 받아 `cuda`가 있으면 GPU, 없으면 CPU로
+돈다 — 하드코딩하지 않는다. 학습 PC의 SUMGIL 환경은 CUDA 빌드 torch(`+cu130`)를 쓴다(README 6절).
+아티팩트 `meta.json`에 `device`·`train_seconds`를 남겨 어느 장치에서 얼마나 걸렸는지 기록한다.
+예측기(`predictor.py`)와 배치 추론은 CPU에서도 그대로 동작해야 하고(EC2에 GPU 없음), 테스트는
+장치를 `cpu`로 고정한다.
+
 ## 테스트 작성 — 무거운 의존성 가드
 
 torch·PySpark처럼 무거운 의존성이 필요한 테스트는 파일 최상단에서
