@@ -9,6 +9,7 @@
 | `time-resolution-check/` | 135 | 1시간→30분 비중 홀드아웃, 30분→열차 배분의 내부 일관성 |
 | `split-check/` | 93 | 전역 vs 호선별·6호선 분리·군집별 fit, 같은 요일유형 시차 세트(B′·B″), 서울역 제외 참고, 방향 진단. 결과 노트북 `split_check.ipynb`(출력 포함) |
 | `recent-source-check/` | 143 | D−1 승하차 원천(`getStnPsgr`) 하루치 점검(커버리지·심야 귀속·규모), 시차 피처 결측 시 배포 모델 퇴화(lookup보다 −37%) → 수집기 필요 판정 |
+| `dl-resid-check/` | 144 | 딥러닝 시계열(GRU) 잔차 모델 — 이력 절단 증강 학습, 2025 이력 가용성 4시나리오(`full/d7_only/d1_only/no_lag`) × 3계열 비교. `full`은 LightGBM에 RMSE로 지지만 이력이 없을 때 붕괴하지 않는다(등급 일치율 lookup 수준 유지). 결과 노트북 `dl_resid_check.ipynb`(출력 포함) |
 | `sim-eval/` | 92 | 시뮬레이션 정답 위 열차·5분 단위 예측기 비교, 생성기 가정 민감도, 모델 계열(LightGBM·Chronos·LLM) 비교. 결과 노트북 `sim_eval.ipynb`(출력 포함) |
 
 `AI/README.md` §2.1의 **착석 기회 지수**(혼잡도% → 착석 확률 변환) PoC는 아직 이 폴더에 없다.
