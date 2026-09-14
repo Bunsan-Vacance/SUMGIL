@@ -50,10 +50,22 @@ def load_seoul_congestion_csv(path: str | Path) -> pd.DataFrame:
     원본 컬럼: 요일구분, 호선, 역번호, 출발역, 상하구분 + 시간대별 컬럼(5시30분, 6시00분, ...).
     인코딩은 CP949다. 요일구분은 평일/토요일/일요일, 상하구분은 상선/하선(2호선만 내선/외선)이다
     — 9호선 원천(평일/휴일, 상선/하선만)과 체계가 다르니 합치지 않는다.
+
+    **연도판마다 표기가 조금씩 다르다**(142에서 2023·2024판을 받아 확인). `연번` 컬럼이 붙은
+    판(2023·2024)이 있고, `호선`이 `"1호선"`이 아니라 `1`인 판, 요일구분 값에 앞뒤 공백이
+    들어간 판(`" 토요일 "`)도 있다. 시간대 컬럼은 `HH시MM분` 패턴으로만 고르고 나머지 표기는
+    여기서 정규화해, 어느 연도판을 읽어도 같은 스키마가 나오게 한다.
     """
     df = pd.read_csv(path, encoding="cp949")
+    df.columns = [str(c).strip() for c in df.columns]
     id_vars = ["요일구분", "호선", "역번호", "출발역", "상하구분"]
-    time_cols = [c for c in df.columns if c not in id_vars]
+    for col in ("요일구분", "출발역", "상하구분"):
+        df[col] = df[col].astype("string").str.strip()
+    # `1` / `"1"` 표기를 `"1호선"`으로 맞춘다(2023·2024판).
+    line = df["호선"].astype("string").str.strip()
+    df["호선"] = line.where(~line.str.fullmatch(r"\d+"), line + "호선")
+    # `연번` 같은 부가 컬럼이 시간대로 섞여 들어가지 않게 패턴으로만 고른다.
+    time_cols = [c for c in df.columns if c not in id_vars and _CSV_TIME_SLOT_PATTERN.match(c)]
     long_df = df.melt(
         id_vars=id_vars, value_vars=time_cols, var_name="time_slot", value_name="congestion_pct"
     )
