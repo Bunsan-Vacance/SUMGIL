@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 AI_ROOT = HERE.parents[2]
 
 
-def build(gru: str, gru_no_trunc: str) -> nbf.NotebookNode:
+def build(gru: str, gru_no_trunc: str, lstm: str) -> nbf.NotebookNode:
     nb = nbf.v4.new_notebook()
     cells = []
 
@@ -58,16 +58,17 @@ figstyle.apply(inline=True)
 
 GRU = AI_ROOT / "{gru}"
 GRU_NT = AI_ROOT / "{gru_no_trunc}"
+LSTM = AI_ROOT / "{lstm}"
 VAL = AI_ROOT / "data" / "CROWD" / "interim" / "validation"
 
 metrics = pd.read_parquet(VAL / "dl_resid_metrics.parquet")
 grades = pd.DataFrame(json.loads((VAL / "dl_resid_grades.json").read_text(encoding="utf-8")))
 timing = json.loads((VAL / "dl_resid_timing.json").read_text(encoding="utf-8"))
-meta = {{p.name: json.loads((p / "meta.json").read_text(encoding="utf-8")) for p in (GRU, GRU_NT)}}
-history = {{p.name: pd.DataFrame(json.loads((p / "history.json").read_text(encoding="utf-8"))) for p in (GRU, GRU_NT)}}
+meta = {{p.name: json.loads((p / "meta.json").read_text(encoding="utf-8")) for p in (GRU, GRU_NT, LSTM)}}
+history = {{p.name: pd.DataFrame(json.loads((p / "history.json").read_text(encoding="utf-8"))) for p in (GRU, GRU_NT, LSTM)}}
 
 SCEN = ["full", "d7_only", "d1_only", "no_lag"]
-SERIES = ["lightgbm", "gru", "gru_no_trunc"]
+SERIES = ["lightgbm", "gru", "gru_no_trunc", "lstm"]
 print(f"지표 {{len(metrics):,}}행 · 평가 행 {{metrics['n'].max():,}} · 하루치 CPU 추론 {{timing['seconds']}}s")
 pd.DataFrame(
     [{{"아티팩트": k, "증강": v["truncation"], "장치": v["device"], "epochs_run": v["epochs_run"],
@@ -82,7 +83,7 @@ pd.DataFrame(
 
     cells.append(
         nbf.v4.new_code_cell("""fig, axes = plt.subplots(1, 2, figsize=(13, 4.5), sharey=True)
-for ax, (name, h) in zip(axes, history.items()):
+for ax, (name, h) in zip(axes, list(history.items())[:2]):
     ax.plot(h["epoch"], h["train_loss"], label="train", lw=2)
     ax.plot(h["epoch"], h["valid_loss"], label="valid (full 이력)", lw=2)
     ax.plot(h["epoch"], h["valid_loss_trunc"], label="valid (절단 혼합)", lw=2, ls="--")
@@ -109,9 +110,9 @@ def bars(metric, ax, target):
     piv = tot[tot["target"] == target].pivot_table(index="scenario", columns="series", values=metric)
     piv = piv.reindex(index=SCEN, columns=SERIES)
     x = np.arange(len(SCEN))
-    w = 0.26
+    w = 0.2
     for i, s in enumerate(SERIES):
-        ax.bar(x + (i - 1) * w, piv[s], w, label=s)
+        ax.bar(x + (i - 1.5) * w, piv[s], w, label=s)
     ax.axhline(0, color="0.2", lw=1)
     ax.set_xticks(x, SCEN)
     ax.set_title(f"{metric} · {target}")
@@ -145,7 +146,7 @@ base = float(grades.loc[grades["run"] == "lookup", "등급_일치율_%"].iloc[0]
 fig, ax = plt.subplots(figsize=(9, 4.5))
 x = np.arange(len(SCEN))
 for i, s in enumerate(SERIES):
-    ax.bar(x + (i - 1) * 0.26, piv[s], 0.26, label=s)
+    ax.bar(x + (i - 1.5) * 0.2, piv[s], 0.2, label=s)
 ax.axhline(base, color="0.2", ls="--", lw=1.5, label=f"lookup {base:.2f}%")
 ax.set_xticks(x, SCEN)
 ax.set_ylim(90, 98)
@@ -157,7 +158,7 @@ piv.round(3)"""))
 
     cells.append(nbf.v4.new_markdown_cell("""## 4. 호선·요일유형 슬라이스
 
-`full`에서 GRU가 lookup보다 나쁜 유일한 호선이 2호선(순환선·지선 방향 체계)이다.
+`full`에서 GRU가 lookup보다 나쁜 유일한 호선이 2호선(순환선·지선 방향 체계)이고, LSTM은 더 나쁘다(−8.98).
 반대로 8·4호선처럼 규모가 작은 호선에서는 GRU가 LightGBM을 앞선다."""))
 
     cells.append(nbf.v4.new_code_cell("""fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
@@ -184,7 +185,8 @@ fig"""))
    **붕괴하지 않는다**는 성질은 확인됐다.
 3. **절단 증강의 대가는 작다.** 두 모델의 full 검증 손실은 0.2917 vs 0.2903으로 거의 같고, 2025 `full`에서는
    승차 −3.4%p / 하차 +7.0%p로 방향이 엇갈린다 — 시드 1개로는 (c)를 판정할 수 없다(145에서 시드 반복).
-4. **CPU 하루치 추론 0.2초.** 운영 기준(10분) 대비 문제가 되지 않는다.
+4. **LSTM(1회 실험)은 GRU와 구분되지 않는다.** 검증 손실 0.2921 vs 0.2917(0.13% 차), `full`은 승차 +7.31 vs +6.99·하차 +7.12 vs +13.72, `no_lag`은 GRU가 낫다. 계열 이름은 `gru`로 확정하고 LSTM은 기록용 1행으로 닫는다.
+5. **CPU 하루치 추론 0.2초.** 운영 기준(10분) 대비 문제가 되지 않는다.
 
 다음(145): 판정 지표 확정, 가용성별 예측기 3단 선택(LightGBM / GRU / lookup), 손실·정규화 1파라미터 실험,
 2호선 열세 원인. 미해결 목록 전체는 [`RESULTS.md`](./RESULTS.md) 5절."""))
@@ -202,10 +204,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--gru", required=True)
     ap.add_argument("--gru-no-trunc", required=True)
+    ap.add_argument("--lstm", required=True)
     ap.add_argument("--out", default=str(HERE / "dl_resid_check.ipynb"))
     args = ap.parse_args()
 
-    nb = build(args.gru.replace("\\", "/"), args.gru_no_trunc.replace("\\", "/"))
+    nb = build(
+        args.gru.replace("\\", "/"),
+        args.gru_no_trunc.replace("\\", "/"),
+        args.lstm.replace("\\", "/"),
+    )
     NotebookClient(nb, timeout=600, resources={"metadata": {"path": str(AI_ROOT)}}).execute()
     nbf.write(nb, args.out)
     print(f"[노트북] 저장(출력 포함): {args.out}")
