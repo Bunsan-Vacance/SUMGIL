@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.graph;
 
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -139,6 +140,33 @@ public final class RouteGraph {
         return outgoingEdges(fromNode).stream()
                 .filter(edge -> edge.toNode().equals(toNode))
                 .findFirst();
+    }
+
+    /**
+     * 주어진 수단만 남긴 하위 그래프를 새로 만든다(S15P21A104-185, 허용 수단 조합별 대체 후보 탐색용).
+     *
+     * <p>탐색 알고리즘({@link com.ssafy.s15p21a104.domain.route.finder.ShortestPathFinder})은
+     * 손대지 않는다 — 같은 알고리즘을 여러 하위 그래프에 반복 적용해 조합별 후보를 얻는다.
+     * 원본 그래프는 바꾸지 않는다(이 그래프도 불변).
+     *
+     * @param allowedModes 남길 수단 집합. 이 집합에 없는 수단의 엣지는 전부 제외한다
+     * @return 허용 수단 엣지만으로 다시 조립한 그래프
+     */
+    public RouteGraph filterByModes(Set<TravelMode> allowedModes) {
+        Set<String> filteredNodes = new LinkedHashSet<>();
+        Map<String, List<Edge>> filteredAdjacency = new LinkedHashMap<>();
+        Map<String, Set<String>> filteredLines = new LinkedHashMap<>();
+        for (Edge edge : edges()) {
+            if (!allowedModes.contains(edge.mode())) {
+                continue;
+            }
+            filteredNodes.add(edge.fromNode());
+            filteredNodes.add(edge.toNode());
+            filteredAdjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
+            filteredLines.computeIfAbsent(edge.fromNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
+            filteredLines.computeIfAbsent(edge.toNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
+        }
+        return RouteGraph.of(filteredNodes, filteredAdjacency, filteredLines);
     }
 
     /**

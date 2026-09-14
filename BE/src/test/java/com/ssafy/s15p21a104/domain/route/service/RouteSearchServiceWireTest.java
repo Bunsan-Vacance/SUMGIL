@@ -127,7 +127,8 @@ class RouteSearchServiceWireTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다.
+        assertTrue(result.size() >= 1);
         assertEquals(1, result.get(0).legs().size());
         assertEquals(TravelMode.BIKE, result.get(0).legs().get(0).mode());
         assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes());
