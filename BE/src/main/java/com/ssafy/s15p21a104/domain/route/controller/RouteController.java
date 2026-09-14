@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.controller;
 
+import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
@@ -27,5 +28,10 @@ public class RouteController implements RouteApi {
     ) {
         return ApiResult.ok(
                 routeSearchService.search(originStationId, destStationId, modes, priority, departureTime));
+    }
+
+    @Override
+    public ApiResult<List<RouteSearchResponse>> searchByCoordinate(CoordinateRouteSearchRequest request) {
+        return ApiResult.ok(routeSearchService.searchByCoordinate(request));
     }
 }
