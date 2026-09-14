@@ -10,7 +10,7 @@
 ```
 z      [S, D, 20, 2]   z-잔차 = resid / std(역, 슬롯)   없는 자리 0
 mask   [S, D, 20]      1 있음 / 0 없음                    (0은 결측 표시일 뿐 값이 아니다 — 원칙 8)
-x_seq  [B, N, 20, 7]   채널 = z 2 + mask 1 + 그 날 요일유형 one-hot 4      N = seq_days, i=0이 D−N
+x_seq  [B, N, 20, C]   채널 = z 2 + mask 1 + 그 날 요일유형 one-hot 4 (+ 입력 안별 추가)  N = seq_days, i=0이 D−N
 x_stat [B, 9]          대상일 요일유형 one-hot 4 + 대상일 이벤트 5(학습 구간 표준화, 없음=0)
 station[B]             역 인덱스(임베딩용, `station_ids` 순서)
 y      [B, 20, 2]      대상일 z-잔차,  y_mask [B, 20]
@@ -23,6 +23,26 @@ y      [B, 20, 2]      대상일 z-잔차,  y_mask [B, 20]
 - **이벤트**: 개수 컬럼과 `festival_min_duration_days`. 축제가 없는 날의 최단 기간은 원본이 NaN인데
   `festival_count=0`이 이미 "없음"을 말하므로 표준화 전에 0으로 둔다(입력 텐서에 NaN을 둘 수 없다).
 - 분할 경계는 144 계획대로 고정한다: 2024-01~10 학습 / 2024-11~12 검증 / 2025 평가(`SPLITS`).
+
+## 입력 설계 변형(198)
+
+`seq_features`·`use_static_events`로 채널 구성을 고른다. 144는 `base` + 정적 이벤트 하나만 썼는데,
+LightGBM 쪽은 87·89·90·93에서 피처 세트 7개를 비교해 고른 것이라 `full` 격차가 "시퀀스 모델의 한계"인지
+"입력 1안의 한계"인지 구분이 안 됐다.
+
+| `seq_features` | 채널 | 추가되는 것 |
+| --- | --- | --- |
+| `base` | 7 | (144 그대로) |
+| `neighbor` | 16 | 이웃 잔차 z 6(prev·next·xfer × 승하) + 이웃 mask 3 |
+| `events_hist` | 12 | 이력 각 날의 이벤트 5(정적 이벤트와 같은 표준화 값을 그 날 채널로) |
+
+- 이웃 잔차는 파생 캐시의 `nb_{side}_{target}_resid`(같은 날·같은 슬롯 이웃 잔차 평균)를 쓰고,
+  **이웃 역 자신의 std**로 나눈다(`neighbor_scale`). 한 side에 이웃이 여럿이면(분기점·환승 다중)
+  잔차가 이미 평균이므로 std도 같은 이웃 집합의 평균을 쓴다. 이웃이 없으면 값 0 + mask 0.
+- **이력 날(D−1…D−14)의 이웃 잔차는 D−1 시점에 확정된 과거 값**이라 D−1 원천 전제를 깨지 않는다.
+  대상일 이웃 값은 넣지 않는다(창이 `t−N…t−1`이라 구조적으로 들어갈 자리가 없다).
+- 이력 절단·시나리오 마스킹은 **관측에서 온 채널만** 지운다(`observed_channels`). 요일유형·이벤트는
+  달력 정보라 이력이 없어도 알 수 있으므로 남긴다.
 """
 
 from __future__ import annotations
@@ -37,6 +57,7 @@ import pandas as pd
 
 from app.CROWD.pipeline.features import SLOT_ORDER
 from app.CROWD.pipeline.lookup import TARGETS
+from app.CROWD.pipeline.masking import apply_scenario, truncate_history
 
 DAY_TYPES = ["평일", "토요일", "일요일", "휴일"]
 EVENT_STATIC_COLS = [
@@ -50,8 +71,71 @@ RESID_COLS = [f"{t}_resid" for t in TARGETS]
 STD_COLS = [f"{t}_std" for t in TARGETS]
 N_SLOTS = len(SLOT_ORDER)
 N_TARGETS = len(TARGETS)
-SEQ_CHANNELS = N_TARGETS + 1 + len(DAY_TYPES)  # z 2 + mask 1 + 요일유형 4 = 7
+SEQ_CHANNELS = N_TARGETS + 1 + len(DAY_TYPES)  # z 2 + mask 1 + 요일유형 4 = 7 (base)
 STAT_FEATURES = len(DAY_TYPES) + len(EVENT_STATIC_COLS)  # 9
+
+# ── 입력 설계 변형(198) ──
+NEIGHBOR_SIDES = ("prev", "next", "xfer")
+NEIGHBOR_RESID_COLS = [f"nb_{side}_{t}_resid" for side in NEIGHBOR_SIDES for t in TARGETS]
+SEQ_FEATURE_SETS = ("base", "neighbor", "events_hist")
+N_NEIGHBOR_CHANNELS = len(NEIGHBOR_RESID_COLS) + len(NEIGHBOR_SIDES)  # z 6 + mask 3 = 9
+
+
+def seq_channels_for(seq_features: str = "base") -> int:
+    """입력 안별 시퀀스 채널 수. `model.ResidualGRU(seq_channels=…)`에 그대로 넣는다."""
+    if seq_features not in SEQ_FEATURE_SETS:
+        raise ValueError(f"모르는 seq_features {seq_features!r} — {list(SEQ_FEATURE_SETS)} 중 하나")
+    if seq_features == "neighbor":
+        return SEQ_CHANNELS + N_NEIGHBOR_CHANNELS
+    if seq_features == "events_hist":
+        return SEQ_CHANNELS + len(EVENT_STATIC_COLS)
+    return SEQ_CHANNELS
+
+
+def stat_features_for(use_static_events: bool = True) -> int:
+    """정적 피처 폭 — 이벤트 스위치를 끄면 대상일 요일유형 one-hot 4만 남는다."""
+    return len(DAY_TYPES) + (len(EVENT_STATIC_COLS) if use_static_events else 0)
+
+
+def seq_feature_columns(seq_features: str = "base") -> list[str]:
+    """입력 안이 파생 프레임에서 **추가로** 요구하는 열(`load_derived_slim(columns=…)`용)."""
+    return list(NEIGHBOR_RESID_COLS) if seq_features == "neighbor" else []
+
+
+def observed_channels(seq_features: str = "base") -> list[int]:
+    """실측에서 온 채널 인덱스(값 + mask). 이력 절단·시나리오 마스킹이 지우는 대상이다.
+
+    요일유형(3~6)·이력 이벤트(`events_hist`의 7~11)는 달력에서 오는 값이라 이력이 없어도 알 수 있고,
+    지우면 "그 날이 무슨 날이었는지"까지 모르게 만든다 — 144 `apply_truncation`과 같은 판단이다.
+    """
+    idx = [0, 1, 2]
+    if seq_features == "neighbor":
+        idx += list(range(SEQ_CHANNELS, SEQ_CHANNELS + N_NEIGHBOR_CHANNELS))
+    return idx
+
+
+def _mask_observed(x_seq: np.ndarray, seq_features: str, fn) -> np.ndarray:
+    """관측 채널만 골라 `fn(values, dummy_mask)`을 먹이고 되돌려 놓는다.
+
+    마스크 채널도 "값"으로 넘겨 같은 keep로 0이 되게 한다(마스크 0 = 없음).
+    """
+    idx = observed_channels(seq_features)
+    dummy = np.ones(x_seq.shape[:-1], dtype=x_seq.dtype)  # [B, N, 20]
+    new_obs, _ = fn(x_seq[..., idx], dummy)
+    out = x_seq.copy()
+    out[..., idx] = new_obs
+    return out
+
+
+def truncate_seq(x_seq: np.ndarray, k, seq_features: str = "base") -> np.ndarray:
+    """이력 앞쪽 `k`일 절단(표본별 배열 가능)을 시퀀스 텐서의 관측 채널에 적용한다."""
+    return _mask_observed(x_seq, seq_features, lambda v, m: truncate_history(v, m, k, axis=1))
+
+
+def scenario_seq(x_seq: np.ndarray, scenario: str, seq_features: str = "base") -> np.ndarray:
+    """`masking.SCENARIOS` 시나리오를 시퀀스 텐서의 관측 채널에 적용한다."""
+    return _mask_observed(x_seq, seq_features, lambda v, m: apply_scenario(v, m, scenario, axis=1))
+
 
 # 144 계획의 시간 분할(포함 구간). 2025는 평가 전용 — early stopping에 쓰지 않는다.
 SPLITS: dict[str, tuple[str, str]] = {
@@ -83,6 +167,23 @@ def fit_event_stats(train_derived: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({"feature": EVENT_STATIC_COLS, "mean": mean.values, "std": std.values})
 
 
+def neighbor_scale(neighbor_map: pd.DataFrame, scale: pd.DataFrame) -> pd.DataFrame:
+    """`(station_no, side, time_slot)` → **이웃 역 자신의** 잔차 std.
+
+    `scale`은 `fit_scale` 결과(역×슬롯). 이웃 역 번호로 조인해 그 역의 std를 가져온다 —
+    파생 캐시의 `nb_*_resid`는 "이웃 역 잔차의 평균"이라 이 역의 std로 나누면 규모가 어긋난다.
+    한 side에 이웃이 여럿이면(분기점·다중 환승) 잔차와 같은 집합의 std 평균을 쓴다.
+    """
+    pairs = neighbor_map[["station_no", "side", "neighbor_station_no"]].drop_duplicates()
+    joined = pairs.merge(
+        scale.rename(columns={"station_no": "neighbor_station_no"}),
+        on="neighbor_station_no",
+        how="inner",
+    )
+    out = joined.groupby(["station_no", "side", "time_slot"], observed=True)[STD_COLS].mean()
+    return out.reset_index()
+
+
 def _date_index(dates: pd.Series | pd.DatetimeIndex, start: pd.Timestamp) -> np.ndarray:
     return ((pd.DatetimeIndex(dates).normalize() - start).days).to_numpy()
 
@@ -98,6 +199,14 @@ class SequencePanel:
     day_type: np.ndarray  # [D] int8 — DAY_TYPES 인덱스
     events: np.ndarray  # [S, D, 5] float32 표준화
     std: np.ndarray  # [S, 20, 2] float32 — 역변환용
+    seq_features: str = "base"
+    use_static_events: bool = True
+    nb_z: np.ndarray | None = None  # [S, D, 20, 6] float32 — `neighbor`일 때만
+    nb_mask: np.ndarray | None = None  # [S, D, 20, 3] float32 — side별 1 있음 / 0 없음
+
+    @property
+    def seq_channels(self) -> int:
+        return seq_channels_for(self.seq_features)
 
     # ── 생성 ──
     @classmethod
@@ -108,13 +217,30 @@ class SequencePanel:
         event_stats: pd.DataFrame,
         holidays: pd.DataFrame | None = None,
         station_ids: Sequence[int] | None = None,
+        seq_features: str = "base",
+        use_static_events: bool = True,
+        neighbor_map: pd.DataFrame | None = None,
     ) -> SequencePanel:
         """파생 프레임(학습·검증·평가 전부 포함 가능)을 밀집 배열로 pivot한다.
 
         `station_ids`를 주면 그 순서를 강제한다(학습 때 저장한 순서로 추론 패널을 만들 때).
         표에 없는 (역, 슬롯)은 std가 없어 z를 만들 수 없으므로 마스크 0으로 남긴다.
+        `seq_features="neighbor"`면 `derived`에 `nb_*_resid` 6열이, `neighbor_map`에 이웃 표가 필요하다
+        (`adjacency.build_neighbor_map`/`build_transfer_map`을 concat한 것).
         """
-        df = derived[["date", "station_no", "time_slot", "day_type", *RESID_COLS]].copy()
+        if seq_features not in SEQ_FEATURE_SETS:
+            raise ValueError(
+                f"모르는 seq_features {seq_features!r} — {list(SEQ_FEATURE_SETS)} 중 하나"
+            )
+        extra = seq_feature_columns(seq_features)
+        present = [c for c in extra if c in derived.columns]
+        if extra and not present:
+            raise ValueError(f"seq_features={seq_features!r}에 필요한 열이 없다: {extra}")
+        df = derived[["date", "station_no", "time_slot", "day_type", *RESID_COLS, *present]].copy()
+        # side 하나가 통째로 없는 토폴로지(환승 없는 노선 등)는 그 side만 NaN → 마스크 0
+        for c in extra:
+            if c not in present:
+                df[c] = np.nan
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
         if station_ids is None:
             station_ids = np.sort(df["station_no"].unique())
@@ -152,6 +278,37 @@ class SequencePanel:
         z[s_idx[ok], d_idx[ok], slot_idx[ok]] = z_rows[ok]
         mask[s_idx[ok], d_idx[ok], slot_idx[ok]] = 1.0
 
+        # 이웃 잔차 z [S, D, 20, 6] · side 마스크 [S, D, 20, 3] — `neighbor`일 때만
+        nb_z = nb_mask = None
+        if seq_features == "neighbor":
+            if neighbor_map is None or not len(neighbor_map):
+                raise ValueError("seq_features='neighbor'는 neighbor_map이 필요하다")
+            nb_std = np.full((S, N_SLOTS, len(NEIGHBOR_RESID_COLS)), np.nan, dtype="float32")
+            ns = neighbor_scale(neighbor_map, scale)
+            ns = ns[ns["station_no"].isin(station_ids)]
+            for i, side in enumerate(NEIGHBOR_SIDES):
+                part = ns[ns["side"] == side]
+                if not len(part):
+                    continue
+                nb_std[
+                    s_lookup.loc[part["station_no"]].to_numpy(),
+                    pd.Categorical(part["time_slot"], categories=SLOT_ORDER).codes,
+                    slice(2 * i, 2 * i + N_TARGETS),
+                ] = part[STD_COLS].to_numpy(dtype="float32")
+            nb_resid = df[NEIGHBOR_RESID_COLS].to_numpy(dtype="float32")
+            with np.errstate(invalid="ignore", divide="ignore"):
+                nb_rows = nb_resid / nb_std[s_idx, slot_idx]
+            # side 하나는 승·하차가 같은 이웃 행에서 오므로 둘 다 유한할 때만 있음으로 본다
+            side_ok = np.isfinite(nb_rows).reshape(-1, len(NEIGHBOR_SIDES), N_TARGETS).all(axis=2)
+            nb_rows = np.nan_to_num(nb_rows, nan=0.0, posinf=0.0, neginf=0.0)
+            nb_rows = (
+                nb_rows.reshape(-1, len(NEIGHBOR_SIDES), N_TARGETS) * side_ok[..., None]
+            ).reshape(nb_rows.shape)
+            nb_z = np.zeros((S, D, N_SLOTS, len(NEIGHBOR_RESID_COLS)), dtype="float32")
+            nb_mask = np.zeros((S, D, N_SLOTS, len(NEIGHBOR_SIDES)), dtype="float32")
+            nb_z[s_idx, d_idx, slot_idx] = nb_rows
+            nb_mask[s_idx, d_idx, slot_idx] = side_ok.astype("float32")
+
         # 요일유형 [D] — 패널 값 우선, 빈 날은 달력
         day_type = _day_type_index(df, dates, holidays)
 
@@ -182,6 +339,10 @@ class SequencePanel:
             day_type=day_type,
             events=events,
             std=np.nan_to_num(std, nan=1.0),
+            seq_features=seq_features,
+            use_static_events=use_static_events,
+            nb_z=nb_z,
+            nb_mask=nb_mask,
         )
 
     # ── 표본 인덱스 ──
@@ -217,10 +378,22 @@ class SequencePanel:
         m_hist = self.mask[s_b, off_c] * valid[..., None]  # [B, N, 20]
         dt_hist = np.eye(len(DAY_TYPES), dtype="float32")[self.day_type[off_c]]  # [B, N, 4]
         dt_hist = np.broadcast_to(dt_hist[:, :, None, :], (*m_hist.shape, len(DAY_TYPES)))
-        x_seq = np.concatenate([z_hist, m_hist[..., None], dt_hist], axis=-1).astype("float32")
+        parts = [z_hist, m_hist[..., None], dt_hist]
+        if self.seq_features == "neighbor":
+            parts.append(self.nb_z[s_b, off_c] * valid[..., None, None])  # [B, N, 20, 6]
+            parts.append(self.nb_mask[s_b, off_c] * valid[..., None, None])  # [B, N, 20, 3]
+        elif self.seq_features == "events_hist":
+            ev_hist = self.events[s_b, off_c] * valid[..., None]  # [B, N, 5]
+            parts.append(
+                np.broadcast_to(ev_hist[:, :, None, :], (*m_hist.shape, len(EVENT_STATIC_COLS)))
+            )
+        x_seq = np.concatenate(parts, axis=-1).astype("float32")
 
         dt_target = np.eye(len(DAY_TYPES), dtype="float32")[self.day_type[d_idx]]  # [B, 4]
-        x_stat = np.concatenate([dt_target, self.events[s_idx, d_idx]], axis=-1).astype("float32")
+        stat_parts = [dt_target]
+        if self.use_static_events:
+            stat_parts.append(self.events[s_idx, d_idx])
+        x_stat = np.concatenate(stat_parts, axis=-1).astype("float32")
         return {
             "x_seq": x_seq,
             "x_stat": x_stat,

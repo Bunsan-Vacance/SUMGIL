@@ -15,6 +15,11 @@ from app.CROWD.pipeline.dl.dataset import (
     SequencePanel,
     fit_event_stats,
     fit_scale,
+    observed_channels,
+    scenario_seq,
+    seq_channels_for,
+    stat_features_for,
+    truncate_seq,
 )
 from app.CROWD.pipeline.features import SLOT_ORDER
 from app.CROWD.pipeline.masking import truncate_history
@@ -184,3 +189,177 @@ def test_build_with_fixed_station_order_and_scale_roundtrip(panel, tmp_path):
     path = sp2.save_scale(tmp_path)
     saved = pd.read_parquet(path)
     assert len(saved) == 3 * N_SLOTS and saved["station_no"].iloc[0] == 333
+
+
+# ── 198: 입력 설계 변형(채널 구성 옵션) ──
+
+NEIGHBOR_MAP = pd.DataFrame(
+    {
+        "station_no": [101, 205, 205, 333],
+        "line": ["1호선"] * 4,
+        "segment": ["본선"] * 4,
+        "side": ["next", "prev", "next", "prev"],
+        "neighbor_station_no": [205, 101, 333, 205],
+    }
+)  # 101 ─ 205 ─ 333 직선. 101은 prev 없음, 333은 next 없음, 아무도 xfer가 없다
+
+
+def _derived_with_neighbors() -> pd.DataFrame:
+    """`nb_{side}_{target}_resid`를 파생 캐시와 같은 규칙(같은 날·같은 슬롯 이웃 잔차)으로 붙인다."""
+    from app.CROWD.pipeline.adjacency import attach_neighbor_features
+
+    df = _derived()
+    return attach_neighbor_features(df, NEIGHBOR_MAP, ["boarding_resid", "alighting_resid"])
+
+
+def test_seq_channels_and_stat_features_per_variant():
+    assert seq_channels_for("base") == 7 == SEQ_CHANNELS
+    assert seq_channels_for("events_hist") == 12
+    assert seq_channels_for("neighbor") == 16
+    assert stat_features_for(True) == STAT_FEATURES == 9
+    assert stat_features_for(False) == 4
+    with pytest.raises(ValueError):
+        seq_channels_for("weather")
+
+
+def test_neighbor_variant_channel_count_and_z_uses_neighbor_std():
+    derived = _derived_with_neighbors()
+    train = derived[derived["date"] <= "2024-03-14"]
+    scale = fit_scale(train)
+    sp = SequencePanel.build(
+        derived,
+        scale,
+        fit_event_stats(train),
+        holidays=NO_HOLIDAYS,
+        seq_features="neighbor",
+        neighbor_map=NEIGHBOR_MAP,
+    )
+    s_idx, d_idx = sp.sample_index("2024-03-15", "2024-03-15")
+    batch = sp.make_batch(s_idx, d_idx, seq_days=7)
+    assert batch["x_seq"].shape == (len(STATIONS), 7, N_SLOTS, 16)
+    assert batch["x_stat"].shape == (len(STATIONS), STAT_FEATURES)
+
+    # 205의 prev 이웃은 101 하나 → 101의 잔차를 **101의 std**로 나눈 값이어야 한다
+    s205 = int(np.where(sp.station_ids == 205)[0][0])
+    s101 = int(np.where(sp.station_ids == 101)[0][0])
+    day = pd.Timestamp("2024-03-14")
+    d = (day - DATES[0]).days
+    slot = SLOT_ORDER.index("09-10")
+    raw101 = float(
+        derived.loc[
+            (derived["station_no"] == 101)
+            & (derived["date"] == day)
+            & (derived["time_slot"] == "09-10"),
+            "boarding_resid",
+        ].iloc[0]
+    )
+    std101 = float(
+        scale.loc[
+            (scale["station_no"] == 101) & (scale["time_slot"] == "09-10"), "boarding_std"
+        ].iloc[0]
+    )
+    assert sp.nb_z[s205, d, slot, 0] == pytest.approx(raw101 / std101, rel=1e-5)
+    # 자기 std로 나눈 값과는 다르다(205의 잔차 규모가 101의 2배)
+    assert sp.nb_z[s205, d, slot, 0] != pytest.approx(raw101 / float(sp.std[s205, slot, 0]))
+    # 같은 자리 z는 여전히 자기 잔차 / 자기 std
+    assert sp.z[s101, d, slot, 0] == pytest.approx(raw101 / std101, rel=1e-5)
+
+
+def test_neighbor_mask_zero_when_no_neighbor_on_side():
+    derived = _derived_with_neighbors()
+    train = derived[derived["date"] <= "2024-03-14"]
+    sp = SequencePanel.build(
+        derived,
+        fit_scale(train),
+        fit_event_stats(train),
+        holidays=NO_HOLIDAYS,
+        seq_features="neighbor",
+        neighbor_map=NEIGHBOR_MAP,
+    )
+    d = (pd.Timestamp("2024-03-14") - DATES[0]).days
+    s101 = int(np.where(sp.station_ids == 101)[0][0])
+    s333 = int(np.where(sp.station_ids == 333)[0][0])
+    s205 = int(np.where(sp.station_ids == 205)[0][0])
+    # side 순서 prev·next·xfer — 101은 prev 없음, 333은 next 없음, 전원 xfer 없음
+    assert sp.nb_mask[s101, d, :, 0].sum() == 0 and sp.nb_mask[s101, d, :, 1].all()
+    assert sp.nb_mask[s333, d, :, 1].sum() == 0 and sp.nb_mask[s333, d, :, 0].all()
+    assert sp.nb_mask[:, :, :, 2].sum() == 0
+    assert np.all(sp.nb_z[s101, d, :, 0:2] == 0)  # 마스크 0 자리의 값은 0
+    assert sp.nb_mask[s205, d, :, :2].all()  # 가운데 역은 prev·next 둘 다 있다
+
+
+def test_events_hist_variant_broadcasts_event_channels_per_history_day():
+    derived = _derived()
+    train = derived[derived["date"] <= "2024-03-14"]
+    sp = SequencePanel.build(
+        derived,
+        fit_scale(train),
+        fit_event_stats(train),
+        holidays=NO_HOLIDAYS,
+        seq_features="events_hist",
+    )
+    s_idx, d_idx = sp.sample_index("2024-03-15", "2024-03-15")
+    batch = sp.make_batch(s_idx, d_idx, seq_days=7)
+    assert batch["x_seq"].shape == (len(STATIONS), 7, N_SLOTS, 12)
+    # 이벤트 채널은 하루 안에서 슬롯과 무관하게 같고, 그 날의 정적 이벤트 값과 일치한다
+    ev = batch["x_seq"][0, :, :, 7:]
+    assert np.allclose(ev, ev[:, :1, :])
+    hist_days = d_idx[0] - np.arange(7, 0, -1)
+    np.testing.assert_allclose(ev[:, 0, :], sp.events[s_idx[0], hist_days])
+
+
+def test_static_events_switch_drops_stat_width_to_four():
+    derived = _derived()
+    train = derived[derived["date"] <= "2024-03-14"]
+    sp = SequencePanel.build(
+        derived,
+        fit_scale(train),
+        fit_event_stats(train),
+        holidays=NO_HOLIDAYS,
+        use_static_events=False,
+    )
+    s_idx, d_idx = sp.sample_index("2024-03-15", "2024-03-15")
+    batch = sp.make_batch(s_idx, d_idx, seq_days=7)
+    assert batch["x_stat"].shape == (len(STATIONS), 4)
+    assert np.allclose(batch["x_stat"].sum(-1), 1.0)  # 요일유형 one-hot만 남는다
+    assert batch["x_seq"].shape[-1] == SEQ_CHANNELS  # 시퀀스 채널은 그대로
+
+
+def test_truncate_seq_clears_neighbor_channels_but_keeps_calendar():
+    derived = _derived_with_neighbors()
+    train = derived[derived["date"] <= "2024-03-14"]
+    sp = SequencePanel.build(
+        derived,
+        fit_scale(train),
+        fit_event_stats(train),
+        holidays=NO_HOLIDAYS,
+        seq_features="neighbor",
+        neighbor_map=NEIGHBOR_MAP,
+    )
+    s_idx, d_idx = sp.sample_index("2024-03-15", "2024-03-15")
+    x = sp.make_batch(s_idx, d_idx, seq_days=7)["x_seq"]
+    out = truncate_seq(x, np.array([0, 7, 3]), "neighbor")
+    assert np.all(out[1, :, :, observed_channels("neighbor")] == 0)  # 관측 채널 전부 0
+    assert np.allclose(out[1, :, :, 3:7], x[1, :, :, 3:7])  # 요일유형은 남는다
+    assert np.all(out[2, :3, :, 7:16] == 0) and np.allclose(out[2, 3:], x[2, 3:])
+    np.testing.assert_array_equal(out[0], x[0])  # k=0은 그대로
+
+
+def test_scenario_seq_keeps_only_named_lag_across_all_observed_channels():
+    derived = _derived_with_neighbors()
+    train = derived[derived["date"] <= "2024-03-14"]
+    sp = SequencePanel.build(
+        derived,
+        fit_scale(train),
+        fit_event_stats(train),
+        holidays=NO_HOLIDAYS,
+        seq_features="neighbor",
+        neighbor_map=NEIGHBOR_MAP,
+    )
+    s_idx, d_idx = sp.sample_index("2024-03-15", "2024-03-15")
+    x = sp.make_batch(s_idx, d_idx, seq_days=7)["x_seq"]
+    out = scenario_seq(x, "d1_only", "neighbor")
+    obs = observed_channels("neighbor")
+    assert np.all(out[:, :-1, :, obs] == 0)  # D−1 자리만 남는다
+    np.testing.assert_array_equal(out[:, -1, :, obs], x[:, -1, :, obs])
+    assert np.all(scenario_seq(x, "no_lag", "neighbor")[..., obs] == 0)

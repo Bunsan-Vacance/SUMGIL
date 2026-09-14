@@ -198,3 +198,122 @@ def test_scenario_switch_masks_history(artifact):
     assert predictor.scenario is None
     sel = (full["date"] == TARGET_DATE) & full["boarding_pred"].notna()
     assert not np.allclose(full.loc[sel, "boarding_pred"], no_lag.loc[sel, "boarding_pred"])
+
+
+# ── 198: `neighbor` 입력 안의 채널 복원(서빙 경로) ──
+
+STATION_NAMES = {101: "가역", 205: "나역", 333: "다역", 404: "가역"}  # 404는 101과 환승 노드
+SEGMENTS = [{"line": "1호선", "segment": "본선", "stations": STATIONS}]
+
+
+def _panel_with_names(dates: pd.DatetimeIndex) -> pd.DataFrame:
+    out = _panel(dates)
+    out["station_name"] = out["station_no"].map(STATION_NAMES)
+    out["line"] = "1호선"
+    return out
+
+
+def _neighbor_map() -> pd.DataFrame:
+    from app.CROWD.pipeline.adjacency import build_neighbor_map, build_transfer_map
+
+    nodes = pd.DataFrame(
+        {
+            "station_no": STATIONS,
+            "station_name": [STATION_NAMES[s] for s in STATIONS],
+            "line": "1호선",
+        }
+    )
+    return pd.concat([build_neighbor_map(SEGMENTS), build_transfer_map(nodes)], ignore_index=True)
+
+
+@pytest.fixture(scope="module")
+def neighbor_artifact(tmp_path_factory):
+    """`seq_features="neighbor"` 아티팩트 — 16채널을 meta로 복원하는지 보려고 1에폭만 학습한다."""
+    from app.CROWD.pipeline.adjacency import attach_neighbor_features
+    from app.CROWD.pipeline.dl.dataset import seq_channels_for, stat_features_for
+
+    panel = _panel_with_names(DATES)
+    lookup = DayTypeLookupBaseline().fit(panel)
+    derived = attach_neighbor_features(_derived(panel, lookup), _neighbor_map(), RESID_COLS)
+    train_d = derived[derived["date"] < VALID_FROM]
+    scale, stats = fit_scale(train_d), fit_event_stats(train_d)
+    sp = SequencePanel.build(
+        derived, scale, stats, seq_features="neighbor", neighbor_map=_neighbor_map()
+    )
+    model, history, best_epoch = train_one(
+        sp,
+        sp.sample_index(DATES[0], VALID_FROM - pd.Timedelta(days=1)),
+        sp.sample_index(VALID_FROM, DATES[-1]),
+        model_kind="gru",
+        seq_days=14,
+        hidden=8,
+        epochs=1,
+        patience=1,
+        seed=0,
+        device="cpu",
+        batch_size=64,
+        lr=1e-3,
+        p_full=0.0,
+        truncation=True,
+        quiet=True,
+    )
+    meta = {
+        "model_kind": "dl",
+        "model": "gru",
+        "seq_days": 14,
+        "hidden": 8,
+        "emb_dim": 16,
+        "mlp_hidden": 128,
+        "channels": seq_channels_for("neighbor"),
+        "seq_features": "neighbor",
+        "use_static_events": True,
+        "stat_features": stat_features_for(True),
+        "targets": TARGETS,
+        "lookup_keys": lookup.keys,
+        "station_ids": [int(s) for s in sp.station_ids],
+        "best_epoch": best_epoch,
+        "device": "cpu",
+    }
+    out = tmp_path_factory.mktemp("models") / "dl_gru_s14_neighbor_s0_test"
+    save_artifact(out, model, sp, lookup, stats, meta, history)
+    return out, panel
+
+
+def test_neighbor_artifact_restores_16_channels_from_meta(neighbor_artifact):
+    art, _ = neighbor_artifact
+    predictor = build_predictor("dl", artifact_dir=art)
+    inner = predictor._inner
+    assert inner.seq_features == "neighbor" and inner.use_static_events
+    assert inner.model.rnn.input_size == len(SLOT_ORDER) * 16
+
+
+def test_neighbor_predictor_needs_segments_and_uses_them(neighbor_artifact):
+    """이웃 표는 `predict(segments=…)`로만 만들 수 있다 — 빈 목록이면 명확한 오류."""
+    art, panel = neighbor_artifact
+    predictor = build_predictor("dl", artifact_dir=art)
+    window = _window(panel, history_days=14)
+    window["station_name"] = window["station_no"].map(STATION_NAMES)
+    window["line"] = "1호선"
+
+    out = predictor.predict(window, segments=SEGMENTS)
+    target = out[out["date"] == TARGET_DATE]
+    assert len(target) == len(STATIONS) * len(SLOT_ORDER)
+    assert target[[f"{t}_pred" for t in TARGETS]].notna().all().all()
+    assert (target["boarding_pred"] != target["boarding_lookup"]).mean() > 0.9
+
+    # 이웃 표가 아예 없으면(세그먼트 없음 + 역명 없음) 조용히 0으로 채우지 않고 막는다
+    bare = window.drop(columns=["station_name", "line"])
+    with pytest.raises(ValueError, match="이웃 표"):
+        predictor.predict(bare, segments=[])
+
+
+def test_seven_day_window_works_for_neighbor_artifact(neighbor_artifact):
+    """짧은 창(7일)에서도 이웃 채널이 같은 규칙으로 만들어진다 — 배치 기본 창."""
+    art, panel = neighbor_artifact
+    predictor = build_predictor("dl", artifact_dir=art)
+    w7 = _window(panel, history_days=7)
+    w7["station_name"] = w7["station_no"].map(STATION_NAMES)
+    w7["line"] = "1호선"
+    out = predictor.predict(w7, segments=SEGMENTS)
+    t7 = out[(out["date"] == TARGET_DATE) & (out["station_no"] == 205)]
+    assert len(t7) == len(SLOT_ORDER) and t7["boarding_pred"].notna().all()
