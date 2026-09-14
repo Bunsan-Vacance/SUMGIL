@@ -31,6 +31,7 @@ BE/
 │  ├─ application.yml         ← 커밋됨. 환경변수 참조만 있음 (비밀번호 없음)
 │  ├─ application-local.yml   ← Git 제외. 로컬 실제 접속 정보
 │  ├─ application-load.yml    ← 정적 적재 프로파일 (local,load 로 실행)
+│  ├─ application-collect.yml ← 실시간 수집기 프로파일 (local,collect 로 실행, docs/infra/collector.md)
 │  ├─ db/migration/           ← Flyway V1 스키마, V2 source 열 확대
 │  ├─ data/subway/            ← 지하철 정적 적재 원천 CSV·설정 (출처는 그 폴더 README)
 │  ├─ data/bus/               ← 버스 정류소·노선 원천 CSV (OA-15067 · OA-1095)
@@ -38,6 +39,7 @@ BE/
 │  └─ data/crowd/             ← 지하철혼잡도정보(15071311)·역번호 별칭 (출처는 그 폴더 README)
 ├─ src/main/java/.../load/    ← 정적 적재 로더 (load 프로파일, docs/db/load-subway.md · load-bus-bike.md)
 │                                prod 적재는 접속 경로가 달라 docs/db/load-prod.md 를 따른다
+├─ src/main/java/.../collect/ ← 실시간 수집기 — 외부 API 3종 → Kafka 프로듀서 (collect 프로파일, docs/infra/collector.md · kafka.md)
 ├─ docs/                      ← 이 폴더. api/db/global/infra/external/perf 로 나눠서 정리
 │                                (external: 외부 데이터 소스 조사·샘플, perf: 성능 측정 기록)
 ├─ scripts/external/          ← 외부 API 1회 호출 probe (node, 의존성 없음)
