@@ -37,6 +37,7 @@ BE/
 │  ├─ data/bike/              ← 따릉이 대여소 스냅샷(bikeList)·파일(OA-13252)
 │  └─ data/crowd/             ← 지하철혼잡도정보(15071311)·역번호 별칭 (출처는 그 폴더 README)
 ├─ src/main/java/.../load/    ← 정적 적재 로더 (load 프로파일, docs/db/load-subway.md · load-bus-bike.md)
+│                                prod 적재는 접속 경로가 달라 docs/db/load-prod.md 를 따른다
 ├─ docs/                      ← 이 폴더. api/db/global/infra/external/perf 로 나눠서 정리
 │                                (external: 외부 데이터 소스 조사·샘플, perf: 성능 측정 기록)
 ├─ scripts/external/          ← 외부 API 1회 호출 probe (node, 의존성 없음)
