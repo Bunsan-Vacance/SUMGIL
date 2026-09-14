@@ -9,7 +9,17 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
 
 ## 학습 구성
 
-- 표본 = (역, 대상일) 하나. 입력은 직전 `seq_days`일 × 20슬롯 × 7채널, 출력은 대상일 20슬롯 × 2.
+- 표본 = (역, 대상일) 하나. 입력은 직전 `seq_days`일 × 20슬롯 × C채널, 출력은 대상일 20슬롯 × 2.
+  C는 `--seq-features`가 정한다(198): `base` 7 · `events_hist` 12 · `neighbor` 16
+  (`dl/dataset.seq_channels_for`).
+- **정적 이벤트는 기본이 꺼짐이다(198 판정 1).** 144는 대상일 이벤트 5열을 정적 피처로 넣었는데,
+  2025 평가에서 그것을 빼면 `full` RMSE 개선율이 시드 3회 평균 +8.29 → **+20.17**(승), +16.43 → +22.60(하)로
+  오르고 `no_lag`도 −8.13 → +1.05로 뒤집힌다. 이벤트 표준화가 2024 분포에 묶여 2025에서 해로웠다는 뜻이다.
+  144 구성을 재현하려면 `--static-events`.
+- **이벤트 인코딩**(`--event-encoding`, 198 후속): 이벤트 5열을 z-점수로 넣으면 99%가 0인 희소 카운트라
+  학습 std가 0.07~0.13이고 이벤트 날 입력이 z 12.8~38.5로 튄다. `log1p_max`는 `log1p(x)/log1p(학습 최대)`로
+  학습 구간에서 0~1에 넣는다(`dl/dataset` "이벤트 인코딩"). 정적 이벤트를 끈 안에서는 이력 이벤트
+  채널(`--seq-features events_hist`)에만 영향이 있다.
 - 분할은 `dl/dataset.SPLITS`: 2024-01~10 학습 / 2024-11~12 검증(early stopping) / 2025 평가.
   검증으로 에폭만 고르고 **2024 전체로 재학습하지 않는다**(144 계획 4번 — 단순화, 기록).
 - **이력 절단 증강**: 표본마다 `k ~ U{0..seq_days}`로 앞쪽 k일을 마스크(`masking.sample_truncation`
@@ -30,6 +40,9 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
     python -m app.CROWD.pipeline.dl.train_dl --model gru                      # 전체(GPU 몇 분)
     python -m app.CROWD.pipeline.dl.train_dl --model gru --no-truncation      # 대조군
     python -m app.CROWD.pipeline.dl.train_dl --stations 20 --epochs 2         # 소표본 스모크
+    python -m app.CROWD.pipeline.dl.train_dl --seq-features neighbor          # 198 V1
+    python -m app.CROWD.pipeline.dl.train_dl --static-events                  # 198 V0(144 구성)
+    python -m app.CROWD.pipeline.dl.train_dl --huber-delta 3                  # 198 손실 실험
 """
 
 from __future__ import annotations
@@ -51,15 +64,22 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 from app.CROWD.pipeline.dataset import time_split
 from app.CROWD.pipeline.dl.dataset import (
+    EVENT_ENCODINGS,
+    SEQ_FEATURE_SETS,
+    SLIM_COLS,
     SPLITS,
     SequencePanel,
     fit_event_stats,
     fit_scale,
     load_derived_slim,
+    seq_channels_for,
+    seq_feature_columns,
+    stat_features_for,
+    truncate_seq,
 )
 from app.CROWD.pipeline.features import DERIVED_VERSION
 from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
-from app.CROWD.pipeline.masking import sample_truncation, truncate_history
+from app.CROWD.pipeline.masking import sample_truncation
 
 AI_ROOT = Path(__file__).resolve().parents[4]
 MODELS_DIR = AI_ROOT / "models" / "CROWD"
@@ -78,12 +98,16 @@ def resolve_device(name: str = "auto") -> str:
 # ── 데이터 ──
 def build_train_panel(
     stations: int | None = None,
+    seq_features: str = "base",
+    use_static_events: bool = True,
+    event_encoding: str = "zscore",
 ) -> tuple[SequencePanel, pd.DataFrame, pd.DataFrame]:
-    """2024 파생(잔차·요일유형·이벤트)만 읽어 밀집 패널·스케일·이벤트 통계를 만든다.
+    """2024 파생(잔차·요일유형·이벤트 + 입력 안이 요구하는 열)만 읽어 밀집 패널·스케일·통계를 만든다.
 
     스케일·이벤트 통계는 **학습 구간(2024-01~10)만**으로 fit한다 — 검증·평가 구간 통계가 스며들면 누수다.
+    `seq_features="neighbor"`면 파생 캐시의 `nb_*_resid` 6열을 더 읽고(재계산 없음) 이웃 표를 만든다.
     """
-    derived = load_derived_slim()
+    derived = load_derived_slim(columns=[*SLIM_COLS, *seq_feature_columns(seq_features)])
     derived = derived[derived["date"] < pd.Timestamp(SPLITS["eval"][0])]
     if stations:
         keep = np.sort(derived["station_no"].unique())[:stations]
@@ -91,9 +115,28 @@ def build_train_panel(
     tr_start, tr_end = SPLITS["train"]
     train_d = derived[(derived["date"] >= tr_start) & (derived["date"] <= tr_end)]
     scale = fit_scale(train_d)
-    stats = fit_event_stats(train_d)
-    sp = SequencePanel.build(derived, scale, stats)
+    stats = fit_event_stats(train_d, encoding=event_encoding)
+    sp = SequencePanel.build(
+        derived,
+        scale,
+        stats,
+        seq_features=seq_features,
+        use_static_events=use_static_events,
+        neighbor_map=panel_neighbor_map() if seq_features == "neighbor" else None,
+        event_encoding=event_encoding,
+    )
     return sp, scale, stats
+
+
+def panel_neighbor_map() -> pd.DataFrame:
+    """노선 앞뒤(`prev`·`next`) + 환승(`xfer`) 이웃 표 — 파생 캐시의 `nb_*` 정의와 같은 조합."""
+    from app.CROWD.pipeline.adjacency import build_neighbor_map, build_transfer_map
+    from app.CROWD.pipeline.dataset import load_panel, resolved_segments
+
+    panel = load_panel(with_events=False)
+    segments, _ = resolved_segments(panel)
+    nodes = panel[["station_no", "station_name", "line"]].drop_duplicates("station_no")
+    return pd.concat([build_neighbor_map(segments), build_transfer_map(nodes)], ignore_index=True)
 
 
 # ── 배치 ──
@@ -110,15 +153,18 @@ def _tensors(batch: dict[str, np.ndarray], device: str):
 
 
 def apply_truncation(
-    x_seq: np.ndarray, rng: np.random.Generator, seq_days: int, p_full: float
+    x_seq: np.ndarray,
+    rng: np.random.Generator,
+    seq_days: int,
+    p_full: float,
+    seq_features: str = "base",
 ) -> np.ndarray:
-    """배치의 z·마스크 채널에 표본별 이력 절단을 적용한다(요일유형 채널은 달력 정보라 남긴다)."""
+    """배치의 **관측 채널**(자기 z·마스크, 이웃 z·마스크)에 표본별 이력 절단을 적용한다.
+
+    요일유형·이력 이벤트 채널은 달력 정보라 남긴다(`dataset.observed_channels`).
+    """
     k = sample_truncation(rng, len(x_seq), seq_days, p_full)
-    values, mask = truncate_history(x_seq[..., :2], x_seq[..., 2], k, axis=1)
-    out = x_seq.copy()
-    out[..., :2] = values
-    out[..., 2] = mask
-    return out
+    return truncate_seq(x_seq, k, seq_features)
 
 
 def _epoch_loss(
@@ -130,6 +176,7 @@ def _epoch_loss(
     device: str,
     rng: np.random.Generator | None = None,
     p_full: float = 0.0,
+    huber_delta: float = 1.0,
 ) -> float:
     """평가용 손실(가중 평균). `rng`를 주면 절단 증강을 섞은 손실을 잰다."""
     import torch
@@ -144,9 +191,11 @@ def _epoch_loss(
             sl = slice(start, start + batch_size)
             batch = sp.make_batch(s_all[sl], d_all[sl], seq_days)
             if rng is not None:
-                batch["x_seq"] = apply_truncation(batch["x_seq"], rng, seq_days, p_full)
+                batch["x_seq"] = apply_truncation(
+                    batch["x_seq"], rng, seq_days, p_full, sp.seq_features
+                )
             x_seq, x_stat, station, y, y_mask = _tensors(batch, device)
-            loss = masked_huber(model(x_seq, x_stat, station), y, y_mask)
+            loss = masked_huber(model(x_seq, x_stat, station), y, y_mask, delta=huber_delta)
             w = float(y_mask.sum())
             total += float(loss) * w
             n += w
@@ -170,6 +219,7 @@ def train_one(
     lr: float,
     p_full: float,
     truncation: bool,
+    huber_delta: float = 1.0,
     quiet: bool = False,
 ) -> tuple[object, list[dict], int]:
     """한 번 학습하고 (best 상태를 담은 모델, 에폭별 기록, best 에폭)을 돌려준다."""
@@ -181,7 +231,13 @@ def train_one(
     torch.use_deterministic_algorithms(True, warn_only=True)
     rng = np.random.default_rng(seed)
 
-    model = ResidualGRU(len(sp.station_ids), model=model_kind, hidden=hidden).to(device)
+    model = ResidualGRU(
+        len(sp.station_ids),
+        model=model_kind,
+        hidden=hidden,
+        seq_channels=sp.seq_channels,
+        stat_features=stat_features_for(sp.use_static_events),
+    ).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     s_tr, d_tr = idx_train
 
@@ -196,9 +252,11 @@ def train_one(
             sel = order[start : start + batch_size]
             batch = sp.make_batch(s_tr[sel], d_tr[sel], seq_days)
             if truncation:
-                batch["x_seq"] = apply_truncation(batch["x_seq"], rng, seq_days, p_full)
+                batch["x_seq"] = apply_truncation(
+                    batch["x_seq"], rng, seq_days, p_full, sp.seq_features
+                )
             x_seq, x_stat, station, y, y_mask = _tensors(batch, device)
-            loss = masked_huber(model(x_seq, x_stat, station), y, y_mask)
+            loss = masked_huber(model(x_seq, x_stat, station), y, y_mask, delta=huber_delta)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
@@ -206,7 +264,9 @@ def train_one(
             total += float(loss.detach()) * w
             n += w
         train_loss = total / n if n else float("nan")
-        valid_loss = _epoch_loss(model, sp, idx_valid, seq_days, batch_size, device)
+        valid_loss = _epoch_loss(
+            model, sp, idx_valid, seq_days, batch_size, device, huber_delta=huber_delta
+        )
         valid_trunc = _epoch_loss(
             model,
             sp,
@@ -216,6 +276,7 @@ def train_one(
             device,
             rng=np.random.default_rng(1234),
             p_full=p_full,
+            huber_delta=huber_delta,
         )
         history.append(
             {
@@ -261,18 +322,36 @@ def save_artifact(out_dir: Path, model, sp: SequencePanel, lookup, stats, meta, 
     return out_dir
 
 
-def run(args) -> Path:
-    import torch
+def prepare(args) -> tuple[SequencePanel, pd.DataFrame, DayTypeLookupBaseline]:
+    """밀집 패널·이벤트 통계·lookup — 한 안의 시드·손실 반복이 **공유하는** 준비물(198).
 
+    시드마다 새로 만들면 400만 행 읽기·pivot을 반복하게 된다(`AI/CLAUDE.md` "실험 실행 효율").
+    lookup은 LightGBM 아티팩트와 같은 기준선(2024 전체 fit) — 파생 캐시의 잔차 정의와 같아야 한다.
+    """
     from app.CROWD.pipeline.dataset import load_panel
+
+    sp, _scale, stats = build_train_panel(  # scale은 sp.save_scale이 아티팩트에 쓴다
+        args.stations,
+        seq_features=args.seq_features,
+        use_static_events=args.static_events,
+        event_encoding=args.event_encoding,
+    )
+    panel = load_panel(with_events=True)
+    train_raw, _ = time_split(panel)
+    return sp, stats, DayTypeLookupBaseline().fit(train_raw)
+
+
+def run(args, prepared=None) -> Path:
+    import torch
 
     device = resolve_device(args.device)
     t0 = time.time()
-    sp, _scale, stats = build_train_panel(args.stations)  # scale은 sp.save_scale이 아티팩트에 쓴다
+    sp, stats, lookup = prepared if prepared is not None else prepare(args)
     idx_train = sp.split_index("train")
     idx_valid = sp.split_index("valid")
     print(
         f"[준비] 역 {len(sp.station_ids)} · 학습 표본 {len(idx_train[0]):,} · 검증 {len(idx_valid[0]):,}"
+        f" · 채널 {sp.seq_channels}({args.seq_features}) · 정적 {stat_features_for(sp.use_static_events)}"
         f" · {time.time() - t0:.0f}s · 장치 {device}",
         flush=True,
     )
@@ -288,6 +367,7 @@ def run(args) -> Path:
         "lr": args.lr,
         "p_full": args.p_full,
         "truncation": not args.no_truncation,
+        "huber_delta": args.huber_delta,
     }
 
     # 결정성 점검 — 같은 시드로 짧게 2회 학습해 검증 손실 차이를 잰다.
@@ -323,11 +403,6 @@ def run(args) -> Path:
     model, history, best_epoch = train_one(sp, idx_train, idx_valid, epochs=args.epochs, **common)
     train_seconds = round(time.time() - t1, 1)
 
-    # lookup은 LightGBM 아티팩트와 같은 기준선(2024 전체 fit)을 쓴다 — 파생 캐시의 잔차 정의와 같아야 한다.
-    panel = load_panel(with_events=True)
-    train_raw, _ = time_split(panel)
-    lookup = DayTypeLookupBaseline().fit(train_raw)
-
     stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M")
     meta = {
         "model_kind": "dl",
@@ -336,7 +411,12 @@ def run(args) -> Path:
         "hidden": args.hidden,
         "emb_dim": 16,
         "mlp_hidden": 128,
-        "channels": int(sp.z.shape[-1] + 1 + 4),
+        "channels": seq_channels_for(args.seq_features),
+        "seq_features": args.seq_features,
+        "use_static_events": args.static_events,
+        "event_encoding": args.event_encoding,
+        "stat_features": stat_features_for(args.static_events),
+        "huber_delta": args.huber_delta,
         "targets": TARGETS,
         "lookup_keys": lookup.keys,
         "station_ids": [int(s) for s in sp.station_ids],
@@ -361,7 +441,14 @@ def run(args) -> Path:
         "determinism": determinism,
         "created_at": stamp,
     }
-    name = args.name or f"dl_{args.model}_s{args.seq_days}_{stamp}"
+    tag = "" if args.seq_features == "base" else f"_{args.seq_features}"
+    if not args.static_events:
+        tag += "_noev"
+    elif args.event_encoding != "zscore":
+        tag += "_evfix"
+    if args.huber_delta != 1.0:
+        tag += f"_hd{args.huber_delta:g}"
+    name = args.name or f"dl_{args.model}_s{args.seq_days}{tag}_s{args.seed}_{stamp}"
     out_dir = save_artifact(
         Path(args.out_root or MODELS_DIR) / name, model, sp, lookup, stats, meta, history
     )
@@ -386,6 +473,27 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--batch-size", type=int, default=512)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--p-full", type=float, default=0.0, help="절단 없음(k=0)을 뽑을 추가 확률")
+    ap.add_argument(
+        "--seq-features",
+        default="base",
+        choices=list(SEQ_FEATURE_SETS),
+        help="시퀀스 채널 구성(198): base 7 · neighbor 16 · events_hist 12",
+    )
+    ap.add_argument(
+        "--static-events",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="대상일 이벤트 5열을 정적 피처로 쓴다. **기본은 끔**(198 판정 1: 켜면 2025 full RMSE −11.9%%p)",
+    )
+    ap.add_argument(
+        "--event-encoding",
+        default="zscore",
+        choices=list(EVENT_ENCODINGS),
+        help="정적·이력 이벤트 값의 인코딩(198 후속): zscore(144) · log1p_max(0~1)",
+    )
+    ap.add_argument(
+        "--huber-delta", type=float, default=1.0, help="masked_huber의 δ(z 단위, 198 손실 실험)"
+    )
     ap.add_argument(
         "--no-truncation", action="store_true", help="이력 절단 증강 없음(대조군 gru_no_trunc)"
     )

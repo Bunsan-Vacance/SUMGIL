@@ -14,6 +14,14 @@
 | `gru_no_trunc` | 144 대조군(증강 없음) | 시퀀스 마스크 0 |
 | `lstm` | 셀만 LSTM으로 바꾼 1회 실험(`--model lstm`, 나머지 설정 동일) | 시퀀스 마스크 0 |
 
+**198부터 계열은 `--models 이름=경로 …`로 얼마든지 넣을 수 있다**(입력 안·시드 반복). 계열 이름에
+`_s<시드>`가 붙어 있으면(`base_s42`·`base_s43`) 접미를 떼어 묶은 **시드 집계 표**(평균·표준편차)를
+따로 낸다 — 안 하나의 개선율이 시드 분산보다 큰지가 198 판정 2의 기준이다. 기존 `--gru/--gru-no-trunc/--lstm`은
+그대로 두고 `--models`에 합쳐진다.
+
+`neighbor` 안의 아티팩트는 서빙에서도 이웃 표가 필요해 `predict(window, segments)`에 **실제 세그먼트**를
+넘긴다(144는 `segments=[]`였다). 이웃 표는 `dataset.resolved_segments(패널)` + 역명 환승 노드다.
+
 시나리오는 `masking.SCENARIOS`(`full / d7_only / d1_only / no_lag`)로 한 곳에서 정의한다. 시퀀스 쪽은
 "남길 이력 일자"가 그대로 마스크가 되고, LightGBM 쪽은 그 일자에 대응하는 시차 컬럼만 남긴다:
 
@@ -51,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -91,6 +100,7 @@ from app.CROWD.pipeline.masking import SCENARIOS
 from app.CROWD.pipeline.predictor import build_predictor, latest_artifact
 from app.CROWD.pipeline.topology import load_capacity
 
+SEED_SUFFIX = re.compile(r"_s(\d+)$")
 DEPLOY_SET = "festival_selflag_d1sd_d7_resid"
 CALIBRATION_NAME = "crowd_congestion_calibration.parquet"
 EVAL_START = pd.Timestamp("2025-01-01")
@@ -111,6 +121,17 @@ DERIVED_COLS = ["date", "station_no", "line", "time_slot", "day_type", *TARGETS]
 ]
 
 
+def _sidecar(metrics_path: Path, what: str) -> Path:
+    """지표 parquet 옆에 두는 부산물 경로. `dl_resid_metrics.parquet` → `dl_resid_grades.json`.
+
+    198이 `--save-metrics dl_input_metrics.parquet`로 부르면 부산물도 `dl_input_*`이 된다 —
+    이름을 고정해 두면 144 산출물을 말없이 덮어쓴다.
+    """
+    stem = metrics_path.stem
+    stem = stem.removesuffix("_metrics")
+    return metrics_path.parent / f"{stem}_{what}.json"
+
+
 def _append_parquet(path: Path, frame: pd.DataFrame) -> None:
     """세트가 끝날 때마다 이어 붙인다 — 중단돼도 끝난 세트는 남는다(`AI/CLAUDE.md`)."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,7 +142,11 @@ def _append_parquet(path: Path, frame: pd.DataFrame) -> None:
 
 # ── 예측 ──
 def dl_predictions(
-    artifact: Path, window: pd.DataFrame, scenarios: list[str], device: str
+    artifact: Path,
+    window: pd.DataFrame,
+    scenarios: list[str],
+    device: str,
+    segments: list[dict] | None = None,
 ) -> dict[str, pd.DataFrame]:
     """`build_predictor("dl")` 경로로 시나리오별 2025 예측. 반환: {시나리오: 키 + *_pred}."""
     predictor = build_predictor("dl", artifact_dir=artifact, device=device)
@@ -129,7 +154,7 @@ def dl_predictions(
     for name in scenarios:
         t0 = time.time()
         predictor.scenario = None if name == "full" else name
-        pred = predictor.predict(window, segments=[])
+        pred = predictor.predict(window, segments=segments or [])
         pred = pred[pred["date"] >= EVAL_START]
         out[name] = pred[
             ["date", "station_no", "time_slot", *[f"{t}_pred" for t in TARGETS]]
@@ -219,7 +244,13 @@ def grade_agreement(
 
 
 # ── 하루치 추론 시간 ──
-def time_one_day(artifact: Path, panel: pd.DataFrame, target: pd.Timestamp, device: str) -> dict:
+def time_one_day(
+    artifact: Path,
+    panel: pd.DataFrame,
+    target: pd.Timestamp,
+    device: str,
+    segments: list[dict] | None = None,
+) -> dict:
     """운영 기준(145: 하루 10분) 대비 하루치 추론 시간. 배치와 같은 창(이력 + 대상일)을 쓴다."""
     predictor = build_predictor("dl", artifact_dir=artifact, device=device)
     days = predictor.required_history_days
@@ -227,7 +258,7 @@ def time_one_day(artifact: Path, panel: pd.DataFrame, target: pd.Timestamp, devi
         (panel["date"] >= target - pd.Timedelta(days=days)) & (panel["date"] <= target)
     ].reset_index(drop=True)
     t0 = time.time()
-    pred = predictor.predict(window, segments=[])
+    pred = predictor.predict(window, segments=segments or [])
     elapsed = time.time() - t0
     rows = int((pred["date"] == target).sum())
     print(f"[추론 시간] {target:%Y-%m-%d} {rows:,}행 · {elapsed:.1f}s ({device})", flush=True)
@@ -245,10 +276,27 @@ def time_one_day(artifact: Path, panel: pd.DataFrame, target: pd.Timestamp, devi
 def run(args) -> pd.DataFrame:
     settings = get_settings()
     models_dir = Path(settings.crowd_models_dir)
-    gru = Path(args.gru) if args.gru else latest_artifact(models_dir, prefix="dl_gru_s", kind="dl")
-    gru_nt = Path(args.gru_no_trunc) if args.gru_no_trunc else None
-    lstm = Path(args.lstm) if args.lstm else None
-    lgb = Path(args.lightgbm) if args.lightgbm else latest_artifact(models_dir, kind="lightgbm")
+    dl_models = dict(args.models or {})
+    if args.gru or not dl_models:
+        gru = (
+            Path(args.gru)
+            if args.gru
+            else latest_artifact(models_dir, prefix="dl_gru_s", kind="dl")
+        )
+        if gru:
+            dl_models.setdefault("gru", gru)
+    if args.gru_no_trunc:
+        dl_models.setdefault("gru_no_trunc", Path(args.gru_no_trunc))
+    if args.lstm:
+        dl_models.setdefault("lstm", Path(args.lstm))
+    gru = next(iter(dl_models.values()), None)  # 추론 시간 측정용 대표 계열
+    lgb = (
+        None
+        if args.no_lightgbm
+        else (
+            Path(args.lightgbm) if args.lightgbm else latest_artifact(models_dir, kind="lightgbm")
+        )
+    )
     scenarios = args.scenarios or list(SCENARIOS)
     metrics_path = Path(args.save_metrics)
     preds_path = Path(args.save_preds)
@@ -276,16 +324,15 @@ def run(args) -> pd.DataFrame:
         flush=True,
     )
 
+    # `neighbor` 입력 안은 서빙에서도 이웃 표가 필요하다 — 평가도 같은 코드로 진짜 세그먼트를 넘긴다.
+    dl_segments, _ = resolved_segments(panel)
+
     # 계열별 시나리오 예측
     series: dict[str, dict[str, pd.DataFrame]] = {}
     if lgb:
         series["lightgbm"] = lgb_predictions(lgb, test, scenarios)
-    if gru:
-        series["gru"] = dl_predictions(gru, window, scenarios, args.device)
-    if gru_nt:
-        series["gru_no_trunc"] = dl_predictions(gru_nt, window, scenarios, args.device)
-    if lstm:
-        series["lstm"] = dl_predictions(lstm, window, scenarios, args.device)
+    for name, artifact in dl_models.items():
+        series[name] = dl_predictions(artifact, window, scenarios, args.device, dl_segments)
 
     aligned = {
         (name, sc): align(test, frame)
@@ -347,22 +394,51 @@ def run(args) -> pd.DataFrame:
         calibration = pd.read_parquet(CROWD_PROCESSED / CALIBRATION_NAME)
         boards = {"lookup": {t: common_lookup[t].to_numpy(dtype="float64") for t in TARGETS}}
         for (name, sc), preds in aligned.items():
-            if sc in args.grades:
+            if sc in args.grades and (not args.grade_series or name in args.grade_series):
                 boards[f"{name}|{sc}"] = {t: preds[t][finite] for t in TARGETS}
         g = grade_agreement(common, boards, segments, capacity, calibration)
         grade_rows = g.to_dict("records")
-        (metrics_path.parent / "dl_resid_grades.json").write_text(
+        _sidecar(metrics_path, "grades").write_text(
             json.dumps(grade_rows, ensure_ascii=False, indent=1), encoding="utf-8"
         )
 
     timing = None
     if gru and not args.no_timing:
-        timing = time_one_day(gru, panel, pd.Timestamp(args.timing_date), "cpu")
-        (metrics_path.parent / "dl_resid_timing.json").write_text(
+        timing = time_one_day(gru, panel, pd.Timestamp(args.timing_date), "cpu", dl_segments)
+        _sidecar(metrics_path, "timing").write_text(
             json.dumps(timing, ensure_ascii=False, indent=1), encoding="utf-8"
         )
     print(f"[완료] {time.time() - t0:.0f}s · 지표 {metrics_path}", flush=True)
     return pd.DataFrame(rows)
+
+
+def seed_summary(tot: pd.DataFrame, scenarios: list[str]) -> pd.DataFrame | None:
+    """계열명 접미 `_s<시드>`를 떼어 묶은 평균·표준편차. 시드가 2개 이상인 안만 남긴다.
+
+    판정 2("개선폭이 시드 표준편차보다 큰가")를 눈으로 확인하는 표다 — 시드가 하나뿐인 안은
+    표준편차가 정의되지 않아(NaN) 넣어도 읽을 것이 없으므로 뺀다.
+    """
+    df = tot.copy()
+    parsed = df["series"].str.extract(SEED_SUFFIX)[0]
+    df = df[parsed.notna()]
+    if df.empty:
+        return None
+    df["variant"] = df["series"].str.replace(SEED_SUFFIX, "", regex=True)
+    df["seed"] = parsed[parsed.notna()]
+    counts = df.groupby("variant")["seed"].nunique()
+    df = df[df["variant"].isin(counts[counts >= 2].index)]
+    if df.empty:
+        return None
+    g = df.groupby(["variant", "scenario", "target"], observed=True)["RMSE_개선율_%"]
+    stat = g.agg(["mean", "std", "count"]).reset_index()
+    stat["값"] = stat["mean"].round(2).astype(str) + " ± " + stat["std"].round(2).astype(str)
+    piv = stat.pivot_table(
+        index="variant", columns=["scenario", "target"], values="값", aggfunc="first"
+    )
+    piv = piv.reindex(columns=[(sc, t) for sc in scenarios for t in TARGETS])
+    piv.columns = [f"{sc}_{t}" for sc, t in piv.columns]
+    piv["시드수"] = stat.groupby("variant")["count"].max()
+    return piv.reset_index()
 
 
 def summarize(res: pd.DataFrame, scenarios: list[str]) -> list[tuple[str, pd.DataFrame]]:
@@ -379,12 +455,32 @@ def summarize(res: pd.DataFrame, scenarios: list[str]) -> list[tuple[str, pd.Dat
     abs_piv = abs_piv.reindex(columns=[(s, t) for s in scenarios for t in TARGETS])
     abs_piv.columns = [f"{s}_{t}" for s, t in abs_piv.columns]
     out.append(("전체 — 절대 RMSE(명)", abs_piv.reset_index().round(2)))
+    seeds = seed_summary(tot, scenarios)
+    if seeds is not None:
+        out.append(("시드 반복 — RMSE 개선율 평균 ± 표준편차(%p)", seeds))
     for axis, title in (("day_type", "요일유형별"), ("line", "호선별")):
         sub = res[(res["axis"] == axis) & (res["target"] == "boarding")]
         piv = sub.pivot_table(index="group", columns=["series", "scenario"], values="RMSE_개선율_%")
         piv.columns = [f"{a}|{b}" for a, b in piv.columns]
         out.append((f"{title} RMSE 개선율(승차, %)", piv.reset_index().round(2)))
     return out
+
+
+def _name_path(item: str) -> tuple[str, Path]:
+    name, sep, path = item.partition("=")
+    if not sep or not name or not path:
+        raise argparse.ArgumentTypeError(f"`이름=경로` 형식이어야 한다: {item!r}")
+    return name, Path(path)
+
+
+class _MergePairs(argparse.Action):
+    """`--models a=… b=…`를 이름 → 경로 dict로 모은다(입력 순서를 유지)."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        current = dict(getattr(namespace, self.dest, None) or {})
+        for name, path in values:
+            current[name] = path
+        setattr(namespace, self.dest, current)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -398,6 +494,16 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--lstm", default=None, help="셀만 LSTM으로 바꾼 1회 실험 아티팩트(계획 보정 7)"
     )
+    ap.add_argument(
+        "--models",
+        nargs="+",
+        default=None,
+        type=_name_path,
+        action=_MergePairs,
+        metavar="이름=경로",
+        help="DL 계열을 이름과 함께 여러 개(198). 예: base_s42=models/CROWD/dl_gru_s14_... ",
+    )
+    ap.add_argument("--no-lightgbm", action="store_true", help="LightGBM 계열을 빼고 DL끼리만 비교")
     ap.add_argument("--lightgbm", default=None, help="비교할 LightGBM 아티팩트(생략 시 최신)")
     ap.add_argument(
         "--scenarios", default=None, type=lambda s: s.split(","), help=f"{','.join(SCENARIOS)}"
@@ -408,6 +514,12 @@ def main(argv: list[str] | None = None) -> None:
         "--eval-days", type=int, default=None, help="평가 구간을 2025 앞쪽 N일로(스모크)"
     )
     ap.add_argument("--grades", default="full", type=lambda s: [x for x in s.split(",") if x])
+    ap.add_argument(
+        "--grade-series",
+        default=None,
+        type=lambda s: [x for x in s.split(",") if x],
+        help="등급 일치율을 낼 계열만(판 하나에 2~3분이라 기본 전부는 비싸다). 생략 시 전부",
+    )
     ap.add_argument("--no-preds", action="store_true")
     ap.add_argument("--preds-every", type=int, default=7, help="예측 표본으로 남길 날짜 간격(일)")
     ap.add_argument("--no-timing", action="store_true")

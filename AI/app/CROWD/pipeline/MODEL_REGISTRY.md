@@ -34,18 +34,35 @@
 | **`festival_selflag_d1sd_d7_resid`** | 13 | 전날 2 + 같은 요일유형 직전 날 2 + 1주 전 2 | D−1 원천 | 93 B″ | **+23.38 / +25.36** (MAE +29.56 / +28.42) | **현재 배포 세트**(`train.py` 기본값). 휴일 +3.6%p, 어느 호선·요일유형도 악화 없음 |
 | `festival_all_derived_resid` | 31 | 위 d1d7 + 같은 시각 인접역·환승 노드 잔차 + 직전 슬롯 잔차 + 인접역 시차 | **실시간 집계**(같은 시각 실측) 필요 | 89·90 | +45.5 / +47.8 | 실시간 원천이 생길 때의 **상한**. D−1 서빙에서 실시간 열을 NaN으로 두고 쓰는 "모델 하나" 안은 +4~8%로 기각(90 마스킹) |
 
-### 딥러닝 계열(144, `model_kind="dl"`)
+### 딥러닝 계열(144·198, `model_kind="dl"`)
 
 피처 세트 코드 체계와 **별개 축**이다 — 세트가 "어떤 열을 쓰나"라면 DL은 "입력을 아예 시퀀스로 받는다"다.
+198에서 입력 구성이 `meta.json`의 `seq_features`(시퀀스 채널)·`use_static_events`(정적 이벤트)로 갈린다.
 
 | 코드 | 입력 | 예측 시점 전제 | 출처 | 2025 평가, lookup 대비 RMSE 개선율 승/하 (%) | 판정 |
 | --- | --- | --- | --- | --- | --- |
-| `dl_gru_s14`(절단 증강) | (역, 대상일) 표본, 직전 14일 × 20슬롯 × 7채널(z-잔차 2 + 마스크 1 + 요일유형 4) + 정적 9 + 역 임베딩 | D−1 원천, **이력 0~14일 어디든** | 144 | `full` +6.99 / +13.72 (MAE +24.68 / +23.92)<br>`no_lag` **−7.92 / −3.94** (LightGBM은 −36.63 / −40.74) | 이력 완비 시 LightGBM에 열세, **이력 결손 시 유일하게 붕괴하지 않는다.** 채택 판정은 145 |
-| `dl_gru_s14_notrunc` | 위와 같으나 이력 절단 증강 없음 | D−1 원천, 이력 완비 | 144 대조 | `full` +10.38 / +6.70, `no_lag` −34.89 / −48.73 | 대조군. 증강이 결손 내성의 원인임을 보인다 |
-| `dl_lstm_s14` | 셀만 LSTM(`--model lstm`), 나머지 설정 동일 | 위와 같음 | 144 실험 1회 | `full` +7.31 / +7.12, `no_lag` −9.43 / −11.09 | GRU와 구분되지 않아(검증 손실 0.13% 차) **계열 이름은 `gru`로 확정**. 기록용 1행 |
+| `dl_gru_s14`(V0, 144 구성) | (역, 대상일) 표본, 직전 14일 × 20슬롯 × **7채널**(z-잔차 2 + 마스크 1 + 요일유형 4) + 정적 **9**(요일 4 + 이벤트 5) + 역 임베딩 | D−1 원천, **이력 0~14일 어디든** | 144 | `full` +8.29 ± 7.04 / +16.43 ± 2.58 (시드 3회)<br>`no_lag` −8.13 ± 6.27 / −2.60 ± 2.12 | 198에서 **교체됨**. 시드 분산이 크다(±7%p) — 시드 1개 비교는 못 쓴다 |
+| **`dl_gru_s14_noev`(V3, 채택)** | 위와 같되 **정적 이벤트 5열 없음**(정적 4) | 위와 같음 | 198 | **`full` +20.17 ± 0.32 / +22.60 ± 0.66**<br>`no_lag` **+1.05 ± 1.03 / +1.92 ± 1.36** (MAE full +29.66 / +29.09) | **현재 DL 기본 구성**(`train_dl` 기본값). LightGBM `full`과 3%p 차, `no_lag`에서 **DL 최초로 lookup을 넘는다** |
+| `dl_gru_s14_neighbor` (V1) | V0 + 이웃 잔차 z 6 + 이웃 마스크 3 = **16채널** | 위와 같음 | 198 | `full` +10.49 / +18.77, `no_lag` −6.35 / −1.09 | V0보다는 낫고 2호선 열세를 없애지만(−6.16 → +0.85) V3에 못 미친다 |
+| `dl_gru_s14_neighbor_noev` | V1 + 정적 이벤트 제거(16채널 + 정적 4) | 위와 같음 | 198 1회 | `full` +19.79 / +23.10, `no_lag` +2.48 / +3.46 | **이웃 효과는 V3와 겹친다** — V3 단독과 차이가 없어 채택하지 않는다(서빙에 이웃 표가 필요해 더 비싸다) |
+| `dl_gru_s14_events_hist` (V2) | V0 + 이력 각 날 이벤트 5 = 12채널 | 위와 같음 | 198 | `full` **−76.02 / −7.52** | 기각. 검증(2024-11~12)은 V0과 비슷한데 2025가 무너진다 — 이벤트 채널이 2024 분포에 과적합 |
+| `dl_gru_s14_hd3` | V0 구조, Huber δ=3(z 단위) | 위와 같음 | 198 1회 | `full` +4.56 / +15.12 (MAE +22.89 / +22.96) | 기각. 승차·MAE가 δ=1보다 나쁘다 — RMSE 격차는 δ가 원인이 아니다 |
+| `dl_gru_s14_notrunc` | V0 구성, 이력 절단 증강 없음 | D−1 원천, 이력 완비 | 144 대조 | `full` +10.38 / +6.70, `no_lag` −34.89 / −48.73 | 대조군. 증강이 결손 내성의 원인임을 보인다 |
+| `dl_lstm_s14` | 셀만 LSTM(`--model lstm`), 나머지 V0과 동일 | 위와 같음 | 144 실험 1회 | `full` +7.31 / +7.12, `no_lag` −9.43 / −11.09 | GRU와 구분되지 않아(검증 손실 0.13% 차) **계열 이름은 `gru`로 확정**. 기록용 1행 |
+| `dl_lstm_s14_noev` | V3 구성(7채널 + 정적 4)에 셀만 LSTM | 위와 같음 | 198 후속 3시드 | `full` +20.28 ± 0.09 / +24.47 ± 0.63<br>`no_lag` +1.56 ± 0.46 / +2.18 ± 0.62 | **계열 `gru` 유지.** 승차 평균 차 0.11%p가 두 표준편차 합(0.41) 안이라 구분 불가. 하차는 +1.87%p 앞서지만 교체 문턱(+2%p) 미달 — 145 메모 |
+| `dl_gru_s14_evfix` | V0 구성인데 이벤트 5열을 **`log1p(x)/log1p(학습 최대)`**로 인코딩(`--event-encoding log1p_max`) | 위와 같음 | 198 후속 3시드 | `full` +19.58 ± 0.71 / +22.27 ± 0.90<br>`no_lag` +1.15 ± 0.61 / +2.70 ± 0.57 | 기각(V3에 −0.59 / −0.33%p). **다만 V0의 붕괴·시드 불안정은 인코딩 탓임을 보인다**(+8.29 ± 7.04 → +19.58 ± 0.71) |
 
-등급 일치율(50/100, 30분 셀 716만)은 `full`에서 lightgbm 96.62 / gru 96.70, `no_lag`에서 lightgbm 91.49 / gru
-**95.34**(lookup 95.37)다. 하루치(5,460행) CPU 추론 0.2초. 수치 원본 `validation/CROWD/dl-resid-check/RESULTS.md`.
+**이벤트 5열은 DL 잔차 예측에 정보를 더하지 않는다(198 판정 1·4 + 후속 B).** 대상일 이벤트를 빼면
+`full`·`no_lag`이 **동시에** 오른다(`full` 승차 시드 평균 +8.29 → +20.17). 원인은 값이 아니라 **인코딩**이다 —
+99%가 0인 희소 카운트를 z-점수로 넣어 학습 std가 0.07~0.13이고 2025 입력이 최대 87.96까지 튄다.
+`log1p_max`로 0~1에 넣으면(`dl_gru_s14_evfix`) 붕괴와 시드 불안정이 사라지지만(+19.58 ± 0.71) **V3를 넘지는
+못한다** → 기본값은 이벤트 제거(V3) 그대로다. 같은 방향으로 이력 이벤트를 더 넣은 V2는 −76%로 무너진다.
+LightGBM 쪽 이벤트 5열은 재점검하지 않았다 — 트리는 값 분포 이동에 덜 민감하고 z-정규화도 쓰지 않으며
+87 이후 세트 비교에서 살아남았으므로 별개 항목이다.
+
+등급 일치율(50/100, 30분 셀 7,158,957개, `full`): lookup 95.37 · lightgbm 96.62(144) · V0 96.695 ·
+**V3 96.854** · V1+V3 96.831 · LSTM V3 96.861(보통이상 재현율 90.314로 V3 89.641보다 높다). 하루치(5,460행) CPU 추론 V3 0.35초. 수치 원본
+`validation/CROWD/dl-input-check/RESULTS.md`(198)와 `dl-resid-check/RESULTS.md`(144).
 
 같은 요일유형 직전 날(`lagsd_*`)은 평일이면 전날, 토요일이면 지난 토요일, 일요일·공휴일이면 직전 일요일 또는 공휴일이고 14일을 넘으면 NaN
 (`lags.attach_same_day_type_lag`, `DERIVED_VERSION=2`).
@@ -67,21 +84,34 @@
 배치의 `--predictor auto`는 `latest_artifact(kind="lightgbm")`(그 계열 중 폴더명 정렬 최신)을 잡는다 — 특정 아티팩트를
 고정하려면 `CROWD_MODELS_DIR`로 폴더를 좁히거나 옛 폴더를 옮긴다. 계열 필터는 4절 `model_kind` 규칙 참고.
 
-현재 로컬 아티팩트(2026-09-13):
+현재 로컬 아티팩트(2026-09-14):
 
 | 폴더 | 세트 | 상태 |
 | --- | --- | --- |
 | `festival_all_derived_resid_20260911-1518` | 실시간 상한 세트 | 90 비교용 보존 |
 | `festival_selflag_d1d7_resid_20260911-1533` | 90 배포 세트 | 93까지 배치가 쓴 모델. 보존 |
 | **`festival_selflag_d1sd_d7_resid_20260913-0340`** | **현재 배포 세트** | 147에서 학습. `batch_predict --today` meta `predictor_version`으로 확인 |
-| `dl_gru_s14_20260914-0949` | 144 GRU(절단 증강) | `model_kind="dl"` — `auto`가 고르지 않는다 |
+| `dl_gru_s14_20260914-0949` | 144 GRU = 198 V0(시드 42) | `model_kind="dl"` — `auto`가 고르지 않는다 |
+| `dl_gru_s14_s43_…`, `dl_gru_s14_s44_…` | V0 시드 43·44 | 198 시드 분산 측정 |
+| **`dl_gru_s14_noev_s42_20260914-1358`** | **198 채택 구성(V3)** | 시드 43·44도 같이 있다(`_noev_s43`, `_noev_s44`) |
+| `dl_gru_s14_neighbor_s42_…`, `dl_gru_s14_neighbor_noev_s42_…` | 198 V1 · V1+V3 | 비교 보존 |
+| `dl_gru_s14_events_hist_s42_…`, `dl_gru_s14_hd3_s42_…` | 198 V2 · δ=3 | 기각 기록 보존 |
 | `dl_lstm_s14_20260914-1236` | 144 LSTM 1회 실험 | 계열 확정 근거. 보존 |
-| `dl_gru_s14_notrunc_20260914-0950` | 144 대조군 | 증강 없음. 비교 보존. **주의: 이름이 뒤라 `--predictor dl`이 이걸 집는다** — DL을 실제로 쓰게 되면(145) 대조군 폴더를 옮기거나 이름을 앞으로 바꾼다 |
+| `dl_lstm_s14_noev_s42_20260914-1457` 외 s43·s44 | 198 후속 — LSTM × V3 3시드 | 계열 재확인(구분 불가). 보존 |
+| `dl_gru_s14_evfix_s42_20260914-1501` 외 s43·s44 | 198 후속 — 이벤트 `log1p_max` 인코딩 3시드 | 인코딩 진단 기록. 보존 |
+| `dl_gru_s14_notrunc_20260914-0950` | 144 대조군 | 증강 없음. 비교 보존 |
+
+**`--predictor dl`의 아티팩트 선택은 여전히 이름 운이다(144 미해결 8, 198에서 악화).** `latest_artifact(kind="dl")`는
+폴더명 정렬 최신을 고르는데 이제 `dl_lstm_s14_…`가 맨 뒤라 **LSTM 대조군**이 잡힌다. `auto`는 lightgbm만 보므로
+운영에는 영향이 없지만, DL을 실제로 쓰게 되면(145·197) `--artifact-dir`로 못박거나 선택 규칙을 손봐야 한다.
 
 DL 아티팩트는 폴더 구성이 다르다: `model.pt`(state_dict) · `scale.parquet`(역×슬롯 잔차 표준편차) ·
 `lookup.parquet` · `event_stats.parquet` · `meta.json` · `history.json`(에폭별 train/valid 손실).
-`meta.json`에는 `model_kind, model, seq_days, hidden, channels, station_ids, derived_version, splits, seed,
-epochs_run, best_epoch, train_seconds, device, truncation, p_full, determinism`이 들어간다 —
+`meta.json`에는 `model_kind, model, seq_days, hidden, channels, seq_features, use_static_events, event_encoding,
+stat_features, huber_delta, station_ids, derived_version, splits, seed, epochs_run, best_epoch, train_seconds,
+device, truncation, p_full, determinism`이 들어간다. `event_stats.parquet`에는 두 인코딩의 상수(`mean`·`std`와
+`log1p_max`)와 실제로 쓴 `encoding`이 같이 들어 있다. `seq_features`·`use_static_events`·`event_encoding`이 없는
+144 아티팩트는 `DLPredictor`가 `base` + 정적 이벤트 있음 + `zscore`로 읽는다(하위 호환) —
 `device`·`train_seconds`·`determinism`(같은 시드 2회 학습의 검증 손실 차이)은 149 GPU 규약의 기록 항목이다.
 
 ## 4. 예측기 코드와 운영 규칙
@@ -90,7 +120,7 @@ epochs_run, best_epoch, train_seconds, device, truncation, p_full, determinism`�
 | --- | --- | --- |
 | `lookup` | 평균만. 네이버·카카오 수준의 정직한 기준선 | 아티팩트가 없을 때의 `auto`, 그리고 **이력 창(직전 7일)에 실측이 하나도 없을 때의 대체**(143) |
 | `lightgbm:<폴더>` | lookup + 잔차 모델 | `auto` 기본. 배치 meta `predictor_version`에 폴더명이 남아 어느 모델이 예측했는지 추적 |
-| `dl:<폴더>` | lookup + GRU 시퀀스 잔차(144) | 명시 지정(`--predictor dl`)일 때만. `auto`는 고르지 않는다 |
+| `dl:<폴더>` | lookup + GRU 시퀀스 잔차(144·198) | 명시 지정(`--predictor dl`)일 때만. `auto`는 고르지 않는다 |
 | `llm` | 시차·이벤트를 프롬프트로 주고 수치를 받는 실험 축 | 145 비교 실험 전용. 프로덕션 기본값 아님 |
 
 **`model_kind` 규칙(144).** 모든 아티팩트 `meta.json`은 계열을 `model_kind`로 밝힌다 — `lightgbm`(기본,
@@ -105,9 +135,9 @@ DL은 `seq_days`=14). 배치는 `max(HISTORY_DAYS, predictor.required_history_da
 **결측 내성(143에서 확인, 미해결).** 배포 세트 모델에 시차 컬럼을 전부 NaN으로 넣으면 lookup 대비 RMSE **−36.6 / −40.7%**,
 1주 전만 있으면 −20.8 / −14.9%(`validation/CROWD/recent-source-check/RESULTS.md` 4절). 학습 때 결측을 본 적이 없기 때문이다.
 그래서 이력이 전혀 없으면 lookup으로 대체하고, D−1 하루만 빠진 경우(`lag1d_available=false`)는 아직 노출만 한다.
-학습 시 시차 마스킹은 144가 다뤘다 — 이력 절단 증강 GRU는 같은 상황에서 −7.9 / −3.9%(등급 일치율은
-lookup과 동등)로 **붕괴하지 않지만 lookup을 이기지도 못한다.** 가용성별 예측기 선택(이력 완비 → LightGBM,
-결손 → GRU, 전무 → lookup)은 145 판정 사항이다.
+학습 시 시차 마스킹은 144가 다뤘고 198이 입력을 고쳤다 — 채택 구성(V3)은 같은 상황에서 **+1.05 / +1.92%**로
+**lookup을 넘는다**(144 V0은 −7.9 / −3.9였다). 그래서 "이력이 전무하면 lookup"이라는 143 규칙의 대체 후보가
+처음으로 생겼다. 가용성별 예측기 선택(이력 완비 → LightGBM, 결손·전무 → GRU)은 여전히 145 판정 사항이다.
 
 ## 5. 이 코드들이 바뀌는 경우
 
