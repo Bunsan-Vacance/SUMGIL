@@ -317,3 +317,69 @@ def test_seven_day_window_works_for_neighbor_artifact(neighbor_artifact):
     out = predictor.predict(w7, segments=SEGMENTS)
     t7 = out[(out["date"] == TARGET_DATE) & (out["station_no"] == 205)]
     assert len(t7) == len(SLOT_ORDER) and t7["boarding_pred"].notna().all()
+
+
+# ── 198: 정적 이벤트 없는 채택 구성(train_dl 기본값) ──
+
+
+@pytest.fixture(scope="module")
+def no_events_artifact(tmp_path_factory):
+    """`use_static_events=False` 아티팩트 — 정적 폭 4를 meta로 복원하는지 본다."""
+    from app.CROWD.pipeline.dl.dataset import stat_features_for
+
+    panel = _panel(DATES)
+    lookup = DayTypeLookupBaseline().fit(panel)
+    derived = _derived(panel, lookup)
+    train_d = derived[derived["date"] < VALID_FROM]
+    scale, stats = fit_scale(train_d), fit_event_stats(train_d)
+    sp = SequencePanel.build(derived, scale, stats, use_static_events=False)
+    model, history, best_epoch = train_one(
+        sp,
+        sp.sample_index(DATES[0], VALID_FROM - pd.Timedelta(days=1)),
+        sp.sample_index(VALID_FROM, DATES[-1]),
+        model_kind="gru",
+        seq_days=14,
+        hidden=8,
+        epochs=1,
+        patience=1,
+        seed=0,
+        device="cpu",
+        batch_size=64,
+        lr=1e-3,
+        p_full=0.0,
+        truncation=True,
+        quiet=True,
+    )
+    meta = {
+        "model_kind": "dl",
+        "model": "gru",
+        "seq_days": 14,
+        "hidden": 8,
+        "emb_dim": 16,
+        "mlp_hidden": 128,
+        "channels": 7,
+        "seq_features": "base",
+        "use_static_events": False,
+        "stat_features": stat_features_for(False),
+        "targets": TARGETS,
+        "lookup_keys": lookup.keys,
+        "station_ids": [int(s) for s in sp.station_ids],
+        "best_epoch": best_epoch,
+        "device": "cpu",
+    }
+    out = tmp_path_factory.mktemp("models") / "dl_gru_s14_noev_s0_test"
+    save_artifact(out, model, sp, lookup, stats, meta, history)
+    return out, panel
+
+
+def test_no_static_events_artifact_restores_stat_width_four(no_events_artifact):
+    art, panel = no_events_artifact
+    predictor = build_predictor("dl", artifact_dir=art)
+    inner = predictor._inner
+    assert inner.use_static_events is False
+    # head 입력 = hidden 8 + emb 16 + 정적 4
+    assert inner.model.head[0].in_features == 8 + 16 + 4
+
+    out = predictor.predict(_window(panel, history_days=14), segments=[])
+    target = out[out["date"] == TARGET_DATE]
+    assert target[[f"{t}_pred" for t in TARGETS]].notna().all().all()

@@ -121,6 +121,17 @@ DERIVED_COLS = ["date", "station_no", "line", "time_slot", "day_type", *TARGETS]
 ]
 
 
+def _sidecar(metrics_path: Path, what: str) -> Path:
+    """지표 parquet 옆에 두는 부산물 경로. `dl_resid_metrics.parquet` → `dl_resid_grades.json`.
+
+    198이 `--save-metrics dl_input_metrics.parquet`로 부르면 부산물도 `dl_input_*`이 된다 —
+    이름을 고정해 두면 144 산출물을 말없이 덮어쓴다.
+    """
+    stem = metrics_path.stem
+    stem = stem.removesuffix("_metrics")
+    return metrics_path.parent / f"{stem}_{what}.json"
+
+
 def _append_parquet(path: Path, frame: pd.DataFrame) -> None:
     """세트가 끝날 때마다 이어 붙인다 — 중단돼도 끝난 세트는 남는다(`AI/CLAUDE.md`)."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -383,18 +394,18 @@ def run(args) -> pd.DataFrame:
         calibration = pd.read_parquet(CROWD_PROCESSED / CALIBRATION_NAME)
         boards = {"lookup": {t: common_lookup[t].to_numpy(dtype="float64") for t in TARGETS}}
         for (name, sc), preds in aligned.items():
-            if sc in args.grades:
+            if sc in args.grades and (not args.grade_series or name in args.grade_series):
                 boards[f"{name}|{sc}"] = {t: preds[t][finite] for t in TARGETS}
         g = grade_agreement(common, boards, segments, capacity, calibration)
         grade_rows = g.to_dict("records")
-        (metrics_path.parent / "dl_resid_grades.json").write_text(
+        _sidecar(metrics_path, "grades").write_text(
             json.dumps(grade_rows, ensure_ascii=False, indent=1), encoding="utf-8"
         )
 
     timing = None
     if gru and not args.no_timing:
         timing = time_one_day(gru, panel, pd.Timestamp(args.timing_date), "cpu", dl_segments)
-        (metrics_path.parent / "dl_resid_timing.json").write_text(
+        _sidecar(metrics_path, "timing").write_text(
             json.dumps(timing, ensure_ascii=False, indent=1), encoding="utf-8"
         )
     print(f"[완료] {time.time() - t0:.0f}s · 지표 {metrics_path}", flush=True)
@@ -503,6 +514,12 @@ def main(argv: list[str] | None = None) -> None:
         "--eval-days", type=int, default=None, help="평가 구간을 2025 앞쪽 N일로(스모크)"
     )
     ap.add_argument("--grades", default="full", type=lambda s: [x for x in s.split(",") if x])
+    ap.add_argument(
+        "--grade-series",
+        default=None,
+        type=lambda s: [x for x in s.split(",") if x],
+        help="등급 일치율을 낼 계열만(판 하나에 2~3분이라 기본 전부는 비싸다). 생략 시 전부",
+    )
     ap.add_argument("--no-preds", action="store_true")
     ap.add_argument("--preds-every", type=int, default=7, help="예측 표본으로 남길 날짜 간격(일)")
     ap.add_argument("--no-timing", action="store_true")

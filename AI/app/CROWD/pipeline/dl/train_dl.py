@@ -11,7 +11,11 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
 
 - 표본 = (역, 대상일) 하나. 입력은 직전 `seq_days`일 × 20슬롯 × C채널, 출력은 대상일 20슬롯 × 2.
   C는 `--seq-features`가 정한다(198): `base` 7 · `events_hist` 12 · `neighbor` 16
-  (`dl/dataset.seq_channels_for`). 정적 피처는 `--no-static-events`로 9 → 4로 줄인다.
+  (`dl/dataset.seq_channels_for`).
+- **정적 이벤트는 기본이 꺼짐이다(198 판정 1).** 144는 대상일 이벤트 5열을 정적 피처로 넣었는데,
+  2025 평가에서 그것을 빼면 `full` RMSE 개선율이 시드 3회 평균 +8.29 → **+20.17**(승), +16.43 → +22.60(하)로
+  오르고 `no_lag`도 −8.13 → +1.05로 뒤집힌다. 이벤트 표준화가 2024 분포에 묶여 2025에서 해로웠다는 뜻이다.
+  144 구성을 재현하려면 `--static-events`.
 - 분할은 `dl/dataset.SPLITS`: 2024-01~10 학습 / 2024-11~12 검증(early stopping) / 2025 평가.
   검증으로 에폭만 고르고 **2024 전체로 재학습하지 않는다**(144 계획 4번 — 단순화, 기록).
 - **이력 절단 증강**: 표본마다 `k ~ U{0..seq_days}`로 앞쪽 k일을 마스크(`masking.sample_truncation`
@@ -33,7 +37,7 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
     python -m app.CROWD.pipeline.dl.train_dl --model gru --no-truncation      # 대조군
     python -m app.CROWD.pipeline.dl.train_dl --stations 20 --epochs 2         # 소표본 스모크
     python -m app.CROWD.pipeline.dl.train_dl --seq-features neighbor          # 198 V1
-    python -m app.CROWD.pipeline.dl.train_dl --no-static-events               # 198 V3
+    python -m app.CROWD.pipeline.dl.train_dl --static-events                  # 198 V0(144 구성)
     python -m app.CROWD.pipeline.dl.train_dl --huber-delta 3                  # 198 손실 실험
 """
 
@@ -322,7 +326,7 @@ def prepare(args) -> tuple[SequencePanel, pd.DataFrame, DayTypeLookupBaseline]:
     sp, _scale, stats = build_train_panel(  # scale은 sp.save_scale이 아티팩트에 쓴다
         args.stations,
         seq_features=args.seq_features,
-        use_static_events=not args.no_static_events,
+        use_static_events=args.static_events,
     )
     panel = load_panel(with_events=True)
     train_raw, _ = time_split(panel)
@@ -401,8 +405,8 @@ def run(args, prepared=None) -> Path:
         "mlp_hidden": 128,
         "channels": seq_channels_for(args.seq_features),
         "seq_features": args.seq_features,
-        "use_static_events": not args.no_static_events,
-        "stat_features": stat_features_for(not args.no_static_events),
+        "use_static_events": args.static_events,
+        "stat_features": stat_features_for(args.static_events),
         "huber_delta": args.huber_delta,
         "targets": TARGETS,
         "lookup_keys": lookup.keys,
@@ -429,7 +433,7 @@ def run(args, prepared=None) -> Path:
         "created_at": stamp,
     }
     tag = "" if args.seq_features == "base" else f"_{args.seq_features}"
-    if args.no_static_events:
+    if not args.static_events:
         tag += "_noev"
     if args.huber_delta != 1.0:
         tag += f"_hd{args.huber_delta:g}"
@@ -465,9 +469,10 @@ def main(argv: list[str] | None = None) -> None:
         help="시퀀스 채널 구성(198): base 7 · neighbor 16 · events_hist 12",
     )
     ap.add_argument(
-        "--no-static-events",
-        action="store_true",
-        help="정적 이벤트 5열을 빼고 대상일 요일유형 4만 쓴다(198 V3 대조군)",
+        "--static-events",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="대상일 이벤트 5열을 정적 피처로 쓴다. **기본은 끔**(198 판정 1: 켜면 2025 full RMSE −11.9%%p)",
     )
     ap.add_argument(
         "--huber-delta", type=float, default=1.0, help="masked_huber의 δ(z 단위, 198 손실 실험)"

@@ -7,7 +7,8 @@
 | `base`(V0) | base | 있음 | 7 | 144 기준(아티팩트 재사용, 시드 43·44만 새로) |
 | `neighbor`(V1) | neighbor | 있음 | 16 | 89에서 인접역 **잔차**가 원본값의 4배 효과였다 — 시퀀스에서도 나는가 |
 | `events_hist`(V2) | events_hist | 있음 | 12 | "지난 경기·축제 날 잔차"를 이벤트로 설명하면 대상일 반응이 좋아지는가 |
-| `no_events`(V3) | base | **없음** | 7 | 대조군 — 이벤트 5열이 실제로 기여하는가 |
+| `no_events`(V3) | base | **없음** | 7 | 대조군 — 이벤트 5열이 실제로 기여하는가. **채택**(198 판정 1) |
+| `neighbor_no_events` | neighbor | **없음** | 16 | 계획 밖 1회 — V1·V3 효과가 겹치는가(겹치지 않았다) |
 
 ## 왜 한 프로세스인가
 
@@ -52,6 +53,8 @@ VARIANTS: dict[str, tuple[str, bool]] = {
     "neighbor": ("neighbor", True),
     "events_hist": ("events_hist", True),
     "no_events": ("base", False),
+    # 계획 밖 1회 탐색(V1+V3): V1·V3이 각각 판정 1을 통과해 두 효과가 겹치는지 본다.
+    "neighbor_no_events": ("neighbor", False),
 }
 RUNS_PATH = _HERE / "runs.jsonl"
 
@@ -88,7 +91,7 @@ def done_keys(path: Path) -> set[str]:
 
 
 def build_args(run_spec: dict, cli) -> Namespace:
-    """`train_dl.main`이 만드는 것과 같은 네임스페이스(기본값은 144 고정 구성)."""
+    """`train_dl.main`이 만드는 것과 같은 네임스페이스(144 고정 구성 + 안별 채널 스위치)."""
     seq_features, use_static = VARIANTS[run_spec["variant"]]
     return Namespace(
         model="gru",
@@ -103,7 +106,7 @@ def build_args(run_spec: dict, cli) -> Namespace:
         p_full=0.0,
         no_truncation=False,
         seq_features=seq_features,
-        no_static_events=not use_static,
+        static_events=use_static,
         huber_delta=run_spec["huber_delta"],
         determinism_probe=0,  # 144에서 0.000%로 확인됨 — 반복 실험에서는 GPU 시간만 먹는다
         stations=cli.stations,
@@ -181,9 +184,9 @@ def main(argv: list[str] | None = None) -> None:
                 "seed": spec["seed"],
                 "huber_delta": spec["huber_delta"],
                 "seq_features": args.seq_features,
-                "use_static_events": not args.no_static_events,
+                "use_static_events": args.static_events,
                 "channels": seq_channels_for(args.seq_features),
-                "stat_features": stat_features_for(not args.no_static_events),
+                "stat_features": stat_features_for(args.static_events),
                 "artifact": str(out_dir),
                 "artifact_name": out_dir.name,
                 "best_epoch": meta["best_epoch"],
