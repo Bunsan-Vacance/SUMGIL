@@ -1,7 +1,9 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
+import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
+import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.MultiLineStringResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
@@ -17,6 +19,7 @@ import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import com.ssafy.s15p21a104.global.exception.DomainException;
@@ -42,6 +45,7 @@ public class RouteSearchService {
     private final RouteGraphRegistry graphRegistry;
     private final TransferRule transferRule;
     private final RailGeometryRegistry railGeometryRegistry;
+    private final WalkGeometryRegistry walkGeometryRegistry;
 
     public List<RouteSearchResponse> search(
             String originStationId,
@@ -123,8 +127,11 @@ public class RouteSearchService {
         if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
             return leg;
         }
-        Optional<MultiLineStringResponse> geometry = railGeometryRegistry.geometryForLeg(
-                leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
+                ? walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
+                        leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
+                : railGeometryRegistry.geometryForLeg(
+                        leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
         if (geometry.isEmpty()) {
             return leg;
         }
@@ -135,6 +142,37 @@ public class RouteSearchService {
                 leg.routeId(), leg.minutes(),
                 geometry.get(), "available"
         );
+    }
+
+    /**
+     * 좌표 기반 통합 길찾기 진입점(S15P21A104-185). 이 티켓 범위는 요청 계약과 입력 검증까지다.
+     *
+     * <p>좌표를 실제 교통망(역·정류장·대여소)에 연결하는 접근 후보 탐색과 보행 계산은
+     * 후속 작업의 책임이다(FE-좌표기반-통합길찾기-API-협의요청.md 6·7절). 유효한 요청이어도
+     * 아직 {@link ErrorType#ACCESS_CANDIDATE_NOT_READY}를 반환한다 — 빈 배열로 조용히
+     * "경로 없음"인 척하지 않고, 미구현 상태임을 명시적으로 알린다.
+     *
+     * @throws DomainException 좌표가 비어있거나 유효 범위를 벗어나면 {@link ErrorType#INVALID_COORDINATE},
+     *         출발·도착 좌표가 완전히 같으면 {@link ErrorType#SAME_ORIGIN_DEST},
+     *         입력이 유효하면 {@link ErrorType#ACCESS_CANDIDATE_NOT_READY}
+     */
+    public List<RouteSearchResponse> searchByCoordinate(CoordinateRouteSearchRequest request) {
+        RoutePlaceRequest origin = requireValidPlace(request == null ? null : request.origin());
+        RoutePlaceRequest destination = requireValidPlace(request == null ? null : request.destination());
+        if (origin.lat().equals(destination.lat()) && origin.lng().equals(destination.lng())) {
+            throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
+        }
+        throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_READY);
+    }
+
+    private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {
+        if (place == null || place.lat() == null || place.lng() == null) {
+            throw new DomainException(ErrorType.INVALID_COORDINATE);
+        }
+        if (place.lat() < -90 || place.lat() > 90 || place.lng() < -180 || place.lng() > 180) {
+            throw new DomainException(ErrorType.INVALID_COORDINATE);
+        }
+        return place;
     }
 
     private Station findStation(String stationId) {

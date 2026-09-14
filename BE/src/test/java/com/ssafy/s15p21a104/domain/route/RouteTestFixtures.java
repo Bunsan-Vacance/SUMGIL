@@ -16,6 +16,9 @@ import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.service.RouteSearchService;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.walk.geometry.KakaoWalkDirectionsClient;
+import com.ssafy.s15p21a104.domain.route.walk.geometry.KakaoWalkProperties;
+import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import java.util.ArrayList;
@@ -266,6 +269,14 @@ public final class RouteTestFixtures {
         }
         lenient().when(registry.stationInfos()).thenReturn(infos);
         return new RouteSearchService(stationRepository, registry, new TransferRule(180),
-                new RailGeometryRegistry(null, null));
+                new RailGeometryRegistry(null, null), noopWalkGeometryRegistry());
+    }
+
+    /**
+     * 카카오 키 미설정 상태의 {@link WalkGeometryRegistry}. 실제 호출 없이 항상 빈 값을 준다
+     * (S15P21A104-186 — 키 발급 전 테스트 기본값).
+     */
+    public static WalkGeometryRegistry noopWalkGeometryRegistry() {
+        return new WalkGeometryRegistry(new KakaoWalkDirectionsClient(new KakaoWalkProperties(null, null)));
     }
 }

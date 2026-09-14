@@ -16,7 +16,9 @@ public enum ErrorType {
 
     SAME_ORIGIN_DEST(400, "SAME_ORIGIN_DEST", "출발지와 도착지가 같습니다."),
     STATION_NOT_FOUND(404, "STATION_NOT_FOUND", "역을 찾을 수 없습니다."),
-    ROUTE_NOT_FOUND(404, "ROUTE_NOT_FOUND", "경로를 찾을 수 없습니다.");
+    ROUTE_NOT_FOUND(404, "ROUTE_NOT_FOUND", "경로를 찾을 수 없습니다."),
+    INVALID_COORDINATE(400, "INVALID_COORDINATE", "좌표가 유효하지 않습니다."),
+    ACCESS_CANDIDATE_NOT_READY(501, "ACCESS_CANDIDATE_NOT_READY", "좌표-교통망 연결은 아직 지원하지 않습니다.");
 
     private final int status;
     private final String code;

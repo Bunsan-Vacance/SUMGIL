@@ -23,6 +23,9 @@ app:
     # FE 로컬 개발 서버 기본값(Vite). 각자 환경(다른 포트·팀원 PC의 LAN IP)이 다르면
     # APP_CORS_ALLOWED_ORIGINS=http://localhost:5173,http://192.168.0.10:5173 형태로 덮어쓴다.
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  kakao:
+    # 도보 경로 조회 REST API 키(S15P21A104-186). 비어 있으면 WALK geometry는 항상 unavailable.
+    rest-api-key: ${KAKAO_REST_API_KEY:}
 
 management:
   endpoints:
