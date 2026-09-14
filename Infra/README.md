@@ -76,9 +76,13 @@ bash ~/sumgil/Infra/k8s/scripts/apply.sh
 ```bash
 docker compose -f Infra/docker/docker-compose.yml up -d postgres redis      # BE 개발
 docker compose -f Infra/docker/docker-compose.yml up -d --wait kafka        # 수집기·스트림
+
+# 실시간 수집기 (BE 앱의 collect 프로파일) — 토픽 3개는 기동 시 자동으로 만들어진다
+cd BE && SPRING_PROFILES_ACTIVE=local,collect ./gradlew bootRun
 ```
 
-Kafka 구성·검증 절차·함정은 [BE/docs/infra/kafka.md](../BE/docs/infra/kafka.md)에 있다.
+Kafka 구성·토픽 보관 정책·이벤트 계약은 [BE/docs/infra/kafka.md](../BE/docs/infra/kafka.md), 수집기 실행·설정은 [BE/docs/infra/collector.md](../BE/docs/infra/collector.md)에 있다.
+prod 토픽은 kubeconfig 가 있는 곳에서 `KAFKA_EXEC="kubectl -n prod exec kafka-0 --" bash BE/scripts/kafka/topics.sh` 로 같은 값을 적용한다.
 
 ## 라우팅 설계
 

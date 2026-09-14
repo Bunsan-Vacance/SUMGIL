@@ -1,0 +1,53 @@
+# 실시간 수집기 프로파일 (S15P21A104-168·169·170). API 서버를 띄우지 않고 CollectorRunner 만 돈다.
+# 실행: SPRING_PROFILES_ACTIVE=local,collect ./gradlew bootRun
+#       SPRING_PROFILES_ACTIVE=local,collect ./gradlew bootRun --args='--collect.run-once=true --collect.dry-run=true'
+# DB·Redis 접속은 다른 프로파일과 같이 DB_URL 등 환경변수로 받는다 (컨텍스트를 공유하므로 필요하다).
+# 인증키는 BE/.env (bootRun 전용 dotenv) 또는 환경변수. 이름은 BE/.env.example.
+spring:
+  main:
+    web-application-type: none
+  jpa:
+    show-sql: false
+
+collect:
+  dry-run: false          # true 면 호출·파싱만 하고 Kafka 에 보내지 않는다 (Kafka 빈 없음)
+  run-once: false         # true 면 활성 소스를 한 회차씩 돌리고 종료
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}   # 파드에서는 kafka:9092
+    send-timeout: 30s
+  topics:                 # 토픽 3개 공통 보관 정책 (168). 값 근거는 BE/docs/infra/kafka.md 토픽 절
+    retention-hours: 48
+    segment-hours: 6
+  http:
+    connect-timeout: 2s
+    read-timeout: 5s
+    max-retries: 2        # 타임아웃·5xx 만 (NFR-EXT-002)
+  budget:
+    daily-calls: ${COLLECT_DAILY_CALLS:1000}   # 소스별 하루 호출 상한. 열린데이터광장 키 한도
+
+  # ── 소스별 주기·운영 시간 창 (170) ─────────────────────────────────────────────
+  # 3분할 호출이라 키당 하루 333회차가 예산이다. 지하철 60초 × 5.5h = 330회차 · 따릉이 120초 × 11h = 330회차.
+  # 창은 KST "HH:mm-HH:mm", 종료 미포함. 발표 시간대에 맞춰 환경변수로 옮긴다.
+  subway:
+    enabled: true
+    topic: subway.arrival
+    interval: ${COLLECT_SUBWAY_INTERVAL:60s}
+    window: ${COLLECT_SUBWAY_WINDOW:07:30-13:00}
+    retention-bytes: 1610612736     # 1.5GiB
+    key: ${SEOUL_SUBWAY_KEY:${SEOUL_API_KEY:}}
+  bike:
+    enabled: true
+    topic: bike.stock
+    interval: ${COLLECT_BIKE_INTERVAL:120s}
+    window: ${COLLECT_BIKE_WINDOW:07:00-18:00}
+    retention-bytes: 1073741824     # 1GiB
+    key: ${SEOUL_BIKE_KEY:${SEOUL_API_KEY:}}
+  weather:                          # 기상청 API허브 — 별도 키·별도 한도라 하루 종일 매시
+    enabled: true
+    topic: weather.nowcast
+    interval: ${COLLECT_WEATHER_INTERVAL:1h}
+    window: ${COLLECT_WEATHER_WINDOW:00:00-24:00}
+    retention-bytes: 67108864       # 64MiB
+    key: ${KMA_API_KEY:}
+    nx: 60
+    ny: 127
