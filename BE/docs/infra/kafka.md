@@ -99,10 +99,29 @@ docker exec $C $K/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic
 CLI 스크립트를 쓴다 — 두 곳의 값은 같아야 한다.
 
 ```bash
-bash BE/scripts/kafka/topics.sh                                                   # 로컬 compose — 만들고/맞추고 describe
-KAFKA_EXEC="kubectl -n prod exec kafka-0 --" bash BE/scripts/kafka/topics.sh      # prod (kubeconfig 필요)
-bash BE/scripts/kafka/topics.sh describe                                          # 확인만
+bash BE/scripts/kafka/topics.sh          # 로컬 compose — 만들고/맞추고 describe
+bash BE/scripts/kafka/topics.sh describe # 확인만
+
+# prod — 노드에 올려서 실행한다. 로컬 PC 에는 kubeconfig 가 없고, k8s API(6443)는 ufw 가 막고 VPN 평면에 있다.
+# 노드 안에서는 k3s 가 kubeconfig 를 이미 들고 있어 sudo kubectl 이 바로 된다 (접속은 팀 pem, Infra/README.md).
+scp -i <팀 pem> BE/scripts/kafka/topics.sh ubuntu@j15a104.p.ssafy.io:/tmp/topics.sh
+ssh -i <팀 pem> ubuntu@j15a104.p.ssafy.io \
+  'KAFKA_EXEC="sudo kubectl exec -n prod sts/kafka --" bash /tmp/topics.sh; rm -f /tmp/topics.sh'
 ```
+
+**적용 결과 (2026-09-14).** 로컬·prod 양쪽에서 생성 경로를 실행해 값이 같은 것을 확인했다.
+
+```
+생성       subway.arrival
+cleanup.policy=delete retention.bytes=1610612736 retention.ms=172800000 segment.bytes=134217728 segment.ms=21600000
+생성       bike.stock
+cleanup.policy=delete retention.bytes=1073741824 retention.ms=172800000 segment.bytes=134217728 segment.ms=21600000
+생성       weather.nowcast
+cleanup.policy=delete retention.bytes=67108864  retention.ms=172800000 segment.bytes=134217728 segment.ms=21600000
+```
+
+세 토픽 모두 `PartitionCount: 1` · `ReplicationFactor: 1`. 재실행하면 "생성" 대신 "설정 맞춤"으로 빠지고 결과는 같다(멱등).
+`kafka-configs --describe` 출력의 `synonyms={...}` 에는 브로커 기본값(`retention.bytes=-1` 등)이 섞여 있으니 그대로 읽지 않는다 — 스크립트가 걸러서 보여준다.
 
 **왜 이 값인가.**
 
@@ -172,5 +191,5 @@ bash BE/scripts/kafka/topics.sh describe                                        
 
 1. ~~수집기 v1~~ — 완료 (169, [collector.md](collector.md)). prod 배포는 173.
 2. **컨슈머 v1 (171)** — `be-redis` 그룹, Kafka → Redis, `source_generated_at`/`ingested_at` 비교로 멱등, TTL 90초. 지하철 도착 Redis 키를 정해 A 파트에 통보.
-3. **prod 토픽 (168 남은 반)** — kubeconfig 를 받으면 `KAFKA_EXEC="kubectl -n prod exec kafka-0 --" bash BE/scripts/kafka/topics.sh` 로 만들고 describe 로 확인. 수집기 파드가 올라가면 기동 시 같은 값으로 다시 맞춘다.
+3. ~~prod 토픽~~ — 완료 (2026-09-14, 4절 "적용 결과"). 수집기 파드가 올라가면 기동 시 같은 값으로 다시 맞춘다. 지금은 **토픽만 있고 프로듀서·컨슈머가 없어 비어 있다.**
 4. AI 컨슈머(`ai-spark`)가 5절 계약으로 붙는다 — `Desktop/ai-part-request-2026-09-14.md` 부탁 2.

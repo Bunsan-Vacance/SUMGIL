@@ -45,7 +45,9 @@ for topic in subway.arrival bike.stock weather.nowcast; do
       echo "생성       $topic"
     fi
   fi
+  # synonyms={...} 에는 브로커 기본값(retention.bytes=-1 등)이 같이 들어 있어 지우고 본다. 남는 건 토픽에 실제로 걸린 값이다.
   $KAFKA_EXEC $BIN/kafka-configs.sh --bootstrap-server $BOOTSTRAP --entity-type topics --entity-name "$topic" --describe \
-    | grep -oE "(cleanup.policy|retention.ms|retention.bytes|segment.ms|segment.bytes)=[^ ,}]+" | sort -u | tr '\n' ' '
+    | sed 's/ sensitive=.*//' \
+    | grep -oE "(cleanup.policy|retention.ms|retention.bytes|segment.ms|segment.bytes)=[^ ,}]+" | sort | tr '\n' ' '
   echo " <- $topic"
 done
