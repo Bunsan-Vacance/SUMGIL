@@ -106,6 +106,11 @@ def attach_external(
     df = df.merge(weather, left_on=[date_col, hour_col], right_on=["date", "hour"], how="left")
     df = df.merge(holidays, left_on=date_col, right_on="date", how="left", suffixes=("", "_hol"))
     df["is_holiday"] = df["is_holiday"].fillna(False)
+    # 날씨 실측 범위 밖 날짜(서빙 시점이 ASOS 이력보다 미래인 경우, Phase D 갭)는 매칭이
+    # 안 돼서 NaN이 섞이는데, bool 컬럼에 NaN이 들어가면 dtype이 object로 깨져서
+    # LightGBM이 거부한다(`ValueError: pandas dtypes must be int, float or bool`) —
+    # 반드시 fillna 뒤 bool로 명시 캐스팅한다.
+    df["is_rain"] = df["is_rain"].fillna(False).astype(bool)
     df["is_kbo_game_jamsil"] = df["od_station_id"].isin(jamsil_stations) & df[date_col].isin(
         jamsil_dates
     )

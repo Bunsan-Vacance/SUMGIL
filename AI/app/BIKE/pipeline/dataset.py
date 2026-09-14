@@ -71,3 +71,12 @@ def scan_station_ids(paths: list[Path]) -> set[str]:
         col = pq.ParquetFile(p).read(columns=["od_station_id"])["od_station_id"]
         ids |= set(col.to_pylist())
     return ids
+
+
+def load_station_static(prefix: str = "train", months: list[str] | None = None) -> pd.DataFrame:
+    """station별 정적 정보(rack_count, lat_stock, lon_stock) — 파일 1개만 훑으면 된다
+    (역 좌표·거치대 수는 월마다 안 바뀜). `LightGBMPredictor.predict_all()`이 예측 대상
+    grid(전체 역 × 48슬롯)를 만들 때, KBO 구장 인근 판정할 때 재사용한다."""
+    path = monthly_paths(prefix, months)[0]
+    df = pd.read_parquet(path, columns=["od_station_id", "rack_count", "lat_stock", "lon_stock"])
+    return df.drop_duplicates("od_station_id").dropna(subset=["lat_stock", "lon_stock"])
