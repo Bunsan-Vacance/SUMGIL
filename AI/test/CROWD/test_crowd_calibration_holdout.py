@@ -24,6 +24,9 @@ def _load_module():
         sys.path.insert(0, str(AI_ROOT))
     spec = importlib.util.spec_from_file_location("crowd_calibration_holdout", _SPEC_PATH)
     module = importlib.util.module_from_spec(spec)
+    # `@dataclass`(199의 `HoldoutVariant`)가 `sys.modules[cls.__module__]`을 들여다보므로
+    # exec 전에 등록해 둬야 한다 — 안 그러면 수집 단계에서 AttributeError로 죽는다.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

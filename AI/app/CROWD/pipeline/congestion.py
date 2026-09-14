@@ -34,6 +34,16 @@ API는 이 셀을 "데이터 부족"으로 노출한다(원칙 8). `congestion_r
   확인해 `BRANCH_DIRECTION_MAP`에 고정했다(같은 RESULTS.md 3절).
 - **결번 역**(3호선 충무로·6호선 연신내 등)은 그대로 결측이다 — 승하차 자체가 다른 호선에 계상돼
   대체할 값이 없다.
+
+## 199 — 규칙은 한 곳에만 둔다
+
+배율표(88)를 재적합하면서 "표에 들어간 규칙"과 "런타임 규칙"이 겹치지 않게 정리했다.
+
+- **경계 유입 상수는 표에 실린다.** `raw_offset` 컬럼이 있으면 `apply_calibration`이
+  `(raw + raw_offset) × ratio`를 계산한다 — 런타임에 상수를 적합하지 않는다. 상수가 없는(또는 0인)
+  표에서는 식이 기존과 완전히 같다. 상수를 어떻게 적합하는지는
+  `DATA_ENGINE/eda/boundary_inflow.py`에 있다.
+- **`truncated_segments`**는 절단 구간만 골라 준다 — 경계 처리와 상태값의 대상 집합이다.
 """
 
 from __future__ import annotations
@@ -255,6 +265,10 @@ def apply_calibration(
     조인 키는 원본 라벨이 아니라 **접은 라벨**(`day_type_bucket`·`direction_bucket`)이다 — 출력의
     `day_type`·`direction`은 그대로 두고, 공휴일을 다른 요일유형의 배율로 채운 행은
     `calibration_fallback=True`로 표시한다(146, 원칙 8).
+
+    배율표에 `raw_offset` 컬럼이 있으면 **`(raw + raw_offset) × ratio`**로 계산한다(199) — 절단면
+    바깥에서 들어와 구간을 통과하는 승객(정원 % 단위)을 재귀식 raw에 되돌려 주는 항이고, 배율은
+    그 더해진 raw로 적합된 값이다. 컬럼이 없거나 0이면 기존과 완전히 같은 식이다.
     """
     frame = labels.copy()
     frame["day_type_bucket"] = bucket_day_type(frame["line"], frame["day_type"], holiday_fallback)
@@ -268,7 +282,10 @@ def apply_calibration(
     )
     frame["time_slot_30min"] = frame["time_slot"].map(hour_bucket_to_30min_slots)
     frame = frame.explode("time_slot_30min", ignore_index=True)
-    ratio_key = calibration[["station_no", "direction", "day_type", "time_slot", "ratio"]].rename(
+    cal_cols = ["station_no", "direction", "day_type", "time_slot", "ratio"]
+    if "raw_offset" in calibration.columns:
+        cal_cols.append("raw_offset")
+    ratio_key = calibration[cal_cols].rename(
         columns={
             "direction": "direction_bucket",
             "day_type": "day_type_bucket",
@@ -280,7 +297,10 @@ def apply_calibration(
         on=["station_no", "direction_bucket", "day_type_bucket", "time_slot_30min"],
         how="left",
     )
-    merged["congestion_pct_calibrated"] = merged["congestion_raw_pct"] * merged["ratio"]
+    offset = (
+        merged["raw_offset"].fillna(0.0) if "raw_offset" in merged.columns else 0.0
+    )  # 표에 없으면 0 — 88·146 표와 식이 같다
+    merged["congestion_pct_calibrated"] = (merged["congestion_raw_pct"] + offset) * merged["ratio"]
     # 대체 요일유형으로도 값이 안 나온 셀은 "대체됨"이 아니라 그냥 결측이다.
     merged["calibration_fallback"] = (
         merged["calibration_fallback"] & merged["congestion_pct_calibrated"].notna()
@@ -288,8 +308,25 @@ def apply_calibration(
     return merged
 
 
+def truncated_segments(segments: Sequence[dict], lines: Sequence[str] | None = None) -> list[dict]:
+    """`truncated: true`인 선형 세그먼트만 — 절단면 처리(경계 유입·상태값)의 대상 집합(199).
+
+    순환 세그먼트(2호선 본선)와 역이 2개 미만인 세그먼트는 종점 링크 개념이 성립하지 않아 뺀다.
+    `lines`를 주면 그 호선으로 좁힌다(`None`이면 전부). 진짜 종점(6호선 응암 순환 시작, 5호선
+    지선 종점 등)은 이 플래그가 없어 자동으로 빠진다 — 거기서는 재차 0이 **정답**이다.
+    """
+    return [
+        seg
+        for seg in segments
+        if seg.get("truncated")
+        and not seg.get("circular")
+        and len(seg.get("stations", ())) >= 2
+        and (lines is None or seg["line"] in lines)
+    ]
+
+
 def truncated_boundary_cells(
-    segments: Sequence[dict], lines: Sequence[str] = ("1호선",)
+    segments: Sequence[dict], lines: Sequence[str] | None = ("1호선",)
 ) -> set[tuple[int, str]]:
     """절단 구간의 **종점 링크** (역번호, 방향) 집합 — 구조적으로 재차 0이 되는 셀(146).
 
@@ -299,15 +336,12 @@ def truncated_boundary_cells(
     32.5%·24.4%를 보고한다. 배율은 raw 평균 0이 분모라 산출 자체가 안 돼(ratio NaN) 값을 낼 수
     없으므로, 값을 지어내는 대신 `data_status`로 사유를 밝힌다.
 
-    `lines`로 범위를 좁힌다 — 3·4·7·9호선과 신정지선도 절단이지만 146의 스코프는 1호선이다.
+    `lines`로 범위를 좁힌다 — 146의 스코프는 1호선이었다. `None`이면 3·4·7·9호선 본선과 신정지선
+    까지 전부(199 B가 절단면 경계를 판정할 때 쓴다).
     """
     out: set[tuple[int, str]] = set()
-    for seg in segments:
-        if not seg.get("truncated") or seg.get("circular") or seg["line"] not in lines:
-            continue
+    for seg in truncated_segments(segments, lines):
         stations = seg["stations"]
-        if len(stations) < 2:
-            continue
         out.add((stations[-1], ASCENDING))
         out.add((stations[0], DESCENDING))
     return out

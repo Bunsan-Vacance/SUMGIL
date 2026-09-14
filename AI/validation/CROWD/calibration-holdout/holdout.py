@@ -45,6 +45,16 @@ OA-12928)이 연도판을 따로 내려주므로 가능하다.
 다른데(2023년 282 / 2024년 273), 세그먼트 구성이 달라지면 같은 역의 raw 값이 연도별로
 다른 링크 구조에서 나와 비교가 흐려진다.
 
+## 199 — 변형을 같은 심판으로 잰다
+
+이 하네스가 199(배율표 재적합)의 **out-of-sample 심판**이다. 세 축을 인자로 받아 임의 변형을 같은
+방식으로 채점한다 — 기본값은 142가 낸 수치를 그대로 재현한다.
+
+| 인자 | 뜻 | 기본 |
+| --- | --- | --- |
+| `--branch-map / --no-branch-map` | 2호선 지선 상·하선을 내/외선으로 접고 조인할 것인가(A) | 켜짐 |
+| `--fit-window {year,multi,season}` | 적합 연도의 승하차 평균 창(C) — 그 해만 / 두 해 / 기준일 ±13주 | `year` |
+
 실행(폴더명에 하이픈이 있어 `python -m`이 아니라 다른 `*-check` 폴더와 같은 파일 경로 호출이다):
     cd AI
     python validation/CROWD/calibration-holdout/holdout.py --fit-year 2024 --eval-year 2025
@@ -57,6 +67,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -97,6 +108,39 @@ GRADE_THRESHOLDS = (50.0, 100.0)
 METHODS = ("pipeline", "copy_prev", "scale_only", "scale_const")
 GROUP_COLS = ["direction", "day_type", "time_slot_30min"]
 
+# 연도판 스냅샷의 기준일 — 적합 창 `season`이 이 날짜 ±`SEASON_WEEKS`주를 쓴다.
+SNAPSHOT_REFERENCE = {2023: "2023-12-31", 2024: "2024-12-31", 2025: "2025-11-30"}
+SEASON_WEEKS = 13
+
+
+@dataclass(frozen=True)
+class HoldoutVariant:
+    """채점할 배율 적합 규칙(199). 기본값은 142가 낸 수치를 그대로 재현한다."""
+
+    branch_map: bool = True
+    fit_window: str = "year"  # year / multi / season
+
+    @property
+    def code(self) -> str:
+        head = "branch" if self.branch_map else "nobranch"
+        return f"{head}_{self.fit_window}"
+
+    def fit_years(self, fit_year: int, eval_year: int) -> tuple[int, ...]:
+        """적합 연도 raw 평균에 넣을 승하차 연도. `multi`는 평가 연도 승하차까지 평균에 넣는다.
+
+        `multi`는 현행 배율표의 구조(2025판 스냅샷 + 2024~2026 승하차 평균)를 홀드아웃에서 흉내
+        내려는 것이라 **평가 연도 승하차가 분모에 들어간다** — 정답(평가 연도 스냅샷)은 여전히
+        out-of-sample이지만 완전한 out-of-sample은 아니다. C절 판정에서 이 한계를 그대로 적는다.
+        """
+        return (fit_year, eval_year) if self.fit_window == "multi" else (fit_year,)
+
+    def season_range(self, fit_year: int) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+        if self.fit_window != "season":
+            return None
+        ref = pd.Timestamp(SNAPSHOT_REFERENCE[fit_year])
+        span = pd.Timedelta(weeks=SEASON_WEEKS)
+        return ref - span, ref + span
+
 
 # ── 원천 ──
 def panel_stations() -> set[int]:
@@ -122,8 +166,12 @@ def load_snapshot(year: int) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
-def yearly_panel(year: int, stations: set[int]) -> pd.DataFrame:
-    """한 해치 승하차를 재귀식 입력 격자(date·station_no·time_slot·boarding·alighting)로.
+def yearly_panel(
+    years: tuple[int, ...],
+    stations: set[int],
+    season: tuple[pd.Timestamp, pd.Timestamp] | None = None,
+) -> pd.DataFrame:
+    """해당 연도들의 승하차를 재귀식 입력 격자(date·station_no·time_slot·boarding·alighting)로.
 
     `build_crowd_panel`의 전체 패널(기상·좌표·이벤트까지 붙인다)은 여기서 필요 없다 —
     재귀식이 읽는 다섯 컬럼만 만든다. 2023년은 기상 원천이 없어 전체 패널을 만들 수도 없다
@@ -133,11 +181,13 @@ def yearly_panel(year: int, stations: set[int]) -> pd.DataFrame:
     rid = pd.read_parquet(
         RIDERSHIP_LONG, columns=["date", "station_no", "time_slot", "direction", "passengers"]
     )
-    rid = rid[rid["date"].dt.year == year]
+    rid = rid[rid["date"].dt.year.isin(years)]
+    if season is not None:
+        rid = rid[(rid["date"] >= season[0]) & (rid["date"] <= season[1])]
     rid["station_no"] = rid["station_no"].astype("int64")
     rid = rid[rid["station_no"].isin(stations)]
     if rid.empty:
-        raise ValueError(f"{year}년 승하차가 원천에 없다: {RIDERSHIP_LONG}")
+        raise ValueError(f"{years}년 승하차가 원천에 없다: {RIDERSHIP_LONG}")
     wide = rid.pivot_table(
         index=["date", "station_no", "time_slot"],
         columns="direction",
@@ -151,20 +201,39 @@ def yearly_panel(year: int, stations: set[int]) -> pd.DataFrame:
     return wide
 
 
-def yearly_raw_mean(year: int, rebuild: bool = False) -> pd.DataFrame:
+def raw_mean_cache_name(
+    years: tuple[int, ...], branch_map: bool, season: tuple[pd.Timestamp, pd.Timestamp] | None
+) -> str:
+    """캐시 파일명. 기본 조합(한 해·대응표 켬·창 없음)은 142가 만든 이름을 그대로 쓴다."""
+    name = f"calibration_holdout_rawmean_{'-'.join(str(y) for y in years)}"
+    if not branch_map:
+        name += "_nobranch"
+    if season is not None:
+        name += f"_season{season[0]:%Y%m%d}"
+    return f"{name}.parquet"
+
+
+def yearly_raw_mean(
+    years: int | tuple[int, ...],
+    branch_map: bool = True,
+    season: tuple[pd.Timestamp, pd.Timestamp] | None = None,
+    rebuild: bool = False,
+) -> pd.DataFrame:
     """(역·호선·방향·요일유형·1시간) 재귀식 raw 혼잡도의 날짜 평균. 결과는 캐시한다.
 
-    방향·요일유형은 **스냅샷 체계로 접은 뒤** 집계한다(`congestion.bucket_*`) — 2호선 지선의
-    상선/하선을 내선/외선으로 옮기는 146 대응표까지 서빙 경로와 똑같이 적용한다. 1~8호선
-    공휴일은 대응 구간이 없어(`holiday_fallback=None`) 여기서 떨어진다.
+    방향·요일유형은 **스냅샷 체계로 접은 뒤** 집계한다(`congestion.bucket_*`) — `branch_map`을 켜면
+    2호선 지선의 상선/하선을 내선/외선으로 옮기는 146 대응표까지 서빙 경로와 똑같이 적용한다
+    (199 A의 대조군을 만들려면 끈다). 1~8호선 공휴일은 대응 구간이 없어
+    (`holiday_fallback=None`) 여기서 떨어진다.
     """
-    cache = VALIDATION_DIR / f"calibration_holdout_rawmean_{year}.parquet"
+    years = (years,) if isinstance(years, int) else tuple(years)
+    cache = VALIDATION_DIR / raw_mean_cache_name(years, branch_map, season)
     if cache.exists() and not rebuild:
         return pd.read_parquet(cache)
 
     t0 = time.time()
     stations = panel_stations()
-    panel = yearly_panel(year, stations)
+    panel = yearly_panel(years, stations, season)
     segments, _ = resolve_segments(load_topology(), stations)
     labels = congestion.recursive_congestion(panel, segments, load_capacity())
 
@@ -173,8 +242,10 @@ def yearly_raw_mean(year: int, rebuild: bool = False) -> pd.DataFrame:
     labels["day_type_bucket"] = congestion.bucket_day_type(
         labels["line"], labels["day_type"], holiday_fallback=None
     )
-    labels["direction_bucket"] = congestion.bucket_direction(
-        labels["segment"], labels["direction"], labels["station_no"]
+    labels["direction_bucket"] = (
+        congestion.bucket_direction(labels["segment"], labels["direction"], labels["station_no"])
+        if branch_map
+        else labels["direction"]
     )
     labels = labels.dropna(subset=["day_type_bucket"])
 
@@ -190,7 +261,8 @@ def yearly_raw_mean(year: int, rebuild: bool = False) -> pd.DataFrame:
     VALIDATION_DIR.mkdir(parents=True, exist_ok=True)
     out.to_parquet(cache, index=False)
     print(
-        f"[재귀식] {year}년 {len(panel):,}행 → raw 평균 {len(out):,}셀 · {time.time() - t0:.0f}s",
+        f"[재귀식] {years} {len(panel):,}행 → raw 평균 {len(out):,}셀 · {time.time() - t0:.0f}s "
+        f"({cache.name})",
         flush=True,
     )
     return out
@@ -313,6 +385,8 @@ def metrics_by_axis(cells: pd.DataFrame, method: str) -> list[dict]:
         "요일유형": cells["day_type"],
         "호선": cells["line"],
         "원천 연속성": cells["source_continuity"],
+        # 199 B의 채택 규칙이 "경계 셀 MAE ≤ 해당 호선 평균 × 2"라 호선별로 갈라 둔다.
+        "경계 셀": cells["line"].where(cells.get("is_boundary", False), "내부"),
     }
     rows = []
     for axis, series in axes.items():
@@ -330,33 +404,48 @@ def metrics_by_axis(cells: pd.DataFrame, method: str) -> list[dict]:
 
 
 # ── 실행 ──
-def build_cells(fit_year: int, eval_year: int, rebuild: bool = False) -> pd.DataFrame:
+def build_cells(
+    fit_year: int,
+    eval_year: int,
+    variant: HoldoutVariant | None = None,
+    rebuild: bool = False,
+) -> pd.DataFrame:
     """평가 셀 한 장 — 정답(B스냅샷) + A스냅샷 + 두 해의 raw 평균 + 네 안의 예측."""
+    variant = variant or HoldoutVariant()
     key = ["station_no", "direction", "day_type", "time_slot_30min"]
     snap_fit = load_snapshot(fit_year).rename(columns={"congestion_pct": "snap_fit"})
     snap_eval = load_snapshot(eval_year).rename(columns={"congestion_pct": "truth"})
-    raw_fit = expand_to_30min(yearly_raw_mean(fit_year, rebuild=rebuild)).rename(
-        columns={"raw_mean": "raw_fit", "n_dates": "n_fit"}
-    )
-    raw_eval = expand_to_30min(yearly_raw_mean(eval_year, rebuild=rebuild)).rename(
-        columns={"raw_mean": "raw_eval", "n_dates": "n_eval"}
-    )
+    raw_fit = expand_to_30min(
+        yearly_raw_mean(
+            variant.fit_years(fit_year, eval_year),
+            branch_map=variant.branch_map,
+            season=variant.season_range(fit_year),
+            rebuild=rebuild,
+        )
+    ).rename(columns={"raw_mean": "raw_fit", "n_dates": "n_fit"})
+    raw_eval = expand_to_30min(
+        yearly_raw_mean(eval_year, branch_map=variant.branch_map, rebuild=rebuild)
+    ).rename(columns={"raw_mean": "raw_eval", "n_dates": "n_eval"})
 
     cells = snap_eval.merge(snap_fit.drop(columns=["line"]), on=key, how="left")
     cells = cells.merge(raw_fit.drop(columns=["line"]), on=key, how="left")
     cells = cells.merge(raw_eval.drop(columns=["line"]), on=key, how="left")
+    cells["raw_fit_adj"] = cells["raw_fit"]
+    cells["raw_eval_adj"] = cells["raw_eval"]
+    cells["is_boundary"] = False
 
     total = len(cells)
     cells = cells[
         cells["truth"].notna()
         & cells["snap_fit"].notna()
         & cells["raw_fit"].notna()
-        & (cells["raw_fit"] > 0)
+        & (cells["raw_fit_adj"] > 0)
         & cells["raw_eval"].notna()
     ].reset_index(drop=True)
     print(
         f"[셀] {eval_year} 스냅샷 {total:,}셀 중 네 안을 모두 낼 수 있는 셀 "
-        f"{len(cells):,} ({len(cells) / total * 100:.1f}%)",
+        f"{len(cells):,} ({len(cells) / total * 100:.1f}%) · 변형 {variant.code}"
+        f" · 경계 셀 {int(cells['is_boundary'].sum()):,}",
         flush=True,
     )
 
@@ -369,10 +458,10 @@ def build_cells(fit_year: int, eval_year: int, rebuild: bool = False) -> pd.Data
     )
 
     cells["pred_copy_prev"] = cells["snap_fit"]
-    cells["pred_pipeline"] = cells["snap_fit"] / cells["raw_fit"] * cells["raw_eval"]
+    cells["pred_pipeline"] = cells["snap_fit"] / cells["raw_fit_adj"] * cells["raw_eval_adj"]
     for method, with_const in (("scale_only", False), ("scale_const", True)):
-        coefs = fit_linear_by_group(cells, GROUP_COLS, "raw_fit", "snap_fit", with_const)
-        cells[f"pred_{method}"] = apply_linear(cells, coefs, GROUP_COLS, "raw_eval")
+        coefs = fit_linear_by_group(cells, GROUP_COLS, "raw_fit_adj", "snap_fit", with_const)
+        cells[f"pred_{method}"] = apply_linear(cells, coefs, GROUP_COLS, "raw_eval_adj")
     return cells
 
 
@@ -396,13 +485,19 @@ def verdict(metrics: pd.DataFrame) -> str:
 
 
 def run_holdout(
-    fit_year: int, eval_year: int, rebuild: bool = False
+    fit_year: int,
+    eval_year: int,
+    variant: HoldoutVariant | None = None,
+    rebuild: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    cells = build_cells(fit_year, eval_year, rebuild=rebuild)
+    variant = variant or HoldoutVariant()
+    cells = build_cells(fit_year, eval_year, variant, rebuild=rebuild)
     rows: list[dict] = []
     for method in METHODS:
         rows += metrics_by_axis(cells, method)
-    metrics = pd.DataFrame(rows).assign(fit_year=fit_year, eval_year=eval_year)
+    metrics = pd.DataFrame(rows).assign(
+        fit_year=fit_year, eval_year=eval_year, variant=variant.code
+    )
     return metrics, cells
 
 
@@ -412,7 +507,7 @@ def summarize(metrics: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
     out.append(
         ("전체", total.reset_index()[["method", "n", "mae", "rmse", "corr", "grade_agree_%"]])
     )
-    for axis in ("방향", "요일유형", "호선", "원천 연속성"):
+    for axis in ("방향", "요일유형", "호선", "원천 연속성", "경계 셀"):
         sub = metrics[metrics["axis"] == axis]
         for value, title in (("mae", "MAE %p"), ("grade_agree_%", "등급 일치율 %")):
             piv = sub.pivot_table(index="group", columns="method", values=value)
@@ -429,11 +524,19 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--rebuild", action="store_true", help="raw 평균 캐시를 다시 만든다")
     ap.add_argument("--save-results", default=None, help="지표 long parquet 경로")
     ap.add_argument("--save-cells", default=None, help="셀 단위 parquet 경로(노트북용)")
+    ap.add_argument(
+        "--no-branch-map",
+        dest="branch_map",
+        action="store_false",
+        help="2호선 지선 방향 대응을 끈다(199 A의 대조군)",
+    )
+    ap.add_argument("--fit-window", default="year", choices=("year", "multi", "season"))
     args = ap.parse_args(argv)
     if args.fit_year == args.eval_year:
         raise SystemExit("--fit-year와 --eval-year는 달라야 한다(홀드아웃이 성립하지 않는다).")
 
-    metrics, cells = run_holdout(args.fit_year, args.eval_year, rebuild=args.rebuild)
+    variant = HoldoutVariant(branch_map=args.branch_map, fit_window=args.fit_window)
+    metrics, cells = run_holdout(args.fit_year, args.eval_year, variant, rebuild=args.rebuild)
     for title, table in summarize(metrics):
         print(f"\n### {title}\n{table.round(3).to_string(index=False)}")
     print(f"\n[판정] {verdict(metrics)}")
