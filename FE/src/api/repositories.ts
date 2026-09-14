@@ -168,7 +168,7 @@ function apiErrorCode(status: number, error: unknown) {
 
 function mapStationSearchResult(value: unknown): StationSearchResult {
   const stationId = isRecord(value) ? text(value.stationId) : undefined
-  if (!isRecord(value) || !stationId || !/^\d+$/.test(stationId) || !text(value.stationName)) {
+  if (!isRecord(value) || !stationId || !text(value.stationName)) {
     throw new RepositoryError('invalid-response', '역 검색 응답이 올바르지 않아요.')
   }
   if (value.lineId !== undefined && value.lineId !== null && !text(value.lineId)) {
