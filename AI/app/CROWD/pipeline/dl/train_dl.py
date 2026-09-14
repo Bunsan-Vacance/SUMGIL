@@ -16,6 +16,10 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
   2025 평가에서 그것을 빼면 `full` RMSE 개선율이 시드 3회 평균 +8.29 → **+20.17**(승), +16.43 → +22.60(하)로
   오르고 `no_lag`도 −8.13 → +1.05로 뒤집힌다. 이벤트 표준화가 2024 분포에 묶여 2025에서 해로웠다는 뜻이다.
   144 구성을 재현하려면 `--static-events`.
+- **이벤트 인코딩**(`--event-encoding`, 198 후속): 이벤트 5열을 z-점수로 넣으면 99%가 0인 희소 카운트라
+  학습 std가 0.07~0.13이고 이벤트 날 입력이 z 12.8~38.5로 튄다. `log1p_max`는 `log1p(x)/log1p(학습 최대)`로
+  학습 구간에서 0~1에 넣는다(`dl/dataset` "이벤트 인코딩"). 정적 이벤트를 끈 안에서는 이력 이벤트
+  채널(`--seq-features events_hist`)에만 영향이 있다.
 - 분할은 `dl/dataset.SPLITS`: 2024-01~10 학습 / 2024-11~12 검증(early stopping) / 2025 평가.
   검증으로 에폭만 고르고 **2024 전체로 재학습하지 않는다**(144 계획 4번 — 단순화, 기록).
 - **이력 절단 증강**: 표본마다 `k ~ U{0..seq_days}`로 앞쪽 k일을 마스크(`masking.sample_truncation`
@@ -60,6 +64,7 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 from app.CROWD.pipeline.dataset import time_split
 from app.CROWD.pipeline.dl.dataset import (
+    EVENT_ENCODINGS,
     SEQ_FEATURE_SETS,
     SLIM_COLS,
     SPLITS,
@@ -95,6 +100,7 @@ def build_train_panel(
     stations: int | None = None,
     seq_features: str = "base",
     use_static_events: bool = True,
+    event_encoding: str = "zscore",
 ) -> tuple[SequencePanel, pd.DataFrame, pd.DataFrame]:
     """2024 파생(잔차·요일유형·이벤트 + 입력 안이 요구하는 열)만 읽어 밀집 패널·스케일·통계를 만든다.
 
@@ -109,7 +115,7 @@ def build_train_panel(
     tr_start, tr_end = SPLITS["train"]
     train_d = derived[(derived["date"] >= tr_start) & (derived["date"] <= tr_end)]
     scale = fit_scale(train_d)
-    stats = fit_event_stats(train_d)
+    stats = fit_event_stats(train_d, encoding=event_encoding)
     sp = SequencePanel.build(
         derived,
         scale,
@@ -117,6 +123,7 @@ def build_train_panel(
         seq_features=seq_features,
         use_static_events=use_static_events,
         neighbor_map=panel_neighbor_map() if seq_features == "neighbor" else None,
+        event_encoding=event_encoding,
     )
     return sp, scale, stats
 
@@ -327,6 +334,7 @@ def prepare(args) -> tuple[SequencePanel, pd.DataFrame, DayTypeLookupBaseline]:
         args.stations,
         seq_features=args.seq_features,
         use_static_events=args.static_events,
+        event_encoding=args.event_encoding,
     )
     panel = load_panel(with_events=True)
     train_raw, _ = time_split(panel)
@@ -406,6 +414,7 @@ def run(args, prepared=None) -> Path:
         "channels": seq_channels_for(args.seq_features),
         "seq_features": args.seq_features,
         "use_static_events": args.static_events,
+        "event_encoding": args.event_encoding,
         "stat_features": stat_features_for(args.static_events),
         "huber_delta": args.huber_delta,
         "targets": TARGETS,
@@ -435,6 +444,8 @@ def run(args, prepared=None) -> Path:
     tag = "" if args.seq_features == "base" else f"_{args.seq_features}"
     if not args.static_events:
         tag += "_noev"
+    elif args.event_encoding != "zscore":
+        tag += "_evfix"
     if args.huber_delta != 1.0:
         tag += f"_hd{args.huber_delta:g}"
     name = args.name or f"dl_{args.model}_s{args.seq_days}{tag}_s{args.seed}_{stamp}"
@@ -473,6 +484,12 @@ def main(argv: list[str] | None = None) -> None:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="대상일 이벤트 5열을 정적 피처로 쓴다. **기본은 끔**(198 판정 1: 켜면 2025 full RMSE −11.9%%p)",
+    )
+    ap.add_argument(
+        "--event-encoding",
+        default="zscore",
+        choices=list(EVENT_ENCODINGS),
+        help="정적·이력 이벤트 값의 인코딩(198 후속): zscore(144) · log1p_max(0~1)",
     )
     ap.add_argument(
         "--huber-delta", type=float, default=1.0, help="masked_huber의 δ(z 단위, 198 손실 실험)"

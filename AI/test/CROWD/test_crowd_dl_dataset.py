@@ -13,6 +13,7 @@ from app.CROWD.pipeline.dl.dataset import (
     SEQ_CHANNELS,
     STAT_FEATURES,
     SequencePanel,
+    encode_events,
     fit_event_stats,
     fit_scale,
     observed_channels,
@@ -343,6 +344,82 @@ def test_truncate_seq_clears_neighbor_channels_but_keeps_calendar():
     assert np.allclose(out[1, :, :, 3:7], x[1, :, :, 3:7])  # 요일유형은 남는다
     assert np.all(out[2, :3, :, 7:16] == 0) and np.allclose(out[2, 3:], x[2, 3:])
     np.testing.assert_array_equal(out[0], x[0])  # k=0은 그대로
+
+
+# ── 198 후속: 이벤트 인코딩(log1p_max) ──
+
+
+def _derived_with_events() -> pd.DataFrame:
+    """희소 이벤트(대부분 0, 하루만 큰 값)를 담은 파생 프레임 — z 폭발이 재현되는 모양."""
+    df = _derived()
+    big = df["date"] == pd.Timestamp("2024-03-05")
+    df.loc[big, "festival_count"] = 4
+    df.loc[big, "festival_min_duration_days"] = 9.0
+    # 평가 구간(학습 최대를 넘는 날) — 학습은 3/14까지다
+    huge = df["date"] == pd.Timestamp("2024-03-18")
+    df.loc[huge, "festival_count"] = 30
+    df.loc[huge, "festival_min_duration_days"] = 60.0
+    return df
+
+
+def test_event_stats_record_log1p_max_and_encoding():
+    derived = _derived_with_events()
+    train = derived[derived["date"] <= "2024-03-14"]
+    stats = fit_event_stats(train, encoding="log1p_max")
+    assert set(stats.columns) == {"feature", "mean", "std", "log1p_max", "encoding"}
+    assert (stats["encoding"] == "log1p_max").all()
+    row = stats.set_index("feature").loc["festival_count"]
+    assert float(row["log1p_max"]) == pytest.approx(np.log1p(4.0))
+    # 학습 구간에 한 번도 없던 열은 나눗셈을 1.0으로 막는다(0 나눗셈 금지)
+    assert float(stats.set_index("feature").loc["festival_long_count", "log1p_max"]) == 1.0
+    with pytest.raises(ValueError):
+        fit_event_stats(train, encoding="minmax")
+
+
+def test_log1p_max_encoding_bounds_train_range_and_compresses_unseen_peaks():
+    derived = _derived_with_events()
+    train = derived[derived["date"] <= "2024-03-14"]
+    stats = fit_event_stats(train, encoding="log1p_max")
+    cols = list(EVENT_STATIC_COLS)
+    raw_train = train.drop_duplicates(["date", "station_no"])[cols].fillna(0.0).to_numpy()
+    enc = encode_events(raw_train, stats, "log1p_max")
+    assert enc.min() >= 0.0 and enc.max() <= 1.0 + 1e-6  # 학습 구간은 0~1
+
+    # 학습 최대를 훨씬 넘는 값도 로그로 눌린다 — 같은 값의 z-점수와 비교
+    raw_eval = np.zeros((1, len(cols)), dtype="float32")
+    raw_eval[0, cols.index("festival_count")] = 30.0
+    raw_eval[0, cols.index("festival_min_duration_days")] = 60.0
+    fixed = encode_events(raw_eval, stats, "log1p_max")
+    z = encode_events(raw_eval, stats, "zscore")
+    assert fixed.max() < 3.0 < z.max()  # z는 희소열 std가 작아 크게 튄다
+    with pytest.raises(ValueError):  # log1p_max 열이 없는 옛 스케일 표로는 복원 불가
+        encode_events(raw_eval, stats.drop(columns=["log1p_max"]), "log1p_max")
+
+
+def test_panel_static_events_follow_event_encoding():
+    derived = _derived_with_events()
+    train = derived[derived["date"] <= "2024-03-14"]
+    scale = fit_scale(train)
+    kw = {"holidays": NO_HOLIDAYS, "use_static_events": True}
+    sp_fixed = SequencePanel.build(
+        derived,
+        scale,
+        fit_event_stats(train, encoding="log1p_max"),
+        event_encoding="log1p_max",
+        **kw,
+    )
+    sp_z = SequencePanel.build(derived, scale, fit_event_stats(train), **kw)
+    assert sp_fixed.event_encoding == "log1p_max" and sp_z.event_encoding == "zscore"
+
+    s_idx, d_idx = sp_fixed.sample_index("2024-03-05", "2024-03-05")
+    ev_fixed = sp_fixed.make_batch(s_idx, d_idx, seq_days=7)["x_stat"][:, len(DAY_TYPES) :]
+    ev_z = sp_z.make_batch(s_idx, d_idx, seq_days=7)["x_stat"][:, len(DAY_TYPES) :]
+    j = EVENT_STATIC_COLS.index("festival_count")
+    assert ev_fixed[0, j] == pytest.approx(1.0, rel=1e-5)  # 그 날이 학습 최대 = 1.0
+    assert np.all((ev_fixed >= 0.0) & (ev_fixed <= 1.0 + 1e-6))
+    assert ev_z[0, j] > 3.0  # 같은 자리의 z-점수는 희소열이라 크게 튄다
+    with pytest.raises(ValueError):
+        SequencePanel.build(derived, scale, fit_event_stats(train), event_encoding="minmax", **kw)
 
 
 def test_scenario_seq_keeps_only_named_lag_across_all_observed_channels():

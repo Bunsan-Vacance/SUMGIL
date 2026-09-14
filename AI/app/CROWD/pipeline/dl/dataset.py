@@ -43,6 +43,23 @@ LightGBM 쪽은 87·89·90·93에서 피처 세트 7개를 비교해 고른 것�
   대상일 이웃 값은 넣지 않는다(창이 `t−N…t−1`이라 구조적으로 들어갈 자리가 없다).
 - 이력 절단·시나리오 마스킹은 **관측에서 온 채널만** 지운다(`observed_channels`). 요일유형·이벤트는
   달력 정보라 이력이 없어도 알 수 있으므로 남긴다.
+
+## 이벤트 인코딩(198 후속)
+
+198 1차는 이벤트 5열을 **z-점수**로 넣었는데, 99%가 0인 희소 카운트라 학습 구간 std가 0.07~0.13이었다.
+이벤트가 있는 날은 입력이 z 12.8~38.5(2025의 `festival_min_duration_days`는 최대 88.0)로 튀고,
+`festival_count`의 z>5인 (역, 날)이 2025에 6.2%다 — 정적 이벤트를 넣은 안(V0)이 무너진 것도,
+시드 표준편차가 ±7%p였던 것도 이 스케일 폭발로 설명된다. 그래서 `event_encoding`을 둔다.
+
+| `event_encoding` | 개수 4열 | `festival_min_duration_days` | 범위(학습 구간) |
+| --- | --- | --- | --- |
+| `zscore` | `(x − mean) / std` | 같음(없음 → 0을 표준화) | 무제한(희소열에서 폭발) |
+| `log1p_max` | `log1p(x) / log1p(학습 최대)` | `log1p(일수) / log1p(학습 최대)`, 없으면 0 | **0~1** |
+
+`log1p_max`는 학습 구간을 넘는 값(2025의 더 큰 이벤트)도 로그로 눌러 1을 조금 넘는 선에서 멈춘다.
+스케일 표(`event_stats.parquet`)에 `log1p_max`(나눈 값)와 `encoding`(실제로 쓴 인코딩)을 같이 남겨
+아티팩트만 보고 복원할 수 있게 한다. 없음(NaN)은 두 인코딩 모두 0으로 두는데, `log1p_max`에서는
+0이 곧 "값 0"이라 `festival_count=0`과 같은 자리를 가리켜 의미가 어긋나지 않는다.
 """
 
 from __future__ import annotations
@@ -79,6 +96,9 @@ NEIGHBOR_SIDES = ("prev", "next", "xfer")
 NEIGHBOR_RESID_COLS = [f"nb_{side}_{t}_resid" for side in NEIGHBOR_SIDES for t in TARGETS]
 SEQ_FEATURE_SETS = ("base", "neighbor", "events_hist")
 N_NEIGHBOR_CHANNELS = len(NEIGHBOR_RESID_COLS) + len(NEIGHBOR_SIDES)  # z 6 + mask 3 = 9
+
+# ── 이벤트 인코딩(198 후속) ──
+EVENT_ENCODINGS = ("zscore", "log1p_max")
 
 
 def seq_channels_for(seq_features: str = "base") -> int:
@@ -159,12 +179,55 @@ def fit_scale(train_derived: pd.DataFrame, min_std: float = 1.0) -> pd.DataFrame
     return std
 
 
-def fit_event_stats(train_derived: pd.DataFrame) -> pd.DataFrame:
-    """이벤트 정적 피처의 (역, 날짜) 단위 평균·표준편차. 셀(슬롯) 중복을 빼고 잰다."""
+def fit_event_stats(train_derived: pd.DataFrame, encoding: str = "zscore") -> pd.DataFrame:
+    """이벤트 정적 피처의 (역, 날짜) 단위 스케일 표. 셀(슬롯) 중복을 빼고 잰다.
+
+    두 인코딩의 상수를 **같이** 담는다 — `zscore`는 평균·표준편차, `log1p_max`는 `log1p(학습 최대)`.
+    `encoding` 열은 그 표로 실제 학습한 인코딩이고, 아티팩트(`event_stats.parquet`)만 보고
+    복원할 수 있게 하려고 남긴다. 학습 구간에 한 번도 안 나온 열(최대 0)은 나눗셈을 1.0으로 막는다.
+    """
+    if encoding not in EVENT_ENCODINGS:
+        raise ValueError(f"모르는 event_encoding {encoding!r} — {list(EVENT_ENCODINGS)} 중 하나")
     daily = train_derived.drop_duplicates(["date", "station_no"])[EVENT_STATIC_COLS].fillna(0.0)
     mean = daily.mean()
     std = daily.std(ddof=0).replace(0.0, 1.0).fillna(1.0)
-    return pd.DataFrame({"feature": EVENT_STATIC_COLS, "mean": mean.values, "std": std.values})
+    log1p_max = np.log1p(daily.clip(lower=0.0).max()).replace(0.0, 1.0).fillna(1.0)
+    return pd.DataFrame(
+        {
+            "feature": EVENT_STATIC_COLS,
+            "mean": mean.values,
+            "std": std.values,
+            "log1p_max": log1p_max.values,
+            "encoding": encoding,
+        }
+    )
+
+
+def encode_events(
+    raw: np.ndarray, event_stats: pd.DataFrame, encoding: str = "zscore"
+) -> np.ndarray:
+    """이벤트 원값 `[n, 5]`(열 순서 `EVENT_STATIC_COLS`, NaN은 0) → 입력 값 `[n, 5]`.
+
+    `zscore`는 144·198 1차 그대로, `log1p_max`는 `log1p(x) / log1p(학습 최대)`로 학습 구간에서
+    0~1에 들어간다(모듈 docstring "이벤트 인코딩"). 표에 `log1p_max` 열이 없는 옛 스케일 표로
+    `log1p_max`를 요구하면 복원할 수 없으므로 막는다.
+    """
+    if encoding not in EVENT_ENCODINGS:
+        raise ValueError(f"모르는 event_encoding {encoding!r} — {list(EVENT_ENCODINGS)} 중 하나")
+    stats = event_stats.set_index("feature")
+    raw = np.asarray(raw, dtype="float32")
+    out = np.zeros_like(raw, dtype="float32")
+    for j, c in enumerate(EVENT_STATIC_COLS):
+        if encoding == "zscore":
+            out[:, j] = (raw[:, j] - stats.loc[c, "mean"]) / stats.loc[c, "std"]
+        else:
+            if "log1p_max" not in stats.columns:
+                raise ValueError(
+                    "event_encoding='log1p_max'는 스케일 표에 log1p_max 열이 필요하다"
+                    " — zscore로 학습한 옛 아티팩트다"
+                )
+            out[:, j] = np.log1p(np.clip(raw[:, j], 0.0, None)) / float(stats.loc[c, "log1p_max"])
+    return out
 
 
 def neighbor_scale(neighbor_map: pd.DataFrame, scale: pd.DataFrame) -> pd.DataFrame:
@@ -201,6 +264,7 @@ class SequencePanel:
     std: np.ndarray  # [S, 20, 2] float32 — 역변환용
     seq_features: str = "base"
     use_static_events: bool = True
+    event_encoding: str = "zscore"  # 198 후속 — "zscore" | "log1p_max"
     nb_z: np.ndarray | None = None  # [S, D, 20, 6] float32 — `neighbor`일 때만
     nb_mask: np.ndarray | None = None  # [S, D, 20, 3] float32 — side별 1 있음 / 0 없음
 
@@ -220,6 +284,7 @@ class SequencePanel:
         seq_features: str = "base",
         use_static_events: bool = True,
         neighbor_map: pd.DataFrame | None = None,
+        event_encoding: str = "zscore",
     ) -> SequencePanel:
         """파생 프레임(학습·검증·평가 전부 포함 가능)을 밀집 배열로 pivot한다.
 
@@ -231,6 +296,10 @@ class SequencePanel:
         if seq_features not in SEQ_FEATURE_SETS:
             raise ValueError(
                 f"모르는 seq_features {seq_features!r} — {list(SEQ_FEATURE_SETS)} 중 하나"
+            )
+        if event_encoding not in EVENT_ENCODINGS:
+            raise ValueError(
+                f"모르는 event_encoding {event_encoding!r} — {list(EVENT_ENCODINGS)} 중 하나"
             )
         extra = seq_feature_columns(seq_features)
         present = [c for c in extra if c in derived.columns]
@@ -312,7 +381,7 @@ class SequencePanel:
         # 요일유형 [D] — 패널 값 우선, 빈 날은 달력
         day_type = _day_type_index(df, dates, holidays)
 
-        # 이벤트 [S, D, 5] — 표준화, 없는 (역, 날짜)는 0(= 학습 평균 위치가 아니라 "정보 없음"으로 둔다)
+        # 이벤트 [S, D, 5] — 인코딩(zscore | log1p_max), 없는 (역, 날짜)는 0
         events = np.zeros((S, D, len(EVENT_STATIC_COLS)), dtype="float32")
         ev_cols = [c for c in EVENT_STATIC_COLS if c in derived.columns]
         if ev_cols:
@@ -321,12 +390,16 @@ class SequencePanel:
             ].copy()
             daily["date"] = pd.to_datetime(daily["date"]).dt.normalize()
             daily = daily[daily["station_no"].isin(station_ids)]
-            stats = event_stats.set_index("feature")
-            vals = np.zeros((len(daily), len(EVENT_STATIC_COLS)), dtype="float32")
+            raw = np.zeros((len(daily), len(EVENT_STATIC_COLS)), dtype="float32")
             for j, c in enumerate(EVENT_STATIC_COLS):
                 if c in ev_cols:
-                    raw = daily[c].fillna(0.0).to_numpy(dtype="float32")
-                    vals[:, j] = (raw - stats.loc[c, "mean"]) / stats.loc[c, "std"]
+                    raw[:, j] = daily[c].fillna(0.0).to_numpy(dtype="float32")
+            vals = encode_events(raw, event_stats, event_encoding)
+            # 파생 프레임에 없는 열은 원값 0 자리에 남는다 — zscore는 "학습 평균과의 거리 0"이 아니라
+            # 그 열의 평균 위치가 되므로, 없는 열이 있으면 그 자리를 0으로 되돌린다(정보 없음).
+            for j, c in enumerate(EVENT_STATIC_COLS):
+                if c not in ev_cols:
+                    vals[:, j] = 0.0
             events[
                 s_lookup.loc[daily["station_no"]].to_numpy(), _date_index(daily["date"], start)
             ] = vals
@@ -341,6 +414,7 @@ class SequencePanel:
             std=np.nan_to_num(std, nan=1.0),
             seq_features=seq_features,
             use_static_events=use_static_events,
+            event_encoding=event_encoding,
             nb_z=nb_z,
             nb_mask=nb_mask,
         )

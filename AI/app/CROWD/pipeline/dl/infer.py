@@ -18,8 +18,9 @@ GPU 없는 EC2 배치가 그대로 읽는 경로다(`AI/CLAUDE.md` "딥러닝 �
 
 ## 입력 설계 변형(198)
 
-`meta.json`의 `seq_features`·`use_static_events`로 채널을 복원한다. 키가 없는 144 아티팩트는
-`base` + 정적 이벤트로 본다. `neighbor` 아티팩트는 **서빙에서도 이웃 잔차가 필요**하므로
+`meta.json`의 `seq_features`·`use_static_events`·`event_encoding`으로 채널을 복원한다. 키가 없는 144
+아티팩트는 `base` + 정적 이벤트 + `zscore`로 본다(`event_stats.parquet`에 `encoding` 열이 있으면 그것).
+`neighbor` 아티팩트는 **서빙에서도 이웃 잔차가 필요**하므로
 `predict(panel_window, segments)`의 `segments`(= `dataset.resolved_segments` 결과)로 이웃 표를 만들고
 창 안의 잔차에 `adjacency.attach_neighbor_features`를 붙인다 — 파생 캐시의 `nb_*_resid`와 같은 계산이다.
 창에 `station_name`이 없으면 환승(`xfer`) side는 만들 수 없어 그 채널만 마스크 0이 된다.
@@ -73,9 +74,20 @@ class DLResidualPredictor:
         # 198: 옛 아티팩트(144)에는 이 키가 없다 → base · 정적 이벤트 있음
         self.seq_features: str = str(self.meta.get("seq_features", "base"))
         self.use_static_events: bool = bool(self.meta.get("use_static_events", True))
+        # 198 후속: 이벤트 인코딩도 meta로 복원한다(없는 옛 아티팩트 → 스케일 표의 열 → zscore)
+        self.event_stats = pd.read_parquet(self.dir / "event_stats.parquet")
+        self.event_encoding: str = str(
+            self.meta.get(
+                "event_encoding",
+                (
+                    self.event_stats["encoding"].iloc[0]
+                    if "encoding" in self.event_stats.columns and len(self.event_stats)
+                    else "zscore"
+                ),
+            )
+        )
         self.station_ids = np.asarray(self.meta["station_ids"], dtype="int64")
         self.scale = pd.read_parquet(self.dir / "scale.parquet")
-        self.event_stats = pd.read_parquet(self.dir / "event_stats.parquet")
         self.lookup = DayTypeLookupBaseline.load(
             self.dir / "lookup.parquet",
             keys=self.meta["lookup_keys"],
@@ -168,6 +180,7 @@ class DLResidualPredictor:
             seq_features=self.seq_features,
             use_static_events=self.use_static_events,
             neighbor_map=neighbor_map,
+            event_encoding=self.event_encoding,
         )
         s_idx, d_idx = self._sample_index(sp, frame)
         if not len(s_idx):

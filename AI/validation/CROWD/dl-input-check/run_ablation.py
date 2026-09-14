@@ -2,13 +2,23 @@
 
 144는 입력 1안(`base`, 시드 42) 하나만 학습했다. 198은 그 위에 세 가지 축을 얹는다.
 
-| 안 | `--seq-features` | 정적 이벤트 | 채널 | 가설 |
-| --- | --- | --- | --- | --- |
-| `base`(V0) | base | 있음 | 7 | 144 기준(아티팩트 재사용, 시드 43·44만 새로) |
-| `neighbor`(V1) | neighbor | 있음 | 16 | 89에서 인접역 **잔차**가 원본값의 4배 효과였다 — 시퀀스에서도 나는가 |
-| `events_hist`(V2) | events_hist | 있음 | 12 | "지난 경기·축제 날 잔차"를 이벤트로 설명하면 대상일 반응이 좋아지는가 |
-| `no_events`(V3) | base | **없음** | 7 | 대조군 — 이벤트 5열이 실제로 기여하는가. **채택**(198 판정 1) |
-| `neighbor_no_events` | neighbor | **없음** | 16 | 계획 밖 1회 — V1·V3 효과가 겹치는가(겹치지 않았다) |
+| 안 | 계열 | `--seq-features` | 정적 이벤트 | 인코딩 | 채널 | 가설 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `base`(V0) | gru | base | 있음 | zscore | 7 | 144 기준(아티팩트 재사용, 시드 43·44만 새로) |
+| `neighbor`(V1) | gru | neighbor | 있음 | zscore | 16 | 89에서 인접역 **잔차**가 원본값의 4배 효과였다 — 시퀀스에서도 나는가 |
+| `events_hist`(V2) | gru | events_hist | 있음 | zscore | 12 | "지난 경기·축제 날 잔차"를 이벤트로 설명하면 대상일 반응이 좋아지는가 |
+| `no_events`(V3) | gru | base | **없음** | — | 7 | 대조군 — 이벤트 5열이 실제로 기여하는가. **1차 채택**(198 판정 1) |
+| `neighbor_no_events` | gru | neighbor | **없음** | — | 16 | 계획 밖 1회 — V1·V3 효과가 겹치는가(겹치지 않았다) |
+| `no_events_lstm` | **lstm** | base | **없음** | — | 7 | 후속 A — 계열(GRU/LSTM)이 채택 구성에서 구분되는가 |
+| `events_fixed` | gru | base | 있음 | **log1p_max** | 7 | 후속 B — 이벤트가 해로운 게 아니라 **z 인코딩**이 해로웠던 것인가 |
+| `events_fixed_lstm` | **lstm** | base | 있음 | **log1p_max** | 7 | 후속 C — B가 채택되면 그 구성에서도 계열 비교를 1행 남긴다 |
+
+## 후속(198 재실행) — 왜 인코딩을 고쳤나
+
+1차 결론은 "이벤트 5열이 해롭다"였는데, 표준화를 점검하니 99%가 0인 희소 카운트를 z-점수로 넣어
+학습 std가 0.07~0.13이었다. 이벤트가 있는 날 입력이 z 12.8~38.5, 2025의 `festival_min_duration_days`는
+최대 88.0이다. 그래서 "이벤트가 해롭다"와 "이 인코딩으로는 해롭다"가 구분되지 않는다 —
+`events_fixed`(= `--static-events --event-encoding log1p_max`)가 그 둘을 가른다.
 
 ## 왜 한 프로세스인가
 
@@ -26,7 +36,8 @@ GPU 15분짜리 묶음이 중간에 끊겨도 남은 것만 돈다. `--force`로
     python validation/CROWD/dl-input-check/run_ablation.py --runs neighbor,events_hist,no_events
     python validation/CROWD/dl-input-check/run_ablation.py --runs base:43,base:44,neighbor:43
     python validation/CROWD/dl-input-check/run_ablation.py --runs base --huber-delta 3
-    python validation/CROWD/dl-input-check/run_ablation.py --runs neighbor --stations 20 --epochs 2  # 스모크
+    python validation/CROWD/dl-input-check/run_ablation.py --runs no_events_lstm:42,no_events_lstm:43
+    python validation/CROWD/dl-input-check/run_ablation.py --runs events_fixed --stations 20 --epochs 2  # 스모크
 예상: 전체 안 1개 = 준비 1분 + 학습 1.5분(GPU). 안 3 + 시드 4 + 손실 2 ≈ 20분.
 """
 
@@ -47,15 +58,38 @@ if str(AI_ROOT) not in sys.path:
 from app.CROWD.pipeline.dl.dataset import seq_channels_for, stat_features_for
 from app.CROWD.pipeline.dl.train_dl import prepare, run
 
-# 안 이름 → (seq_features, 정적 이벤트 사용)
-VARIANTS: dict[str, tuple[str, bool]] = {
-    "base": ("base", True),
-    "neighbor": ("neighbor", True),
-    "events_hist": ("events_hist", True),
-    "no_events": ("base", False),
+# 안 이름 → 학습 구성. 안 이름이 곧 계열명(`runs.jsonl`·평가 `--models`의 접두)이라
+# 계열(gru/lstm)과 이벤트 인코딩도 이름으로 갈라 둔다 — 키 형식(`<안>|s<시드>|hd<δ>`)을 바꾸지 않아
+# 1차 9회의 `runs.jsonl`이 그대로 "끝난 것"으로 읽힌다.
+VARIANTS: dict[str, dict] = {
+    "base": {"seq_features": "base", "static_events": True},
+    "neighbor": {"seq_features": "neighbor", "static_events": True},
+    "events_hist": {"seq_features": "events_hist", "static_events": True},
+    "no_events": {"seq_features": "base", "static_events": False},
     # 계획 밖 1회 탐색(V1+V3): V1·V3이 각각 판정 1을 통과해 두 효과가 겹치는지 본다.
-    "neighbor_no_events": ("neighbor", False),
+    "neighbor_no_events": {"seq_features": "neighbor", "static_events": False},
+    # ── 후속(A·B·C) ──
+    "no_events_lstm": {"seq_features": "base", "static_events": False, "model": "lstm"},
+    "events_fixed": {
+        "seq_features": "base",
+        "static_events": True,
+        "event_encoding": "log1p_max",
+    },
+    "events_fixed_lstm": {
+        "seq_features": "base",
+        "static_events": True,
+        "event_encoding": "log1p_max",
+        "model": "lstm",
+    },
 }
+VARIANT_DEFAULTS = {"model": "gru", "event_encoding": "zscore"}
+
+
+def variant_config(name: str) -> dict:
+    """안 이름 → `{model, seq_features, static_events, event_encoding}`(기본값 채운 것)."""
+    return {**VARIANT_DEFAULTS, **VARIANTS[name]}
+
+
 RUNS_PATH = _HERE / "runs.jsonl"
 
 
@@ -92,9 +126,9 @@ def done_keys(path: Path) -> set[str]:
 
 def build_args(run_spec: dict, cli) -> Namespace:
     """`train_dl.main`이 만드는 것과 같은 네임스페이스(144 고정 구성 + 안별 채널 스위치)."""
-    seq_features, use_static = VARIANTS[run_spec["variant"]]
+    cfg = variant_config(run_spec["variant"])
     return Namespace(
-        model="gru",
+        model=cfg["model"],
         seq_days=cli.seq_days,
         hidden=cli.hidden,
         epochs=cli.epochs,
@@ -105,8 +139,9 @@ def build_args(run_spec: dict, cli) -> Namespace:
         lr=cli.lr,
         p_full=0.0,
         no_truncation=False,
-        seq_features=seq_features,
-        static_events=use_static,
+        seq_features=cfg["seq_features"],
+        static_events=cfg["static_events"],
+        event_encoding=cfg["event_encoding"],
         huber_delta=run_spec["huber_delta"],
         determinism_probe=0,  # 144에서 0.000%로 확인됨 — 반복 실험에서는 GPU 시간만 먹는다
         stations=cli.stations,
@@ -183,8 +218,10 @@ def main(argv: list[str] | None = None) -> None:
                 "variant": spec["variant"],
                 "seed": spec["seed"],
                 "huber_delta": spec["huber_delta"],
+                "model": args.model,
                 "seq_features": args.seq_features,
                 "use_static_events": args.static_events,
+                "event_encoding": args.event_encoding,
                 "channels": seq_channels_for(args.seq_features),
                 "stat_features": stat_features_for(args.static_events),
                 "artifact": str(out_dir),
