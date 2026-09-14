@@ -211,12 +211,29 @@ CROWD의 배포 모델(`festival_selflag_d1sd_d7_resid`, `MODEL_REGISTRY.md`)을
 
 Dec 검증 l2도 111.4로, lag 없을 때(159) 대비 크게 낮아짐. **B4 최초로 avg를 명확히 이김.**
 
-## 결론 (최신)
+## p_empty/p_full — D-1/D-7 lag 포함 quantile+isotonic 재확인 (`train_multisource_quantile.py`)
+
+exp_bikes와 같은 피처(날씨·공휴일·KBO·D-1/D-7 lag)로 quantile(0.1/0.5/0.9) 3개 학습 +
+isotonic 보정. avg 쪽 확률은 `StockProfileBaseline`과 동일한 계산(station×dow_type×time_slot
+실측 empty/full 비율). 전체 스케일(train 43.5M행, test 13.0M행), 학습 3299초(55분,
+q50 모델은 1500라운드 다 써도 early stopping 안 걸림 — 개선 여지 있으나 시간 대비 판단 보류).
+
+| | avg | model(보정 전) | model(isotonic 후) | 개선율 |
+|---|---|---|---|---|
+| **p_empty** | 0.0656 | 0.0655 | 0.0644 | **-1.8%**(근소— avg의 절대 수준 자체가 이미 낮아 개선 여지 적음) |
+| **p_full** | 0.1849 | 0.1633 | 0.1619 | **-12.4%**(확실) |
+
+## 결론 (최종)
 
 날짜축 멀티소스 모델은 **D-1/D-7 lag 피처가 핵심**이었다 — 날씨·공휴일·KBO는 0단계에서 신호가
 있다고 확인됐지만, 그것만으론 avg를 못 이겼고 어제/1주 전 실측 lag를 더해야 이겼다(CROWD와
-같은 패턴). 결정 게이트: **avg를 이김 → predictor.py 구현 재개.** 다음: p_empty/p_full도 같은
-방식(quantile+isotonic, B2에서 검증됨)으로 lag 피처를 넣어 재확인 필요.
+같은 패턴).
+
+**세 지표 종합**: exp_bikes -11.6%, p_full -12.4%(둘 다 확실한 개선), p_empty -1.8%(약하지만
+avg를 넘김 — avg 자체 수준이 이미 낮아 더 줄일 여지가 작다고 판단, 추가 투자 보류).
+
+**결정 게이트 통과 → predictor.py 구현 재개(Phase A).** p_empty는 "약하게 이김"으로 기록하고
+향후 개선 후보(직접 분류기 등)로 남긴다.
 
 ## 다음 검토 여지 (미해결)
 
