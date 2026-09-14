@@ -412,14 +412,212 @@ describe('백엔드 repository', () => {
     )
   })
 
-  it('일반 장소를 역으로 추정하지 않고 안전한 오류를 반환한다', async () => {
+  it('최단 경로와 대안 경로 응답을 함께 변환하고 자전거 구간 geometry를 보존한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [
+            {
+              routeType: 'SHORTEST',
+              totalMinutes: 11,
+              source: 'ALGORITHM',
+              legs: [{ mode: 'WALK', minutes: 11 }],
+            },
+            {
+              routeType: 'ALTERNATIVE',
+              totalMinutes: 14,
+              source: 'ALGORITHM',
+              legs: [
+                {
+                  mode: 'WALK',
+                  minutes: 3,
+                  geometry: {
+                    type: 'MultiLineString',
+                    coordinates: [
+                      [
+                        [127.03, 37.5],
+                        [127.031, 37.501],
+                      ],
+                    ],
+                  },
+                  geometryStatus: 'available',
+                },
+                {
+                  mode: 'BIKE',
+                  minutes: 8,
+                  geometry: {
+                    type: 'MultiLineString',
+                    coordinates: [
+                      [
+                        [127.031, 37.501],
+                        [127.04, 37.51],
+                      ],
+                    ],
+                  },
+                  geometryStatus: 'available',
+                },
+                { mode: 'WALK', minutes: 3 },
+              ],
+            },
+          ],
+        }),
+      })),
+    )
+
+    const result = await createBackendRouteRepository('http://be.test').search(
+      { origin: station('역삼'), destination: station('강변') },
+      new AbortController().signal,
+    )
+
+    expect(result).toHaveLength(2)
+    expect(result[1]).toMatchObject({
+      label: '따릉이 포함 경로',
+      modes: ['walk', 'bike'],
+      geometry: { coordinates: expect.any(Array) },
+    })
+    expect(result[1].legs[0].geometry?.coordinates).toEqual([
+      [
+        [127.03, 37.5],
+        [127.031, 37.501],
+      ],
+    ])
+    expect(result[1].legs[1].geometry?.coordinates).toEqual([
+      [
+        [127.031, 37.501],
+        [127.04, 37.51],
+      ],
+    ])
+  })
+
+  it('알 수 없는 경로 유형은 성공 응답으로 숨기지 않는다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [
+            {
+              routeType: 'UNSUPPORTED',
+              totalMinutes: 1,
+              source: 'ALGORITHM',
+              legs: [{ mode: 'WALK', minutes: 1 }],
+            },
+          ],
+        }),
+      })),
+    )
+
+    await expect(
+      createBackendRouteRepository('http://be.test').search(
+        { origin: station('역삼'), destination: station('강변') },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+  })
+
+  it('좌표가 없는 장소는 coordinate 요청 전에 오류를 반환한다', async () => {
     const repository = createBackendRouteRepository('http://be.test')
     await expect(
       repository.search(
         { origin: { ...station('역삼'), stationId: undefined }, destination: station('강변') },
         new AbortController().signal,
       ),
-    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'unsupported-place' })
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-coordinate' })
+  })
+
+  it('역이 아닌 장소는 좌표 API에 JSON으로 전달한다', async () => {
+    const fetchMock = vi.fn(async () => ({
+      status: 501,
+      ok: false,
+      json: async () => ({
+        success: false,
+        error: { status: 501, code: 'ACCESS_CANDIDATE_NOT_READY' },
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const origin = {
+      id: 'origin-place',
+      name: '출발 장소',
+      address: '서울',
+      kind: '장소',
+      lat: 37.5,
+      lng: 127.03,
+    }
+    const destination = {
+      id: 'destination-place',
+      name: '도착 장소',
+      address: '서울',
+      kind: '장소',
+      lat: 37.51,
+      lng: 127.04,
+    }
+
+    await expect(
+      createBackendRouteRepository('http://be.test').search(
+        {
+          origin,
+          destination,
+          modes: ['walk', 'subway'],
+          priority: 'fast',
+          departedAt: '2026-09-15T00:00:00.000Z',
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({
+      code: 'coordinate-not-ready',
+      status: 501,
+      message: '좌표 기반 경로는 아직 준비 중이에요.',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://be.test/api/routes/search/coordinate',
+      expect.objectContaining({
+        method: 'POST',
+        signal: expect.any(AbortSignal),
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin: { lat: 37.5, lng: 127.03, name: '출발 장소' },
+          destination: { lat: 37.51, lng: 127.04, name: '도착 장소' },
+          modes: ['WALK', 'SUBWAY'],
+          priority: 'TIME',
+          departureTime: '2026-09-15T09:00:00',
+        }),
+      }),
+    )
+  })
+
+  it('좌표 API의 잘못된 좌표 오류를 사용자 오류로 변환한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 400,
+        ok: false,
+        json: async () => ({
+          success: false,
+          error: { status: 400, code: 'INVALID_COORDINATE' },
+        }),
+      })),
+    )
+
+    await expect(
+      createBackendRouteRepository('http://be.test').search(
+        {
+          origin: { ...station('origin'), stationId: undefined, lat: 37.5, lng: 127.03 },
+          destination: { ...station('destination'), stationId: undefined, lat: 37.51, lng: 127.04 },
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({
+      code: 'invalid-coordinate',
+      status: 400,
+      message: '출발지와 도착지 좌표를 확인해 주세요.',
+    })
   })
 
   it('unavailable geometry는 버리고 transfer를 이동수단·환승 수에 중복 반영하지 않는다', async () => {

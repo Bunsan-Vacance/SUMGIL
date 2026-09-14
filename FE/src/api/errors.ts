@@ -1,6 +1,8 @@
 export type RepositoryErrorCode =
   | 'same-origin-destination'
   | 'station-not-found'
+  | 'coordinate-not-ready'
+  | 'invalid-coordinate'
   | 'unsupported-place'
   | 'bad-request'
   | 'network'
