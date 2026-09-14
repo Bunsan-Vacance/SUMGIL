@@ -6,8 +6,7 @@
 특히 **상수 0이면 주입하지 않은 것과 같아야 한다**는 회귀선을 고정한다 — 이게 깨지면 88 현행 표를
 더는 재현할 수 없고, 199의 모든 전후 비교가 기준선을 잃는다.
 
-이 파일은 티켓이 진행되면서 늘어난다 — 여기서는 심판 하네스가 쓰는 순수 함수(절단 구간 선별,
-경계 상수 적합, 인접역 차용, `raw_offset`을 실은 표의 서빙 계산)를 고정한다.
+이 파일은 티켓이 진행되면서 늘어난다.
 """
 
 from __future__ import annotations
@@ -25,6 +24,11 @@ from app.CROWD.pipeline.congestion import (
 from DATA_ENGINE.eda.boundary_inflow import (
     borrow_neighbor_boundary,
     fit_boundary_inflow,
+)
+from DATA_ENGINE.eda.build_congestion_calibration import (
+    CalibrationVariant,
+    bucket_day_type,
+    fit_window_mask,
 )
 
 SEGMENTS = [
@@ -131,6 +135,17 @@ def test_borrow_neighbor_boundary_copies_ratio_and_raw_mean():
     assert edge["raw_offset"] == 400.0  # 그 셀의 예측은 인접역 날짜 평균이 된다
 
 
+# ── 적합 창 ──
+def test_fit_window_mask_narrows_to_year_and_season():
+    dates = pd.Series(pd.to_datetime(["2024-06-01", "2025-06-01", "2025-11-25", "2026-01-05"]))
+    variant = CalibrationVariant(snapshot_release="2025-11-30", window_weeks=13)
+    assert fit_window_mask(dates, variant).tolist() == [True, True, True, True]
+    year = fit_window_mask(dates, CalibrationVariant(fit_window="snapshot_year")).tolist()
+    assert year == [False, True, True, False]
+    season = fit_window_mask(dates, CalibrationVariant(fit_window="snapshot_season")).tolist()
+    assert season == [False, False, True, True]
+
+
 # ── A: 지선 방향 대응이 산출 쪽에서도 같은 규칙을 쓴다 ──
 def test_branch_direction_map_is_shared_between_serving_and_builder():
     frame = pd.DataFrame(
@@ -143,6 +158,15 @@ def test_branch_direction_map_is_shared_between_serving_and_builder():
     mapped = bucket_direction(frame["segment"], frame["direction"], frame["station_no"])
     assert mapped.tolist() == ["외선", "내선", "내선", "하선"]
     assert BRANCH_DIRECTION_MAP["성수지선"]["하선"] == "외선"
+
+
+def test_builder_day_type_bucket_never_fabricates_a_holiday():
+    """공휴일 대체는 서빙(`congestion.HOLIDAY_FALLBACK_DAY_TYPE`) 한 곳에서만 일어난다."""
+    line = pd.Series(["1호선", "9호선"])
+    day_type = pd.Series(["휴일", "휴일"])
+    bucketed = bucket_day_type(line, day_type)
+    assert bucketed.isna().iloc[0]  # 1~8호선 공휴일은 조인에서 빠진다(표에 행을 만들지 않는다)
+    assert bucketed.iloc[1] == "휴일"  # 9호선은 스냅샷 정의 그대로
 
 
 # ── 서빙: raw_offset이 실린 표 ──

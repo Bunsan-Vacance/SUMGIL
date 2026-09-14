@@ -28,15 +28,22 @@
 전부 "휴일" 하나로 묶어 맞춘다 — 이건 추정이 아니라 원천이 스스로 쓰는 정의를 그대로
 따르는 것이다.
 
-## 알려진 잔여 결측 — 2호선 지선의 방향 라벨 스킴이 다르다
+## 199 — 변형(`CalibrationVariant`)으로 적합 규칙을 고른다
 
-스냅샷은 2호선을 본선·지선 구분 없이 54역 전부 **내선/외선**으로만 보고한다(2026-09-10
-대조 확인). 그런데 `line_topology.yaml`의 성수지선·신정지선은 `circular` 플래그가 없어
-`build_congestion_label.py`가 상선/하선으로 계산한다 — 그 결과 지선 역(용답·신답·신설동·
-도림천·양천구청·신정네거리 등) 3,393행이 매칭 실패로 남는다. 이건 수치 오류가 아니라
-**방향 라벨 체계 자체가 다른 것**이라 여기서 임의로 맞추지 않는다(원칙 1) — 지선을
-순환선으로 취급할지 여부는 `line_topology.yaml`/`build_congestion_label.py` 쪽에서
-따로 판단할 문제라 이 모듈의 스코프 밖에 남겨 둔다.
+88이 "이 모듈의 스코프 밖"으로 남겼던 두 결측 원인을 199가 여기서 푼다. 규칙을 상수로 박지 않고
+`CalibrationVariant`로 받아, `validation/CROWD/calibration-refit/`가 **같은 심판(홀드아웃·등급
+일치율·`data_status`)으로 후보를 재고** 채택안을 기본값으로 둔다. 현행(88) 재현은
+`CalibrationVariant.current()`다 — 바이트 단위로 같은 표가 나온다.
+
+- **2호선 지선 방향 대응(`branch_direction_map`).** 스냅샷은 2호선 54역 전부를 **내/외선**으로
+  보고하는데(2026-09-10 대조 확인) `line_topology.yaml`의 성수·신정지선은 `circular`가 아니라
+  재귀식이 **상/하선**으로 계산한다 → 조인 공집합. 146이 두 지선의 대응이 서로 반대임을 실측
+  출퇴근 비대칭·상관으로 확정해 `congestion.BRANCH_DIRECTION_MAP`에 고정했다. 그 대응표를 여기
+  조인 직전에 적용한다(라벨 파일은 건드리지 않는다).
+- **적합 창(`fit_window`).** 스냅샷 기준일과 승하차 평균 창의 어긋남(142 §2-B·§6)을 고르는 축이다.
+
+절단면 경계 셀(진행방향 끝 링크의 재차가 정의상 0이라 배율이 산출되지 않는 셀)은 아직 그대로
+결측이다 — 199 B에서 다룬다.
 
 ## 9호선 스냅샷은 (station, direction, day_type, time_slot) 키가 원래 중복이다
 
@@ -72,10 +79,12 @@ XLSX 원본(9호선 혼잡도 자료)에 역명만 있고 역번호 컬럼이 �
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
+from app.CROWD.pipeline.congestion import bucket_direction
 from DATA_ENGINE.eda.build_crowd_panel import attach_calendar
 from DATA_ENGINE.eda.parsers_crowd_line9_daily_ridership import load_station_master
 
@@ -87,6 +96,9 @@ LABEL_NAME = "crowd_congestion_label_2024_2026.parquet"
 SNAPSHOT_NAME = "crowd_congestion_long.parquet"
 OUTPUT_NAME = "crowd_congestion_calibration.parquet"
 OUTPUT_NAME_EXPRESS = "crowd_congestion_calibration_express.parquet"
+
+# 배율표가 선 실측 스냅샷의 기준일(142 1절에서 2025-11-30판과 완전 일치함을 확인).
+SNAPSHOT_RELEASE = "2025-11-30"
 
 # 9호선 스냅샷의 day_type 정의를 그대로 따른다 — 주말+공휴일을 "휴일" 하나로 묶는다.
 _LINE9_DAY_TYPE_BUCKET = {"평일": "평일", "토요일": "휴일", "일요일": "휴일", "휴일": "휴일"}
@@ -101,6 +113,48 @@ _LINE2_BRANCH_STATIONS = {211, 244, 245, 250, 246, 234, 247, 248, 249}
 _LINE9_CALIBRATION_YEAR = 2025
 
 _SLOT_PATTERN = re.compile(r"^(\d{2}):(\d{2})$")
+
+
+@dataclass(frozen=True)
+class CalibrationVariant:
+    """배율 적합 규칙의 축(199). 후보 비교와 재생성이 같은 코드를 쓰게 하는 장치다.
+
+    - `branch_direction_map` — 2호선 지선의 상/하선을 스냅샷의 내/외선으로 옮기고 조인한다(A1).
+    - `fit_window` — raw 평균을 낼 승하차 날짜 창. `all`(현행) / `snapshot_year`(스냅샷 기준일의
+      연도만) / `snapshot_season`(기준일 ±`window_weeks`주).
+    """
+
+    branch_direction_map: bool = True
+    fit_window: str = "all"
+    snapshot_release: str = SNAPSHOT_RELEASE
+    window_weeks: int = 13
+
+    @classmethod
+    def current(cls) -> CalibrationVariant:
+        """88이 만든 현행 표를 그대로 재현하는 설정 — 모든 비교의 기준선."""
+        return cls(branch_direction_map=False, fit_window="all")
+
+    @property
+    def code(self) -> str:
+        head = "branch" if self.branch_direction_map else "nobranch"
+        return f"{head}_{self.fit_window}"
+
+
+def fit_window_mask(dates: pd.Series, variant: CalibrationVariant) -> pd.Series:
+    """적합 창 — raw 평균에 넣을 승하차 날짜를 고른다.
+
+    `snapshot_season`은 스냅샷 기준일 ±`window_weeks`주다. 기준일 주변만 남기면 계절이 맞는 대신
+    셀당 표본이 줄어 분산이 커진다 — 어느 쪽이 나은지는 홀드아웃이 판정한다(142 §6 미해결).
+    """
+    if variant.fit_window == "all":
+        return pd.Series(True, index=dates.index)
+    ref = pd.Timestamp(variant.snapshot_release)
+    if variant.fit_window == "snapshot_year":
+        return dates.dt.year == ref.year
+    if variant.fit_window == "snapshot_season":
+        span = pd.Timedelta(weeks=variant.window_weeks)
+        return (dates >= ref - span) & (dates <= ref + span)
+    raise ValueError(f"알 수 없는 적합 창: {variant.fit_window!r}")
 
 
 def dedupe_snapshot_keys(snapshot: pd.DataFrame, line9_train_type: str = "일반") -> pd.DataFrame:
@@ -174,16 +228,30 @@ def bucket_day_type(line: pd.Series, day_type: pd.Series) -> pd.Series:
     return bucketed
 
 
-def raw_hourly_mean(labels: pd.DataFrame) -> pd.DataFrame:
+def raw_hourly_mean(
+    labels: pd.DataFrame, variant: CalibrationVariant | None = None
+) -> pd.DataFrame:
     """(station_no, direction, line, day_type_bucket, time_slot) 별 raw 평균과 표본 날짜 수.
 
     `crowd_congestion_label_2024_2026.parquet`에는 `day_type`이 없다 — 승하차 패널과
     달리 재귀식 결과는 (date, station_no, ...) 원자 단위라 요일유형을 안 들고 있어서,
     `build_crowd_panel.attach_calendar`로 `date`에서 다시 파생한다.
+
+    `variant.branch_direction_map`이 켜지면 2호선 지선의 상/하선을 **조인 직전에** 내/외선으로
+    옮긴다(146 대응표). 라벨 파일은 그대로 두고 여기서만 접는 것이라, 88·146이 낸 라벨 수치는
+    흔들리지 않는다. `variant.fit_window`는 평균에 넣을 날짜를 좁힌다.
     """
+    variant = variant or CalibrationVariant()
     frame = attach_calendar(labels.copy())
+    frame = frame[fit_window_mask(frame["date"], variant)]
     frame["day_type_bucket"] = bucket_day_type(frame["line"], frame["day_type"])
     frame = frame.dropna(subset=["day_type_bucket"])
+    if variant.branch_direction_map:
+        frame["direction"] = bucket_direction(
+            frame["segment"] if "segment" in frame.columns else None,
+            frame["direction"],
+            frame["station_no"],
+        )
 
     grouped = frame.groupby(
         ["station_no", "direction", "line", "day_type_bucket", "time_slot"], observed=True
@@ -193,13 +261,17 @@ def raw_hourly_mean(labels: pd.DataFrame) -> pd.DataFrame:
 
 def build_calibration_ratio(
     line9_train_type: str = "일반",
+    variant: CalibrationVariant | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """배율표를 만든다. `line9_train_type`을 `"급행"`으로 주면 급행 6역용 배율표가 된다.
 
     두 호출 모두 같은 raw 평균(분모, 재귀식은 열차 종류를 구분하지 않는다)을 쓰고
     분자(실측)만 갈라서 계산한다 — "raw가 실제로 몇 배 과대한가"를 일반·급행 두
     시선으로 각각 보는 것이다. 하나가 다른 하나에서 유도되는 관계가 아니다.
+
+    `variant`가 적합 규칙(지선 방향 대응·경계 유입·적합 창)을 정한다 — 모듈 docstring 참고.
     """
+    variant = variant or CalibrationVariant()
     labels = pd.read_parquet(CROWD_PROCESSED / LABEL_NAME)
     snapshot = pd.read_parquet(CROWD_INTERIM / SNAPSHOT_NAME)
 
@@ -216,7 +288,7 @@ def build_calibration_ratio(
             "남아 있다 — 배율표가 조인 시 행 수를 부풀린다. 원인을 먼저 확인할 것."
         )
 
-    raw_mean = raw_hourly_mean(labels)
+    raw_mean = raw_hourly_mean(labels, variant)
 
     merged = snapshot.merge(
         raw_mean,
@@ -293,12 +365,14 @@ def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_pa
 def main() -> None:
     local_ratio, local_diag = build_calibration_ratio(line9_train_type="일반")
     local_path = save_calibration(local_ratio, OUTPUT_NAME)
-    _report("일반", local_ratio, local_diag, local_path)
+    _report(f"일반 · 변형 {CalibrationVariant().code}", local_ratio, local_diag, local_path)
 
     # 급행은 9호선에만 있는 개념이라(1~8호선은 train_type 자체가 없다) dedupe_snapshot_keys가
     # 1~8호선 행을 그대로 통과시켜도, 여기서는 9호선만 남긴다 — "급행" 산출물에 급행이
-    # 없는 호선의 행이 섞여 있으면 헷갈린다.
-    express_ratio, _ = build_calibration_ratio(line9_train_type="급행")
+    # 없는 호선의 행이 섞여 있으면 헷갈린다. 9호선은 199 스코프 밖이라 변형을 적용하지 않는다.
+    express_ratio, _ = build_calibration_ratio(
+        line9_train_type="급행", variant=CalibrationVariant.current()
+    )
     express_ratio = express_ratio[express_ratio["line"] == "9호선"].reset_index(drop=True)
     express_diag = {
         "스냅샷_행": len(express_ratio),
