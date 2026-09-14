@@ -269,6 +269,48 @@ describe('백엔드 repository', () => {
     )
   })
 
+  it('역 검색 결과의 영문 stationId도 숫자 ID와 함께 보존한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [
+            { stationId: '150', stationName: '서울' },
+            { stationId: 'S410', stationName: '서울대벤처타운' },
+          ],
+        }),
+      })),
+    )
+
+    await expect(
+      createBackendStationRepository('http://be.test').search('서울', new AbortController().signal),
+    ).resolves.toEqual([
+      { stationId: '150', stationName: '서울' },
+      { stationId: 'S410', stationName: '서울대벤처타운' },
+    ])
+  })
+
+  it('역 검색 결과 stationId가 공백이면 응답을 무효 처리한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [{ stationId: '   ', stationName: '강변' }],
+        }),
+      })),
+    )
+
+    await expect(
+      createBackendStationRepository('http://be.test').search('강변', new AbortController().signal),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+  })
+
   it('역 검색 응답 좌표가 잘못되면 빈 결과로 숨기지 않는다', async () => {
     vi.stubGlobal(
       'fetch',

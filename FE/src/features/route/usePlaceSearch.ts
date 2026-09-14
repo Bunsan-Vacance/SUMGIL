@@ -40,7 +40,7 @@ function isStoredPlace(value: unknown): value is Place {
   if (value.lng !== undefined && !isValidCoordinate(value.lng, -180, 180)) return false
   if (
     value.stationId !== undefined &&
-    (typeof value.stationId !== 'string' || !/^\d+$/.test(value.stationId.trim()))
+    (typeof value.stationId !== 'string' || !value.stationId.trim())
   )
     return false
   if (value.placeUrl !== undefined) {

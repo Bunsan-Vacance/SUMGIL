@@ -4,7 +4,13 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PlaceRepository, StationRepository } from '../../api/contracts'
 import type { Place } from './types'
-import { stationSearchResultToPlace, usePlaceSearch, useStationSearch } from './usePlaceSearch'
+import {
+  RECENT_PLACES_STORAGE_KEY,
+  loadRecentPlaces,
+  stationSearchResultToPlace,
+  usePlaceSearch,
+  useStationSearch,
+} from './usePlaceSearch'
 
 afterEach(() => {
   cleanup()
@@ -115,6 +121,19 @@ describe('역 검색 요청', () => {
       stationId: '214',
       kind: '지하철역',
     })
+  })
+
+  it('최근 장소의 영문 stationId를 보존하고 공백 stationId는 거부한다', () => {
+    localStorage.setItem(
+      RECENT_PLACES_STORAGE_KEY,
+      JSON.stringify([
+        { ...result, stationId: '150' },
+        { ...result, id: 'station-s410', stationId: 'S410' },
+        { ...result, id: 'station-blank', stationId: '   ' },
+      ]),
+    )
+
+    expect(loadRecentPlaces().map((place) => place.stationId)).toEqual(['150', 'S410'])
   })
 
   it('백엔드가 설정되지 않은 환경에서는 역 검색 요청을 만들지 않는다', async () => {
