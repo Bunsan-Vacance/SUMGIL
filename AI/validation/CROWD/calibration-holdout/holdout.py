@@ -53,12 +53,18 @@ OA-12928)이 연도판을 따로 내려주므로 가능하다.
 | 인자 | 뜻 | 기본 |
 | --- | --- | --- |
 | `--branch-map / --no-branch-map` | 2호선 지선 상·하선을 내/외선으로 접고 조인할 것인가(A) | 켜짐 |
+| `--boundary {none,joint,anchored}` · `--boundary-apply {segment,cell}` | 절단면 경계 유입 상수 주입(B) | `none` |
 | `--fit-window {year,multi,season}` | 적합 연도의 승하차 평균 창(C) — 그 해만 / 두 해 / 기준일 ±13주 | `year` |
+
+경계 유입은 `DATA_ENGINE/eda/boundary_inflow.py`의 **배율표 산출과 같은 함수**로 적합한다(심판과
+산출물이 다른 상수를 쓰면 비교가 성립하지 않는다). 상수는 **적합 연도 자료로만** 구해 평가 연도
+raw에 더하므로 out-of-sample이 유지된다.
 
 실행(폴더명에 하이픈이 있어 `python -m`이 아니라 다른 `*-check` 폴더와 같은 파일 경로 호출이다):
     cd AI
     python validation/CROWD/calibration-holdout/holdout.py --fit-year 2024 --eval-year 2025
     python validation/CROWD/calibration-holdout/holdout.py --fit-year 2023 --eval-year 2024
+    python validation/CROWD/calibration-holdout/holdout.py --boundary anchored --boundary-apply cell
 예상: 연도별 재귀식 1회 2~4분(결과는 `interim/validation/`에 캐시, 두 번째부터 수 초).
 """
 
@@ -79,6 +85,7 @@ if str(AI_ROOT) not in sys.path:
     sys.path.insert(0, str(AI_ROOT))
 
 from app.CROWD.pipeline import congestion
+from DATA_ENGINE.eda.boundary_inflow import boundary_offsets
 from DATA_ENGINE.eda.build_congestion_label import (
     load_capacity,
     load_topology,
@@ -118,12 +125,15 @@ class HoldoutVariant:
     """채점할 배율 적합 규칙(199). 기본값은 142가 낸 수치를 그대로 재현한다."""
 
     branch_map: bool = True
+    boundary: str = "none"  # none / joint / anchored
+    boundary_apply: str = "segment"
     fit_window: str = "year"  # year / multi / season
 
     @property
     def code(self) -> str:
         head = "branch" if self.branch_map else "nobranch"
-        return f"{head}_{self.fit_window}"
+        mid = self.boundary if self.boundary == "none" else f"{self.boundary}-{self.boundary_apply}"
+        return f"{head}_{mid}_{self.fit_window}"
 
     def fit_years(self, fit_year: int, eval_year: int) -> tuple[int, ...]:
         """적합 연도 raw 평균에 넣을 승하차 연도. `multi`는 평가 연도 승하차까지 평균에 넣는다.
@@ -404,6 +414,35 @@ def metrics_by_axis(cells: pd.DataFrame, method: str) -> list[dict]:
 
 
 # ── 실행 ──
+def attach_boundary_offset(cells: pd.DataFrame, variant: HoldoutVariant) -> pd.DataFrame:
+    """절단 구간 셀에 경계 유입 상수를 붙인다 — **적합 연도 자료로만** 구한다(199 B).
+
+    배율표 산출과 같은 `boundary_inflow.boundary_offsets`를 쓴다. 평가 연도 raw에도 같은 상수를
+    더하므로(모형이 `meas ≈ s·(raw + c)`라 c는 표의 일부다) 평가 연도 정답은 건드리지 않는다.
+    """
+    out = cells.copy()
+    if variant.boundary == "none":
+        out["raw_offset"] = 0.0
+        return out
+    frame = out.rename(
+        columns={
+            "time_slot_30min": "time_slot",
+            "raw_fit": "raw_mean",
+            "snap_fit": "congestion_pct",
+        }
+    )
+    offsets = boundary_offsets(
+        frame,
+        available=panel_stations(),
+        method=variant.boundary,
+        apply_to=variant.boundary_apply,
+    ).rename(columns={"time_slot": "time_slot_30min"})
+    key = ["station_no", "direction", "day_type", "time_slot_30min"]
+    out = out.merge(offsets, on=key, how="left")
+    out["raw_offset"] = out["raw_offset"].fillna(0.0)
+    return out
+
+
 def build_cells(
     fit_year: int,
     eval_year: int,
@@ -430,9 +469,11 @@ def build_cells(
     cells = snap_eval.merge(snap_fit.drop(columns=["line"]), on=key, how="left")
     cells = cells.merge(raw_fit.drop(columns=["line"]), on=key, how="left")
     cells = cells.merge(raw_eval.drop(columns=["line"]), on=key, how="left")
-    cells["raw_fit_adj"] = cells["raw_fit"]
-    cells["raw_eval_adj"] = cells["raw_eval"]
-    cells["is_boundary"] = False
+    # 경계 상수는 **행을 걸러내기 전에** 붙인다 — 걸러내는 기준(raw > 0)이 상수 때문에 바뀐다.
+    cells = attach_boundary_offset(cells, variant)
+    cells["raw_fit_adj"] = cells["raw_fit"] + cells["raw_offset"]
+    cells["raw_eval_adj"] = cells["raw_eval"] + cells["raw_offset"]
+    cells["is_boundary"] = (cells["raw_fit"] == 0) & (cells["raw_offset"] > 0)
 
     total = len(cells)
     cells = cells[
@@ -530,12 +571,19 @@ def main(argv: list[str] | None = None) -> None:
         action="store_false",
         help="2호선 지선 방향 대응을 끈다(199 A의 대조군)",
     )
+    ap.add_argument("--boundary", default="none", choices=("none", "joint", "anchored"))
+    ap.add_argument("--boundary-apply", default="segment", choices=("segment", "cell"))
     ap.add_argument("--fit-window", default="year", choices=("year", "multi", "season"))
     args = ap.parse_args(argv)
     if args.fit_year == args.eval_year:
         raise SystemExit("--fit-year와 --eval-year는 달라야 한다(홀드아웃이 성립하지 않는다).")
 
-    variant = HoldoutVariant(branch_map=args.branch_map, fit_window=args.fit_window)
+    variant = HoldoutVariant(
+        branch_map=args.branch_map,
+        boundary=args.boundary,
+        boundary_apply=args.boundary_apply,
+        fit_window=args.fit_window,
+    )
     metrics, cells = run_holdout(args.fit_year, args.eval_year, variant, rebuild=args.rebuild)
     for title, table in summarize(metrics):
         print(f"\n### {title}\n{table.round(3).to_string(index=False)}")

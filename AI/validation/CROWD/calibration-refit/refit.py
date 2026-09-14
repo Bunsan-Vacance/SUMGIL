@@ -5,9 +5,8 @@
 | 단계 | 질문 | 후보 |
 | --- | --- | --- |
 | A | 2호선 지선 546셀/일을 살릴 수 있나 | A3 현행 / **A1 방향 대응표 적용** / (A2 라벨 재정의는 A1 실패 시만) |
+| B | 절단면 경계 셀에 값을 줄 수 있나 | B3 현행 / B1-joint / B1-anchored-구간 / B1-anchored-경계셀 / B2 인접역 값 차용 |
 | C | 적합 창을 바꿔야 하나 | C1 전체(현행) / C2 스냅샷 연도 / C3 기준일 ±13주 |
-
-B(절단면 경계 셀)는 다음 커밋에서 같은 틀에 붙는다.
 
 채택 규칙은 계획(`.claude/plans/S15P21A104-199-calibration-refit.md`)에 **사전 고정**돼 있고,
 판정 문장과 규칙 대비 ○×는 같은 폴더 `RESULTS.md`에 적는다.
@@ -48,6 +47,7 @@ from app.CROWD.pipeline.dataset import (
 )
 from app.CROWD.pipeline.predictor import build_predictor
 from app.CROWD.pipeline.topology import load_capacity
+from DATA_ENGINE.eda.boundary_inflow import borrow_neighbor_boundary
 from DATA_ENGINE.eda.build_congestion_calibration import (
     CalibrationVariant,
     build_calibration_ratio,
@@ -57,39 +57,73 @@ STORE = CROWD_INTERIM / "validation"
 
 # 배율표 후보 — 이름이 RESULTS의 행 이름이다.
 BASE = CalibrationVariant.current()
-A1 = CalibrationVariant()
+A1 = CalibrationVariant(boundary_inflow=False)
 
 CALIBRATION_CANDIDATES: dict[str, CalibrationVariant] = {
     "A3 현행(88)": BASE,
     "A1 지선 방향 대응": A1,
-    "C2 스냅샷 연도": CalibrationVariant(fit_window="snapshot_year"),
-    "C3 기준일 ±13주": CalibrationVariant(fit_window="snapshot_season"),
+    "B1j 경계-joint·구간": CalibrationVariant(boundary_method="joint", boundary_apply="segment"),
+    "B1s 경계-anchored·구간": CalibrationVariant(
+        boundary_method="anchored", boundary_apply="segment"
+    ),
+    "B1c 경계-anchored·경계셀": CalibrationVariant(
+        boundary_method="anchored", boundary_apply="cell"
+    ),
+    "C2 스냅샷 연도": CalibrationVariant(boundary_inflow=False, fit_window="snapshot_year"),
+    "C3 기준일 ±13주": CalibrationVariant(boundary_inflow=False, fit_window="snapshot_season"),
+    "채택 A1+B1s+C1": CalibrationVariant(),
 }
 
 HOLDOUT_CANDIDATES: dict[str, HoldoutVariant] = {
     "A3 현행(88)": HoldoutVariant(branch_map=False),
     "A1 지선 방향 대응": HoldoutVariant(branch_map=True),
+    "B1j 경계-joint·구간": HoldoutVariant(boundary="joint", boundary_apply="segment"),
+    "B1s 경계-anchored·구간": HoldoutVariant(boundary="anchored", boundary_apply="segment"),
+    "B1c 경계-anchored·경계셀": HoldoutVariant(boundary="anchored", boundary_apply="cell"),
     "C1 전체 평균(현행 구조)": HoldoutVariant(fit_window="multi"),
     "C2 스냅샷 연도": HoldoutVariant(fit_window="year"),
     "C3 기준일 ±13주": HoldoutVariant(fit_window="season"),
+    "채택 A1+B1s+C1": HoldoutVariant(boundary="anchored", boundary_apply="segment"),
 }
 
 STAGE_CALIBRATION = {
     "a": ["A3 현행(88)", "A1 지선 방향 대응"],
+    "b": [
+        "A1 지선 방향 대응",
+        "B1j 경계-joint·구간",
+        "B1s 경계-anchored·구간",
+        "B1c 경계-anchored·경계셀",
+        "B2 인접역 값 차용",
+    ],
     "c": ["A1 지선 방향 대응", "C2 스냅샷 연도", "C3 기준일 ±13주"],
+    "final": ["A3 현행(88)", "채택 A1+B1s+C1"],
 }
 STAGE_HOLDOUT = {
     "a": ["A3 현행(88)", "A1 지선 방향 대응"],
+    "b": [
+        "A1 지선 방향 대응",
+        "B1j 경계-joint·구간",
+        "B1s 경계-anchored·구간",
+        "B1c 경계-anchored·경계셀",
+    ],
     "c": ["C2 스냅샷 연도", "C1 전체 평균(현행 구조)", "C3 기준일 ±13주"],
+    "final": ["A3 현행(88)", "채택 A1+B1s+C1"],
 }
 
 
 def build_tables(names: list[str]) -> dict[str, pd.DataFrame]:
-    """후보 이름 → 배율표."""
+    """후보 이름 → 배율표. B2는 A1 표를 후처리해서 만든다(재귀식 불변이라는 정의 그대로)."""
     tables: dict[str, pd.DataFrame] = {}
     for name in names:
         t0 = time.time()
-        tables[name], _ = build_calibration_ratio(variant=CALIBRATION_CANDIDATES[name])
+        if name == "B2 인접역 값 차용":
+            base = tables.get("A1 지선 방향 대응")
+            if base is None:
+                base, _ = build_calibration_ratio(variant=A1)
+            labels_stations = set(base["station_no"].unique())
+            tables[name] = borrow_neighbor_boundary(base, labels_stations)
+        else:
+            tables[name], _ = build_calibration_ratio(variant=CALIBRATION_CANDIDATES[name])
         print(f"[표] {name}: {len(tables[name]):,}행 · {time.time() - t0:.0f}s", flush=True)
     return tables
 
@@ -98,12 +132,12 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--stage", default="all", choices=("a", "c", "all"))
+    ap.add_argument("--stage", default="all", choices=("a", "b", "c", "final", "all"))
     ap.add_argument("--out", default=str(_HERE / "RESULTS_draft.md"))
     ap.add_argument("--skip-status", action="store_true", help="③ data_status 단계를 건너뛴다")
     args = ap.parse_args(argv)
 
-    stages = ["a", "c"] if args.stage == "all" else [args.stage]
+    stages = ["a", "b", "c", "final"] if args.stage == "all" else [args.stage]
     chunks: list[str] = []
 
     def emit(title: str, frame: pd.DataFrame, index: bool = False) -> None:
@@ -132,6 +166,12 @@ def main(argv: list[str] | None = None) -> None:
         "②. 2025 등급 일치율(50/100) — 배율만 갈아끼운 재계산",
         judges.grade_agreement(cells, tables),
     )
+    if "final" in stages:
+        # 경계 상수가 날짜별 변동을 얼마나 희석하는지는 **상수가 들어간 호선**에서만 보여야 한다.
+        emit(
+            "②-B. 호선별 전달폭 — 경계 상수의 비용",
+            judges.grade_agreement(cells, tables, by_line=True),
+        )
     del cells
 
     # 표 자체의 변화

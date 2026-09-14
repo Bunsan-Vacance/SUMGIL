@@ -40,10 +40,18 @@
   재귀식이 **상/하선**으로 계산한다 → 조인 공집합. 146이 두 지선의 대응이 서로 반대임을 실측
   출퇴근 비대칭·상관으로 확정해 `congestion.BRANCH_DIRECTION_MAP`에 고정했다. 그 대응표를 여기
   조인 직전에 적용한다(라벨 파일은 건드리지 않는다).
+- **절단면 경계 유입(`boundary_inflow`).** `truncated: true` 구간은 절단면 바깥에서 들어와
+  구간을 통과하는 승객이 있는데 재귀식은 닫힌 OD를 가정해 그 승객을 못 본다 — 진행방향 끝
+  링크의 재차가 정의상 0이 되어 배율이 산출조차 안 된다. 146 §4-C가 `meas ≈ s·raw + c` 적합에서
+  상수항이 정원의 20~30%로 실재함을 확인했다. 여기서는 그 상수를 **정원 % 단위(`c/s`)로 환산해
+  raw에 더한 뒤 배율을 다시 적합**하고, 더한 양을 `raw_offset` 컬럼으로 표에 같이 싣는다.
+  서빙(`congestion.apply_calibration`)은 `(raw + raw_offset) × ratio`를 계산하므로 오프셋 0인
+  표에서는 기존과 완전히 같다. 146 §4-D의 (a)가 실패한 이유(기존 배율표 위에 상수를 더한 이중
+  계상)는 여기서 생기지 않는다 — 상수를 넣은 raw로 배율을 **다시** 적합하기 때문이다.
 - **적합 창(`fit_window`).** 스냅샷 기준일과 승하차 평균 창의 어긋남(142 §2-B·§6)을 고르는 축이다.
 
-절단면 경계 셀(진행방향 끝 링크의 재차가 정의상 0이라 배율이 산출되지 않는 셀)은 아직 그대로
-결측이다 — 199 B에서 다룬다.
+진짜 종점(6호선 응암 순환 시작, 5호선 지선 종점 등)은 재차 0이 **정답**이라 대상이 아니다 —
+`truncated` 플래그가 붙은 구간만 본다.
 
 ## 9호선 스냅샷은 (station, direction, day_type, time_slot) 키가 원래 중복이다
 
@@ -85,6 +93,7 @@ from pathlib import Path
 import pandas as pd
 
 from app.CROWD.pipeline.congestion import bucket_direction
+from DATA_ENGINE.eda.boundary_inflow import boundary_offsets
 from DATA_ENGINE.eda.build_crowd_panel import attach_calendar
 from DATA_ENGINE.eda.parsers_crowd_line9_daily_ridership import load_station_master
 
@@ -117,14 +126,20 @@ _SLOT_PATTERN = re.compile(r"^(\d{2}):(\d{2})$")
 
 @dataclass(frozen=True)
 class CalibrationVariant:
-    """배율 적합 규칙의 축(199). 후보 비교와 재생성이 같은 코드를 쓰게 하는 장치다.
+    """배율 적합 규칙의 축 세 개(199). 후보 비교와 재생성이 같은 코드를 쓰게 하는 장치다.
 
     - `branch_direction_map` — 2호선 지선의 상/하선을 스냅샷의 내/외선으로 옮기고 조인한다(A1).
+    - `boundary_inflow` / `boundary_scale` — 절단 구간에 경계 유입 상수를 주입한 raw로 재적합한다(B1).
+      `boundary_scale=0.0`이면 상수가 전부 0이라 **주입하지 않은 표와 바이트 단위로 같다**(테스트로 고정).
     - `fit_window` — raw 평균을 낼 승하차 날짜 창. `all`(현행) / `snapshot_year`(스냅샷 기준일의
       연도만) / `snapshot_season`(기준일 ±`window_weeks`주).
     """
 
     branch_direction_map: bool = True
+    boundary_inflow: bool = True
+    boundary_method: str = "anchored"
+    boundary_apply: str = "segment"
+    boundary_scale: float = 1.0
     fit_window: str = "all"
     snapshot_release: str = SNAPSHOT_RELEASE
     window_weeks: int = 13
@@ -132,12 +147,20 @@ class CalibrationVariant:
     @classmethod
     def current(cls) -> CalibrationVariant:
         """88이 만든 현행 표를 그대로 재현하는 설정 — 모든 비교의 기준선."""
-        return cls(branch_direction_map=False, fit_window="all")
+        return cls(branch_direction_map=False, boundary_inflow=False, fit_window="all")
 
     @property
     def code(self) -> str:
-        head = "branch" if self.branch_direction_map else "nobranch"
-        return f"{head}_{self.fit_window}"
+        parts = [
+            "branch" if self.branch_direction_map else "nobranch",
+            (
+                f"{self.boundary_method}-{self.boundary_apply}{self.boundary_scale:g}"
+                if self.boundary_inflow
+                else "noinflow"
+            ),
+            self.fit_window,
+        ]
+        return "_".join(parts)
 
 
 def fit_window_mask(dates: pd.Series, variant: CalibrationVariant) -> pd.Series:
@@ -155,6 +178,31 @@ def fit_window_mask(dates: pd.Series, variant: CalibrationVariant) -> pd.Series:
         span = pd.Timedelta(weeks=variant.window_weeks)
         return (dates >= ref - span) & (dates <= ref + span)
     raise ValueError(f"알 수 없는 적합 창: {variant.fit_window!r}")
+
+
+def attach_boundary_offset(
+    merged: pd.DataFrame, labels: pd.DataFrame, variant: CalibrationVariant
+) -> pd.DataFrame:
+    """`merged`에 `raw_offset`을 붙인다 — 절단 구간만 값이 있고 나머지는 0이다(199 B).
+
+    상수 적합은 `DATA_ENGINE/eda/boundary_inflow.py`에 있고, 연도 홀드아웃 하네스도 같은 함수를
+    쓴다. 끄면(`boundary_inflow=False`) 전 셀 0이라 88 현행 표와 수치가 같다.
+    """
+    out = merged.copy()
+    if not variant.boundary_inflow:
+        out["raw_offset"] = 0.0
+        return out
+    cell_key = ["station_no", "direction", "day_type", "time_slot"]
+    offsets = boundary_offsets(
+        out,
+        available=set(labels["station_no"].astype("int64").unique()),
+        method=variant.boundary_method,
+        apply_to=variant.boundary_apply,
+        scale=variant.boundary_scale,
+    )
+    return out.merge(offsets, on=cell_key, how="left").assign(
+        raw_offset=lambda f: f["raw_offset"].fillna(0.0)
+    )
 
 
 def dedupe_snapshot_keys(snapshot: pd.DataFrame, line9_train_type: str = "일반") -> pd.DataFrame:
@@ -297,14 +345,17 @@ def build_calibration_ratio(
         how="left",
         suffixes=("", "_raw"),
     )
-    merged["ratio"] = merged["congestion_pct"] / merged["raw_mean"]
-    # raw_mean이 0이면 나눗셈이 inf가 된다 — 0으로 나눈 결과는 배율이 아니라 결측이다.
-    merged.loc[merged["raw_mean"] == 0, "ratio"] = pd.NA
+    merged = attach_boundary_offset(merged, labels, variant)
+    fitted_raw = merged["raw_mean"] + merged["raw_offset"]
+    merged["ratio"] = merged["congestion_pct"] / fitted_raw
+    # 더해 준 뒤에도 0이면 나눗셈이 inf가 된다 — 0으로 나눈 결과는 배율이 아니라 결측이다.
+    merged.loc[fitted_raw == 0, "ratio"] = pd.NA
 
     diagnostics = {
         "스냅샷_행": len(snapshot),
         "raw_평균_매칭_실패": int(merged["raw_mean"].isna().sum()),
         "배율_계산됨": int(merged["ratio"].notna().sum()),
+        "경계_유입_주입_셀": int((merged["raw_offset"] > 0).sum()),
     }
 
     cols = [
@@ -319,6 +370,8 @@ def build_calibration_ratio(
         "n_dates",
         "ratio",
     ]
+    if variant.boundary_inflow:
+        cols.append("raw_offset")
     return merged[cols], diagnostics
 
 
@@ -350,7 +403,19 @@ def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_pa
         )
     zero_raw = ratio[ratio["raw_mean"] == 0]
     if len(zero_raw):
-        print(f"  raw 평균이 0이라 배율을 정의할 수 없어 제외한 행: {len(zero_raw):,}행")
+        rescued = int(zero_raw["ratio"].notna().sum())
+        print(
+            f"  raw 평균이 0인 행: {len(zero_raw):,}행 "
+            f"(그중 경계 유입 주입으로 배율이 정의된 행 {rescued:,})"
+        )
+    if "raw_offset" in ratio.columns:
+        injected = ratio[ratio["raw_offset"] > 0]
+        print(
+            f"  경계 유입 주입 셀 {len(injected):,}행 · 상수 중위 "
+            f"{injected['raw_offset'].median():.1f}% 정원"
+            if len(injected)
+            else "  경계 유입 주입 셀 없음"
+        )
     print("[배율 분포] 호선별 요약:")
     print(
         ratio.dropna(subset=["ratio"])
