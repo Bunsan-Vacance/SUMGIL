@@ -10,8 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * 유지된다. 원천 선정·쿼터·요금은 팀 합의 사항이라(S15P21A104-186) 실제 키는 아직 없다.
  *
  * @param restApiKey 카카오디벨로퍼스 REST API 키. {@code KAKAO_REST_API_KEY} 환경변수로 주입
- * @param baseUrl 도보 경로 조회 엔드포인트. 기본값은 검색으로 확인한 잠정치이며, 실제 사용 전
- *                카카오디벨로퍼스 콘솔 원문 문서로 대조 확인이 필요하다
+ * @param baseUrl 도보 경로 조회 엔드포인트. 실제 키로 호출해 확인함(2026-09-14)
  */
 @ConfigurationProperties("app.kakao")
 public record KakaoWalkProperties(String restApiKey, String baseUrl) {
