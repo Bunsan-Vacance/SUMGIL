@@ -12,6 +12,7 @@
 | `lightgbm` | 현 배포 아티팩트(`festival_selflag_d1sd_d7_resid`) | 시차 컬럼 NaN(143 `mask_lags`) |
 | `gru` | 144 아티팩트(이력 절단 증강) | 시퀀스 마스크 0 |
 | `gru_no_trunc` | 144 대조군(증강 없음) | 시퀀스 마스크 0 |
+| `lstm` | 셀만 LSTM으로 바꾼 1회 실험(`--model lstm`, 나머지 설정 동일) | 시퀀스 마스크 0 |
 
 시나리오는 `masking.SCENARIOS`(`full / d7_only / d1_only / no_lag`)로 한 곳에서 정의한다. 시퀀스 쪽은
 "남길 이력 일자"가 그대로 마스크가 되고, LightGBM 쪽은 그 일자에 대응하는 시차 컬럼만 남긴다:
@@ -246,6 +247,7 @@ def run(args) -> pd.DataFrame:
     models_dir = Path(settings.crowd_models_dir)
     gru = Path(args.gru) if args.gru else latest_artifact(models_dir, prefix="dl_gru_s", kind="dl")
     gru_nt = Path(args.gru_no_trunc) if args.gru_no_trunc else None
+    lstm = Path(args.lstm) if args.lstm else None
     lgb = Path(args.lightgbm) if args.lightgbm else latest_artifact(models_dir, kind="lightgbm")
     scenarios = args.scenarios or list(SCENARIOS)
     metrics_path = Path(args.save_metrics)
@@ -282,6 +284,8 @@ def run(args) -> pd.DataFrame:
         series["gru"] = dl_predictions(gru, window, scenarios, args.device)
     if gru_nt:
         series["gru_no_trunc"] = dl_predictions(gru_nt, window, scenarios, args.device)
+    if lstm:
+        series["lstm"] = dl_predictions(lstm, window, scenarios, args.device)
 
     aligned = {
         (name, sc): align(test, frame)
@@ -391,6 +395,9 @@ def main(argv: list[str] | None = None) -> None:
         "--gru", default=None, help="models/CROWD/dl_gru_... (생략 시 최신 dl 아티팩트)"
     )
     ap.add_argument("--gru-no-trunc", default=None, help="절단 증강 없는 대조군 아티팩트")
+    ap.add_argument(
+        "--lstm", default=None, help="셀만 LSTM으로 바꾼 1회 실험 아티팩트(계획 보정 7)"
+    )
     ap.add_argument("--lightgbm", default=None, help="비교할 LightGBM 아티팩트(생략 시 최신)")
     ap.add_argument(
         "--scenarios", default=None, type=lambda s: s.split(","), help=f"{','.join(SCENARIOS)}"
