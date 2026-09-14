@@ -500,6 +500,74 @@ python -m DATA_ENGINE.archive.upload_raw_partitions --yes
 기본값은 dry-run이라 Drive API를 호출하지 않고 manifest도 기록하지 않는다. `--yes`를 붙이면
 완료된 시간대 파티션만 Drive에 올리고, 결과를 `data/manifest/archive_uploads.jsonl`에 기록한다.
 
+## Kafka consumer
+
+Kafka broker·topic·producer 구축은 BE/Infra 소유다. 이 폴더에서는 BE/Infra가 발행하는
+topic을 AI consumer group으로 구독해 기존 raw parquet 계층에 저장하는 consumer만 다룬다.
+J15A104A는 k3s worker 노드이므로 `/etc/hosts`에 Kafka ClusterIP를 등록한 뒤
+`kafka:9092`로 접속한다.
+
+필요한 `.env` 값:
+
+```text
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_CONSUMER_GROUP=ai-spark
+KAFKA_AUTO_OFFSET_RESET=earliest
+KAFKA_TOPIC_BIKE_STOCK=bike.stock
+KAFKA_TOPIC_WEATHER_NOWCAST=weather.nowcast
+KAFKA_TOPIC_SUBWAY_ARRIVAL=subway.arrival
+```
+
+J15A104A host 설정:
+
+```bash
+echo "10.43.134.226 kafka" | sudo tee -a /etc/hosts
+```
+
+`10.43.134.226`은 현재 prod Kafka Service ClusterIP다. Service를 재생성하면 바뀔 수
+있으므로, BE/Infra에서 변경 공유를 받으면 `/etc/hosts`도 함께 갱신한다.
+
+저장 경로:
+
+| topic | 저장 위치 |
+| --- | --- |
+| `bike.stock` | `data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+| `weather.nowcast` | `data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+| `subway.arrival` | `data/SUBWAY/raw/arrival/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+
+Kafka event는 공통 envelope 컬럼과 `payload_json` 원본 보존 컬럼으로 저장한다. partition 기준
+시간은 `poll_run_at`을 우선 사용하고, 없으면 `ingested_at`으로 대체한다. 품질/신선도 기준
+시간은 `source_generated_at`이 있으면 그 값을 쓰고, 따릉이처럼 원천 생성시각이 없으면
+`ingested_at`을 쓴다. 이렇게 하면 기존 Drive archive·retention·partition count 계층과 같은
+`dt=/hh=/snapshot_*.parquet` 구조를 유지할 수 있다.
+
+mock/sample event 기반 parser·sink 테스트:
+
+```bash
+cd AI
+pytest -q test/test_kafka_event_parser.py test/test_kafka_sink.py
+```
+
+실제 consumer 실행:
+
+```bash
+cd AI
+bash DATA_ENGINE/scripts/run_kafka_consumer.sh
+```
+
+Kafka에 접속하지 않고 `.env` 설정만 먼저 확인:
+
+```bash
+cd AI
+bash DATA_ENGINE/scripts/run_kafka_consumer.sh --check-config
+```
+
+실제 연결 전 BE/Infra 확인이 필요한 값:
+
+- topic별 payload 실측 샘플 추가 변경 여부
+- prod 이벤트 투입 시작 시각
+- Kafka Service ClusterIP 변경 여부
+
 ## Redis 연동 상태
 
 Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
