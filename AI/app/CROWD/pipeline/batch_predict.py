@@ -24,9 +24,15 @@ API는 요청 시점에 모델을 돌리지 않고 이 표만 읽는다(`AI/CLAU
 
 ## 결측은 상태로 노출한다
 
-lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 배율표 결측(2호선 지선 방향 체계, 1~8호선
-공휴일, 결번 역)은 값을 채우지 않고 `data_status`에 `no_lookup` / `no_calibration`으로 남긴다.
-API가 이 셀을 "데이터 부족"으로 표시한다(원칙 8). 예측 승하차 음수는 0으로 자른다(인원).
+lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 배율표 결측(2호선 지선 방향 체계, 결번 역)은
+값을 채우지 않고 `data_status`로 남긴다. API가 이 셀을 "데이터 부족"으로 표시한다(원칙 8). 예측 승하차
+음수는 0으로 자른다(인원). 상태 값은 우선순위 순으로 다음 다섯이다(146에서 둘 추가):
+
+    no_lookup            기준선(lookup) 자체가 없음 — 혼잡도 이전 단계에서 끊김
+    ok                   예측·배율 모두 정상
+    calibration_fallback 1~8호선 공휴일이라 일요일 배율을 빌려 씀(값은 있다, 대체 사실을 밝히는 것)
+    line1_truncated      1호선 절단면의 종점 링크(서울역 상선·청량리 하선) — 구조적으로 재차 0이라 배율 없음
+    no_calibration       그 밖의 배율표 결측(결번 역, 대응 못 한 2호선 지선)
 
 실행:
     cd AI
@@ -48,7 +54,13 @@ import pandas as pd
 
 from app.core.config import get_settings
 from app.CROWD.pipeline.calendar import attach_calendar, holiday_coverage_end, load_holidays
-from app.CROWD.pipeline.congestion import apply_calibration, grade, recursive_congestion
+from app.CROWD.pipeline.congestion import (
+    HOLIDAY_FALLBACK_DAY_TYPE,
+    apply_calibration,
+    grade,
+    recursive_congestion,
+    truncated_boundary_cells,
+)
 from app.CROWD.pipeline.dataset import (
     CROWD_PROCESSED,
     EVENT_COUNT_COLS,
@@ -203,15 +215,20 @@ def to_congestion_table(
     capacity: dict,
     calibration: pd.DataFrame,
     thresholds: list[float],
+    holiday_fallback: str | None = HOLIDAY_FALLBACK_DAY_TYPE,
 ) -> pd.DataFrame:
-    """승하차 예측 → 30분 보정 혼잡도·등급·상태 표(OUTPUT_COLS)."""
+    """승하차 예측 → 30분 보정 혼잡도·등급·상태 표(OUTPUT_COLS).
+
+    `holiday_fallback=None`으로 부르면 146 이전 동작(1~8호선 공휴일 전체가 `no_calibration`)이 나온다 —
+    전후 비교용이다(`validation/CROWD/congestion-criteria-check/diagnose.py`).
+    """
     board = predicted.copy()
     for t in TARGETS:
         board[t] = np.clip(board[f"{t}_pred"].to_numpy(dtype=float), 0.0, None)
     raw = recursive_congestion(board, segments, capacity)
     day_type = predicted[["date", "station_no", "day_type"]].drop_duplicates(["date", "station_no"])
     raw = raw.merge(day_type, on=["date", "station_no"], how="left")
-    cal = apply_calibration(raw, calibration)
+    cal = apply_calibration(raw, calibration, holiday_fallback)
     cal["grade"] = grade(cal["congestion_pct_calibrated"], thresholds)
 
     per_row = predicted.rename(
@@ -232,8 +249,20 @@ def to_congestion_table(
     ]
     out = cal.merge(per_row, on=["date", "station_no", "time_slot"], how="left")
     out = out.rename(columns={"congestion_pct_calibrated": "congestion_pct"})
+    missing = out["congestion_pct"].isna().to_numpy()
+    boundary = (
+        pd.MultiIndex.from_arrays([out["station_no"], out["direction"]])
+        .isin(list(truncated_boundary_cells(segments)))
+        .astype(bool)
+    )
     status = np.where(out["boarding_lookup"].isna(), "no_lookup", "ok")
-    status = np.where(out["congestion_pct"].isna() & (status == "ok"), "no_calibration", status)
+    status = np.where(
+        (status == "ok") & out["calibration_fallback"].fillna(False).to_numpy(),
+        "calibration_fallback",
+        status,
+    )
+    status = np.where((status == "ok") & missing & boundary, "line1_truncated", status)
+    status = np.where((status == "ok") & missing, "no_calibration", status)
     out["data_status"] = status
     return out.reindex(columns=OUTPUT_COLS)
 
