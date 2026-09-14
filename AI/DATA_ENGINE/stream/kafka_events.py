@@ -42,6 +42,10 @@ class KafkaEvent:
     def partition_time(self) -> datetime:
         return self.poll_run_at or self.ingested_at
 
+    @property
+    def freshness_time(self) -> datetime:
+        return self.source_generated_at or self.ingested_at
+
     def to_record(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
@@ -50,6 +54,7 @@ class KafkaEvent:
             "source_generated_at": self.source_generated_at,
             "ingested_at": self.ingested_at,
             "poll_run_at": self.poll_run_at,
+            "freshness_at": self.freshness_time,
             "payload_json": json.dumps(self.payload, ensure_ascii=False, sort_keys=True),
             "kafka_topic": self.kafka_topic,
             "kafka_partition": self.kafka_partition,

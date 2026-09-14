@@ -42,6 +42,24 @@ def test_parse_kafka_event_falls_back_to_ingested_at():
     assert event.partition_time.isoformat() == "2026-09-14T09:00:03+09:00"
 
 
+def test_parse_kafka_event_freshness_prefers_source_generated_at():
+    event = parse_kafka_event(
+        event_payload(
+            source_generated_at="2026-09-14T08:59:00+09:00",
+            ingested_at="2026-09-14T09:00:03+09:00",
+        )
+    )
+
+    assert event.freshness_time.isoformat() == "2026-09-14T08:59:00+09:00"
+    assert event.to_record()["freshness_at"].isoformat() == "2026-09-14T08:59:00+09:00"
+
+
+def test_parse_kafka_event_freshness_falls_back_to_ingested_at():
+    event = parse_kafka_event(event_payload(source_generated_at=None))
+
+    assert event.freshness_time.isoformat() == "2026-09-14T09:00:03+09:00"
+
+
 def test_parse_kafka_event_requires_envelope_fields():
     payload = event_payload()
     del payload["event_id"]

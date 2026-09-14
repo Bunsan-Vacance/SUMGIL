@@ -65,7 +65,7 @@ def run_consumer(
 
     bootstrap_servers = env("KAFKA_BOOTSTRAP_SERVERS")
     group_id = os.environ.get("KAFKA_CONSUMER_GROUP", "ai-spark")
-    auto_offset_reset = os.environ.get("KAFKA_AUTO_OFFSET_RESET", "latest")
+    auto_offset_reset = os.environ.get("KAFKA_AUTO_OFFSET_RESET", "earliest")
     topics = topics or _topics_from_env()
 
     consumer = KafkaConsumer(
