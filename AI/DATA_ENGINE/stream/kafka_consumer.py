@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
@@ -24,12 +25,30 @@ logger = logging.getLogger("kafka_consumer")
 DEFAULT_TOPICS = ("bike.stock", "weather.nowcast", "subway.arrival")
 
 
+@dataclass(frozen=True)
+class KafkaConsumerConfig:
+    bootstrap_servers: str
+    group_id: str
+    auto_offset_reset: str
+    topics: list[str]
+
+
 def _topics_from_env() -> list[str]:
     return [
         os.environ.get("KAFKA_TOPIC_BIKE_STOCK", "bike.stock"),
         os.environ.get("KAFKA_TOPIC_WEATHER_NOWCAST", "weather.nowcast"),
         os.environ.get("KAFKA_TOPIC_SUBWAY_ARRIVAL", "subway.arrival"),
     ]
+
+
+def config_from_env(*, topics: list[str] | None = None) -> KafkaConsumerConfig:
+    load_dotenv()
+    return KafkaConsumerConfig(
+        bootstrap_servers=env("KAFKA_BOOTSTRAP_SERVERS"),
+        group_id=os.environ.get("KAFKA_CONSUMER_GROUP", "ai-spark"),
+        auto_offset_reset=os.environ.get("KAFKA_AUTO_OFFSET_RESET", "earliest"),
+        topics=topics or _topics_from_env(),
+    )
 
 
 def parse_messages(messages: Iterable[object]) -> list[KafkaEvent]:
@@ -60,27 +79,23 @@ def run_consumer(
     batch_size: int = 1000,
     flush_interval_sec: int = 30,
 ) -> None:
-    load_dotenv()
     from kafka import KafkaConsumer
 
-    bootstrap_servers = env("KAFKA_BOOTSTRAP_SERVERS")
-    group_id = os.environ.get("KAFKA_CONSUMER_GROUP", "ai-spark")
-    auto_offset_reset = os.environ.get("KAFKA_AUTO_OFFSET_RESET", "earliest")
-    topics = topics or _topics_from_env()
+    config = config_from_env(topics=topics)
 
     consumer = KafkaConsumer(
-        *topics,
-        bootstrap_servers=bootstrap_servers,
-        group_id=group_id,
-        auto_offset_reset=auto_offset_reset,
+        *config.topics,
+        bootstrap_servers=config.bootstrap_servers,
+        group_id=config.group_id,
+        auto_offset_reset=config.auto_offset_reset,
         enable_auto_commit=False,
         value_deserializer=lambda value: value,
     )
     logger.info(
         "DATA_ENGINE Kafka consumer started topics=%s group_id=%s bootstrap=%s",
-        ",".join(topics),
-        group_id,
-        bootstrap_servers,
+        ",".join(config.topics),
+        config.group_id,
+        config.bootstrap_servers,
     )
 
     buffer: list[object] = []
@@ -110,7 +125,22 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--topics", nargs="*", default=None, help="Override Kafka topics.")
     ap.add_argument("--batch-size", type=int, default=1000)
     ap.add_argument("--flush-interval-sec", type=int, default=30)
+    ap.add_argument(
+        "--check-config",
+        action="store_true",
+        help="Validate .env Kafka settings without connecting to Kafka.",
+    )
     args = ap.parse_args(argv)
+    if args.check_config:
+        config = config_from_env(topics=args.topics)
+        print(
+            "DATA_ENGINE Kafka consumer config OK "
+            f"bootstrap={config.bootstrap_servers} "
+            f"group_id={config.group_id} "
+            f"auto_offset_reset={config.auto_offset_reset} "
+            f"topics={','.join(config.topics)}"
+        )
+        return
     run_consumer(
         topics=args.topics,
         batch_size=args.batch_size,

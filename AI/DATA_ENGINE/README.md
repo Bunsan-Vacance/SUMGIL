@@ -555,6 +555,13 @@ cd AI
 bash DATA_ENGINE/scripts/run_kafka_consumer.sh
 ```
 
+Kafka에 접속하지 않고 `.env` 설정만 먼저 확인:
+
+```bash
+cd AI
+bash DATA_ENGINE/scripts/run_kafka_consumer.sh --check-config
+```
+
 실제 연결 전 BE/Infra 확인이 필요한 값:
 
 - topic별 payload 실측 샘플 추가 변경 여부
