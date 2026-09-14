@@ -543,6 +543,48 @@ describe('일반 지도 장소 마커', () => {
     rendered.customOverlays.forEach((overlay) => expect(overlay.setMap).toHaveBeenCalledWith(null))
   })
 
+  it('자전거 경계 marker는 일반 대여소 아이콘으로 만들고 경로 해제 시 정리한다', async () => {
+    const route: Route = {
+      id: 'route-bike-markers',
+      label: '따릉이 경로',
+      minutes: 8,
+      transfers: 0,
+      modes: ['bike'],
+      legs: [
+        {
+          mode: 'bike',
+          title: '따릉이 이동',
+          note: '대여소에서 반납소까지',
+          minutes: 8,
+          from: { id: 'bike-rental', name: '대여소', lat: 37.5, lng: 127.03 },
+          to: { id: 'bike-return', name: '반납소', lat: 37.52, lng: 127.05 },
+        },
+      ],
+    }
+    const rendered = renderMap({ route })
+    await waitFor(() => expect(rendered.customOverlays).toHaveLength(2))
+
+    const contents = rendered.customOverlays.map(
+      (overlay) => (overlay.options as { content: HTMLButtonElement }).content,
+    )
+    expect(contents.every((content) => content.className === 'bike-station-marker')).toBe(true)
+    expect(contents.every((content) => !content.classList.contains('route-active'))).toBe(true)
+    expect(
+      rendered.customOverlays.every(
+        (overlay) => (overlay.options as { zIndex?: number }).zIndex === 10,
+      ),
+    ).toBe(true)
+
+    rendered.rerender(
+      <KakaoMap origin={origin} destination={null} route={null} onMessage={vi.fn()} />,
+    )
+    await waitFor(() =>
+      rendered.customOverlays.forEach((overlay) =>
+        expect(overlay.setMap).toHaveBeenCalledWith(null),
+      ),
+    )
+  })
+
   it('지도 크기가 바뀌면 저장한 경로 bounds를 다시 적용한다', async () => {
     const geometry: NonNullable<Route['geometry']> = {
       type: 'MultiLineString',

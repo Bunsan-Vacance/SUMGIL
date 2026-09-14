@@ -2,18 +2,20 @@ import type { KakaoMapInstance, KakaoMaps, MapOverlay } from '../../lib/kakao/sd
 import type { GeometryLineString, Leg, Place, Route, RouteEndpoint } from '../route/types'
 
 export type RouteEndpointRole = '승차' | '환승' | '하차'
+export type BikeEndpointRole = '대여' | '반납'
 type LocatedRouteEndpoint = RouteEndpoint & { lat: number; lng: number }
 
 export interface RouteEndpointCandidate {
   endpoint: LocatedRouteEndpoint
   roles: RouteEndpointRole[]
+  bikeRoles?: BikeEndpointRole[]
 }
 
 const ROUTE_LINE_STYLES = {
   subway: { strokeColor: '#6379bd', strokeStyle: 'solid' },
   bus: { strokeColor: '#2f80c0', strokeStyle: 'solid' },
   bike: { strokeColor: '#2f7a59', strokeStyle: 'solid' },
-  walk: { strokeColor: '#7b8591', strokeStyle: 'dashed' },
+  walk: { strokeColor: '#6379bd', strokeStyle: 'solid' },
   transfer: { strokeColor: '#5d6873', strokeStyle: 'dashed' },
 } as const
 
@@ -141,8 +143,14 @@ function endpointKey(endpoint: LocatedRouteEndpoint) {
 export function getRouteEndpointCandidates(route: Route): RouteEndpointCandidate[] {
   const candidates = new Map<
     string,
-    { endpoint: LocatedRouteEndpoint; roles: Set<RouteEndpointRole> }
+    {
+      endpoint: LocatedRouteEndpoint
+      roles: Set<RouteEndpointRole>
+      bikeRoles: Set<BikeEndpointRole>
+    }
   >()
+  const existingCandidate = (endpoint: LocatedRouteEndpoint) =>
+    candidates.get(endpointKey(endpoint))
   const add = (role: RouteEndpointRole, endpoint: RouteEndpoint | undefined) => {
     if (!hasCoordinates(endpoint)) return
     const key = endpointKey(endpoint)
@@ -151,9 +159,21 @@ export function getRouteEndpointCandidates(route: Route): RouteEndpointCandidate
       existing.roles.add(role)
       return
     }
-    candidates.set(key, { endpoint, roles: new Set([role]) })
+    candidates.set(key, { endpoint, roles: new Set([role]), bikeRoles: new Set() })
   }
-  const transitLegs = route.legs.filter((leg) => leg.mode !== 'walk' && !leg.transfer)
+  const addBike = (role: BikeEndpointRole, endpoint: RouteEndpoint | undefined) => {
+    if (!hasCoordinates(endpoint)) return
+    const key = endpointKey(endpoint)
+    const existing = existingCandidate(endpoint)
+    if (existing) {
+      existing.bikeRoles.add(role)
+      return
+    }
+    candidates.set(key, { endpoint, roles: new Set(), bikeRoles: new Set([role]) })
+  }
+  const transitLegs = route.legs.filter(
+    (leg) => (leg.mode === 'subway' || leg.mode === 'bus') && !leg.transfer,
+  )
   add('승차', transitLegs[0]?.from)
   add('하차', transitLegs.at(-1)?.to)
   route.legs
@@ -168,13 +188,40 @@ export function getRouteEndpointCandidates(route: Route): RouteEndpointCandidate
       add('환승', hasCoordinates(leg.from) ? leg.from : previous.to)
     }
   })
-  return [...candidates.values()].map(({ endpoint, roles }) => ({
+  let bikeStart: Leg | undefined
+  route.legs.forEach((leg, index) => {
+    if (leg.mode === 'bike' && !bikeStart) {
+      bikeStart = leg
+      return
+    }
+    if (leg.mode === 'bike') return
+    if (bikeStart) {
+      addBike('대여', bikeStart.from)
+      addBike('반납', route.legs[index - 1]?.to)
+      bikeStart = undefined
+    }
+  })
+  if (bikeStart) addBike('대여', bikeStart.from)
+  if (bikeStart) addBike('반납', route.legs.at(-1)?.to)
+  return [...candidates.values()].map(({ endpoint, roles, bikeRoles }) => ({
     endpoint,
     roles: [...roles],
+    ...(bikeRoles.size ? { bikeRoles: [...bikeRoles] } : {}),
   }))
 }
 
 export function routeEndpointPlace(candidate: RouteEndpointCandidate): Place {
+  if (candidate.bikeRoles?.length) {
+    const label = candidate.bikeRoles.map((role) => `따릉이 ${role}`).join(' · ')
+    return {
+      id: `route-endpoint:${endpointKey(candidate.endpoint)}`,
+      name: candidate.endpoint.name?.trim() || '따릉이 대여소',
+      address: label,
+      kind: '따릉이 대여소',
+      lat: candidate.endpoint.lat,
+      lng: candidate.endpoint.lng,
+    }
+  }
   const firstRole = candidate.roles[0] || '환승'
   const displayName = candidate.endpoint.name?.trim() || `${firstRole} 지점`
   const key = endpointKey(candidate.endpoint)
