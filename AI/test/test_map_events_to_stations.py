@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from DATA_ENGINE.eda.map_events_to_stations import (
     SPIKE_MAX_DAYS,
     aggregate_festival_rows,
+    events_output_name,
     haversine_km,
     nearest_stations,
 )
@@ -111,3 +113,18 @@ def test_aggregate_festival_rows_treats_boundary_duration_as_short():
 
     assert rows.loc[218, "festival_short_count"] == 1
     assert rows.loc[218, "festival_long_count"] == 1
+
+
+# ── 구간 백필(학습 기간 확장) ──
+@pytest.mark.parametrize(
+    ("panel_name", "expected"),
+    [
+        # 기본 패널은 기존 이벤트 파일명을 그대로 내야 한다.
+        ("crowd_panel_2024_2025.parquet", "crowd_station_events_2024_2025.parquet"),
+        ("crowd_panel_2023_2023.parquet", "crowd_station_events_2023_2023.parquet"),
+        # 규칙 밖 이름이어도 구간이 다른 판끼리 덮어쓰지는 않게 한다.
+        ("my_panel.parquet", "crowd_station_events__my_panel.parquet"),
+    ],
+)
+def test_events_output_name_follows_panel(panel_name, expected):
+    assert events_output_name(panel_name) == expected
