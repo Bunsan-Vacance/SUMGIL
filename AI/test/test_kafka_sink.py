@@ -6,7 +6,7 @@ import pandas as pd
 from test_kafka_event_parser import BE_SAMPLE_EVENTS
 
 from DATA_ENGINE.stream.kafka_events import parse_kafka_event
-from DATA_ENGINE.stream.kafka_sink import base_dir_for_topic, write_events
+from DATA_ENGINE.stream.kafka_sink import base_dir_for_topic, dedupe_events, write_events
 
 
 def _event(topic: str, entity_id: str = "ST-1234"):
@@ -85,3 +85,23 @@ def test_write_be_sample_events_to_topic_partitions(tmp_path):
     assert by_source["weather.nowcast"]["entity_id"] == "60:127:PTY"
     assert by_source["subway.arrival"]["entity_id"] == "1009000937"
     assert json.loads(by_source["subway.arrival"]["payload_json"])["statnNm"] == "둔촌오륜"
+
+
+def test_dedupe_events_keeps_first_event_id():
+    first = _event("subway.arrival", "1009000937")
+    duplicate = _event("subway.arrival", "1009000937")
+    other = _event("subway.arrival", "1009000938")
+
+    assert dedupe_events([first, duplicate, other]) == [first, other]
+
+
+def test_write_events_dedupes_event_id_within_batch(tmp_path):
+    first = _event("subway.arrival", "1009000937")
+    duplicate = _event("subway.arrival", "1009000937")
+
+    paths = write_events([first, duplicate], ai_root=tmp_path)
+
+    assert len(paths) == 1
+    df = pd.read_parquet(paths[0])
+    assert len(df) == 1
+    assert df.loc[0, "event_id"] == first.event_id

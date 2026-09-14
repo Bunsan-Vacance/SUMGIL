@@ -37,6 +37,18 @@ def _snapshot_path(base_dir: Path, partition_time: datetime) -> Path:
     return out_dir / filename
 
 
+def dedupe_events(events: list[KafkaEvent]) -> list[KafkaEvent]:
+    """Keep the first event for each event_id within one flush batch."""
+    seen: set[str] = set()
+    unique: list[KafkaEvent] = []
+    for event in events:
+        if event.event_id in seen:
+            continue
+        seen.add(event.event_id)
+        unique.append(event)
+    return unique
+
+
 def write_events(events: list[KafkaEvent], *, ai_root: Path = AI_ROOT) -> list[Path]:
     """Write events grouped by topic and poll run time.
 
@@ -44,7 +56,7 @@ def write_events(events: list[KafkaEvent], *, ai_root: Path = AI_ROOT) -> list[P
     present, ``ingested_at`` becomes the fallback partition time.
     """
     grouped: dict[tuple[str, datetime], list[KafkaEvent]] = defaultdict(list)
-    for event in events:
+    for event in dedupe_events(events):
         topic = event.kafka_topic or event.source
         grouped[(topic, event.partition_time)].append(event)
 
