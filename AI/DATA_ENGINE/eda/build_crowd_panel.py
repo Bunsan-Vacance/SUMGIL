@@ -5,9 +5,15 @@
 하나로 만든다. 이후 상관분석·PCA·클러스터링·피처중요도는 전부 이 테이블 하나만 읽는다 —
 조인 로직이 분석 스크립트마다 흩어지면 서로 다른 기준으로 계산하게 되기 때문이다.
 
-**분석 구간은 2024-01-01~2025-12-31 (731일)로 고정한다.**
-승하차 자체는 2023년부터 있지만 ASOS 기상이 2024년부터라 2023년은 기상·이벤트가 통째로
-비어 있고, 2026년은 아직 상반기 데이터가 확보되지 않은 원천이 있어 양쪽을 다 잘라냈다.
+**기본 분석 구간은 2024-01-01~2025-12-31 (731일)이다.**
+승하차 자체는 2023년부터 있지만 ASOS 기상이 2024년부터라 2023년은 기상이 통째로 비어 있고,
+2026년은 아직 상반기 데이터가 확보되지 않은 원천이 있어 양쪽을 다 잘라낸 값이다.
+
+**구간은 `--start`·`--end`로 넓힐 수 있다(학습 기간 확장 백필용).** 기본값 밖으로 나가면
+기상 컬럼이 통째로 NaN이 되므로 `main()`이 경고를 찍는다 — 기상을 안 쓰는 모델(배포 세트는
+시차·이벤트만 쓴다)에는 문제가 없지만, 조용히 비어 있는 판을 만들지 않기 위한 장치다.
+출력 파일명은 구간에서 자동으로 정해진다(`crowd_panel_<시작연도>_<끝연도>.parquet`) — 구간이
+다른 판이 서로 덮어쓰지 않게 하려는 것이고, `--out`으로 직접 줄 수도 있다.
 
 **패널 격자**: (date, station_no, time_slot). 승차/하차는 행이 아니라 열(`boarding`/
 `alighting`)로 편다 — 모델이 둘을 동시에 예측하고, 순유입(하차-승차)을 파생하기 쉽다.
@@ -24,10 +30,13 @@
 실행:
     cd AI
     python -m DATA_ENGINE.eda.build_crowd_panel
+    python -m DATA_ENGINE.eda.build_crowd_panel --start 2023-01-01 --end 2023-12-31
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -75,10 +84,17 @@ def slot_to_weather_offset(slot: str) -> tuple[int, int]:
     return 0, int(slot.split("-")[0])
 
 
-def load_ridership_window() -> pd.DataFrame:
+def panel_output_name(start: pd.Timestamp, end: pd.Timestamp) -> str:
+    """구간 → 출력 파일명. 기본 구간이면 기존 이름(`crowd_panel_2024_2025.parquet`) 그대로다."""
+    return f"crowd_panel_{pd.Timestamp(start).year}_{pd.Timestamp(end).year}.parquet"
+
+
+def load_ridership_window(
+    start: pd.Timestamp = PANEL_START, end: pd.Timestamp = PANEL_END
+) -> pd.DataFrame:
     """분석 구간의 일별 승하차만 읽어온다."""
     df = pd.read_parquet(CROWD_INTERIM / "crowd_daily_ridership_long.parquet")
-    return df[(df["date"] >= PANEL_START) & (df["date"] <= PANEL_END)].copy()
+    return df[(df["date"] >= start) & (df["date"] <= end)].copy()
 
 
 def station_name_inventory(df: pd.DataFrame) -> pd.DataFrame:
@@ -173,8 +189,15 @@ def attach_station_meta(panel: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def build_panel() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
-    ridership = load_ridership_window()
+def build_panel(
+    start: pd.Timestamp = PANEL_START, end: pd.Timestamp = PANEL_END
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
+    ridership = load_ridership_window(start, end)
+    if ridership.empty:
+        raise ValueError(
+            f"{start:%Y-%m-%d}~{end:%Y-%m-%d} 구간에 승하차가 없다 — "
+            "`crowd_daily_ridership_long.parquet`의 커버 범위를 먼저 확인할 것."
+        )
     name_changes = station_name_inventory(ridership)
 
     panel = pivot_directions(ridership)
@@ -203,15 +226,27 @@ def build_panel() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
     return panel[ordered], name_changes, fill_counts
 
 
-def save_panel(panel: pd.DataFrame) -> Path:
+def save_panel(panel: pd.DataFrame, output_name: str = OUTPUT_NAME) -> Path:
     CROWD_PROCESSED.mkdir(parents=True, exist_ok=True)
-    out_path = CROWD_PROCESSED / OUTPUT_NAME
+    out_path = CROWD_PROCESSED / output_name
     panel.to_parquet(out_path, index=False)
     return out_path
 
 
-def main() -> None:
-    panel, name_changes, fill_counts = build_panel()
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--start", default=str(PANEL_START.date()), help="분석 구간 시작(YYYY-MM-DD)")
+    ap.add_argument("--end", default=str(PANEL_END.date()), help="분석 구간 끝(YYYY-MM-DD)")
+    ap.add_argument("--out", default=None, help="출력 파일명(기본: 구간에서 자동)")
+    args = ap.parse_args(argv)
+    start, end = pd.Timestamp(args.start), pd.Timestamp(args.end)
+    if start > end:
+        raise SystemExit("--start가 --end보다 늦다.")
+    output_name = args.out or panel_output_name(start, end)
+
+    panel, name_changes, fill_counts = build_panel(start, end)
 
     # 콘솔이 cp949라 이모지를 못 찍는다(UnicodeEncodeError) — 표기는 한글로 둔다.
     if len(name_changes):
@@ -225,11 +260,16 @@ def main() -> None:
     missing_weather = int(panel["temp_c"].isna().sum())
     missing_coord = int(panel["lat"].isna().sum())
     if missing_weather:
-        print(f"[경고] 기상 미매칭 {missing_weather:,}행 — 구간 경계(24~ 마지막 날) 확인 필요")
+        share = missing_weather / len(panel) * 100
+        print(
+            f"[경고] 기상 미매칭 {missing_weather:,}행({share:.1f}%) — "
+            "몇 행이면 구간 경계(24~ 마지막 날)지만, 통째로 비면 ASOS가 그 연도를 안 덮는 것이다"
+            "(기본 구간 2024~2025 밖은 아직 없다). 기상을 쓰는 분석은 이 판을 그대로 쓰면 안 된다."
+        )
     if missing_coord:
         print(f"[경고] 좌표 미매칭 {missing_coord:,}행")
 
-    out_path = save_panel(panel)
+    out_path = save_panel(panel, output_name)
     print(
         f"저장 완료: {out_path} ({len(panel):,}행, "
         f"{panel['date'].min():%Y-%m-%d}~{panel['date'].max():%Y-%m-%d}, "
@@ -238,4 +278,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

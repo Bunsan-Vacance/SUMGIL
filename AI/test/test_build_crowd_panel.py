@@ -4,6 +4,8 @@ import pytest
 import DATA_ENGINE.eda.build_crowd_panel as build_crowd_panel_module
 from DATA_ENGINE.eda.build_crowd_panel import (
     attach_calendar,
+    main,
+    panel_output_name,
     pivot_directions,
     slot_to_weather_offset,
     station_name_inventory,
@@ -87,3 +89,23 @@ def test_pivot_directions_makes_boarding_alighting_columns():
     assert len(wide) == 1
     assert wide.loc[0, "boarding"] == 100.0
     assert wide.loc[0, "alighting"] == 250.0
+
+
+# ── 구간 백필(학습 기간 확장) ──
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [
+        # 기본 구간은 기존 파일명을 그대로 내야 한다 — 백필 인자를 붙여도 회귀가 없어야 한다.
+        ("2024-01-01", "2025-12-31", "crowd_panel_2024_2025.parquet"),
+        ("2023-01-01", "2023-12-31", "crowd_panel_2023_2023.parquet"),
+        ("2022-01-01", "2025-12-31", "crowd_panel_2022_2025.parquet"),
+    ],
+)
+def test_panel_output_name_is_derived_from_range(start, end, expected):
+    assert panel_output_name(pd.Timestamp(start), pd.Timestamp(end)) == expected
+
+
+def test_main_rejects_reversed_range_before_touching_data():
+    """구간이 뒤집혀 있으면 원천을 읽기 전에 멈춘다 — 빈 판을 조용히 저장하지 않는다."""
+    with pytest.raises(SystemExit):
+        main(["--start", "2025-01-01", "--end", "2024-01-01"])
