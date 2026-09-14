@@ -74,15 +74,20 @@ SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --offline
 ### 2-5. 검증
 
 ```bash
-# 행 수
-ssh -i "$PEM" "$NODE" 'sudo kubectl exec -n prod sts/postgres -- \
-  psql -U sumgil -d sumgil -tAc "select tablename, n_live_tup from pg_stat_user_tables order by tablename"'
+# 행 수 (파드 이름을 직접 쓴다. sts/postgres 로는 psql 이 붙지 않았고, 열 이름은 relname 이다)
+ssh -i "$PEM" "$NODE" 'sudo kubectl exec -n prod postgres-0 -- \
+  psql -U sumgil -d sumgil -tAc "select relname, n_live_tup from pg_stat_user_tables order by relname"'
 
-# API (로컬 결과와 대조한다)
-curl -s "https://j15a104.p.ssafy.io/api/stations/search?query=강남"
-curl -s "https://j15a104.p.ssafy.io/api/bike-stations/nearby?lat=37.5006&lng=127.0364&radius=3000"
-curl -s "https://j15a104.p.ssafy.io/api/routes/search?..."
+# API — **-k 가 필요하다.** 도메인 인증서가 교육기관 자체 서명이라 curl 이 기본값으로 거부한다
+# (붙이지 않으면 exit 60 · status=000 으로 빈 응답처럼 보인다).
+curl -sk "https://j15a104.p.ssafy.io/api/stations/search?query=강남"
+curl -sk "https://j15a104.p.ssafy.io/api/bike-stations/nearby?lat=37.5006&lng=127.0364&radius=3000"
+curl -sk "https://j15a104.p.ssafy.io/api/routes/search?originStationId=222&destStationId=151"
 ```
+
+경로 검색의 역 ID 는 **먼저 역 검색으로 확인한다.** `station_id` 는 환승역이면 노선별 코드 중 작은 값이라
+노선 번호로 짐작하면 틀린다 — 시청은 1·2호선 환승이라 2호선 번호 `201` 이 아니라 1호선 번호 **`151`** 이다
+(`201` 로 부르면 `STATION_NOT_FOUND` 404). 체계는 `docs/db/load-subway.md` 참고.
 
 ### 2-6. BE 재기동 (경로 검색에 필수)
 
@@ -134,11 +139,36 @@ SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --offline \
 
 `10.43.53.186` 은 2026-09-14 값이다. Service 를 지우고 다시 만들면 바뀌므로 터널을 열 때마다 조회한다.
 
-## 4. 실행 기록
+## 4. 실행 기록 (2026-09-14)
 
-| 날짜 | 범위 | 결과 |
+Flyway 는 `Successfully validated 3 migrations` · `Schema "public" is up to date. No migration necessary.` — 스키마를 건드리지 않았다.
+
+| 표 | 행 수 | 적재 시간 |
 | --- | --- | --- |
-| 2026-09-14 | 사전 확인 · dry-run(`subway,bus,bike,railgeometry`) | 터널·인증·Flyway 버전 일치 확인. 네 소스 파싱·검증 통과(혼잡도는 3-1 로 중단) |
-| — | 전체 적재 | **미실행** |
+| `line` | 18 | 36 ms |
+| `station` | 564 | 54 ms |
+| `transfer_meta` | 199 | 17 ms |
+| `edge_time` | 193,536 | 14,517 ms (BATCH) |
+| `bus_route` | 718 | 51 ms |
+| `bus_stop` | 13,099 | 892 ms |
+| `bike_station` | 2,731 | 176 ms |
+| `rail_node` | 1,652 | 106 ms |
+| `rail_link_geometry` | 1,728 | 301 ms |
+| `congestion` | 29,016 | 2,275 ms |
+| **합계** | **243,261** | **32,691 ms** (파싱·검증 포함 전체) |
 
-적재 소요 시간은 실행 후 이 절에 **1회 측정치**로 적는다. 터널을 경유하므로 로컬 수치와 조건이 달라 비교 근거로 쓰지 않는다(`BE/docs/perf/README.md` 규약).
+적재 후 `pg_stat_user_tables` 행 수가 위 표와 일치한다. `bike_stock_pred` 는 0 으로 남는다 — S15P21A104-172 범위다.
+`prune` 은 빈 DB 라 삭제 0건. 경고는 로컬 적재와 같은 종류였다(좌표 다수결 대체 10건, 시각표 이상치 27건, 대여소 거치대수 불일치 233건 등).
+
+**검증 결과**
+
+| 확인 | 결과 |
+| --- | --- |
+| `GET /api/stations/search?query=강남` | 4행 (강남 2호선·신분당선, 강남구청 7호선·수인분당선) |
+| `GET /api/bike-stations/nearby` (역삼 3km) | `ST-1896` 강남파이낸스센터앞 49.8 m 외 실제 값 |
+| `GET /api/routes/search` 222→151 **재기동 전** | `data: []` |
+| `GET /api/routes/search` 222→151 **재기동 후** | 강남 → 신사(신분당선) → 환승 → 을지로3가(3호선) → … → 시청, 22.5분, 경로 형상 포함 |
+
+재기동 필요 범위가 2-6 절 표대로 갈리는 것이 실제로 확인됐다. 역 검색·대여소 조회는 적재 직후 값이 나왔고, 경로 검색만 `kubectl rollout restart` 뒤에 살아났다. 롤링 재시작이라 중단은 없었다.
+
+**성능 수치에 대해.** 위 시간은 **1회 측정치라 `BE/docs/perf/README.md` 규약(워밍업 1회 + 5회 이상, median·p95)을 충족하지 않는다.** 기준선으로만 남기고 개선 근거로 인용하지 않는다. 특히 `edge_time` 13,332 행/초는 SSH 터널을 경유한 값이라 로컬 직결 수치와 **조건이 달라 비교 대상이 아니다** — 터널 오버헤드와 로더 성능이 섞여 있어 둘을 나란히 놓으면 잘못된 결론이 난다.
