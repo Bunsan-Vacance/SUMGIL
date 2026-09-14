@@ -50,7 +50,7 @@ subway.arrival 회차 2026-09-14T11:50:21+09:00 — 호출 3회 · 행 3002건 �
 | --- | --- | --- | --- | --- | --- | --- |
 | `subway.arrival` | 지하철 실시간 도착 일괄 OA-15799 `swopenapi.seoul.go.kr/api/subway/{KEY}/json/realtimeStationArrival/{start}/{end}/ALL` | 1,000행씩 이어 받고 `total` 에 닿으면 끝. 보통 3회, `total` > 3,000 이면 4회(상한) | 60초 · 07:30-13:00 | `statnId` (API 고유 ID, 예 `1009000937`) | `recptnDt` | **실측 2026-09-14 11:50** — 3회 · 3,002행 · 963ms, `total` 3,009. 로컬 Kafka 에 적재 확인 |
 | `bike.stock` | 따릉이 bikeList OA-15493 `openapi.seoul.go.kr:8088/{KEY}/json/bikeList/{start}/{end}/` | 1,000건씩 3회. 마지막 페이지가 1,000 미만이면 끝 | 120초 · 07:00-18:00 | `stationId` (`ST-xxx` = `bike_station.rental_id`) | 없음 → `null`, `ingested_at` 이 신선도 기준 | 실습실 망에서 호출 불가(8088 차단). 실측 샘플(2026-09-08)로 단위 테스트, 실호출은 EC2·핫스팟에서 |
-| `weather.nowcast` | 기상청 API허브 `VilageFcstInfoService_2.0/getUltraSrtNcst`·`getUltraSrtFcst` (nx=60 ny=127) | 실황 1회 + 예보 1회 | 1시간 · 하루 종일 | `nx:ny:category` (예 `60:127:T1H`) | 발표 시각 `baseDate+baseTime` | `KMA_API_KEY` 발급 전 — 픽스처로 단위 테스트만. 항목은 AI 폴러와 같은 T1H·RN1·REH·WSD·PTY |
+| `weather.nowcast` | 기상청 API허브 `VilageFcstInfoService_2.0/getUltraSrtNcst`·`getUltraSrtFcst` (nx=60 ny=127) | 실황 1회 + 예보 1회 | 1시간 · 하루 종일 | `nx:ny:category` (예 `60:127:T1H`) | 발표 시각 `baseDate+baseTime` | **실측 2026-09-14 12:28·12:32** — 2회 호출(실황+예보) · 35건 · 752 ms·982 ms, 로컬 Kafka 적재 확인. 항목은 AI 폴러와 같은 T1H·RN1·REH·WSD·PTY |
 
 - 지하철 `statnId` 는 우리 `station.station_id`(서울 역번호)와 **체계가 다르다.** 대응은 Redis 반영 컨슈머(171)에서 한다.
 - 지하철 페이지 경계의 행이 양쪽 페이지에 겹쳐 온다(실측 3,002건 중 고유 `event_id` 3,001). 같은 행은 `event_id` 가 같아 컨슈머가 걸러낸다.
@@ -149,6 +149,8 @@ KAFKA_BOOTSTRAP_SERVERS=localhost:9092 ./gradlew test --tests 'com.ssafy.s15p21a
 
 실측(2026-09-14, 로컬 compose): `run-once` 로 지하철 한 회차 — 호출 3회 · 3,002행 · 전송 3,002건 · 963ms, JVM 정상 종료.
 `subway.arrival` 오프셋 1 → 3,003. 디스크 730KB(lz4, 약 240B/이벤트).
+날씨도 같은 방식으로 두 회차 — 호출 2회(실황+예보) · 35건 · 752ms(12:28) · 982ms(12:32).
+전부 **1회성 측정치**다. 반복·분포를 갖춘 정식 기록이 아니므로 `docs/perf/README.md` 의 기준선 절에 그렇게 표시해 두었다.
 
 ## 8. 배포 (S15P21A104-173 에서)
 
