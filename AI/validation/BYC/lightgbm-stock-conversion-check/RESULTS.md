@@ -171,6 +171,53 @@ minutes_since_anchor)를 받게 된다. **MAE 1.6대가 이 조건에서도 재�
 1차 판단(전부 net_flow만 봐서 기각)은 틀렸다. **날씨·공휴일·KBO(잠실) 셋 다 채택**,
 날짜축 기반 멀티소스 모델을 진행할 근거가 충분하다고 결론. 1단계(BE 스키마 협의)로 진행.
 
+## 4~5단계 — 날짜축 멀티소스 학습 (`train_multisource_lightgbm.py`)
+
+anchor 없이 target_datetime 맥락(시간·요일·날씨·공휴일·KBO)만으로 절대 재고(`target_stock`)를
+직접 예측하는 모델. 전체 스케일(train 11개월 43.5M행, valid 12월, test 2025 Q3 13.0M행),
+`n_estimators=1500, learning_rate=0.02, num_leaves=127, early_stopping=60`.
+
+### 1차 시도 — avg 못 이김 (여러 원인 수정 과정)
+
+| 시도 | MAE | 비고 |
+|---|---|---|
+| baseline1(avg, dow_type×time_slot) | 8.160 | |
+| baseline2(month×dow_type×time_slot) | 8.593 | avg보다도 못함(세분화=노이즈↑, 재학습 rolling 기각과 같은 패턴) |
+| LightGBM v1(기본 하이퍼파라미터) | 8.359 | avg 못 이김 |
+| LightGBM v2(튜닝, historical profile을 target_dow×hour로 계산) | 8.328 | 여전히 못 이김 |
+| LightGBM v3(historical profile을 avg와 동일하게 dow_type×time_slot로 수정 + station_code를 카테고리형으로 명시) | 8.207 | 거의 붙었지만 못 이김 |
+| LightGBM v4(잔차 학습: target_stock−hist_mean만 예측) | 8.216 | v3와 수학적으로 동치, 개선 없음(예상대로) |
+
+**원인 진단**: (1) 모델에 준 historical profile 피처가 avg보다 노이즈 많은 그룹핑(요일 안 묶음)이었음 →
+avg와 동일 그룹핑으로 수정. (2) `station_code`를 정수로 줘서 LightGBM이 순서 있는 숫자로 오인 →
+`categorical_feature`로 명시. 둘 다 고쳤지만 **avg를 못 넘었다.**
+
+### CROWD 벤치마킹 후 재시도 — D-1/D-7 lag 추가로 avg 격파
+
+CROWD의 배포 모델(`festival_selflag_d1sd_d7_resid`, `MODEL_REGISTRY.md`)을 보니 날씨·이벤트만으론
++1.5%뿐이고 **자기 역 전날 실측 잔차**를 추가하니 +21.7%로 급상승했다는 게 확인됨 — BIKE에도
+동일하게 D-1(어제 같은 시각)·D-7(1주 전 같은 시각) 실측 lag를 피처로 추가.
+
+**중요한 버그 발견 및 수정**: 분(minute) 단위로 정확히 매칭하면 가용률이 27~35%뿐이었음 — 원본이
+5분 고정 그리드가 아니라 실제 대여·반납 이벤트만 기록된 데이터라(역당 하루 288슬롯 중 실제로는
+50~60개뿐), 분까지 맞추면 거의 안 맞았음. **30분 단위(time_slot)로 집계해서 매칭**하도록 수정 →
+가용률 68~78%로 개선.
+
+| | MAE |
+|---|---|
+| baseline1(avg) | 8.160 |
+| baseline2(월별) | 8.593 |
+| **LightGBM(D-1/D-7 lag 포함, 전체 스케일)** | **7.217** (avg 대비 **-11.6%**) |
+
+Dec 검증 l2도 111.4로, lag 없을 때(159) 대비 크게 낮아짐. **B4 최초로 avg를 명확히 이김.**
+
+## 결론 (최신)
+
+날짜축 멀티소스 모델은 **D-1/D-7 lag 피처가 핵심**이었다 — 날씨·공휴일·KBO는 0단계에서 신호가
+있다고 확인됐지만, 그것만으론 avg를 못 이겼고 어제/1주 전 실측 lag를 더해야 이겼다(CROWD와
+같은 패턴). 결정 게이트: **avg를 이김 → predictor.py 구현 재개.** 다음: p_empty/p_full도 같은
+방식(quantile+isotonic, B2에서 검증됨)으로 lag 피처를 넣어 재확인 필요.
+
 ## 다음 검토 여지 (미해결)
 
 - 지금은 소규모(1개월, 5% 샘플)만 확인함 — 전체 스케일에서도 같은 calibration이 유지되는지는
