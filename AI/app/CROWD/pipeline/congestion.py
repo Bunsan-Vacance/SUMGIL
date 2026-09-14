@@ -39,11 +39,17 @@ API는 이 셀을 "데이터 부족"으로 노출한다(원칙 8). `congestion_r
 
 배율표(88)를 재적합하면서 "표에 들어간 규칙"과 "런타임 규칙"이 겹치지 않게 정리했다.
 
+- **공휴일 대체는 런타임 전용이다.** 배율표에는 1~8호선 `휴일` 행이 **아예 없다**(`휴일` 행은 9호선
+  스냅샷이 주말·공휴일을 묶어 쓰는 것뿐이다). 산출 쪽 `build_congestion_calibration.bucket_day_type`은
+  대체 인자를 갖지 않아 공휴일을 만들 수 없고, 대체는 여기 `HOLIDAY_FALLBACK_DAY_TYPE` 한 곳에서만
+  일어난다. 두 곳에서 대체하면 `calibration_fallback` 표시가 거짓이 된다.
+- **지선 방향 대응은 조인 키 규칙이라 양쪽에 다 필요하다.** 배율표는 스냅샷 방향(내/외선)으로 서고,
+  재귀식은 지선을 상/하선으로 낸다 — 그래서 표를 만들 때도(라벨 → 스냅샷 방향), 표를 쓸 때도
+  (재귀식 → 표 방향) 같은 변환이 필요하다. 규칙 자체는 `BRANCH_DIRECTION_MAP` **한 곳**에 있고
+  `DATA_ENGINE`이 그것을 import한다. 중복이 아니라 한 규칙의 양쪽 적용이다.
 - **경계 유입 상수는 표에 실린다.** `raw_offset` 컬럼이 있으면 `apply_calibration`이
   `(raw + raw_offset) × ratio`를 계산한다 — 런타임에 상수를 적합하지 않는다. 상수가 없는(또는 0인)
-  표에서는 식이 기존과 완전히 같다. 상수를 어떻게 적합하는지는
-  `DATA_ENGINE/eda/boundary_inflow.py`에 있다.
-- **`truncated_segments`**는 절단 구간만 골라 준다 — 경계 처리와 상태값의 대상 집합이다.
+  표에서는 식이 기존과 완전히 같다.
 """
 
 from __future__ import annotations
@@ -326,7 +332,7 @@ def truncated_segments(segments: Sequence[dict], lines: Sequence[str] | None = N
 
 
 def truncated_boundary_cells(
-    segments: Sequence[dict], lines: Sequence[str] | None = ("1호선",)
+    segments: Sequence[dict], lines: Sequence[str] | None = None
 ) -> set[tuple[int, str]]:
     """절단 구간의 **종점 링크** (역번호, 방향) 집합 — 구조적으로 재차 0이 되는 셀(146).
 
@@ -336,8 +342,9 @@ def truncated_boundary_cells(
     32.5%·24.4%를 보고한다. 배율은 raw 평균 0이 분모라 산출 자체가 안 돼(ratio NaN) 값을 낼 수
     없으므로, 값을 지어내는 대신 `data_status`로 사유를 밝힌다.
 
-    `lines`로 범위를 좁힌다 — 146의 스코프는 1호선이었다. `None`이면 3·4·7·9호선 본선과 신정지선
-    까지 전부(199 B가 절단면 경계를 판정할 때 쓴다).
+    **기본값이 199에서 바뀌었다.** 146은 1호선만 봤지만(`lines=("1호선",)`) 이제 기본이 전 절단
+    구간(`None`)이다 — 상태값도 `line1_truncated`에서 `segment_truncated`로 넓혔다. 146 시절 수치를
+    재현하려면 `lines`를 명시한다.
     """
     out: set[tuple[int, str]] = set()
     for seg in truncated_segments(segments, lines):

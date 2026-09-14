@@ -102,7 +102,8 @@ def status_tables(
         for s in seg["stations"]
         if s not in BRANCH_JUNCTION_STATIONS
     }
-    boundary = truncated_boundary_cells(segments)
+    # 146의 원인 분류는 1호선 전용이었다 — 199가 기본값을 넓혔으므로 여기서는 명시한다.
+    boundary = truncated_boundary_cells(segments, lines=("1호선",))
 
     dist_rows: list[dict] = []
     cause_rows: list[dict] = []
@@ -115,7 +116,9 @@ def status_tables(
         after = to_congestion_table(predicted, segments, capacity, calibration, thresholds)
         day_type = str(predicted["day_type"].iloc[0])
         # 146 이전에는 절단면 셀도 그냥 `no_calibration`이었다 — "전" 열을 그 시절 값으로 되돌린다.
-        before["data_status"] = before["data_status"].replace({"line1_truncated": "no_calibration"})
+        before["data_status"] = before["data_status"].replace(
+            {"segment_truncated": "no_calibration"}
+        )
         for name, table in (("전(146 이전)", before), ("후(146 적용)", after)):
             counts = table["data_status"].value_counts().to_dict()
             dist_rows.append(
@@ -148,7 +151,8 @@ STATUS_ORDER = [
     "ok",
     "calibration_fallback",
     "no_lookup",
-    "line1_truncated",
+    # 199에서 `line1_truncated` → `segment_truncated`(전 절단 구간)로 넓어졌다.
+    "segment_truncated",
     "no_calibration",
 ]
 

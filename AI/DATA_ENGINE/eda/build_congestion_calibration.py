@@ -81,13 +81,18 @@ XLSX 원본(9호선 혼잡도 자료)에 역명만 있고 역번호 컬럼이 �
 
 실행:
     cd AI
-    python -m DATA_ENGINE.eda.build_congestion_calibration
+    python -m DATA_ENGINE.eda.build_congestion_calibration            # 채택 변형(기본값)
+    python -m DATA_ENGINE.eda.build_congestion_calibration --variant current   # 88 현행 재현
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -105,6 +110,7 @@ LABEL_NAME = "crowd_congestion_label_2024_2026.parquet"
 SNAPSHOT_NAME = "crowd_congestion_long.parquet"
 OUTPUT_NAME = "crowd_congestion_calibration.parquet"
 OUTPUT_NAME_EXPRESS = "crowd_congestion_calibration_express.parquet"
+ARCHIVE_DIR = CROWD_PROCESSED / "_archive"
 
 # 배율표가 선 실측 스냅샷의 기준일(142 1절에서 2025-11-30판과 완전 일치함을 확인).
 SNAPSHOT_RELEASE = "2025-11-30"
@@ -382,6 +388,76 @@ def save_calibration(ratio: pd.DataFrame, output_name: str = OUTPUT_NAME) -> Pat
     return out_path
 
 
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def archive_previous(path: Path) -> Path | None:
+    """이전 산출물을 `processed/_archive/`로 옮긴다 — 덮어쓰기 전에 되돌릴 수 있게 남긴다.
+
+    `_archive/`는 `data/` 아래라 gitignore 대상이다(용량·재생성 가능). 파일명에 이전 파일의
+    수정 시각을 붙여 여러 벌이 겹치지 않게 한다.
+    """
+    if not path.exists():
+        return None
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime("%Y%m%d-%H%M%S")
+    target = ARCHIVE_DIR / f"{path.stem}_{stamp}{path.suffix}"
+    path.replace(target)
+    return target
+
+
+def calibration_meta(
+    ratio: pd.DataFrame,
+    variant: CalibrationVariant,
+    diagnostics: dict[str, int],
+    previous_sha256: str | None,
+    previous_archived: str | None,
+) -> dict:
+    """`crowd_congestion_calibration.meta.json` 내용 — 이 표가 무엇으로 만들어졌는지(199 규칙 1).
+
+    배율표는 모든 혼잡도 산출의 승수라 모델 아티팩트와 같은 수준으로 추적한다
+    (`app/CROWD/pipeline/MODEL_REGISTRY.md` "변환 층 산출물").
+    """
+    labels_path = CROWD_PROCESSED / LABEL_NAME
+    dates = pd.read_parquet(labels_path, columns=["date"])["date"]
+    kept = dates[fit_window_mask(dates, variant)]
+    return {
+        "ticket": "S15P21A104-199",
+        "snapshot_release": variant.snapshot_release,
+        "snapshot_source": str(CROWD_INTERIM / SNAPSHOT_NAME),
+        "label_source": str(labels_path),
+        "ridership_window": {
+            "mode": variant.fit_window,
+            "window_weeks": variant.window_weeks if variant.fit_window else None,
+            "start": str(kept.min().date()) if len(kept) else None,
+            "end": str(kept.max().date()) if len(kept) else None,
+            "n_dates": int(kept.dt.normalize().nunique()),
+        },
+        "direction_mapping": (
+            "congestion.BRANCH_DIRECTION_MAP(146) — 성수지선 하선→외선 / 신정지선 하선→내선, "
+            "분기역(211·234) 제외"
+            if variant.branch_direction_map
+            else "없음(88 현행) — 2호선 지선은 상/하선 그대로라 조인이 공집합"
+        ),
+        "boundary_variant": (
+            f"B1 경계 유입 주입(정원 % 단위, scale={variant.boundary_scale:g}) — "
+            "truncated 구간만, 9호선 제외"
+            if variant.boundary_inflow
+            else "B3 현행 유지 — 경계 셀은 ratio NaN"
+        ),
+        "variant": asdict(variant),
+        "variant_code": variant.code,
+        "rows": len(ratio),
+        "ratio_defined": int(ratio["ratio"].notna().sum()),
+        "ratio_missing": int(ratio["ratio"].isna().sum()),
+        "diagnostics": diagnostics,
+        "previous_sha256": previous_sha256,
+        "previous_archived_as": previous_archived,
+        "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+    }
+
+
 def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_path: Path) -> None:
     print(f"\n=== {label} ===")
     print(
@@ -427,10 +503,50 @@ def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_pa
     print(f"저장 완료: {out_path} ({len(ratio):,}행)")
 
 
-def main() -> None:
-    local_ratio, local_diag = build_calibration_ratio(line9_train_type="일반")
+VARIANT_PRESETS: dict[str, CalibrationVariant] = {
+    "adopted": CalibrationVariant(),
+    "current": CalibrationVariant.current(),
+    "branch_only": CalibrationVariant(boundary_inflow=False),
+    "branch_year": CalibrationVariant(boundary_inflow=False, fit_window="snapshot_year"),
+    "branch_season": CalibrationVariant(boundary_inflow=False, fit_window="snapshot_season"),
+}
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--variant", default="adopted", choices=sorted(VARIANT_PRESETS))
+    ap.add_argument(
+        "--boundary-scale",
+        type=float,
+        default=None,
+        help="경계 유입 상수의 배수(0이면 주입하지 않은 표와 같은 수치가 나온다)",
+    )
+    ap.add_argument("--no-archive", action="store_true", help="이전 산출물을 옮기지 않는다")
+    args = ap.parse_args(argv)
+
+    variant = VARIANT_PRESETS[args.variant]
+    if args.boundary_scale is not None:
+        variant = replace(variant, boundary_scale=args.boundary_scale)
+
+    local_path = CROWD_PROCESSED / OUTPUT_NAME
+    previous_sha = sha256_of(local_path) if local_path.exists() else None
+
+    local_ratio, local_diag = build_calibration_ratio(line9_train_type="일반", variant=variant)
+    archived = None if args.no_archive else archive_previous(local_path)
     local_path = save_calibration(local_ratio, OUTPUT_NAME)
-    _report(f"일반 · 변형 {CalibrationVariant().code}", local_ratio, local_diag, local_path)
+    meta = calibration_meta(
+        local_ratio, variant, local_diag, previous_sha, archived.name if archived else None
+    )
+    meta["sha256"] = sha256_of(local_path)
+    local_path.with_suffix(".meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    _report(f"일반 · 변형 {variant.code}", local_ratio, local_diag, local_path)
+    print(f"메타: {local_path.with_suffix('.meta.json')}")
+    if archived:
+        print(f"이전 표 보관: {archived}")
 
     # 급행은 9호선에만 있는 개념이라(1~8호선은 train_type 자체가 없다) dedupe_snapshot_keys가
     # 1~8호선 행을 그대로 통과시켜도, 여기서는 9호선만 남긴다 — "급행" 산출물에 급행이

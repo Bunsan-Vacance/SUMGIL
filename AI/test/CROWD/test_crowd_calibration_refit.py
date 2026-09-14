@@ -5,8 +5,6 @@
 
 특히 **상수 0이면 주입하지 않은 것과 같아야 한다**는 회귀선을 고정한다 — 이게 깨지면 88 현행 표를
 더는 재현할 수 없고, 199의 모든 전후 비교가 기준선을 잃는다.
-
-이 파일은 티켓이 진행되면서 늘어난다.
 """
 
 from __future__ import annotations
@@ -19,6 +17,7 @@ from app.CROWD.pipeline.congestion import (
     BRANCH_DIRECTION_MAP,
     apply_calibration,
     bucket_direction,
+    truncated_boundary_cells,
     truncated_segments,
 )
 from DATA_ENGINE.eda.boundary_inflow import (
@@ -28,6 +27,7 @@ from DATA_ENGINE.eda.boundary_inflow import (
 from DATA_ENGINE.eda.build_congestion_calibration import (
     CalibrationVariant,
     bucket_day_type,
+    calibration_meta,
     fit_window_mask,
 )
 
@@ -67,6 +67,16 @@ def test_truncated_segments_skips_circular_and_untruncated():
     picked = {(s["line"], s["segment"]) for s in truncated_segments(SEGMENTS)}
     assert picked == {("1호선", "본선"), ("9호선", "2·3단계")}
     assert {s["line"] for s in truncated_segments(SEGMENTS, lines=("1호선",))} == {"1호선"}
+
+
+def test_truncated_boundary_cells_defaults_to_every_truncated_segment():
+    """199에서 기본값이 1호선 전용에서 전 절단 구간으로 넓어졌다(`segment_truncated`)."""
+    assert truncated_boundary_cells(SEGMENTS) == {
+        (158, "하선"),
+        (150, "상선"),
+        (4137, "하선"),
+        (4138, "상선"),
+    }
 
 
 # ── B: 경계 유입 상수 ──
@@ -214,3 +224,31 @@ def test_apply_calibration_is_unchanged_without_raw_offset():
     right = zeros["congestion_pct_calibrated"].to_numpy()
     assert np.array_equal(left, right, equal_nan=True)
     assert left[0] == 0.0  # 상수가 없으면 경계 셀(raw 0)은 0이라는 **틀린 값**이 나온다
+
+
+# ── 버전 메타 ──
+def test_calibration_meta_records_the_variant_and_previous_hash(tmp_path, monkeypatch):
+    import DATA_ENGINE.eda.build_congestion_calibration as builder
+
+    labels = pd.DataFrame({"date": pd.to_datetime(["2024-01-01", "2025-06-01"])})
+    labels.to_parquet(tmp_path / builder.LABEL_NAME, index=False)
+    monkeypatch.setattr(builder, "CROWD_PROCESSED", tmp_path)
+
+    ratio = pd.DataFrame({"ratio": [0.1, np.nan]})
+    variant = CalibrationVariant()
+    meta = calibration_meta(ratio, variant, {"스냅샷_행": 2}, "abc123", "old.parquet")
+    assert meta["ticket"] == "S15P21A104-199"
+    assert meta["snapshot_release"] == "2025-11-30"
+    assert meta["previous_sha256"] == "abc123"
+    assert meta["previous_archived_as"] == "old.parquet"
+    assert meta["ratio_defined"] == 1 and meta["ratio_missing"] == 1
+    assert meta["ridership_window"] == {
+        "mode": "all",
+        "window_weeks": 13,
+        "start": "2024-01-01",
+        "end": "2025-06-01",
+        "n_dates": 2,
+    }
+    assert "BRANCH_DIRECTION_MAP" in meta["direction_mapping"]
+    assert meta["variant"]["boundary_method"] == "anchored"
+    assert meta["variant_code"] == "branch_anchored-segment1_all"

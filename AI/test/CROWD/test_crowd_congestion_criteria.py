@@ -164,11 +164,19 @@ def test_truncated_boundary_cells_are_the_two_terminal_links():
             "stations": [309, 310],
         },  # 스코프 밖
     ]
-    assert truncated_boundary_cells(segments) == {(158, "하선"), (150, "상선")}
+    # 146의 스코프는 1호선이었다. 199가 기본값을 전 절단 구간(`lines=None`)으로 넓혔으므로
+    # 1호선만 보려면 명시해야 한다 — 두 동작을 다 고정해 둔다.
+    assert truncated_boundary_cells(segments, lines=("1호선",)) == {(158, "하선"), (150, "상선")}
+    assert truncated_boundary_cells(segments) == {
+        (158, "하선"),
+        (150, "상선"),
+        (310, "하선"),
+        (309, "상선"),
+    }
 
 
 def test_data_status_priority_marks_fallback_then_truncation():
-    """같은 표에서 ok · calibration_fallback · line1_truncated · no_calibration이 우선순위대로 붙는다."""
+    """같은 표에서 ok · calibration_fallback · segment_truncated · no_calibration이 우선순위대로 붙는다."""
     stations = [150, 151, 158]
     predicted = pd.DataFrame(
         {
@@ -202,14 +210,14 @@ def test_data_status_priority_marks_fallback_then_truncation():
     table = to_congestion_table(predicted, segments, CAPACITY, cal, [50.0, 100.0])
     status = table.set_index(["station_no", "direction", "time_slot_30min"])["data_status"]
     assert status.loc[(158, "하선", "08:00")] == "no_lookup"  # lookup이 없으면 그게 먼저다
-    assert status.loc[(150, "상선", "08:00")] == "line1_truncated"
+    assert status.loc[(150, "상선", "08:00")] == "segment_truncated"
     assert status.loc[(151, "상선", "08:00")] == "no_calibration"
     assert status.loc[(150, "하선", "08:00")] == "calibration_fallback"
     assert set(table["data_status"]) <= {
         "ok",
         "calibration_fallback",
         "no_lookup",
-        "line1_truncated",
+        "segment_truncated",
         "no_calibration",
     }
 
@@ -245,4 +253,4 @@ def test_data_status_without_fallback_collapses_to_no_calibration():
     table = to_congestion_table(
         predicted, segments, CAPACITY, cal, [50.0, 100.0], holiday_fallback=None
     )
-    assert set(table["data_status"]) == {"no_calibration", "line1_truncated"}
+    assert set(table["data_status"]) == {"no_calibration", "segment_truncated"}
