@@ -161,6 +161,8 @@ function apiErrorCode(status: number, error: unknown) {
   const value = isRecord(error) ? text(error.code) : text(error)
   if (value === 'SAME_ORIGIN_DEST') return 'same-origin-destination' as const
   if (value === 'STATION_NOT_FOUND') return 'station-not-found' as const
+  if (value === 'ACCESS_CANDIDATE_NOT_READY') return 'coordinate-not-ready' as const
+  if (value === 'INVALID_COORDINATE') return 'invalid-coordinate' as const
   if (status === 400) return 'bad-request' as const
   if (status === 404) return 'station-not-found' as const
   return 'network' as const
@@ -194,10 +196,14 @@ function mapStationSearchResult(value: unknown): StationSearchResult {
   }
 }
 
-async function requestApi<T>(url: string, signal: AbortSignal): Promise<T> {
+async function requestApi<T>(url: string, signal: AbortSignal, init: RequestInit = {}): Promise<T> {
   let response: Response
   try {
-    response = await fetch(url, { signal, headers: { Accept: 'application/json' } })
+    response = await fetch(url, {
+      ...init,
+      signal,
+      headers: { Accept: 'application/json', ...init.headers },
+    })
   } catch (error) {
     if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       throw abortError()
@@ -212,11 +218,20 @@ async function requestApi<T>(url: string, signal: AbortSignal): Promise<T> {
   }
   if (!response.ok || !isRecord(body) || body.success !== true || !('data' in body)) {
     const error = isRecord(body) ? body.error : undefined
-    throw new RepositoryError(
-      apiErrorCode(response.status, error),
-      response.status === 404 ? '역 정보를 찾지 못했어요.' : '서버에서 요청을 처리하지 못했어요.',
-      response.status,
-    )
+    const code = apiErrorCode(response.status, error)
+    const message =
+      code === 'same-origin-destination'
+        ? '출발지와 도착지는 다른 장소를 선택해 주세요.'
+        : code === 'station-not-found'
+          ? '역 정보를 찾지 못했어요.'
+          : code === 'coordinate-not-ready'
+            ? '좌표 기반 경로는 아직 준비 중이에요.'
+            : code === 'invalid-coordinate'
+              ? '출발지와 도착지 좌표를 확인해 주세요.'
+              : response.status === 404
+                ? '역 정보를 찾지 못했어요.'
+                : '서버에서 요청을 처리하지 못했어요.'
+    throw new RepositoryError(code, message, response.status)
   }
   return body.data as T
 }
@@ -342,7 +357,11 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
     throw new RepositoryError('invalid-response', '경로 응답이 올바르지 않아요.')
   }
   const routeType = value.routeType
-  if (routeType !== 'SHORTEST' && routeType !== 'SHORTEST_WITH_BIKE') {
+  if (
+    routeType !== 'SHORTEST' &&
+    routeType !== 'SHORTEST_WITH_BIKE' &&
+    routeType !== 'ALTERNATIVE'
+  ) {
     throw new RepositoryError('invalid-response', '지원하지 않는 경로 유형 응답이에요.')
   }
   const rawLegs = value.legs
@@ -393,7 +412,12 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
     .slice(1)
     .reduce((count, routeId, index) => count + (routeId !== transitRouteIds[index] ? 1 : 0), 0)
   const transfers = explicitTransfers || routeTransitions
-  const label = routeType === 'SHORTEST' ? '최단 경로' : '따릉이 포함 경로'
+  const label =
+    routeType === 'SHORTEST'
+      ? '최단 경로'
+      : routeType === 'SHORTEST_WITH_BIKE' || legs.some((leg) => leg.mode === 'bike')
+        ? '따릉이 포함 경로'
+        : '대안 경로'
   return {
     id: `${routeType.toLowerCase()}-${index}`,
     label,
@@ -432,34 +456,52 @@ export function createBackendStationRepository(baseUrl: string): StationReposito
   }
 }
 
-function stationId(place: Place) {
-  if (!place.stationId) {
-    throw new RepositoryError(
-      'unsupported-place',
-      '현재 지하철역 간 경로를 지원해요. 출발/도착역을 선택해 주세요.',
-    )
+function coordinate(place: Place, name: '출발지' | '도착지') {
+  if (!finite(place.lat, -90, 90) || !finite(place.lng, -180, 180)) {
+    throw new RepositoryError('invalid-coordinate', `${name} 좌표를 확인해 주세요.`)
   }
-  return place.stationId
+  return { lat: place.lat, lng: place.lng, name: place.name }
 }
 
 export function createBackendRouteRepository(baseUrl: string): RouteRepository {
   return {
     async search(request, signal) {
-      const originStationId = stationId(request.origin)
-      const destStationId = stationId(request.destination)
-      if (originStationId === destStationId) {
+      const originStationId = request.origin.stationId
+      const destStationId = request.destination.stationId
+      if (originStationId && destStationId && originStationId === destStationId) {
         throw new RepositoryError('same-origin-destination', '출발역과 도착역은 달라야 해요.')
       }
       const departedAt = request.departedAt || new Date().toISOString()
-      const params = new URLSearchParams({ originStationId, destStationId })
-      if (request.modes?.length) {
-        params.set('modes', request.modes.map((mode) => mode.toUpperCase()).join(','))
-      }
-      if (request.priority) params.set('priority', request.priority === 'fast' ? 'TIME' : 'COMFORT')
       const departureTime = backendDepartureTime(departedAt)
-      if (departureTime) params.set('departureTime', departureTime)
       try {
-        const data = await requestApi<unknown>(`${baseUrl}/api/routes/search?${params}`, signal)
+        const params = new URLSearchParams({
+          originStationId: originStationId || '',
+          destStationId: destStationId || '',
+        })
+        if (request.modes?.length) {
+          params.set('modes', request.modes.map((mode) => mode.toUpperCase()).join(','))
+        }
+        if (request.priority)
+          params.set('priority', request.priority === 'fast' ? 'TIME' : 'COMFORT')
+        if (departureTime) params.set('departureTime', departureTime)
+        const data =
+          originStationId && destStationId
+            ? await requestApi<unknown>(`${baseUrl}/api/routes/search?${params}`, signal)
+            : await requestApi<unknown>(`${baseUrl}/api/routes/search/coordinate`, signal, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  origin: coordinate(request.origin, '출발지'),
+                  destination: coordinate(request.destination, '도착지'),
+                  ...(request.modes?.length
+                    ? { modes: request.modes.map((mode) => mode.toUpperCase()) }
+                    : {}),
+                  ...(request.priority
+                    ? { priority: request.priority === 'fast' ? 'TIME' : 'COMFORT' }
+                    : {}),
+                  ...(departureTime ? { departureTime } : {}),
+                }),
+              })
         if (!Array.isArray(data)) {
           throw new RepositoryError('invalid-response', '경로 응답이 올바르지 않아요.')
         }

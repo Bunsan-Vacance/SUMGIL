@@ -3,7 +3,6 @@ import { ArrowLeft, Bike, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-
 import type { Place } from '../features/route/types'
 import MapPlacePicker from '../features/map/MapPlacePicker'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
-import { stationRepository } from '../api/repositories'
 import {
   clearRecentPlaces,
   loadRecentPlaces,
@@ -23,17 +22,13 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
   const [recentPlaces, setRecentPlaces] = useState<Place[]>(loadRecentPlaces)
   const [mapMode, setMapMode] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
-  const stationSearchEnabled = Boolean(stationRepository)
-  const { places, loading, error } = usePlaceSearch(mapMode || stationSearchEnabled ? '' : query)
+  const { places, loading, error } = usePlaceSearch(mapMode ? '' : query)
   const {
     stations,
     loading: stationsLoading,
     error: stationsError,
   } = useStationSearch(mapMode ? '' : query)
-  const searchPlaces = [
-    ...stations.map(stationSearchResultToPlace),
-    ...(stationSearchEnabled ? [] : places),
-  ]
+  const searchPlaces = [...stations.map(stationSearchResultToPlace), ...places]
   const selectPlace = (place: Place, save = true) => {
     const accepted = choosePlace(place)
     if (accepted !== false && save) setRecentPlaces(saveRecentPlace(place))
@@ -98,7 +93,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={stationSearchEnabled ? '지하철역 검색' : '장소, 역, 주소 검색'}
+          placeholder="장소, 역, 주소 검색"
           aria-label="장소 검색어"
         />
         {query && (
@@ -191,11 +186,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           <div className="empty">
             <Search />
             <h3>검색 결과가 없어요</h3>
-            <p>
-              {stationSearchEnabled
-                ? '다른 역 이름으로 검색해 주세요.'
-                : '다른 장소 이름으로 검색해 주세요.'}
-            </p>
+            <p>다른 장소, 역, 주소로 검색해 주세요.</p>
           </div>
         )}
       {(loading || stationsLoading) && (
