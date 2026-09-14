@@ -500,6 +500,59 @@ python -m DATA_ENGINE.archive.upload_raw_partitions --yes
 기본값은 dry-run이라 Drive API를 호출하지 않고 manifest도 기록하지 않는다. `--yes`를 붙이면
 완료된 시간대 파티션만 Drive에 올리고, 결과를 `data/manifest/archive_uploads.jsonl`에 기록한다.
 
+## Kafka consumer
+
+Kafka broker·topic·producer 구축은 BE/Infra 소유다. 이 폴더에서는 BE/Infra가 발행하는
+topic을 AI consumer group으로 구독해 기존 raw parquet 계층에 저장하는 consumer만 다룬다.
+실제 Kafka 접속은 BE/Infra에서 J15A104A 기준 bootstrap server와 네트워크 접근 방식을
+공유한 뒤 진행한다.
+
+필요한 `.env` 값:
+
+```text
+KAFKA_BOOTSTRAP_SERVERS=<BE/Infra 제공 주소>
+KAFKA_CONSUMER_GROUP=ai-spark
+KAFKA_AUTO_OFFSET_RESET=latest
+KAFKA_TOPIC_BIKE_STOCK=bike.stock
+KAFKA_TOPIC_WEATHER_NOWCAST=weather.nowcast
+KAFKA_TOPIC_SUBWAY_ARRIVAL=subway.arrival
+```
+
+저장 경로:
+
+| topic | 저장 위치 |
+| --- | --- |
+| `bike.stock` | `data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+| `weather.nowcast` | `data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+| `subway.arrival` | `data/SUBWAY/raw/arrival/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+
+Kafka event는 공통 envelope 컬럼과 `payload_json` 원본 보존 컬럼으로 저장한다. partition 기준
+시간은 `poll_run_at`을 우선 사용하고, 없으면 `ingested_at`으로 대체한다. 이렇게 하면 기존
+Drive archive·retention·partition count 계층과 같은 `dt=/hh=/snapshot_*.parquet` 구조를
+유지할 수 있다.
+
+mock/sample event 기반 parser·sink 테스트:
+
+```bash
+cd AI
+pytest -q test/test_kafka_event_parser.py test/test_kafka_sink.py
+```
+
+실제 consumer 실행:
+
+```bash
+cd AI
+bash DATA_ENGINE/scripts/run_kafka_consumer.sh
+```
+
+실제 연결 전 BE/Infra 확인이 필요한 값:
+
+- J15A104A에서 접근 가능한 Kafka bootstrap server 주소/포트
+- topic 생성 여부: `bike.stock`, `weather.nowcast`, `subway.arrival`
+- topic별 payload 샘플 1건
+- message key 정책(`entity_id`/`station_id` 기준인지, null인지)
+- 최초 offset reset 정책(`earliest`/`latest`)과 장애 재시작 기준
+
 ## Redis 연동 상태
 
 Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전략과 서버 구성은 BE/Infra
