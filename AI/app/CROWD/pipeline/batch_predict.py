@@ -1,7 +1,7 @@
 """배치 추론 잡 — 대상 날짜의 전 역·전 시간대 혼잡도 표를 만들어 서빙 디렉터리에 저장한다.
 
-    패널(최근 7일 + 대상 날짜 골격)
-      → Predictor.predict (lookup / lightgbm / llm 중 설정값)      승하차 예측
+    패널(최근 이력 창 + 대상 날짜 골격)                              창 길이 = 예측기의 required_history_days
+      → Predictor.predict (lookup / lightgbm / dl / llm 중 설정값)   승하차 예측
       → recursive_congestion (재귀식 방향 분해)                      1시간 재차인원
       → apply_calibration (배율표)                                  30분 보정 혼잡도
       → grade (임계치)                                              등급
@@ -120,19 +120,23 @@ def build_target_skeleton(
 
 
 def resolve_predictor(kind: str, panel_train: pd.DataFrame, settings) -> Predictor:
-    """설정값 → 예측기. `auto`는 최신 아티팩트가 있으면 lightgbm, 없으면 lookup."""
+    """설정값 → 예측기. `auto`는 최신 **lightgbm** 아티팩트가 있으면 그것, 없으면 lookup.
+
+    `auto`가 `model_kind`를 보지 않고 폴더명 최신을 잡으면 144가 DL 아티팩트를 만든 순간 운영
+    기본값이 조용히 바뀐다 — `latest_artifact(kind=...)`로 계열을 고정한다. DL 채택 판정은 145다.
+    """
     if kind == "auto":
-        art = latest_artifact(settings.crowd_models_dir)
-        kind = "lightgbm" if art else "lookup"
+        art = latest_artifact(settings.crowd_models_dir, kind="lightgbm")
         if art:
             return build_predictor("lightgbm", artifact_dir=art)
-    if kind == "lightgbm":
-        art = latest_artifact(settings.crowd_models_dir)
+        kind = "lookup"
+    if kind in ("lightgbm", "dl"):
+        art = latest_artifact(settings.crowd_models_dir, kind=kind)
         if art is None:
             raise FileNotFoundError(
-                f"아티팩트가 없다: {settings.crowd_models_dir} — train.py를 먼저 돌린다"
+                f"{kind} 아티팩트가 없다: {settings.crowd_models_dir} — 학습을 먼저 돌린다"
             )
-        return build_predictor("lightgbm", artifact_dir=art)
+        return build_predictor(kind, artifact_dir=art)
     if kind == "lookup":
         return build_predictor("lookup", train_panel=panel_train)
     if kind == "llm":
@@ -158,8 +162,10 @@ def predict_day(
     meta에 `predictor_fallback="no_history"`를 남긴다.
     """
     target_date = pd.Timestamp(target_date).normalize()
+    # 창 길이는 예측기가 정한다 — DL(시퀀스)은 seq_days(기본 14)가 필요하고 lookup·LightGBM은 7일이다.
+    history_days = max(HISTORY_DAYS, getattr(predictor, "required_history_days", HISTORY_DAYS))
     history = panel[
-        (panel["date"] >= target_date - pd.Timedelta(days=HISTORY_DAYS))
+        (panel["date"] >= target_date - pd.Timedelta(days=history_days))
         & (panel["date"] < target_date)
     ]
     target = build_target_skeleton(panel, target_date, holidays, events)
@@ -176,6 +182,7 @@ def predict_day(
     meta = {
         "target_date": str(target_date.date()),
         "in_panel": bool(len(panel[panel["date"] == target_date])),
+        "history_window_days": int(history_days),
         "history_days_present": len(have_dates),
         "history_dates": sorted(str(pd.Timestamp(d).date()) for d in have_dates),
         "lag1d_available": (target_date - pd.Timedelta(days=1)) in have_dates,
@@ -306,7 +313,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--date", action="append", default=[], help="YYYY-MM-DD (여러 번 가능)")
     ap.add_argument("--today", action="store_true")
     ap.add_argument("--tomorrow", action="store_true")
-    ap.add_argument("--predictor", default=None, help="auto|lookup|lightgbm|llm (기본: 설정값)")
+    ap.add_argument("--predictor", default=None, help="auto|lookup|lightgbm|dl|llm (기본: 설정값)")
     ap.add_argument("--out-dir", default=None)
     ap.add_argument(
         "--no-recent", action="store_true", help="D−1 수집 파일을 이어붙이지 않는다(패널만)"
