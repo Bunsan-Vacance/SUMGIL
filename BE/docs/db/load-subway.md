@@ -192,5 +192,4 @@ node --test scripts/data/test/*.test.mjs                  # 데이터 스크립�
 - 시각표 밖 노선 9개의 열차별 시각표: TAGO 지하철정보 API(15098554) 활용신청 → 커버리지 확인(양정·서현) → 수집 → `timetable` 로 대체 (`wait_sec` 채움). 인천1·2는 공공데이터포털 열차시각표 파일이 있다.
 - GTX-A: 실시간 API subwayId 확인 뒤 같은 방식으로 추가 (KTDB 링크·표준데이터 좌표는 이미 있다. 역번호는 없어 임시 부여 필요).
 - 인천1·2·의정부·에버라인·김포골드·자기부상(97역): subwayId 가 없어 line_id 체계를 정해야 넣을 수 있다.
-- `edge_time` 137k행 처리량 12회 재측정(perf 규약).
 - 실시간 `statnId` ↔ `station_id` 매핑 표 (수집기 티켓).
