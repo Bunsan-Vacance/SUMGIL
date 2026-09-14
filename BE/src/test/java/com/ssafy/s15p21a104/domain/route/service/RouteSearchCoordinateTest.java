@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.domain.route.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
@@ -39,7 +40,8 @@ class RouteSearchCoordinateTest {
     private RailGeometryRegistry railGeometryRegistry;
 
     private RouteSearchService service() {
-        return new RouteSearchService(stationRepository, graphRegistry, transferRule, railGeometryRegistry);
+        return new RouteSearchService(stationRepository, graphRegistry, transferRule, railGeometryRegistry,
+                RouteTestFixtures.noopWalkGeometryRegistry());
     }
 
     @Test

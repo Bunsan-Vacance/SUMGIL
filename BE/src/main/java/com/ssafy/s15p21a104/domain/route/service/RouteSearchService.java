@@ -19,6 +19,7 @@ import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import com.ssafy.s15p21a104.global.exception.DomainException;
@@ -44,6 +45,7 @@ public class RouteSearchService {
     private final RouteGraphRegistry graphRegistry;
     private final TransferRule transferRule;
     private final RailGeometryRegistry railGeometryRegistry;
+    private final WalkGeometryRegistry walkGeometryRegistry;
 
     public List<RouteSearchResponse> search(
             String originStationId,
@@ -125,8 +127,11 @@ public class RouteSearchService {
         if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
             return leg;
         }
-        Optional<MultiLineStringResponse> geometry = railGeometryRegistry.geometryForLeg(
-                leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
+                ? walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
+                        leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
+                : railGeometryRegistry.geometryForLeg(
+                        leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
         if (geometry.isEmpty()) {
             return leg;
         }

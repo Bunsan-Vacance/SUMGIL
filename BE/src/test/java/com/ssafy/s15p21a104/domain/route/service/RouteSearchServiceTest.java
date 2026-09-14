@@ -1,6 +1,8 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
+
+import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -57,7 +59,8 @@ class RouteSearchServiceTest {
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 new Edge("0222", "0221", "2", 300, 0, TravelMode.SUBWAY)));
         routeSearchService = new RouteSearchService(
-                stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null));
+                stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
+                RouteTestFixtures.noopWalkGeometryRegistry());
     }
 
     @Test
@@ -82,7 +85,8 @@ class RouteSearchServiceTest {
     @DisplayName("그래프 미적재 시 빈 배열로 응답한다(가짜 후보 없음)")
     void 미적재시_빈배열() {
         RouteSearchService unloaded = new RouteSearchService(
-                stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null));
+                stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null),
+                RouteTestFixtures.noopWalkGeometryRegistry());
 
         List<RouteSearchResponse> result = unloaded.search("0222", "0221", null, null, null);
 

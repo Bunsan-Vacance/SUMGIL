@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
+import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -68,7 +69,8 @@ class RouteSearchServiceWireTest {
         lenient().when(graphRegistry.transferTimes()).thenReturn(Map.of(
                 new TransferRule.TransferKey("B", "L1", "L2"), 60));
         routeSearchService = new RouteSearchService(
-                stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null));
+                stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
+                RouteTestFixtures.noopWalkGeometryRegistry());
     }
 
     @Test
