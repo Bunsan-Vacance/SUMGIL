@@ -15,7 +15,7 @@
 | 4 | early stopping용 검증 분할 없음 | 2024-01~10 학습 / **2024-11~12 검증** / 2025 평가. 에폭만 고르고 2024 전체 재학습은 하지 않았다(단순화, 기록) |
 | 5 | `batch_predict.HISTORY_DAYS=7`인데 티켓은 7~14일 시퀀스 | N=14로 학습하되 **예측기는 7일만 와도 동작**(뒤 7일 마스크). `Predictor.required_history_days` 속성을 추가하고 배치가 `max(7, 그 값)`으로 창을 잡게 했다 |
 | 6 | `latest_artifact()`가 폴더명 최신을 잡아 `auto`가 DL을 집어갈 위험 | 아티팩트 `meta.json`에 `model_kind`를 기록하고 `latest_artifact(kind=…)`로 거른다. 배치 `auto`는 `lightgbm`만 고른다 |
-| 7 | PatchTST·N-BEATS "필요 시" — 범위 불명 | **GRU 하나**로 한정(LSTM은 `--model` 스위치만 두고 실행하지 않음). Transformer 계열은 145에서 판단 |
+| 7 | PatchTST·N-BEATS "필요 시" — 범위 불명 | **GRU 하나**로 한정하고 **LSTM은 셀만 바꾼 1회 실험**으로 닫았다(`--model lstm`, 시드·에폭·증강 동일). 검증 손실 0.292061 vs GRU 0.291675(0.13% 차), 2025 `full` +7.31/+7.12 vs +6.99/+13.72 — 시드 1개의 재현 오차와 구분되지 않아 계열 이름은 `gru`로 확정. Transformer 계열은 145에서 판단 |
 
 ## 결과 (2025 전체 1,992,900행, lookup 기준 RMSE 196.10/196.24 · MAE 81.91/85.74)
 
@@ -54,4 +54,4 @@
    알고 있다(`meta.history_days_present`).
 3. RMSE 격차 원인(z-정규화 + Huber δ=1이 큰 잔차 기울기를 누른다) 1파라미터 실험.
 4. 2호선만 `full`에서도 lookup보다 나쁘다(−6.16%) — 원인 확인.
-5. 시드 반복(결정성은 확인, 시드 간 분산은 미측정), `--model lstm` 1회 비교.
+5. 시드 반복(결정성은 확인, 시드 간 분산은 미측정) — GRU vs LSTM 차이가 이 분산 안에 묻혀 있다.
