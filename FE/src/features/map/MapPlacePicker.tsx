@@ -280,9 +280,18 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
           {selected
             ? geocoding
               ? '선택한 위치의 주소를 확인하고 있어요.'
-              : selected.address
+              : selected.address || selected.name
             : '지도에서 위치를 눌러 주세요.'}
         </p>
+        {selected?.kind === '따릉이 대여소' &&
+          (selected.dockCount !== undefined || selected.distanceMeters !== undefined) && (
+            <p className="map-picker-station-meta">
+              {selected.dockCount !== undefined && `거치대 총 ${selected.dockCount}개`}
+              {selected.dockCount !== undefined && selected.distanceMeters !== undefined && ' · '}
+              {selected.distanceMeters !== undefined &&
+                `조회한 지도 중심에서 ${Math.round(selected.distanceMeters)}m`}
+            </p>
+          )}
         {message && (
           <p className="error" role="alert">
             {message}

@@ -225,6 +225,36 @@ function finite(value: unknown, min: number, max: number) {
   return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
 }
 
+function backendDepartureTime(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)
+  if (!hasTimeZone) return trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`
+  const date = new Date(trimmed)
+  if (!Number.isFinite(date.getTime())) return undefined
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value
+  const year = valueOf('year')
+  const month = valueOf('month')
+  const day = valueOf('day')
+  const hour = valueOf('hour')
+  const minute = valueOf('minute')
+  const second = valueOf('second')
+  return year && month && day && hour && minute && second
+    ? `${year}-${month}-${day}T${hour}:${minute}:${second}`
+    : undefined
+}
+
 function parseGeometry(value: unknown, status: unknown): RouteGeometry | undefined {
   if (status !== undefined && status !== 'available' && status !== 'unavailable') {
     throw new RepositoryError('invalid-response', '지원하지 않는 경로 좌표 상태 응답이에요.')
@@ -265,6 +295,8 @@ function mapMode(mode: unknown): { mode: 'walk' | 'subway' | 'bus' | 'bike'; tra
 function routeLineName(routeId: string | undefined) {
   if (!routeId) return undefined
   const names: Record<string, string> = {
+    BIKE: '자전거',
+    WALK: '도보',
     '1001': '1호선',
     '1002': '2호선',
     '1003': '3호선',
@@ -424,6 +456,8 @@ export function createBackendRouteRepository(baseUrl: string): RouteRepository {
         params.set('modes', request.modes.map((mode) => mode.toUpperCase()).join(','))
       }
       if (request.priority) params.set('priority', request.priority === 'fast' ? 'TIME' : 'COMFORT')
+      const departureTime = backendDepartureTime(departedAt)
+      if (departureTime) params.set('departureTime', departureTime)
       try {
         const data = await requestApi<unknown>(`${baseUrl}/api/routes/search?${params}`, signal)
         if (!Array.isArray(data)) {
