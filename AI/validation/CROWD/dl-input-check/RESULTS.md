@@ -6,6 +6,11 @@
 LightGBM(96.62)보다 높다. 채택 안은 V3(`no_events`, 7채널 + 정적 4)이고 `train_dl` 기본값이 됐다.
 144의 (c) 판정(절단 증강이 full을 깎는가)은 **여전히 확정할 수 없다** — V0의 시드 표준편차가 ±7.04%p다.
 
+**후속(6절, 학습 6회).** 그 ±7.04%p와 V2 붕괴는 이벤트의 정보가 아니라 **희소 카운트의 z-정규화**가 원인이었다.
+`log1p_max` 인코딩으로 고치면 같은 "이벤트 켬" 구성이 +8.29 ± 7.04 → **+19.58 ± 0.71**이 된다. 그래도 V3(제거)를
+넘지는 못해(−0.59%p) **기본값은 V3 그대로**이고, LSTM × V3 3시드도 GRU와 `full` 승차 0.11%p 차이로 **구분되지 않아
+계열은 `gru` 유지**다. 이벤트 채널과 시퀀스 셀 종류는 둘 다 이 문제의 축이 아니다.
+
 ## 1. 실행 조건
 
 | 항목 | 값 |
@@ -180,12 +185,14 @@ z-정규화 자체(역×슬롯 std로 나누면 큰 역의 큰 잔차가 상대�
 
 ## 5. 미해결 · 다음으로 넘기는 것
 
-1. **이벤트 피처 표준화 재점검(판정 4).** DL에서 이벤트 5열은 `full`을 11.9%p 깎고 시드 분산을 20배 키웠다.
-   원인 후보: (i) 학습 구간(2024-01~10) 평균·표준편차로 z화한 값이 2025 이벤트 분포와 맞지 않는다,
-   (ii) `festival_min_duration_days`의 "없음 → 0" 처리가 실제 0일과 구분되지 않는다,
-   (iii) 이벤트가 (역, 날짜) 단위라 20슬롯 전체에 같은 값이 걸려 첨두 형태를 흐린다.
-   **LightGBM 쪽 이벤트 5열은 건드리지 않았다** — 트리는 값 분포 이동에 덜 민감하고 87 이후 세트 비교를
-   통과했다. 같은 진단을 트리에도 돌릴지는 별개 티켓.
+1. ~~**이벤트 피처 표준화 재점검(판정 4).**~~ **후속 6절에서 닫았다.** 원인은 (i) z-정규화였다 —
+   희소 카운트(99%가 0)의 학습 std가 0.07~0.13이라 2025 입력이 최대 87.96까지 튀었고, `log1p_max` 인코딩으로
+   0~1에 넣자 붕괴와 시드 불안정이 사라진다(`full` 승 +8.29 ± 7.04 → +19.58 ± 0.71). 다만 고친 이벤트도
+   V3(이벤트 제거)를 넘지 못해 **기본값은 V3 그대로**다. (ii)(`festival_min_duration_days`의 "없음 → 0")는
+   `log1p_max`에서 0이 곧 값 0이라 자연스럽게 풀렸고, (iii)(슬롯 전체에 같은 값)은 여전히 미검증이다 —
+   이벤트를 시간대 분포로 펴는 설계는 이번 범위 밖이다.
+   **LightGBM 쪽 이벤트 5열은 건드리지 않았다** — 트리는 값 분포 이동에 덜 민감하고 z-정규화도 쓰지 않으며
+   87 이후 세트 비교를 통과했다. 같은 진단을 트리에도 돌릴지는 별개 티켓.
 2. **144 (c) 판정(절단 증강의 full 비용)은 여전히 미판정.** V0 시드 분산이 ±7%p라 `notrunc` 대조군(시드 1개)과의
    비교가 성립하지 않는다. 확정하려면 **V3 구성으로** 증강/무증강 각 3시드가 필요하다(6회 = GPU 9분).
    V3는 시드 분산이 ±0.32%p라 그 비교는 성립할 것이다 → 145.
@@ -206,18 +213,143 @@ z-정규화 자체(역×슬롯 std로 나누면 큰 역의 큰 잔차가 상대�
 9. **lookup 기준선의 검증 구간 포함(144 미해결 7 그대로).** 파생 캐시의 잔차는 2024 전체로 fit한 lookup 기준이라
    검증 구간이 그 평균에 들어가 있다(약한 누수, 2025 평가에는 영향 없음).
 
-## 6. 산출물
+## 6. 후속 — LSTM × V3 · 이벤트 인코딩 수정(`events_fixed`)
+
+1차는 **GRU만** 9회 돌렸고, 채택 안 V3는 "이벤트 5열을 **뺀**" 안이었다. 남은 두 구멍을 후속 6회로 닫는다.
+
+- **A. 계열.** 144의 LSTM 1회 비교는 V0(이벤트 있음, 시드 1개) 위에서 한 것이라, 채택 구성에서 계열이
+  구분되는지는 모른다. LSTM × V3 시드 42·43·44.
+- **B. 이벤트 인코딩.** 이벤트 5열의 표준화를 점검하니 **인코딩 문제**다 — 99%가 0인 희소 카운트를 z-점수로
+  넣어 학습 std가 0.07~0.13이고, 2025 입력이 아래처럼 튄다. 그래서 1차 결론("이벤트가 해롭다")은
+  **"이 인코딩으로는 해롭다"**와 구분되지 않는다. `events_fixed`(정적 이벤트 켬 + `--event-encoding log1p_max`)
+  × 시드 42·43·44가 그 둘을 가른다.
+
+| 이벤트 열 | 2025 원값 최대 | **z-점수 최대** | **log1p_max 최대** | 2025에서 0인 비율 |
+| --- | --- | --- | --- | --- |
+| `game_count` | 2 | 25.67 | 1.585 | 99.49% |
+| `festival_count` | 4 | 30.82 | 0.898 | 93.81% |
+| `festival_short_count` | 3 | 28.81 | 0.861 | 99.70% |
+| `festival_long_count` | 2 | 27.35 | 1.000 | 94.02% |
+| `festival_min_duration_days` | 231 | **87.96** | 1.431 | 93.81% |
+
+`festival_count`의 z가 5를 넘는 (역, 날)이 2025에 **6.19%**다. `log1p_max`는 개수 4열을
+`log1p(x) / log1p(학습 최대)`, `festival_min_duration_days`를 `log1p(일수) / log1p(학습 최대)`(없으면 0)로
+넣어 학습 구간에서 0~1이고, 학습 최대를 넘는 2025 값도 1.59에서 멈춘다. 스케일 표(`event_stats.parquet`)에
+`log1p_max`(나눈 값)와 `encoding` 열을 남겨 아티팩트만으로 복원된다(`DLPredictor`).
+
+**C(조건부)**: B가 채택되면 그 구성에서도 계열 비교를 1행(LSTM × `events_fixed` 시드 42) 남기기로 했으나,
+B가 채택되지 않아 **돌리지 않았다**.
+
+### 6.1 학습(6회, GPU 429초 = 7분)
+
+고정 구성은 1차와 같다(seq 14 · hidden 64 · 절단 증강 · Huber δ=1 · 배치 512 · lr 1e-3 · patience 5 · epoch ≤30).
+스모크(`--stations 20 --epochs 2`) 3안 12초 선행.
+
+| 안 | 계열 | 시드 | 채널 | 정적 | 인코딩 | 아티팩트 | epochs_run / best | best valid Huber | train_seconds |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no_events(V3) | lstm | 42 | 7 | 4 | — | `dl_lstm_s14_noev_s42_20260914-1457` | 24 / 19 | 0.293309 | 74.9 |
+| no_events(V3) | lstm | 43 | 7 | 4 | — | `dl_lstm_s14_noev_s43_20260914-1458` | 22 / 17 | 0.294581 | 71.8 |
+| no_events(V3) | lstm | 44 | 7 | 4 | — | `dl_lstm_s14_noev_s44_20260914-1500` | 21 / 16 | 0.294464 | 70.4 |
+| events_fixed | gru | 42 | 7 | 9 | log1p_max | `dl_gru_s14_evfix_s42_20260914-1501` | 21 / 16 | 0.293759 | 70.7 |
+| events_fixed | gru | 43 | 7 | 9 | log1p_max | `dl_gru_s14_evfix_s43_20260914-1502` | 18 / 13 | 0.294556 | 61.2 |
+| events_fixed | gru | 44 | 7 | 9 | log1p_max | `dl_gru_s14_evfix_s44_20260914-1503` | 21 / 16 | 0.290321 | 73.3 |
+
+검증 손실은 1차와 같은 말을 한다 — 6회가 0.2903~0.2946(차이 1.5%) 안에 있고, **안을 고르지 못한다**(2절).
+
+### 6.2 2025 평가 — RMSE 개선율(%) · 시드 42/43/44
+
+같은 행 집합(2025 전체 **1,992,900행** = 100%), 같은 lookup 기준선(RMSE 196.10 / 196.24). GRU V3 3시드도
+**같은 실행에서 다시 재어** 한 표에 넣었고, 1차 수치와 소수점까지 같다(결정성 확인).
+
+| 계열 | full 승 | full 하 | d7_only 승 | d7_only 하 | d1_only 승 | d1_only 하 | no_lag 승 | no_lag 하 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **lightgbm**(배포) | **+23.38** | **+25.36** | −20.79 | −14.88 | +6.52 | +7.22 | −36.63 | −40.74 |
+| GRU V3 s42 / s43 / s44 | +20.46 / +19.83 / +20.22 | +23.33 / +22.05 / +22.41 | +4.71 / +2.76 / +3.85 | +5.59 / +3.61 / +4.74 | +17.08 / +16.42 / +15.91 | +18.83 / +18.30 / +17.67 | +2.23 / +0.48 / +0.43 | +3.44 / +1.51 / +0.82 |
+| LSTM V3 s42 / s43 / s44 | +20.23 / +20.39 / +20.23 | +23.76 / +24.69 / +24.97 | +4.48 / +2.96 / +4.91 | +4.96 / +3.51 / +5.90 | +16.34 / +17.44 / +16.09 | +19.08 / +19.64 / +18.37 | +1.77 / +1.04 / +1.88 | +2.18 / +1.56 / +2.80 |
+| GRU events_fixed s42 / s43 / s44 | +20.25 / +19.65 / +18.83 | +23.17 / +22.25 / +21.38 | +4.13 / +3.29 / +2.91 | +5.97 / +4.78 / +4.68 | +17.21 / +16.36 / +15.65 | +19.90 / +18.55 / +18.85 | +1.31 / +1.66 / +0.48 | +2.91 / +3.13 / +2.06 |
+
+절대 RMSE(명, `full` 승/하, 시드 42): lightgbm 150.25 / 146.47 · **GRU V3 155.98 / 150.46** ·
+LSTM V3 156.42 / 149.61 · GRU events_fixed 156.39 / 150.77.
+
+### 6.3 시드 평균 ± 표준편차(%p, 시드 3회)
+
+| 안 | 지표 | full 승 | full 하 | d7_only 승 | d7_only 하 | d1_only 승 | d1_only 하 | no_lag 승 | no_lag 하 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **GRU V3**(현 채택) | RMSE | **+20.17 ± 0.32** | +22.60 ± 0.66 | +3.77 ± 0.98 | +4.65 ± 0.99 | +16.47 ± 0.59 | +18.27 ± 0.58 | +1.05 ± 1.03 | +1.92 ± 1.36 |
+| LSTM V3 | RMSE | +20.28 ± 0.09 | **+24.47 ± 0.63** | +4.12 ± 1.02 | +4.79 ± 1.20 | +16.62 ± 0.72 | +19.03 ± 0.64 | +1.56 ± 0.46 | +2.18 ± 0.62 |
+| GRU events_fixed | RMSE | +19.58 ± 0.71 | +22.27 ± 0.90 | +3.44 ± 0.62 | +5.14 ± 0.72 | +16.41 ± 0.78 | +19.10 ± 0.71 | +1.15 ± 0.61 | +2.70 ± 0.57 |
+| GRU V3 | MAE | +29.26 ± 0.38 | +28.62 ± 0.42 | +6.15 ± 1.06 | +6.70 ± 0.97 | +24.59 ± 0.50 | +24.05 ± 0.51 | +2.11 ± 1.21 | +3.09 ± 1.43 |
+| LSTM V3 | MAE | +29.43 ± 0.13 | +29.24 ± 0.14 | +6.70 ± 1.41 | +6.87 ± 1.52 | +24.95 ± 0.37 | +24.47 ± 0.28 | +2.93 ± 0.65 | +3.44 ± 0.75 |
+| GRU events_fixed | MAE | +28.74 ± 0.21 | +28.27 ± 0.26 | +6.36 ± 0.44 | +6.89 ± 0.76 | +24.37 ± 0.30 | +24.23 ± 0.26 | +2.54 ± 0.59 | +3.42 ± 0.79 |
+
+기준 병기: **LightGBM** MAE `full` +29.56 / +28.42, `no_lag` −106.47 / −104.89. **lookup**은 정의상 0(기준선,
+2025 RMSE 196.10 / 196.24 · MAE 81.91 / 85.74).
+
+### 6.4 등급 일치율(임계치 50/100, 30분 셀 7,158,957개, `full`) — 채택 구성 2판만
+
+| 판 | 등급 일치율 % | 보통이상 재현율 % |
+| --- | --- | --- |
+| lookup(기준) | 95.370 | 83.433 |
+| lightgbm(144 측정) | 96.619 | — |
+| **GRU V3 s42**(현 채택) | **96.854** | 89.641 |
+| LSTM V3 s42 | **96.861** | **90.314** |
+
+### 6.5 판정(사전 고정)
+
+| # | 기준 | 결과 | 근거 |
+| --- | --- | --- | --- |
+| **A** | 계열 — 시드 평균 차가 **두 표준편차 합보다 작으면** "구분 불가 → 계열 gru 유지". LSTM이 평균 **+2%p 이상** 앞서고 `no_lag` 악화가 없으면 계열 lstm 후보로 기록(기본값은 바꾸지 않고 145에 전달) | **× (계열 gru 유지)** | `full` 승차: 평균 차 **0.11**%p < 표준편차 합 0.41 → 구분 불가. `full` 하차: 차 **1.87**%p > 합 1.29로 구분은 되지만 **+2%p 문턱에 미달**. `no_lag`은 LSTM이 오히려 +0.51 / +0.26 좋고 등급 재현율도 +0.67%p — **문턱을 넘지 못한 우세**로 145에 메모만 넘긴다 |
+| **B** | 이벤트 인코딩 — V3 대비 `full` **+2%p**(승·하차) & `no_lag` 악화 ≤1%p & 시드 평균 유지면 `events_fixed`를 기본값으로 교체 | **× (V3 유지)** | `full` 시드 평균이 V3보다 **−0.59 / −0.33%p**로 오히려 낮다(+2%p 필요). `no_lag`(+0.10 / +0.78)·`d1_only` 하차(+0.83)에 미세 우세가 있지만 1번 조건이 깨져 기본값을 바꾸지 않는다. **"인코딩 수정으로도 이벤트 이득 없음"**을 기록한다 |
+| **C** | B 채택 시 LSTM × `events_fixed` 시드 42 1회 | **생략** | B가 채택되지 않았다 |
+
+**기본값 변경 없음.** `train_dl`은 `--no-static-events`(1차 채택)가 그대로 기본이고, `--event-encoding`의 기본은
+`zscore`(144 호환)다 — 정적 이벤트가 기본으로 꺼져 있어 이 기본값은 `--static-events`나
+`--seq-features events_hist`를 명시할 때만 작동한다. 145가 쓸 `gru` 계열 아티팩트도
+**`dl_gru_s14_noev_s42_20260914-1358` 그대로**다.
+
+### 6.6 그래서 1차 결론은 어떻게 바뀌나
+
+**인코딩은 실제로 고쳐졌다**(2025 입력 최대 87.96 → 1.43). 그리고 그것만으로 1차 V0의 붕괴와 시드 불안정이
+사라진다 — 같은 "정적 이벤트 켬" 구성에서 `full` 승차가 **+8.29 ± 7.04 → +19.58 ± 0.71**(시드 표준편차 10배 축소)이다.
+즉 **1차의 "이벤트 5열이 해롭다"는 정확히는 "z-인코딩이 해롭다"**였다. 그런데 인코딩을 고친 이벤트도
+이벤트를 아예 빼는 것(V3)을 **넘지 못한다**(−0.59 / −0.33%p). 두 문장을 합치면:
+
+> 이벤트 5열은 **이 데이터·이 모델에서 잔차 예측에 정보를 더하지 않는다.** 1차에서 관찰된 붕괴(−76%)와
+> 시드 불안정(±7.04%p)은 이벤트의 정보가 아니라 **희소 카운트의 z-정규화**가 만든 것이다.
+
+계열도 같은 결론이다 — GRU와 LSTM은 채택 구성에서 `full` 승차가 0.11%p 차이로 겹친다(144의 "구분 안 됨"이
+V0 시드 1개가 아니라 V3 시드 3회에서도 재확인됐다). **시퀀스 셀 종류와 이벤트 채널은 둘 다 이 문제의 축이 아니다.**
+남은 축은 5절 3번 그대로 z-정규화 정의(197)와 절단 증강의 full 비용(145)이다.
+
+### 6.7 실행 명령
+
+```
+python validation/CROWD/dl-input-check/run_ablation.py --runs events_fixed --stations 20 --epochs 2   # 스모크
+python validation/CROWD/dl-input-check/run_ablation.py \
+    --runs no_events_lstm:42,no_events_lstm:43,no_events_lstm:44,events_fixed:42,events_fixed:43,events_fixed:44
+python validation/CROWD/dl-resid-check/evaluate_dl.py --models <9계열 이름=경로> --grades "" --no-preds --no-timing \
+    --fresh --save-metrics data/CROWD/interim/validation/dl_input_followup_metrics.parquet
+python validation/CROWD/dl-resid-check/evaluate_dl.py --models no_events_s42=… no_events_lstm_s42=… \
+    --scenarios full --grades full --grade-series no_events_s42,no_events_lstm_s42 --no-lightgbm --no-preds \
+    --no-timing --fresh --save-metrics data/CROWD/interim/validation/dl_input_followup2_metrics.parquet
+```
+
+소요: 학습 6회 GPU 7분 · 9계열 × 4시나리오 2025 평가 5분(CPU) · 등급 2판 7분.
+
+## 7. 산출물
 
 | 경로 | 내용 |
 | --- | --- |
-| `app/CROWD/pipeline/dl/dataset.py` | `SequencePanel.build(seq_features=…, use_static_events=…)`, `seq_channels_for`·`stat_features_for`·`observed_channels`, `truncate_seq`·`scenario_seq`, `neighbor_scale` |
-| `app/CROWD/pipeline/dl/train_dl.py` | `--seq-features` · `--static-events/--no-static-events`(**기본 꺼짐**) · `--huber-delta`, `prepare()`(안별 준비물 재사용) |
-| `app/CROWD/pipeline/dl/infer.py` | meta로 채널 복원, `neighbor`면 `segments`로 이웃 표를 만들어 서빙 경로에서 이웃 잔차 생성 |
+| `app/CROWD/pipeline/dl/dataset.py` | `SequencePanel.build(seq_features=…, use_static_events=…, event_encoding=…)`, `fit_event_stats(encoding=…)`·`encode_events`,, `seq_channels_for`·`stat_features_for`·`observed_channels`, `truncate_seq`·`scenario_seq`, `neighbor_scale` |
+| `app/CROWD/pipeline/dl/train_dl.py` | `--seq-features` · `--static-events/--no-static-events`(**기본 꺼짐**) · `--event-encoding`(zscore·log1p_max) · `--huber-delta`, `prepare()`(안별 준비물 재사용) |
+| `app/CROWD/pipeline/dl/infer.py` | meta로 채널·이벤트 인코딩 복원, `neighbor`면 `segments`로 이웃 표를 만들어 서빙 경로에서 이웃 잔차 생성 |
 | `app/CROWD/pipeline/MODEL_REGISTRY.md` | DL 계열 절 갱신(안별 수치·채택·아티팩트 목록) |
-| `validation/CROWD/dl-input-check/run_ablation.py` | 안 × 시드 × 손실 순차 학습, `runs.jsonl` append·재시작 |
-| `validation/CROWD/dl-input-check/runs.jsonl` | 학습 9회의 아티팩트 경로·검증 손실·시간 |
+| `validation/CROWD/dl-input-check/run_ablation.py` | 안(계열·인코딩 포함) × 시드 × 손실 순차 학습, `runs.jsonl` append·재시작 |
+| `validation/CROWD/dl-input-check/runs.jsonl` | 학습 9회 + 후속 6회의 아티팩트 경로·검증 손실·시간 |
+| `data/CROWD/interim/validation/dl_input_followup_metrics.parquet` | 후속 9계열(GRU V3·LSTM V3·events_fixed × 3시드) × 4시나리오 지표 |
+| `data/CROWD/interim/validation/dl_input_followup2_grades.json` | 후속 등급 2판(GRU V3·LSTM V3, `full`) — 1차 `dl_input_grades.json`은 덮어쓰지 않았다 |
 | `validation/CROWD/dl-resid-check/evaluate_dl.py` | `--models 이름=경로 …` 다중 계열 · 시드 집계 표 · `--grade-series` · 부산물 파일명 파생 |
 | `data/CROWD/interim/validation/dl_input_metrics.parquet` | 롱 포맷 지표(계열 11 × 시나리오 4 × 축 × 타깃) |
 | `data/CROWD/interim/validation/dl_input_grades.json`, `dl_input_timing.json` | 등급 일치율 4판 · V3 하루치 추론 시간 |
-| `dl_input_check.ipynb` | 안별 막대 · 시드 오차막대 · 학습 곡선 · 호선 슬라이스(출력 포함) |
-| `test/CROWD/test_crowd_dl_dataset.py`, `test_crowd_dl_predictor.py` | 채널 수 7/12/16, 이웃 z가 이웃 std로 나뉘는지, 이웃 없는 side mask 0, 정적 폭 4, 절단·시나리오가 이웃 채널까지 지우는지, 예측기 채널 복원(neighbor·정적 없음) |
+| `dl_input_check.ipynb` | 안별 막대 · 시드 오차막대 · 학습 곡선 · 호선 슬라이스 · **후속 6절**(계열·인코딩 오차막대, 인코딩 최대값 비교, 등급 2판) — 출력 포함 |
+| `test/CROWD/test_crowd_dl_dataset.py`, `test_crowd_dl_predictor.py` | 채널 수 7/12/16, 이웃 z가 이웃 std로 나뉘는지, 이웃 없는 side mask 0, 정적 폭 4, 절단·시나리오가 이웃 채널까지 지우는지, 예측기 채널 복원(neighbor·정적 없음), **이벤트 인코딩**(log1p_max 표 기록·0~1 범위·미지 값 압축·패널 반영) |

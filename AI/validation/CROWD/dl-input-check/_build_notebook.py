@@ -208,7 +208,108 @@ piv.round(2)"""
         )
     )
 
-    cells.append(nbf.v4.new_markdown_cell("""## 6. 읽은 것
+    cells.append(
+        nbf.v4.new_markdown_cell("""## 6. 후속 — LSTM × V3 · 이벤트 인코딩 수정(`events_fixed`)
+
+1차는 GRU만 9회 돌렸고, 채택 안 V3는 "이벤트 5열을 **뺀**" 안이었다. 그런데 이벤트 열의 표준화를
+점검하니 99%가 0인 희소 카운트를 z-점수로 넣어 학습 std가 0.07~0.13이었다 — 2025에서 입력이
+z 25.7~88.0까지 튄다. 그래서 1차 결론("이벤트가 해롭다")은 **"이 인코딩으로는 해롭다"**와 구분되지 않는다.
+후속 6회(LSTM×V3 3시드 · GRU×`events_fixed` 3시드)가 그 둘을 가른다.""")
+    )
+
+    cells.append(nbf.v4.new_code_cell(r"""FOLLOWUP = ["no_events", "no_events_lstm", "events_fixed"]
+f_metrics = pd.read_parquet(VAL / "dl_input_followup_metrics.parquet")
+f_grades = pd.DataFrame(
+    json.loads((VAL / "dl_input_followup2_grades.json").read_text(encoding="utf-8"))
+)
+ftot = f_metrics[f_metrics["axis"] == "전체"].copy()
+ftot["variant"] = ftot["series"].str.replace(r"_s\d+$", "", regex=True)
+fstat = ftot[ftot["variant"].isin(FOLLOWUP)].groupby(
+    ["variant", "scenario", "target"]
+)["RMSE_개선율_%"].agg(["mean", "std"]).reset_index()
+
+fig, axes = plt.subplots(1, 2, figsize=(13, 4.5), sharey=True)
+for ax, target in zip(axes, ["boarding", "alighting"]):
+    sub = fstat[fstat["target"] == target]
+    x = np.arange(len(SCEN))
+    w = 0.8 / len(FOLLOWUP)
+    for i, v in enumerate(FOLLOWUP):
+        row = sub[sub["variant"] == v].set_index("scenario").reindex(SCEN)
+        ax.bar(x + (i - (len(FOLLOWUP) - 1) / 2) * w, row["mean"], w, yerr=row["std"],
+               capsize=4, label=v)
+    lgb_full = float(
+        ftot[(ftot["series"] == "lightgbm") & (ftot["target"] == target)
+             & (ftot["scenario"] == "full")]["RMSE_개선율_%"].iloc[0]
+    )
+    ax.axhline(lgb_full, color="0.35", ls=":", lw=1.5)
+    ax.axhline(0, color="0.2", lw=1)
+    ax.set_xticks(x, SCEN)
+    ax.set_title(f"RMSE 개선율 평균 ± 표준편차 · {target}")
+axes[0].set_ylabel("lookup 대비 개선율 (%)")
+axes[0].legend(title="후속 3안(시드 42·43·44)")
+fig.suptitle("세 안의 막대가 오차막대 안에서 겹친다 — 계열·이벤트 인코딩은 V3를 넘지 못한다", y=1.01)
+fig.tight_layout()
+fstat.pivot_table(index=["variant", "target"], columns="scenario",
+                  values=["mean", "std"]).round(2)"""))
+
+    cells.append(
+        nbf.v4.new_markdown_cell(
+            """### 인코딩은 실제로 고쳐졌는가
+
+학습 구간(2024-01~10) 통계로 2025 이벤트 값을 인코딩했을 때의 **최대 입력값**이다. z-점수는 25.7~88.0,
+`log1p_max`는 0.86~1.59 — 고치려던 것은 고쳐졌다. 그런데도 2025 성능이 V3와 같다는 것이 6절의 답이다."""
+        )
+    )
+
+    cells.append(
+        nbf.v4.new_code_cell(
+            """from app.CROWD.pipeline.dl.dataset import EVENT_STATIC_COLS, encode_events
+
+ev_fix = pd.read_parquet(AI_ROOT / MODELS["events_fixed_s42"] / "event_stats.parquet")
+ev_z = pd.read_parquet(AI_ROOT / MODELS["no_events_s42"] / "event_stats.parquet")
+daily25 = pd.read_parquet(
+    AI_ROOT / "data" / "CROWD" / "interim" / "crowd_panel_derived_2024_2025.parquet",
+    columns=["date", "station_no", *EVENT_STATIC_COLS],
+).drop_duplicates(["date", "station_no"])
+daily25 = daily25[pd.to_datetime(daily25["date"]) >= "2025-01-01"]
+raw25 = daily25[EVENT_STATIC_COLS].fillna(0.0).to_numpy()
+enc = pd.DataFrame(
+    {
+        "2025 원값 최대": raw25.max(axis=0),
+        "zscore 최대": encode_events(raw25, ev_z, "zscore").max(axis=0),
+        "log1p_max 최대": encode_events(raw25, ev_fix, "log1p_max").max(axis=0),
+        "0인 비율 %": (raw25 == 0).mean(axis=0) * 100,
+    },
+    index=EVENT_STATIC_COLS,
+)
+
+fig, ax = plt.subplots(figsize=(9, 4))
+x = np.arange(len(EVENT_STATIC_COLS))
+ax.bar(x - 0.2, enc["zscore 최대"], 0.4, label="zscore")
+ax.bar(x + 0.2, enc["log1p_max 최대"], 0.4, label="log1p_max")
+ax.set_yscale("log")
+ax.set_xticks(x, [c.replace("festival_", "f_") for c in EVENT_STATIC_COLS], rotation=20, ha="right")
+ax.set_ylabel("2025 입력 최대값(로그 축)")
+ax.set_title("이벤트 5열의 2025 입력 최대값 — z-점수는 최대 88.0, log1p_max는 1.43")
+ax.legend()
+fig.tight_layout()
+enc.round(2)"""
+        )
+    )
+
+    cells.append(nbf.v4.new_markdown_cell("""### 등급 일치율 — 채택 구성(V3)의 GRU·LSTM 2판
+
+후속에서는 채택 구성만 등급으로 확인한다(판 하나에 2~3분). 1차 표(5절)와 같은 셀 집합이다."""))
+
+    cells.append(
+        nbf.v4.new_code_cell(
+            """f_grades.set_index("run")[["cells", "등급_일치율_%", "보통이상_재현율_%"]].round(3)"""
+        )
+    )
+
+    cells.append(
+        nbf.v4.new_markdown_cell(
+            """## 7. 읽은 것
 
 결론·판정 ○× 는 [`RESULTS.md`](./RESULTS.md) 4·5절이 원본이다. 그림에서 바로 보이는 것만 적으면:
 
@@ -217,7 +318,12 @@ piv.round(2)"""
 2. **`events_hist`(V2)는 크게 실패한다.** 검증(2024-11~12) 손실은 base와 거의 같은데 2025 평가가 무너진다 —
    이벤트 채널이 2024 이벤트 분포에 과적합됐다는 뜻이고, 1번과 같은 방향을 가리킨다.
 3. **`neighbor`(V1)는 작지만 일관되게 좋고 2호선 열세를 없앤다.**
-4. 시드 오차막대는 작다 — 위 차이들은 시드 노이즈로 설명되지 않는다."""))
+4. 시드 오차막대는 작다 — 위 차이들은 시드 노이즈로 설명되지 않는다.
+5. **후속(6절): 계열(GRU/LSTM)은 구분되지 않고, 이벤트는 인코딩을 고쳐도 V3를 넘지 못한다.**
+   다만 인코딩 수정은 1차의 붕괴·시드 불안정(`full` +8.29 ± 7.04 → +19.58 ± 0.71)을 없앴다 —
+   1차 결론은 "이벤트가 해롭다"가 아니라 **"z-인코딩이 해롭고, 이벤트는 고쳐도 보태는 게 없다"**로 정정된다."""
+        )
+    )
 
     nb["cells"] = cells
     nb.metadata["kernelspec"] = {

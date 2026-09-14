@@ -49,14 +49,19 @@
 | `dl_gru_s14_hd3` | V0 구조, Huber δ=3(z 단위) | 위와 같음 | 198 1회 | `full` +4.56 / +15.12 (MAE +22.89 / +22.96) | 기각. 승차·MAE가 δ=1보다 나쁘다 — RMSE 격차는 δ가 원인이 아니다 |
 | `dl_gru_s14_notrunc` | V0 구성, 이력 절단 증강 없음 | D−1 원천, 이력 완비 | 144 대조 | `full` +10.38 / +6.70, `no_lag` −34.89 / −48.73 | 대조군. 증강이 결손 내성의 원인임을 보인다 |
 | `dl_lstm_s14` | 셀만 LSTM(`--model lstm`), 나머지 V0과 동일 | 위와 같음 | 144 실험 1회 | `full` +7.31 / +7.12, `no_lag` −9.43 / −11.09 | GRU와 구분되지 않아(검증 손실 0.13% 차) **계열 이름은 `gru`로 확정**. 기록용 1행 |
+| `dl_lstm_s14_noev` | V3 구성(7채널 + 정적 4)에 셀만 LSTM | 위와 같음 | 198 후속 3시드 | `full` +20.28 ± 0.09 / +24.47 ± 0.63<br>`no_lag` +1.56 ± 0.46 / +2.18 ± 0.62 | **계열 `gru` 유지.** 승차 평균 차 0.11%p가 두 표준편차 합(0.41) 안이라 구분 불가. 하차는 +1.87%p 앞서지만 교체 문턱(+2%p) 미달 — 145 메모 |
+| `dl_gru_s14_evfix` | V0 구성인데 이벤트 5열을 **`log1p(x)/log1p(학습 최대)`**로 인코딩(`--event-encoding log1p_max`) | 위와 같음 | 198 후속 3시드 | `full` +19.58 ± 0.71 / +22.27 ± 0.90<br>`no_lag` +1.15 ± 0.61 / +2.70 ± 0.57 | 기각(V3에 −0.59 / −0.33%p). **다만 V0의 붕괴·시드 불안정은 인코딩 탓임을 보인다**(+8.29 ± 7.04 → +19.58 ± 0.71) |
 
-**정적 이벤트 5열은 DL에서 해롭다(198 판정 1·4).** 대상일 이벤트를 빼면 `full`·`no_lag`이 **동시에** 오른다
-(`full` 승차 시드 평균 +8.29 → +20.17). 학습 구간(2024) 표준화가 2025 이벤트 분포에 맞지 않는다는 뜻이고,
-같은 방향으로 이력 이벤트를 더 넣은 V2는 −76%로 무너진다. LightGBM 쪽 이벤트 5열은 재점검하지 않았다 —
-트리는 값 분포 이동에 덜 민감하고 87 이후 세트 비교에서 살아남았으므로 별개 항목이다.
+**이벤트 5열은 DL 잔차 예측에 정보를 더하지 않는다(198 판정 1·4 + 후속 B).** 대상일 이벤트를 빼면
+`full`·`no_lag`이 **동시에** 오른다(`full` 승차 시드 평균 +8.29 → +20.17). 원인은 값이 아니라 **인코딩**이다 —
+99%가 0인 희소 카운트를 z-점수로 넣어 학습 std가 0.07~0.13이고 2025 입력이 최대 87.96까지 튄다.
+`log1p_max`로 0~1에 넣으면(`dl_gru_s14_evfix`) 붕괴와 시드 불안정이 사라지지만(+19.58 ± 0.71) **V3를 넘지는
+못한다** → 기본값은 이벤트 제거(V3) 그대로다. 같은 방향으로 이력 이벤트를 더 넣은 V2는 −76%로 무너진다.
+LightGBM 쪽 이벤트 5열은 재점검하지 않았다 — 트리는 값 분포 이동에 덜 민감하고 z-정규화도 쓰지 않으며
+87 이후 세트 비교에서 살아남았으므로 별개 항목이다.
 
 등급 일치율(50/100, 30분 셀 7,158,957개, `full`): lookup 95.37 · lightgbm 96.62(144) · V0 96.695 ·
-**V3 96.854** · V1+V3 96.831. 하루치(5,460행) CPU 추론 V3 0.35초. 수치 원본
+**V3 96.854** · V1+V3 96.831 · LSTM V3 96.861(보통이상 재현율 90.314로 V3 89.641보다 높다). 하루치(5,460행) CPU 추론 V3 0.35초. 수치 원본
 `validation/CROWD/dl-input-check/RESULTS.md`(198)와 `dl-resid-check/RESULTS.md`(144).
 
 같은 요일유형 직전 날(`lagsd_*`)은 평일이면 전날, 토요일이면 지난 토요일, 일요일·공휴일이면 직전 일요일 또는 공휴일이고 14일을 넘으면 NaN
@@ -92,6 +97,8 @@
 | `dl_gru_s14_neighbor_s42_…`, `dl_gru_s14_neighbor_noev_s42_…` | 198 V1 · V1+V3 | 비교 보존 |
 | `dl_gru_s14_events_hist_s42_…`, `dl_gru_s14_hd3_s42_…` | 198 V2 · δ=3 | 기각 기록 보존 |
 | `dl_lstm_s14_20260914-1236` | 144 LSTM 1회 실험 | 계열 확정 근거. 보존 |
+| `dl_lstm_s14_noev_s42_20260914-1457` 외 s43·s44 | 198 후속 — LSTM × V3 3시드 | 계열 재확인(구분 불가). 보존 |
+| `dl_gru_s14_evfix_s42_20260914-1501` 외 s43·s44 | 198 후속 — 이벤트 `log1p_max` 인코딩 3시드 | 인코딩 진단 기록. 보존 |
 | `dl_gru_s14_notrunc_20260914-0950` | 144 대조군 | 증강 없음. 비교 보존 |
 
 **`--predictor dl`의 아티팩트 선택은 여전히 이름 운이다(144 미해결 8, 198에서 악화).** `latest_artifact(kind="dl")`는
@@ -100,10 +107,11 @@
 
 DL 아티팩트는 폴더 구성이 다르다: `model.pt`(state_dict) · `scale.parquet`(역×슬롯 잔차 표준편차) ·
 `lookup.parquet` · `event_stats.parquet` · `meta.json` · `history.json`(에폭별 train/valid 손실).
-`meta.json`에는 `model_kind, model, seq_days, hidden, channels, seq_features, use_static_events, stat_features,
-huber_delta, station_ids, derived_version, splits, seed, epochs_run, best_epoch, train_seconds, device,
-truncation, p_full, determinism`이 들어간다. `seq_features`·`use_static_events`가 없는 144 아티팩트는
-`DLPredictor`가 `base` + 정적 이벤트 있음으로 읽는다(하위 호환) —
+`meta.json`에는 `model_kind, model, seq_days, hidden, channels, seq_features, use_static_events, event_encoding,
+stat_features, huber_delta, station_ids, derived_version, splits, seed, epochs_run, best_epoch, train_seconds,
+device, truncation, p_full, determinism`이 들어간다. `event_stats.parquet`에는 두 인코딩의 상수(`mean`·`std`와
+`log1p_max`)와 실제로 쓴 `encoding`이 같이 들어 있다. `seq_features`·`use_static_events`·`event_encoding`이 없는
+144 아티팩트는 `DLPredictor`가 `base` + 정적 이벤트 있음 + `zscore`로 읽는다(하위 호환) —
 `device`·`train_seconds`·`determinism`(같은 시드 2회 학습의 검증 손실 차이)은 149 GPU 규약의 기록 항목이다.
 
 ## 4. 예측기 코드와 운영 규칙
