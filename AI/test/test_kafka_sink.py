@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+from test_kafka_event_parser import BE_SAMPLE_EVENTS
 
 from DATA_ENGINE.stream.kafka_events import parse_kafka_event
 from DATA_ENGINE.stream.kafka_sink import base_dir_for_topic, write_events
@@ -59,3 +60,28 @@ def test_write_events_groups_by_topic(tmp_path):
         tmp_path / "data/BIKE/raw/realtime/dt=2026-09-14/hh=09",
         tmp_path / "data/EXTERNAL/weather/raw/nowcast/dt=2026-09-14/hh=09",
     }
+
+
+def test_write_be_sample_events_to_topic_partitions(tmp_path):
+    events = [
+        parse_kafka_event(sample, topic=topic, partition=0, offset=index)
+        for index, (topic, sample) in enumerate(BE_SAMPLE_EVENTS.items())
+    ]
+
+    paths = write_events(events, ai_root=tmp_path)
+
+    assert {path.parent for path in paths} == {
+        tmp_path / "data/SUBWAY/raw/arrival/dt=2026-09-14/hh=11",
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast/dt=2026-09-14/hh=12",
+        tmp_path / "data/BIKE/raw/realtime/dt=2026-09-14/hh=09",
+    }
+
+    rows = []
+    for path in paths:
+        rows.extend(pd.read_parquet(path).to_dict("records"))
+
+    by_source = {row["source"]: row for row in rows}
+    assert by_source["bike.stock"]["entity_id"] == "ST-4"
+    assert by_source["weather.nowcast"]["entity_id"] == "60:127:PTY"
+    assert by_source["subway.arrival"]["entity_id"] == "1009000937"
+    assert json.loads(by_source["subway.arrival"]["payload_json"])["statnNm"] == "둔촌오륜"
