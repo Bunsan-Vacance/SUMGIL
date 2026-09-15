@@ -111,7 +111,9 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다 — 최소 1개, 가장 빠른 건 BIKE.
+        assertTrue(result.size() >= 1);
+        assertEquals(RouteType.SHORTEST, result.get(0).routeType());
         assertEquals(2, result.get(0).legs().size());
         assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.BIKE));
         assertEquals("A", result.get(0).legs().get(0).fromNodeId());
@@ -134,16 +136,16 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        assertTrue(result.size() >= 1);
         List<TravelMode> modes = result.get(0).legs().stream().map(leg -> leg.mode()).toList();
         assertTrue(modes.contains(TravelMode.BIKE));
         assertTrue(modes.contains(TravelMode.SUBWAY));
     }
 
     @Test
-    @DisplayName("IT4: 단일 후보 + 사후 필터 — BIKE만 허용하면 지하철 최단은 빈 배열이다")
-    void it4_모드필터_사후제외() {
-        // 지하철 직통 300초가 최단이라 BIKE 필터에 걸려 탈락한다. (현재 정책 기록)
+    @DisplayName("IT4: 모드 필터 — BIKE만 허용하면 자전거 후보만 남는다(185: 이제 후보를 실제로 만든다)")
+    void it4_모드필터_BIKE만_필터() {
+        // 지하철 직통 300초가 더 빠르지만, BIKE 필터를 걸면 자전거 후보(800초)만 응답에 남아야 한다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 300),
                 bike("A", "R1", 400),
@@ -152,7 +154,9 @@ class RouteSearchIntegrationTest {
         List<RouteSearchResponse> result =
                 routeSearchService.search("A", "C", List.of(TravelMode.BIKE), null, null);
 
-        assertTrue(result.isEmpty());
+        assertEquals(1, result.size());
+        assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.BIKE));
+        assertEquals((400 + 400) / 60.0, result.get(0).totalMinutes(), 1e-9);
     }
 
     @Test
@@ -172,8 +176,10 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
-    @DisplayName("IT6: 재고 소진 대여소 경유 후보는 제외된다")
+    @DisplayName("IT6: 재고 소진 대여소를 경유하는 후보만 제외된다(다른 후보는 남는다, 185)")
     void it6_재고소진_제외() {
+        // 자전거 후보(240초)는 R1 재고 소진으로 걸러지지만, SUBWAY 전용 후보(900초)는 R1을
+        // 거치지 않으므로 그대로 응답에 남아야 한다 — 재고 게이트는 후보 하나만 걸러야 한다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 900),
                 bike("A", "R1", 120),
@@ -182,7 +188,9 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertTrue(result.isEmpty());
+        assertEquals(1, result.size());
+        assertTrue(result.get(0).legs().stream().noneMatch(leg -> leg.mode() == TravelMode.BIKE));
+        assertEquals(900 / 60.0, result.get(0).totalMinutes(), 1e-9);
     }
 
     @Test
@@ -251,7 +259,7 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        assertTrue(result.size() >= 1);
         assertEquals(5, result.get(0).legs().size());
         assertEquals(TravelMode.WALK, result.get(0).legs().get(0).mode());
         assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(1).mode());
@@ -280,7 +288,7 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        assertTrue(result.size() >= 1);
         assertEquals(6, result.get(0).legs().size());
         assertEquals(TravelMode.BIKE, result.get(0).legs().get(2).mode());
         assertEquals(TravelMode.BIKE, result.get(0).legs().get(3).mode());
@@ -301,10 +309,38 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        // 185: BUS(240초, 최단)와 SUBWAY 전용(900초, 대체) 딱 2개 후보로 정확히 갈린다 — 중복 없음.
+        assertEquals(2, result.size());
+        assertEquals(RouteType.SHORTEST, result.get(0).routeType());
         assertEquals(1, result.get(0).legs().size());
         assertEquals(TravelMode.BUS, result.get(0).legs().get(0).mode());
         assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes(), 1e-9);
+        assertEquals(RouteType.ALTERNATIVE, result.get(1).routeType());
+        assertEquals(TravelMode.SUBWAY, result.get(1).legs().get(0).mode());
+        assertEquals(900 / 60.0, result.get(1).totalMinutes(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("IT12b: 모드 필터 조합 — 허용 조합에 맞는 후보만 남는다(185)")
+    void it12b_모드필터_조합() {
+        // 지하철 900초 vs 버스 240초. modes=[SUBWAY,BUS]면 둘 다, modes=[BUS]면 버스만 남아야 한다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "C", "L1", 900),
+                bus("A", "T1", "B100", 120),
+                bus("T1", "C", "B100", 120)));
+
+        List<RouteSearchResponse> both = routeSearchService.search(
+                "A", "C", List.of(TravelMode.SUBWAY, TravelMode.BUS), null, null);
+        assertEquals(2, both.size());
+
+        List<RouteSearchResponse> busOnly = routeSearchService.search(
+                "A", "C", List.of(TravelMode.BUS), null, null);
+        assertEquals(1, busOnly.size());
+        assertEquals(TravelMode.BUS, busOnly.get(0).legs().get(0).mode());
+
+        List<RouteSearchResponse> bikeOnly = routeSearchService.search(
+                "A", "C", List.of(TravelMode.BIKE), null, null);
+        assertTrue(bikeOnly.isEmpty());
     }
 
     @Test
@@ -320,7 +356,7 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        assertTrue(result.size() >= 1);
         List<TravelMode> modes = result.get(0).legs().stream().map(leg -> leg.mode()).toList();
         assertTrue(modes.contains(TravelMode.BUS));
         assertTrue(modes.contains(TravelMode.SUBWAY));

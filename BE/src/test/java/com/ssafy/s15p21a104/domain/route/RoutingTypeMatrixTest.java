@@ -87,7 +87,8 @@ class RoutingTypeMatrixTest {
                 Set.of("R1", "R2"))
                 .search("A", "C", null, null, null);
 
-        assertEquals(1, r.size());
+        // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다.
+        assertTrue(r.size() >= 1);
         assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
                 TravelMode.TRANSFER, TravelMode.WALK), modes(r));
         assertEquals("A", r.get(0).legs().get(0).fromNodeId());
@@ -105,7 +106,8 @@ class RoutingTypeMatrixTest {
                 Set.of("R1", "R2", "R3"))
                 .search("A", "C", null, null, null);
 
-        assertEquals(1, r.size());
+        // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다.
+        assertTrue(r.size() >= 1);
         assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
                 TravelMode.BIKE, TravelMode.TRANSFER, TravelMode.WALK), modes(r));
         assertEquals("R2", r.get(0).legs().get(2).toNodeId());

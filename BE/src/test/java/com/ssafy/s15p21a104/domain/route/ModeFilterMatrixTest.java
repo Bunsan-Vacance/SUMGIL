@@ -65,7 +65,8 @@ class ModeFilterMatrixTest {
                 Set.of("R1", "R2"))
                 .search("A", "C", List.of(TravelMode.SUBWAY, TravelMode.BIKE), null, null);
 
-        assertEquals(1, r.size());
+        // 185: SUBWAY 전용 조합의 (더 느린) 대체 후보도 modes=[SUBWAY,BIKE]를 통과해 함께 남는다.
+        assertTrue(r.size() >= 1);
         assertTrue(modes(r).contains(TravelMode.BIKE));
     }
 

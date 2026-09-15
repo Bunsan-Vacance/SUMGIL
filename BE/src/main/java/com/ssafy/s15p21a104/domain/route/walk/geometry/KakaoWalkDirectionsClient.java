@@ -30,12 +30,11 @@ public class KakaoWalkDirectionsClient {
         if (!properties.isConfigured()) {
             return Optional.empty();
         }
-        String origin = fromLng + "," + fromLat;
-        String destination = toLng + "," + toLat;
         try {
             KakaoWalkDirectionsResponse response = restClient.get()
-                    .uri(properties.baseUrl() + "?origin={origin}&destination={destination}",
-                            origin, destination)
+                    .uri(properties.baseUrl()
+                                    + "?start_x={startX}&start_y={startY}&end_x={endX}&end_y={endY}",
+                            fromLng, fromLat, toLng, toLat)
                     .header("Authorization", "KakaoAK " + properties.restApiKey())
                     .retrieve()
                     .body(KakaoWalkDirectionsResponse.class);

@@ -50,7 +50,8 @@ class RealCoordRoutingTest {
         var result = serviceWith(graph, Set.of("ST-948", "ST-1391"))
                 .search("415", "S115", null, null, null);
 
-        assertEquals(1, result.size());
+        // 185: SUBWAY 전용 조합으로도 (더 느린) 직통 대체 후보가 따로 나온다.
+        assertTrue(result.size() >= 1);
         List<TravelMode> modes = result.get(0).legs().stream()
                 .map(com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse::mode).toList();
         assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
