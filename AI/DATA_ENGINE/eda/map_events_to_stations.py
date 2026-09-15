@@ -13,13 +13,22 @@
 역이 코레일·인천교통공사 소속이면 붙일 데가 없다. 어느 경기장이 실제로 연결됐는지는
 `main()`이 표로 출력한다 — 연결 안 된 경기장의 경기는 이 패널에서 신호가 되지 못한다.
 
+**구간은 패널이 정한다.** 어느 패널에 붙일지 `--panel`로 받고, 이벤트 구간은 그 패널의
+날짜 범위를 그대로 따른다(출력 파일명도 패널 이름에서 자동으로 정해진다). 학습 기간을
+넓힐 때 이 스크립트를 다시 돌리면 되는데, **원천 커버리지를 먼저 확인해야 한다** —
+경기 일정(KBO·K리그)은 지금 2024-03부터만 수집돼 있어 그 이전 구간은 `game_count`가
+전부 0이 된다. 축제는 2013~2027로 넓다. `main()`이 구간 밖 원천을 경고로 찍는다.
+
 실행:
     cd AI
     python -m DATA_ENGINE.eda.map_events_to_stations
+    python -m DATA_ENGINE.eda.map_events_to_stations --panel crowd_panel_2023_2023.parquet
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -63,10 +72,22 @@ def load_venues() -> tuple[pd.DataFrame, float]:
     return pd.DataFrame(rows), float(conf["radius_km"])
 
 
-def load_panel_stations() -> pd.DataFrame:
+def events_output_name(panel_name: str) -> str:
+    """패널 파일명 → 이벤트 파일명. `crowd_panel_2024_2025` → `crowd_station_events_2024_2025`.
+
+    구간이 다른 판끼리 서로 덮어쓰지 않게 하려는 것이다. 규칙에 안 맞는 이름이 오면
+    접미를 붙여 최소한 구분은 되게 한다.
+    """
+    stem = Path(panel_name).stem
+    if stem.startswith("crowd_panel_"):
+        return f"crowd_station_events_{stem.removeprefix('crowd_panel_')}.parquet"
+    return f"crowd_station_events__{stem}.parquet"
+
+
+def load_panel_stations(panel_name: str = PANEL_NAME) -> pd.DataFrame:
     """패널에 실제로 있는 역과 그 좌표."""
     panel = pd.read_parquet(
-        CROWD_PROCESSED / PANEL_NAME, columns=["station_no", "station_name", "line", "lat", "lon"]
+        CROWD_PROCESSED / panel_name, columns=["station_no", "station_name", "line", "lat", "lon"]
     )
     return panel.drop_duplicates("station_no").dropna(subset=["lat", "lon"]).reset_index(drop=True)
 
@@ -120,7 +141,8 @@ def load_festivals(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     """축제를 하루 한 행으로 편다 — 기간 축제는 열린 날마다 한 행이 된다.
 
     `duration_days`는 **패널 구간으로 자르기 전 원래 개최 기간**을 그대로 들고 온다. 잘린
-    기간을 다시 계산하면 2024-01-01 이전에 시작한 장기 전시가 "짧은 축제"로 뒤바뀐다.
+    기간을 다시 계산하면 구간 시작 이전에 시작한 장기 전시가 "짧은 축제"로 뒤바뀐다.
+    이 규칙 덕에 구간을 넓혀도 겹치는 날짜의 값은 바뀌지 않는다(구간 밖 날짜만 늘어난다).
     """
     fest = pd.read_parquet(EVENTS_INTERIM / "festival_capital.parquet")
     fest = fest.dropna(subset=["lat", "lon"])
@@ -160,12 +182,18 @@ def aggregate_festival_rows(fest_events: pd.DataFrame) -> pd.DataFrame:
 
 def build_station_events(
     panel_range: tuple[pd.Timestamp, pd.Timestamp],
+    panel_name: str = PANEL_NAME,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    stations = load_panel_stations()
+    stations = load_panel_stations(panel_name)
     venues, radius_km = load_venues()
 
     venue_links, venue_summary = nearest_stations(venues, stations, radius_km)
     games = load_games()
+    # 경기도 패널 구간으로 자른다. 축제(`load_festivals`)는 원래 구간을 받는데 경기는 안
+    # 받고 있었다 — 원천이 마침 2024~2025뿐이라 드러나지 않던 것이고, 구간을 옮기면
+    # 패널에 없는 날짜의 이벤트 행이 그대로 섞인다.
+    start, end = panel_range
+    games = games[(games["date"] >= start) & (games["date"] <= end)]
     game_events = games.merge(venue_links, on="stadium", how="inner", suffixes=("", "_venue"))
     # 관중수가 없는 경기(우천취소 등)를 합계에서 0으로 흘려보내면 "관중 0명"과 구별이
     # 안 된다. 결측 건수를 따로 세어 남기고, 그런 날의 합계는 NaN으로 둔다.
@@ -207,18 +235,48 @@ def build_station_events(
     return events, venue_summary, venue_links
 
 
-def save_events(events: pd.DataFrame) -> Path:
+def save_events(events: pd.DataFrame, output_name: str = OUTPUT_NAME) -> Path:
     CROWD_PROCESSED.mkdir(parents=True, exist_ok=True)
-    out_path = CROWD_PROCESSED / OUTPUT_NAME
+    out_path = CROWD_PROCESSED / output_name
     events.to_parquet(out_path, index=False)
     return out_path
 
 
-def main() -> None:
-    panel_dates = pd.read_parquet(CROWD_PROCESSED / PANEL_NAME, columns=["date"])["date"]
-    events, venue_summary, venue_links = build_station_events(
-        (panel_dates.min(), panel_dates.max())
+def warn_source_coverage(panel_range: tuple[pd.Timestamp, pd.Timestamp]) -> None:
+    """원천이 패널 구간을 덮지 않으면 경고한다 — 0과 "수집 안 됨"을 구별하기 위해서다.
+
+    경기 일정은 2024-03부터만 수집돼 있어, 학습 기간을 2022·2023으로 넓히면 그 구간의
+    `game_count`가 전부 0이 된다. "그 날 경기가 없었다"와 구별되지 않으므로 조용히 넘기지
+    않는다(원칙 8 — 표본 부족 구간에 값을 채우지 않는다).
+    """
+    start, end = panel_range
+    games = load_games()
+    fest = pd.read_parquet(EVENTS_INTERIM / "festival_capital.parquet")
+    for name, lo, hi in (
+        ("경기 일정(KBO·K리그)", games["date"].min(), games["date"].max()),
+        ("축제", fest["start_date"].min(), fest["end_date"].max()),
+    ):
+        if lo > start or hi < end:
+            print(
+                f"[경고] {name} 원천 범위({lo:%Y-%m-%d}~{hi:%Y-%m-%d})가 패널 구간"
+                f"({start:%Y-%m-%d}~{end:%Y-%m-%d})을 덮지 못한다 — 그 바깥 날짜는 "
+                "이벤트 건수가 0으로 나오지만 '없었다'가 아니라 '수집 안 됨'이다."
+            )
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    ap.add_argument("--panel", default=PANEL_NAME, help="이벤트를 붙일 패널 파일명")
+    ap.add_argument("--out", default=None, help="출력 파일명(기본: 패널 이름에서 자동)")
+    args = ap.parse_args(argv)
+    output_name = args.out or events_output_name(args.panel)
+
+    panel_dates = pd.read_parquet(CROWD_PROCESSED / args.panel, columns=["date"])["date"]
+    panel_range = (panel_dates.min(), panel_dates.max())
+    warn_source_coverage(panel_range)
+    events, venue_summary, venue_links = build_station_events(panel_range, args.panel)
 
     print("[안내] 경기장별 최근접 역 — 좌표가 맞는지 확인용(예상 역이 아니면 좌표를 의심할 것):")
     print(
@@ -244,7 +302,7 @@ def main() -> None:
         "장기 쪽이 압도적이면 festival_count 단독으로는 신호가 묻힌다."
     )
 
-    out_path = save_events(events)
+    out_path = save_events(events, output_name)
     print(
         f"\n저장 완료: {out_path} ({len(events):,}행, "
         f"경기 {int((events['game_count'] > 0).sum()):,}건, "
@@ -254,4 +312,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

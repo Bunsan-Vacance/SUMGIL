@@ -294,6 +294,65 @@ base_datetime, forecast_datetime, nx, ny, t1h, rn1, reh, wsd, pty
 10 4 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && bash DATA_ENGINE/scripts/run_data_engine_batch.sh --date "$(TZ=Asia/Seoul date -d 'yesterday' +\%F)" --yes >> logs/data_engine_batch.log 2>&1
 ```
 
+### 배치 산출물 품질 점검
+
+배치가 `part.parquet` 파일을 만들었더라도 row 수, 필수 컬럼, 결측·중복·이상값이 깨질 수
+있다. `check_batch_outputs.py`는 배치 결과가 모델·분석 입력으로 쓸 수 있는 최소 품질을
+만족하는지 확인한다. 기본 날짜는 KST 기준 어제다.
+
+수동 실행:
+
+```bash
+cd <REPO_ROOT>/AI
+
+python -m DATA_ENGINE.monitor.check_batch_outputs
+python -m DATA_ENGINE.monitor.check_batch_outputs --date 2026-09-13
+```
+
+점검 대상:
+
+```text
+AI/data/BIKE/interim/realtime_stock_5min/dt=YYYY-MM-DD/part.parquet
+AI/data/EXTERNAL/weather/interim/nowcast_features/dt=YYYY-MM-DD/part.parquet
+```
+
+기본 기준:
+
+- 따릉이 row 수 최소 100,000.
+- 날씨 row 수 최소 100.
+- 필수 컬럼이 모두 존재해야 한다.
+- 따릉이 `station_id`, `collected_at`은 결측이면 실패한다.
+- 따릉이 `current_bike_count`, `rack_total_count`는 음수이면 실패한다.
+- 따릉이 `stock_ratio`는 음수이면 실패한다. 상한은 `rack_total_count` 기준 차이와 초과 거치가
+  실제 데이터에 자주 나타나므로 실패 조건으로 두지 않고, `max_stock_ratio` 참고 통계로 출력한다.
+- 따릉이 `collected_at + station_id` 중복 row가 있으면 실패한다.
+- 날씨 `weather_source`는 `observed`, `forecast`만 허용한다.
+- 날씨 `t1h`, `rn1`, `reh`, `wsd`, `pty`가 모두 비어 있으면 실패한다.
+- 날씨 `rn1`, `reh`, `wsd`, `pty`는 음수이면 실패하고, `reh`는 0~100 범위여야 한다.
+
+정상 출력 예:
+
+```text
+OK bike batch output: rows=733575 stations=2737 snapshots=268 max_stock_ratio=12.14 path=...
+OK weather batch output: rows=938 path=...
+DATA_ENGINE batch output quality OK
+```
+
+실패 출력 예:
+
+```text
+FAIL bike batch output missing: path=...
+FAIL weather invalid weather_source: values=['bad']
+DATA_ENGINE batch output quality FAILED
+```
+
+운영에서는 배치가 끝난 뒤 한 번 실행한다. 예를 들어 전날 데이터 배치가 04:10에 돈다면,
+품질 점검은 04:30 이후에 등록한다.
+
+```cron
+30 4 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.check_batch_outputs --date "$(TZ=Asia/Seoul date -d 'yesterday' +\%F)" >> logs/data_engine_batch_quality.log 2>&1
+```
+
 ## 데이터 보관 정책
 
 따릉이·날씨 실시간 수집기는 서버 로컬에 `snapshot_*.parquet`를 계속 쌓는다. 로컬 디스크가
@@ -440,6 +499,74 @@ python -m DATA_ENGINE.archive.upload_raw_partitions --yes
 
 기본값은 dry-run이라 Drive API를 호출하지 않고 manifest도 기록하지 않는다. `--yes`를 붙이면
 완료된 시간대 파티션만 Drive에 올리고, 결과를 `data/manifest/archive_uploads.jsonl`에 기록한다.
+
+## Kafka consumer
+
+Kafka broker·topic·producer 구축은 BE/Infra 소유다. 이 폴더에서는 BE/Infra가 발행하는
+topic을 AI consumer group으로 구독해 기존 raw parquet 계층에 저장하는 consumer만 다룬다.
+J15A104A는 k3s worker 노드이므로 `/etc/hosts`에 Kafka ClusterIP를 등록한 뒤
+`kafka:9092`로 접속한다.
+
+필요한 `.env` 값:
+
+```text
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_CONSUMER_GROUP=ai-spark
+KAFKA_AUTO_OFFSET_RESET=earliest
+KAFKA_TOPIC_BIKE_STOCK=bike.stock
+KAFKA_TOPIC_WEATHER_NOWCAST=weather.nowcast
+KAFKA_TOPIC_SUBWAY_ARRIVAL=subway.arrival
+```
+
+J15A104A host 설정:
+
+```bash
+echo "10.43.134.226 kafka" | sudo tee -a /etc/hosts
+```
+
+`10.43.134.226`은 현재 prod Kafka Service ClusterIP다. Service를 재생성하면 바뀔 수
+있으므로, BE/Infra에서 변경 공유를 받으면 `/etc/hosts`도 함께 갱신한다.
+
+저장 경로:
+
+| topic | 저장 위치 |
+| --- | --- |
+| `bike.stock` | `data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+| `weather.nowcast` | `data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+| `subway.arrival` | `data/SUBWAY/raw/arrival/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet` |
+
+Kafka event는 공통 envelope 컬럼과 `payload_json` 원본 보존 컬럼으로 저장한다. partition 기준
+시간은 `poll_run_at`을 우선 사용하고, 없으면 `ingested_at`으로 대체한다. 품질/신선도 기준
+시간은 `source_generated_at`이 있으면 그 값을 쓰고, 따릉이처럼 원천 생성시각이 없으면
+`ingested_at`을 쓴다. 이렇게 하면 기존 Drive archive·retention·partition count 계층과 같은
+`dt=/hh=/snapshot_*.parquet` 구조를 유지할 수 있다.
+
+mock/sample event 기반 parser·sink 테스트:
+
+```bash
+cd AI
+pytest -q test/test_kafka_event_parser.py test/test_kafka_sink.py
+```
+
+실제 consumer 실행:
+
+```bash
+cd AI
+bash DATA_ENGINE/scripts/run_kafka_consumer.sh
+```
+
+Kafka에 접속하지 않고 `.env` 설정만 먼저 확인:
+
+```bash
+cd AI
+bash DATA_ENGINE/scripts/run_kafka_consumer.sh --check-config
+```
+
+실제 연결 전 BE/Infra 확인이 필요한 값:
+
+- topic별 payload 실측 샘플 추가 변경 여부
+- prod 이벤트 투입 시작 시각
+- Kafka Service ClusterIP 변경 여부
 
 ## Redis 연동 상태
 

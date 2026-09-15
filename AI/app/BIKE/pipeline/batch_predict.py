@@ -2,7 +2,7 @@
 
     models/BIKE/<tag>_<시각>/  (train.py 또는 train_multisource.py 아티팩트, 지정 없으면 최신)
       → Predictor.predict_all(target_date)                           avg(기본값)|lightgbm
-      → data/BIKE/serving/bike_stock_pred_<생성시각>.parquet + .meta.json
+      → data/BIKE/serving/bike_stock_pred_<생성시각>.parquet + .csv + .meta.json
 
 API(`app/BIKE/service.py`)는 이 디렉터리에서 가장 최신 파일 하나만 읽는다(`AI/CLAUDE.md`:
 서빙 경로는 가벼운 의존성만 — lightgbm은 여기서도 predictor.py를 통해서만 지연 import된다).
@@ -68,6 +68,7 @@ def run(
     stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M%S")
     path = out_dir / f"bike_stock_pred_{stamp}.parquet"
     table.to_parquet(path, index=False)
+    table.to_csv(path.with_suffix(".csv"), index=False)
 
     meta = {
         # source: service.py의 BikeMetaResponse.source(avg|model) 계약과 이름을 맞춘다.

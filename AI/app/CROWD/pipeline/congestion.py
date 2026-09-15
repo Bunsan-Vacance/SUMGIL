@@ -18,6 +18,22 @@ DATA_ENGINE 쪽이 나중에 여기를 import하는 방향으로 합치면 된�
 배율표가 없는 셀(2호선 지선 방향 체계 불일치, 1~8호선 공휴일, 결번 역)은 NaN이고 등급도 NaN이다.
 API는 이 셀을 "데이터 부족"으로 노출한다(원칙 8). `congestion_raw_pct`는 배차 미보정이라 절대값을
 그대로 쓰면 안 된다 — 항상 배율을 거친 값만 밖으로 낸다.
+
+## 146 — 결측을 줄이되 "채우지" 않는다
+
+세 가지 결측 원인 중 두 개를 라벨 층에서 푼다. 어느 쪽도 값을 지어내지 않고, 대체한 사실은
+`calibration_fallback` 불리언으로 그대로 밖에 내보낸다(원칙 8).
+
+- **1~8호선 공휴일**: 배율표에 공휴일 구간이 없어 하루치가 통째로 결측이었다. 공휴일은 서울교통공사
+  열차운행시간표가 **일요일 다이어**로 돌고(`timetable_long.parquet`의 요일유형이 평일·토요일·일요일
+  3종이며 공휴일 다이어가 따로 없다), 9호선 스냅샷은 아예 토·일·공휴일을 "휴일" 하나로 묶는다 —
+  배율의 주 성분이 배차라 일요일 배율로 대체한다(`HOLIDAY_FALLBACK_DAY_TYPE`). 근거 수치는
+  `validation/CROWD/congestion-criteria-check/RESULTS.md` 2절.
+- **2호선 지선 방향 라벨**: 스냅샷은 지선까지 내선/외선으로 보고하는데 재귀식은 지선을 순환으로 보지
+  않아 상선/하선으로 계산한다. 두 지선의 대응이 **서로 반대**라는 것을 출퇴근 비대칭과 상관 두 가지로
+  확인해 `BRANCH_DIRECTION_MAP`에 고정했다(같은 RESULTS.md 3절).
+- **결번 역**(3호선 충무로·6호선 연신내 등)은 그대로 결측이다 — 승하차 자체가 다른 호선에 계상돼
+  대체할 값이 없다.
 """
 
 from __future__ import annotations
@@ -33,6 +49,25 @@ CIRCULAR_LABELS = {ASCENDING: "내선", DESCENDING: "외선"}
 
 # 9호선 스냅샷은 토·일·공휴일을 "휴일" 하나로 묶고, 1~8호선 스냅샷에는 "휴일" 구간이 없다.
 _LINE9_DAY_TYPE_BUCKET = {"평일": "평일", "토요일": "휴일", "일요일": "휴일", "휴일": "휴일"}
+
+# 1~8호선 공휴일이 빌려 쓸 요일유형(146). 모듈 docstring "결측을 줄이되 채우지 않는다" 참고.
+HOLIDAY_FALLBACK_DAY_TYPE = "일요일"
+
+# 2호선 지선 — 재귀식의 상선/하선을 스냅샷(배율표)의 내선/외선으로 옮기는 대응표(146).
+#
+# **두 지선의 대응이 서로 반대다.** 평일 출근(07~09시)·퇴근(18~20시) 실측 혼잡도의 비대칭으로
+# 확정했다(RESULTS.md 3절). 성수지선은 본선(성수) 쪽으로 가는 아침 방향이 `내선`(용답 54.6% vs
+# 외선 11.3%)이고, 재귀식에서 그 방향은 리스트 역순 = `상선`이다. 신정지선은 반대로 본선(신도림)
+# 쪽 아침 방향이 `외선`(양천구청 90.6% vs 내선 24.8%)이라 `상선`이 `외선`에 붙는다. 재귀식 raw의
+# 출퇴근 비대칭이 실측과 같은 부호로 맞는 쪽을 고른 것이고, 셀별 상관(성수 0.60 vs 0.29,
+# 신정 0.58 vs 0.37)도 같은 답을 준다.
+BRANCH_DIRECTION_MAP = {
+    "성수지선": {ASCENDING: "외선", DESCENDING: "내선"},
+    "신정지선": {ASCENDING: "내선", DESCENDING: "외선"},
+}
+# 지선과 본선이 함께 지나는 분기역(성수·신도림)은 본선 세그먼트가 이미 내선/외선으로 값을 낸다.
+# 지선 쪽 행까지 같은 라벨로 접으면 한 셀에 값이 두 개 생기므로 대응표에서 뺀다.
+BRANCH_JUNCTION_STATIONS = frozenset({211, 234})
 
 
 # ── 방향 분해 ──
@@ -170,31 +205,112 @@ def hour_bucket_to_30min_slots(hour_bucket: str) -> list[str]:
     return [f"{hour:02d}:00", f"{hour:02d}:30"]
 
 
-def bucket_day_type(line: pd.Series, day_type: pd.Series) -> pd.Series:
-    """패널 4종 day_type을 호선별 스냅샷 체계로 접는다(9호선은 주말·공휴일→휴일, 1~8호선 공휴일→None)."""
+def bucket_day_type(
+    line: pd.Series, day_type: pd.Series, holiday_fallback: str | None = None
+) -> pd.Series:
+    """패널 4종 day_type을 호선별 스냅샷 체계로 접는다(9호선은 주말·공휴일→휴일).
+
+    1~8호선 공휴일은 대응하는 스냅샷 구간이 없다. 기본값(`holiday_fallback=None`)은 원천 정의
+    그대로 None으로 떨궈 조인에서 빠지게 하고, `holiday_fallback="일요일"`을 주면 그 요일유형의
+    배율을 빌려 쓴다(146). **대체를 켤지는 부르는 쪽이 정한다** — 배율표를 만드는 쪽
+    (`DATA_ENGINE`)은 대체하면 안 되고, 서빙 변환(`apply_calibration`)만 켠다.
+    """
     is_line9 = line == "9호선"
     bucketed = day_type.where(~is_line9, day_type.map(_LINE9_DAY_TYPE_BUCKET))
-    return bucketed.where(is_line9 | (day_type != "휴일"), None)
+    return bucketed.where(is_line9 | (day_type != "휴일"), holiday_fallback)
 
 
-def apply_calibration(labels: pd.DataFrame, calibration: pd.DataFrame) -> pd.DataFrame:
+def holiday_fallback_mask(line: pd.Series, day_type: pd.Series) -> pd.Series:
+    """`bucket_day_type`의 공휴일 대체가 실제로 적용되는 행(1~8호선 × 공휴일)."""
+    return (line != "9호선") & (day_type == "휴일")
+
+
+def bucket_direction(
+    segment: pd.Series | None, direction: pd.Series, station_no: pd.Series
+) -> pd.Series:
+    """재귀식 방향 라벨을 배율표(스냅샷) 방향 라벨로 옮긴다 — 2호선 지선만 해당(146).
+
+    `segment`가 없으면(세그먼트 축이 없는 호출) 아무것도 바꾸지 않는다. 분기역
+    (`BRANCH_JUNCTION_STATIONS`)은 본선 세그먼트가 이미 값을 내므로 제외한다.
+    """
+    out = direction.copy()
+    if segment is None:
+        return out
+    for seg_name, mapping in BRANCH_DIRECTION_MAP.items():
+        target = (segment == seg_name) & (~station_no.isin(BRANCH_JUNCTION_STATIONS))
+        out = out.where(~target, direction.map(mapping))
+    return out
+
+
+def apply_calibration(
+    labels: pd.DataFrame,
+    calibration: pd.DataFrame,
+    holiday_fallback: str | None = HOLIDAY_FALLBACK_DAY_TYPE,
+) -> pd.DataFrame:
     """재귀식 결과(1시간, `day_type` 컬럼 포함)를 30분으로 펼쳐 배율을 곱한다.
 
     `calibration`은 `crowd_congestion_calibration.parquet`(station_no·direction·day_type·time_slot·ratio).
     배율이 없는 셀은 `congestion_pct_calibrated`가 NaN.
+
+    조인 키는 원본 라벨이 아니라 **접은 라벨**(`day_type_bucket`·`direction_bucket`)이다 — 출력의
+    `day_type`·`direction`은 그대로 두고, 공휴일을 다른 요일유형의 배율로 채운 행은
+    `calibration_fallback=True`로 표시한다(146, 원칙 8).
     """
     frame = labels.copy()
-    frame["day_type_bucket"] = bucket_day_type(frame["line"], frame["day_type"])
+    frame["day_type_bucket"] = bucket_day_type(frame["line"], frame["day_type"], holiday_fallback)
+    frame["calibration_fallback"] = (holiday_fallback is not None) & holiday_fallback_mask(
+        frame["line"], frame["day_type"]
+    )
+    frame["direction_bucket"] = bucket_direction(
+        frame["segment"] if "segment" in frame.columns else None,
+        frame["direction"],
+        frame["station_no"],
+    )
     frame["time_slot_30min"] = frame["time_slot"].map(hour_bucket_to_30min_slots)
     frame = frame.explode("time_slot_30min", ignore_index=True)
     ratio_key = calibration[["station_no", "direction", "day_type", "time_slot", "ratio"]].rename(
-        columns={"day_type": "day_type_bucket", "time_slot": "time_slot_30min"}
+        columns={
+            "direction": "direction_bucket",
+            "day_type": "day_type_bucket",
+            "time_slot": "time_slot_30min",
+        }
     )
     merged = frame.merge(
-        ratio_key, on=["station_no", "direction", "day_type_bucket", "time_slot_30min"], how="left"
+        ratio_key,
+        on=["station_no", "direction_bucket", "day_type_bucket", "time_slot_30min"],
+        how="left",
     )
     merged["congestion_pct_calibrated"] = merged["congestion_raw_pct"] * merged["ratio"]
+    # 대체 요일유형으로도 값이 안 나온 셀은 "대체됨"이 아니라 그냥 결측이다.
+    merged["calibration_fallback"] = (
+        merged["calibration_fallback"] & merged["congestion_pct_calibrated"].notna()
+    )
     return merged
+
+
+def truncated_boundary_cells(
+    segments: Sequence[dict], lines: Sequence[str] = ("1호선",)
+) -> set[tuple[int, str]]:
+    """절단 구간의 **종점 링크** (역번호, 방향) 집합 — 구조적으로 재차 0이 되는 셀(146).
+
+    선형 세그먼트에서 오름차순 방향의 마지막 역과 내림차순 방향의 첫 역은 "이 역을 출발한 직후"
+    통과량이 정의상 0이다. 실제 종점이면 0이 맞지만 `truncated: true` 구간은 절단면이라 0이 틀리다
+    — 1호선은 서울역(150) 상선·청량리(158) 하선이 여기 해당하고, 실측 스냅샷은 그 셀에 평일 평균
+    32.5%·24.4%를 보고한다. 배율은 raw 평균 0이 분모라 산출 자체가 안 돼(ratio NaN) 값을 낼 수
+    없으므로, 값을 지어내는 대신 `data_status`로 사유를 밝힌다.
+
+    `lines`로 범위를 좁힌다 — 3·4·7·9호선과 신정지선도 절단이지만 146의 스코프는 1호선이다.
+    """
+    out: set[tuple[int, str]] = set()
+    for seg in segments:
+        if not seg.get("truncated") or seg.get("circular") or seg["line"] not in lines:
+            continue
+        stations = seg["stations"]
+        if len(stations) < 2:
+            continue
+        out.add((stations[-1], ASCENDING))
+        out.add((stations[0], DESCENDING))
+    return out
 
 
 # ── 등급 ──
