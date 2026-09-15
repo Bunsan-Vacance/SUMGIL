@@ -60,7 +60,7 @@ class RouteSearchServiceTest {
                 new Edge("0222", "0221", "2", 300, 0, TravelMode.SUBWAY)));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
-                RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
     }
 
@@ -87,7 +87,7 @@ class RouteSearchServiceTest {
     void 미적재시_503() {
         RouteSearchService unloaded = new RouteSearchService(
                 stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null),
-                RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
 
         DomainException exception = assertThrows(DomainException.class,

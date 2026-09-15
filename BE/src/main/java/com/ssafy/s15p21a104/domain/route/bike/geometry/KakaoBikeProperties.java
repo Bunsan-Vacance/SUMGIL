@@ -1,0 +1,29 @@
+package com.ssafy.s15p21a104.domain.route.bike.geometry;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+/**
+ * 카카오맵 자전거 경로 조회 REST API 설정(S15P21A104-222).
+ *
+ * <p>{@code restApiKey}가 비어 있으면 {@link KakaoBikeDirectionsClient}는 호출 자체를 하지 않고
+ * 항상 빈 값을 반환한다 — 키 발급 전(로컬 개발, CI)에도 기존 동작(geometry unavailable)이 그대로
+ * 유지된다. 도보(S15P21A104-186)와 같은 카카오디벨로퍼스 앱·REST 키를 그대로 쓴다.
+ *
+ * @param restApiKey 카카오디벨로퍼스 REST API 키. {@code KAKAO_REST_API_KEY} 환경변수로 주입
+ * @param baseUrl 자전거 경로 조회 엔드포인트. 실제 키로 호출해 확인함(2026-09-15)
+ */
+@ConfigurationProperties("app.kakao-bike")
+public record KakaoBikeProperties(String restApiKey, String baseUrl) {
+
+    private static final String DEFAULT_BASE_URL = "https://dapi.kakao.com/v2/routing/bicycle";
+
+    public KakaoBikeProperties {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = DEFAULT_BASE_URL;
+        }
+    }
+
+    public boolean isConfigured() {
+        return restApiKey != null && !restApiKey.isBlank();
+    }
+}
