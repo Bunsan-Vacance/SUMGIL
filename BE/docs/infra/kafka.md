@@ -189,7 +189,8 @@ cleanup.policy=delete retention.bytes=67108864  retention.ms=172800000 segment.b
 
 ## 7. 다음 단계
 
-1. ~~수집기 v1~~ — 완료 (169, [collector.md](collector.md)). prod 배포는 173.
-2. **컨슈머 v1 (171)** — `be-redis` 그룹, Kafka → Redis, `source_generated_at`/`ingested_at` 비교로 멱등, TTL 90초. 지하철 도착 Redis 키를 정해 A 파트에 통보.
-3. ~~prod 토픽~~ — 완료 (2026-09-14, 4절 "적용 결과"). 수집기 파드가 올라가면 기동 시 같은 값으로 다시 맞춘다. 지금은 **토픽만 있고 프로듀서·컨슈머가 없어 비어 있다.**
-4. AI 컨슈머(`ai-spark`)가 5절 계약으로 붙는다 — `Desktop/ai-part-request-2026-09-14.md` 부탁 2.
+1. ~~수집기 v1~~ — 완료 (169, [collector.md](collector.md)).
+2. ~~prod 배포~~ — 완료 (173, 2026-09-15. [collector.md](collector.md) 8절). 수집기 파드가 기동하며 토픽 설정을 같은 값으로 다시 맞춘다.
+3. ~~prod 토픽~~ — 완료 (2026-09-14, 4절 "적용 결과").
+4. **컨슈머 v1 (171)** — `be-redis` 그룹, Kafka → Redis, `source_generated_at`/`ingested_at` 비교로 멱등, TTL 90초. 지하철 도착 Redis 키를 정해 A 파트에 통보. **소비자는 전우석의 192**(실시간 열차 도착 조회 API)이고 그 티켓이 171 을 선행으로 잡고 있다 — 키·값 형태는 통보가 아니라 합의로 정한다.
+5. AI 컨슈머(`ai-spark`)가 5절 계약으로 붙는다. **2026-09-15 부터 세 토픽에 실제 이벤트가 들어간다** (그 전까지는 토픽만 있고 비어 있어 AI 컨슈머가 받을 것이 없었다). Kafka ClusterIP 는 `10.43.134.226` 으로 변동 없다.
