@@ -6,6 +6,7 @@ import json
 from datetime import date
 
 import pandas as pd
+import pytest
 
 from app.BIKE.pipeline import batch_predict
 from app.BIKE.pipeline.lookup import StockProfileBaseline
@@ -110,8 +111,8 @@ def test_avg_predictor_expands_observed_stations_with_station_only_fallback():
         (out["rental_id"] == "ST-1") & (out["dow_type"] == 2) & (out["time_slot"] == 5)
     ].iloc[0]
     assert station_time["exp_bikes"] == 15.0
-    assert station_time["p_empty"] == 0.2
-    assert station_time["p_full"] == 0.3
+    assert station_time["p_empty"] == pytest.approx(0.2)
+    assert station_time["p_full"] == pytest.approx(0.3)
     assert station_time["prediction_source"] == "station_time_fallback"
 
     station_global = out[
