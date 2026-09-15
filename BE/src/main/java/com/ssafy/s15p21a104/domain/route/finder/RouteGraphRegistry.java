@@ -92,17 +92,21 @@ public class RouteGraphRegistry {
                         rental.getRentalId(), rental.getName(), rental.getLat(), rental.getLng()));
             }
             List<Edge> rentalEdges = BikeRentalEdgeBuilder.build(rentals);
-            List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals);
             Map<String, List<BusEdgeBuilder.RouteStop>> busRoutes = BusRouteStopsReader.read();
             List<Edge> busEdges = BusEdgeBuilder.build(busRoutes);
+            Map<String, BikeEdgeBuilder.Stop> busStops = new HashMap<>();
             for (List<BusEdgeBuilder.RouteStop> routeStops : busRoutes.values()) {
                 for (BusEdgeBuilder.RouteStop routeStop : routeStops) {
                     infos.putIfAbsent(routeStop.stopId(), new RouteMapper.StationInfo(
                             routeStop.stopId(),
                             routeStop.name() == null ? routeStop.stopId() : routeStop.name(),
                             routeStop.lat(), routeStop.lng()));
+                    busStops.putIfAbsent(routeStop.stopId(), new BikeEdgeBuilder.Stop(
+                            routeStop.stopId(), routeStop.lat(), routeStop.lng()));
                 }
             }
+            // 역↔정류장·대여소↔정류장 보행 연결(S15P21A104-188). 정류장↔정류장은 그대로 BUS 엣지 몫이다.
+            List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals, busStops);
             List<Edge> extraEdges = new java.util.ArrayList<>(walkEdges);
             extraEdges.addAll(rentalEdges);
             extraEdges.addAll(busEdges);

@@ -87,4 +87,56 @@ class WalkEdgeBuilderTest {
         assertEquals(2, WalkEdgeBuilder.build(inside, r499).size());
         assertTrue(WalkEdgeBuilder.build(inside, r501).isEmpty());
     }
+
+    @Test
+    @DisplayName("188-T1: 역↔정류장 반경 안 쌍도 양방향 WALK 엣지가 생긴다")
+    void t188_역_정류장_양방향() {
+        Map<String, Stop> stations = Map.of("S1", new Stop("S1", 37.5000, 127.0000));
+        Map<String, Stop> busStops = Map.of("BS1", new Stop("BS1", 37.5000, 127.0045));
+
+        List<Edge> edges = WalkEdgeBuilder.build(stations, Map.of(), busStops);
+
+        assertEquals(2, edges.size());
+        assertTrue(edges.stream().anyMatch(e -> e.fromNode().equals("S1") && e.toNode().equals("BS1")));
+        assertTrue(edges.stream().anyMatch(e -> e.fromNode().equals("BS1") && e.toNode().equals("S1")));
+    }
+
+    @Test
+    @DisplayName("188-T2: 대여소↔정류장 반경 안 쌍도 양방향 WALK 엣지가 생긴다")
+    void t188_대여소_정류장_양방향() {
+        Map<String, Stop> rentals = Map.of("R1", new Stop("R1", 37.5000, 127.0000));
+        Map<String, Stop> busStops = Map.of("BS1", new Stop("BS1", 37.5000, 127.0045));
+
+        List<Edge> edges = WalkEdgeBuilder.build(Map.of(), rentals, busStops);
+
+        assertEquals(2, edges.size());
+        assertTrue(edges.stream().anyMatch(e -> e.fromNode().equals("R1") && e.toNode().equals("BS1")));
+        assertTrue(edges.stream().anyMatch(e -> e.fromNode().equals("BS1") && e.toNode().equals("R1")));
+    }
+
+    @Test
+    @DisplayName("188-T3: 정류장↔정류장은 WALK로 잇지 않는다(그건 BUS 엣지의 몫)")
+    void t188_정류장_정류장_미연결() {
+        Map<String, Stop> busStops = Map.of(
+                "BS1", new Stop("BS1", 37.5000, 127.0000),
+                "BS2", new Stop("BS2", 37.5000, 127.0005));
+
+        List<Edge> edges = WalkEdgeBuilder.build(Map.of(), Map.of(), busStops);
+
+        assertTrue(edges.isEmpty());
+    }
+
+    @Test
+    @DisplayName("188-T4: 3자 조합 — 역·대여소·정류장이 섞여 있어도 이형(異形) 쌍만 연결된다")
+    void t188_삼자조합_이형쌍만() {
+        Map<String, Stop> stations = Map.of("S1", new Stop("S1", 37.5000, 127.0000));
+        Map<String, Stop> rentals = Map.of("R1", new Stop("R1", 37.5000, 127.0010));
+        Map<String, Stop> busStops = Map.of("BS1", new Stop("BS1", 37.5000, 127.0020));
+
+        List<Edge> edges = WalkEdgeBuilder.build(stations, rentals, busStops);
+
+        // S1-R1(약 88m), R1-BS1(약 88m), S1-BS1(약 177m) 모두 반경(500m) 안 — 3쌍 x 2방향.
+        assertEquals(6, edges.size());
+        assertTrue(edges.stream().noneMatch(e -> e.fromNode().equals(e.toNode())));
+    }
 }
