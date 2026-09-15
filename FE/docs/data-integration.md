@@ -2,17 +2,17 @@
 
 ## 현재 연결 상태
 
-| 영역                           | 실제 구현                                                      | 연결 위치                                                 |
-| ------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------- |
-| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                              | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`         |
-| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회           | `features/map/useCurrentLocation.ts`                      |
-| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                             | `features/map/MapPlacePicker.tsx`                         |
-| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                           | `lib/kakao/sdk.ts`, `api/repositories.ts`                 |
-| 실제 경로 입력의 장소·역 후보  | 백엔드 역 검색과 카카오 장소·주소 검색 결과                    | `api/repositories.ts`, `features/route/usePlaceSearch.ts` |
-| 추천 경로                      | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 샘플           | `api/repositories.ts`                                     |
-| 정렬·이동수단 필터             | 요청 modes는 서버에 전달, 결과 필터·우선순위 정렬은 클라이언트 | `api/repositories.ts`, `features/route`                   |
-| 경로선·실제 길찾기·혼잡 추정   | 경로 API·좌표 연결, 혼잡도는 응답에 있을 때만 표시             | `api/repositories.ts`, `features/map`                     |
-| 따릉이 대여소 데이터·지도 마커 | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay               | `api/repositories.ts`, `features/map/bikeStations.ts`     |
+| 영역                           | 실제 구현                                                                          | 연결 위치                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                                                  | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`         |
+| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회                               | `features/map/useCurrentLocation.ts`                      |
+| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                                                 | `features/map/MapPlacePicker.tsx`                         |
+| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                                               | `lib/kakao/sdk.ts`, `api/repositories.ts`                 |
+| 실제 경로 입력의 장소·역 후보  | 백엔드 역 검색과 카카오 장소·주소 검색 결과                                        | `api/repositories.ts`, `features/route/usePlaceSearch.ts` |
+| 추천 경로                      | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 샘플                               | `api/repositories.ts`                                     |
+| 정렬·이동수단 필터             | 요청 modes는 서버에 전달하고 결과에도 같은 필터를 적용, 우선순위 정렬은 클라이언트 | `api/repositories.ts`, `features/route`                   |
+| 경로선·실제 길찾기·혼잡 추정   | 경로 API·좌표 연결, 혼잡도는 응답에 있을 때만 표시                                 | `api/repositories.ts`, `features/map`                     |
+| 따릉이 대여소 데이터·지도 마커 | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay                                   | `api/repositories.ts`, `features/map/bikeStations.ts`     |
 
 ### 따릉이 대여소 정적 데이터
 
@@ -40,6 +40,7 @@
 - `useTrip`은 검색 시 `modes`, 현재 `priority`, 검색 시각 `departedAt`을 전달하며 WALK를 항상 포함한다. 필터 변경과 전체 수단 복원은 이미 목적지가 있고 검색된 상태에서만 같은 조건으로 재요청하고, priority 변경은 후보를 로컬 정렬만 한다.
 - `Route.departedAt`가 있으면 해당 시각을 기준으로 도착 예정 시각을 계산하고, 없으면 샘플의 `09:41` 기준을 유지한다. 백엔드 요청의 `departureTime`은 같은 순간을 Asia/Seoul 기준 timezone 없는 `LocalDateTime`으로 변환한다.
 - `Route.congestionPercent`·`walk`·`line`은 선택 필드다. 서버 응답에 없는 값은 화면에 만들지 않는다. 혼잡도 값이 없으면 혼잡도 우선 정렬을 비활성화한다.
+- 역 ID가 있는 기존 GET `/api/routes/search`는 여러 경로 후보를 배열로 반환하며, 좌표 기반 POST `/api/routes/search/coordinate`도 같은 후보 변환 규칙을 사용한다. 요청 `modes`에는 `WALK`가 항상 포함되고 응답 구간에는 `WALK`·`TRANSFER`가 포함될 수 있다. 응답 순서와 중복 `ALTERNATIVE` 후보를 그대로 목록에 표시한다. `SHORTEST`는 `빠른 경로`, `ALTERNATIVE`는 이동수단 포함 여부와 관계없이 `다른 경로`로 표시하며, `SHORTEST_WITH_BIKE`만 `따릉이 포함 경로`로 표시한다. 요청한 이동수단으로 필터한 결과가 비어도 조회 성공으로 처리해 `해당 수단으로는 경로가 없어요`를 표시한다. 응답에 혼잡도 근거가 없으면 혼잡도나 덜 붐빔을 주장하지 않으며, 버스 소요시간·혼잡도도 백엔드 응답이 있을 때만 표시한다.
 - 경로 구간 `routeId`의 화면 표시명은 노선 매핑을 적용하며 `BIKE`는 `자전거`, `WALK`는 `도보`로 표시하고 원본 ID는 보존한다.
 
 `api/repositories.ts`에서 사용할 구현을 선택한다. 페이지에서는 `fixtures`를 import하지 않는다. `app/preview.ts`는 초기 후보를 만들지 않고 미리보기 시나리오의 제안 경로만 주입한다.

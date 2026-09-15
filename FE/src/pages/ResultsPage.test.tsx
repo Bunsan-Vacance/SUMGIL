@@ -39,7 +39,7 @@ describe('경로 결과 상태', () => {
     render(<ResultsPage {...props({ status: 'error', error: '', retry })} />)
 
     expect(screen.getByRole('alert').textContent).toContain('경로를 불러오지 못했어요.')
-    expect(screen.queryByText('이 조건에 맞는 경로가 없어요')).toBeNull()
+    expect(screen.queryByText('해당 수단으로는 경로가 없어요')).toBeNull()
     expect(screen.queryByText('추천 경로')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
@@ -51,7 +51,7 @@ describe('경로 결과 상태', () => {
     const retry = vi.fn()
     render(<ResultsPage {...props({ openFilter, retry })} />)
 
-    expect(screen.getByText('이 조건에 맞는 경로가 없어요')).toBeTruthy()
+    expect(screen.getByText('해당 수단으로는 경로가 없어요')).toBeTruthy()
     expect(screen.queryByText('경로를 불러오지 못했어요.')).toBeNull()
     expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull()
 

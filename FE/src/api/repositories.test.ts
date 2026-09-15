@@ -412,7 +412,7 @@ describe('백엔드 repository', () => {
     )
   })
 
-  it('최단 경로와 대안 경로 응답을 함께 변환하고 자전거 구간 geometry를 보존한다', async () => {
+  it('빠른 경로와 다른 경로 응답을 함께 변환하고 자전거 구간 geometry를 보존한다', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
@@ -463,6 +463,12 @@ describe('백엔드 repository', () => {
                 { mode: 'WALK', minutes: 3 },
               ],
             },
+            {
+              routeType: 'ALTERNATIVE',
+              totalMinutes: 18,
+              source: 'ALGORITHM',
+              legs: [{ mode: 'WALK', minutes: 18 }],
+            },
           ],
         }),
       })),
@@ -473,12 +479,18 @@ describe('백엔드 repository', () => {
       new AbortController().signal,
     )
 
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(3)
+    expect(result.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: 'shortest-0', label: '빠른 경로' },
+      { id: 'alternative-1', label: '다른 경로' },
+      { id: 'alternative-2', label: '다른 경로' },
+    ])
     expect(result[1]).toMatchObject({
-      label: '따릉이 포함 경로',
+      label: '다른 경로',
       modes: ['walk', 'bike'],
       geometry: { coordinates: expect.any(Array) },
     })
+    expect(result[2]).toMatchObject({ label: '다른 경로', modes: ['walk'] })
     expect(result[1].legs[0].geometry?.coordinates).toEqual([
       [
         [127.03, 37.5],

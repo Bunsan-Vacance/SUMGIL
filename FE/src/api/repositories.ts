@@ -414,10 +414,10 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
   const transfers = explicitTransfers || routeTransitions
   const label =
     routeType === 'SHORTEST'
-      ? '최단 경로'
-      : routeType === 'SHORTEST_WITH_BIKE' || legs.some((leg) => leg.mode === 'bike')
-        ? '따릉이 포함 경로'
-        : '대안 경로'
+      ? '빠른 경로'
+      : routeType === 'ALTERNATIVE'
+        ? '다른 경로'
+        : '따릉이 포함 경로'
   return {
     id: `${routeType.toLowerCase()}-${index}`,
     label,

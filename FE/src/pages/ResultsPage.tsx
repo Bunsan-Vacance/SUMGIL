@@ -157,7 +157,7 @@ export default function ResultsPage({
             {!visible.length && (
               <div className="empty">
                 <Navigation />
-                <h3>이 조건에 맞는 경로가 없어요</h3>
+                <h3>해당 수단으로는 경로가 없어요</h3>
                 <button className="secondary" onClick={openFilter}>
                   조건 변경
                 </button>
