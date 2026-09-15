@@ -49,7 +49,7 @@ subway.arrival 회차 2026-09-14T11:50:21+09:00 — 호출 3회 · 행 3002건 �
 | 토픽 | 원천 | 호출 | 주기 · 창(기본) | `entity_id` | `source_generated_at` | 확인 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `subway.arrival` | 지하철 실시간 도착 일괄 OA-15799 `swopenapi.seoul.go.kr/api/subway/{KEY}/json/realtimeStationArrival/{start}/{end}/ALL` | 1,000행씩 이어 받고 `total` 에 닿으면 끝. 보통 3회, `total` > 3,000 이면 4회(상한) | 60초 · 07:30-13:00 | `statnId` (API 고유 ID, 예 `1009000937`) | `recptnDt` | **실측 2026-09-14 11:50** — 3회 · 3,002행 · 963ms, `total` 3,009. 로컬 Kafka 에 적재 확인 |
-| `bike.stock` | 따릉이 bikeList OA-15493 `openapi.seoul.go.kr:8088/{KEY}/json/bikeList/{start}/{end}/` | 1,000건씩 3회. 마지막 페이지가 1,000 미만이면 끝 | 120초 · 07:00-18:00 | `stationId` (`ST-xxx` = `bike_station.rental_id`) | 없음 → `null`, `ingested_at` 이 신선도 기준 | 실습실 망에서 호출 불가(8088 차단). 실측 샘플(2026-09-08)로 단위 테스트, 실호출은 EC2·핫스팟에서 |
+| `bike.stock` | 따릉이 bikeList OA-15493 `openapi.seoul.go.kr:8088/{KEY}/json/bikeList/{start}/{end}/` | 1,000건씩 3회. 마지막 페이지가 1,000 미만이면 끝 | 120초 · 07:00-18:00 | `stationId` (`ST-xxx` = `bike_station.rental_id`) | 없음 → `null`, `ingested_at` 이 신선도 기준 | **실측 2026-09-15 13:09 (prod)** — 3회 · 2,738행 · 3,623 ms, prod Kafka 적재 확인. 실습실 망에서는 호출 불가(호스트 단위 차단)라 로컬은 실측 샘플(2026-09-08)로 단위 테스트 |
 | `weather.nowcast` | 기상청 API허브 `VilageFcstInfoService_2.0/getUltraSrtNcst`·`getUltraSrtFcst` (nx=60 ny=127) | 실황 1회 + 예보 1회 | 1시간 · 하루 종일 | `nx:ny:category` (예 `60:127:T1H`) | 발표 시각 `baseDate+baseTime` | **실측 2026-09-14 12:28·12:32** — 2회 호출(실황+예보) · 35건 · 752 ms·982 ms, 로컬 Kafka 적재 확인. 항목은 AI 폴러와 같은 T1H·RN1·REH·WSD·PTY |
 
 - 지하철 `statnId` 는 우리 `station.station_id`(서울 역번호)와 **체계가 다르다.** 대응은 Redis 반영 컨슈머(171)에서 한다.
@@ -152,16 +152,104 @@ KAFKA_BOOTSTRAP_SERVERS=localhost:9092 ./gradlew test --tests 'com.ssafy.s15p21a
 날씨도 같은 방식으로 두 회차 — 호출 2회(실황+예보) · 35건 · 752ms(12:28) · 982ms(12:32).
 전부 **1회성 측정치**다. 반복·분포를 갖춘 정식 기록이 아니므로 `docs/perf/README.md` 의 기준선 절에 그렇게 표시해 두었다.
 
-## 8. 배포 (S15P21A104-173 에서)
+## 8. 배포 (S15P21A104-173)
 
-BE 이미지를 그대로 쓰고 프로파일만 바꾼다. 매니페스트는 플랫폼(리드) 소유라 초안을 넘긴다.
+BE 이미지를 그대로 쓰고 프로파일만 바꾼다. `BE/k8s/**` 는 `Infra/k8s/CONTRACT.md` 1절상 플랫폼(리드) 소유이나,
+이 건은 **리드 승인 하에 C 파트가 직접 작성·적용**했다.
 
 | 항목 | 값 |
 | --- | --- |
-| 이미지 | `sumgil-be:latest` (같은 이미지) |
+| 매니페스트 | `BE/k8s/prod/be-collector.yaml` · `collector.env` · `.env.example` · `kustomization.yaml` |
+| 이미지 | `sumgil-be:latest` (같은 이미지 — 수집기 코드가 같은 jar 안에 있다) |
 | 환경 | `SPRING_PROFILES_ACTIVE=prod,collect` · `KAFKA_BOOTSTRAP_SERVERS=kafka:9092` · `be-config`(DB·Redis 포인터) · `data-secret`(DB_PASSWORD) · **`be-secret`**(`SEOUL_SUBWAY_KEY`·`SEOUL_API_KEY`·`SEOUL_BIKE_KEY`·`KMA_API_KEY`) · `COLLECT_*_WINDOW` |
-| replicas | **1** — 파티션 1이고, 2개가 돌면 호출 예산을 두 배로 쓴다 |
+| replicas | **1** · `strategy: Recreate` — 파티션 1이고, 파드가 겹쳐 돌면 호출 예산을 두 배로 쓴다 |
 | 헬스 | 웹 서버가 없어 HTTP 프로브 없음. 로그(JSON, prod 프로파일)로 본다 |
+
+`be-secret` 은 `CONTRACT.md` 4절이 "필요 시 · 현재 없음" 으로 예약해 둔 자리를 처음 쓴 것이다. 적용 전 prod 에는
+Secret 이 `data-secret` 하나뿐이었다.
+
+### 절차
+
+```bash
+# 1. 로컬 — 매니페스트 커밋 후 control-plane 으로 동기화 (워커는 레지스트리에서 이미지를 받아 소스가 필요 없다)
+NODES=a104 bash Infra/k8s/scripts/sync-to-nodes.sh
+
+# 2. 로컬 — 시크릿은 sync 대상에서 제외되므로 따로 올린다 (sync-to-nodes.sh 가 tar 에서 뺀다)
+scp <로컬 .env.secret> a104:~/sumgil/BE/k8s/prod/.env.secret
+
+# 3. 노드 — 렌더링 확인 (20분 빌드 전에 파일 문제를 먼저 잡는다). 리소스 7개 + be-secret-<해시>
+ssh a104 'cd ~/sumgil && sudo kubectl kustomize BE/k8s/prod | grep -c "^kind:"'
+
+# 4. 노드 — 이미지 빌드·push. Gradle 멀티스테이지라 오래 걸린다. 백그라운드로 띄운다
+ssh a104 'cd ~/sumgil && nohup bash Infra/k8s/scripts/build-push.sh be > /tmp/build-be.log 2>&1 & echo started'
+ssh a104 'tail -5 /tmp/build-be.log'   # "✓ sumgil-be pushed" 면 완료
+
+# 5. 노드 — 적용. apply.sh 가 kubectl apply -k 로 폴더 전체를 적용하므로 be-collector 도 함께 만들어진다
+ssh a104 'cd ~/sumgil && bash Infra/k8s/scripts/apply.sh'
+ssh a104 'sudo kubectl rollout status deployment/be-collector -n prod --timeout=180s'
+```
+
+`apply.sh` 는 `be`·`fe` 만 rollout 을 기다린다. `be-collector` 는 목록에 없어 5번 마지막 줄을 수동으로 친다.
+
+### 검증
+
+```bash
+# 기동 로그 — 소스별 예산 계획이 찍힌다
+ssh a104 'sudo kubectl logs deploy/be-collector -n prod --tail=40'
+
+# 토픽 오프셋 — 0 이 아니면 들어간 것
+ssh a104 'sudo kubectl exec -n prod sts/kafka -- /opt/kafka/bin/kafka-get-offsets.sh \
+  --bootstrap-server localhost:9092 --topic bike.stock'
+
+# 이벤트 1건 눈으로
+ssh a104 'sudo kubectl exec -n prod sts/kafka -- /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic bike.stock --from-beginning --max-messages 1'
+```
+
+로그의 `⚠ 계획이 예산을 넘는다` 는 창·주기 오설정, `인증키가 없어 비활성화한다` 는 `be-secret` 키 이름 불일치다.
+
+롤백은 `sudo kubectl delete deployment be-collector -n prod`. 토픽·`be`·데이터 계층에 영향이 없다.
+
+### 적용 결과 (2026-09-15)
+
+기동 28.8초(JPA·탐색 그래프 로드 포함) 뒤 세 소스가 첫 회차를 돌았다. 파드 `be-collector-7cc4f995b6-4tdzg`,
+워커 노드(`ip-172-26-10-6`) 배치.
+
+| 소스 | 첫 회차 (13:09:17) | 호출 | 행 | 전송 | 소요 |
+| --- | --- | --- | --- | --- | --- |
+| `weather.nowcast` | 실황+예보 | 2회 | 35 | 35 | 2,903 ms |
+| `bike.stock` | 3분할 | 3회 | **2,738** | 2,738 | 3,623 ms |
+| `subway.arrival` | 3분할 | 3회 | 2,956 | 2,956 | 3,914 ms |
+
+토픽 끝 오프셋(13:12 기준): `subway.arrival` 5,883 · `bike.stock` 2,738 · `weather.nowcast` 35.
+**토픽만 있고 비어 있던 상태가 해소됐다** — AI `ai-spark` 컨슈머가 받을 이벤트가 생겼다.
+Kafka ClusterIP 는 `10.43.134.226` 으로 이전과 같아 AI 쪽 `/etc/hosts` 갱신이 필요 없다.
+
+- **따릉이가 EC2 에서 처음 성공했다.** 실습실 망에서 `openapi.seoul.go.kr` 이 호스트 단위로 막혀 있어
+  169 까지 실호출을 못 했던 항목이다. 배포 전 노드에서 무인증 요청으로 경로를 먼저 확인했고
+  (`HTTP 500 · 152 ms` — 키·경로 없는 루트 요청이라 500 이 정상), 실제 수집에서 2,738행을 받았다.
+- **대여소가 2,738곳으로 정본(2,731)보다 7곳 많다.** 정본은 2026-09-09 `bikeList` 스냅샷이라 그 사이
+  신설된 것으로 보인다. `bike_station` 재적재 시점 판단과 `bike_stock_pred` 로더(172)에서 확인할 항목이다.
+- 지하철 2,956행은 같은 날 로컬 실측(11:12, 2,872행)과 다르다 — 시각에 따라 잡히는 열차 수가 달라
+  회차마다 총량이 변한다(`total` 기준 3회 또는 4회 분할).
+
+### 알아둘 것
+
+- **`sumgil-be:latest` 가 함께 갱신된다 — `be` 재시작이 곧 185·186 배포다.** 수집기 코드가 같은 이미지에
+  있어 재빌드가 필수다. `be` Deployment 는 스펙이 안 바뀌어 재시작되지 않으므로 배포 후에도
+  **09-14 14:15 무렵 이미지(`sha256:f2c1e1cc…`)로 계속 돈다** — 185(14:51)·186(14:52)·ROUTE 통합(14:57)이
+  그 뒤라 지금 `be` 에는 좌표 기반 경로 검색·도보 geometry 코드가 없다. 올리는 시점은 A 파트가 정한다:
+  `sudo kubectl rollout restart deployment/be -n prod` (`apply.sh` 는 `latest` 재push 만으로 rollout 을
+  일으키지 않는다).
+- **`KAKAO_REST_API_KEY` 가 없는 것은 현재 정상이다.** `KakaoWalkProperties.isConfigured()` 가 키가 비면
+  카카오 호출 자체를 건너뛰고 빈 값을 돌려준다(186 주석: "원천 선정·쿼터·요금은 팀 합의 사항이라 실제 키는
+  아직 없다"). 키 없이 재시작해도 장애가 아니라 도보 구간 geometry 가 안 나오는 정도다. 키가 생기면
+  `be-secret` 에 넣고 `be.yaml` 의 `envFrom` 에 `secretRef: be-secret` 을 붙인다 — Secret 자리는 173 에서
+  이미 만들었다.
+- **로컬과 prod 가 같은 서울시 키를 쓴다.** 하루 1,000회 예산을 나눠 쓰므로 prod 수집기가 뜨면 로컬 수집기는
+  중단한다. AI 파트도 EC2 에서 D−1 승하차를 수집하므로(S15P21A104-201) 같은 키인지 확인이 필요하다.
+- **지하철 운영 창이 `10:00-15:30` 이다.** 발표가 그 밖이면 `collector.env` 의 `COLLECT_SUBWAY_WINDOW` 를
+  옮기고 다시 apply 한다. 폭(5시간 30분)은 유지해야 예산 안에 든다.
 
 ## 9. 밟은 함정
 
