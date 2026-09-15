@@ -269,7 +269,7 @@ public final class RouteTestFixtures {
         }
         lenient().when(registry.stationInfos()).thenReturn(infos);
         return new RouteSearchService(stationRepository, registry, new TransferRule(180),
-                new RailGeometryRegistry(null, null), noopWalkGeometryRegistry(),
+                new RailGeometryRegistry(null, null), noopWalkGeometryRegistry(), noopBikeGeometryRegistry(),
                 noopRouteLineRepository(), noopBusRouteRepository());
     }
 
@@ -279,6 +279,16 @@ public final class RouteTestFixtures {
      */
     public static WalkGeometryRegistry noopWalkGeometryRegistry() {
         return new WalkGeometryRegistry(new KakaoWalkDirectionsClient(new KakaoWalkProperties(null, null)));
+    }
+
+    /**
+     * 카카오 키 미설정 상태의 {@link com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry}.
+     * 실제 호출 없이 항상 빈 값을 준다(S15P21A104-222 — 키 발급 전 테스트 기본값).
+     */
+    public static com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry noopBikeGeometryRegistry() {
+        return new com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry(
+                new com.ssafy.s15p21a104.domain.route.bike.geometry.KakaoBikeDirectionsClient(
+                        new com.ssafy.s15p21a104.domain.route.bike.geometry.KakaoBikeProperties(null, null)));
     }
 
     /** 이름 조회가 필요 없는 테스트용 mock. {@code findAllById}는 기본값(빈 목록)을 준다(S15P21A104-150). */

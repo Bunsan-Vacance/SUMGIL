@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.domain.route.service;
 import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
 import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
+import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
@@ -76,6 +77,7 @@ public class RouteSearchService {
     private final TransferRule transferRule;
     private final RailGeometryRegistry railGeometryRegistry;
     private final WalkGeometryRegistry walkGeometryRegistry;
+    private final BikeGeometryRegistry bikeGeometryRegistry;
     private final RouteLineRepository routeLineRepository;
     private final BusRouteRepository busRouteRepository;
 
@@ -236,11 +238,17 @@ public class RouteSearchService {
         if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
             return leg;
         }
-        Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
-                ? walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
-                        leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
-                : railGeometryRegistry.geometryForLeg(
-                        leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        Optional<MultiLineStringResponse> geometry;
+        if (leg.mode() == TravelMode.WALK) {
+            geometry = walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
+                    leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        } else if (leg.mode() == TravelMode.BIKE) {
+            geometry = bikeGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
+                    leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        } else {
+            geometry = railGeometryRegistry.geometryForLeg(
+                    leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        }
         if (geometry.isEmpty()) {
             return leg;
         }

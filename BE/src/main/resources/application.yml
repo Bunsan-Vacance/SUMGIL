@@ -26,6 +26,9 @@ app:
   kakao:
     # 도보 경로 조회 REST API 키(S15P21A104-186). 비어 있으면 WALK geometry는 항상 unavailable.
     rest-api-key: ${KAKAO_REST_API_KEY:}
+  kakao-bike:
+    # 자전거 경로 조회(S15P21A104-222). 도보와 같은 카카오 앱·키를 그대로 쓴다(엔드포인트만 다름).
+    rest-api-key: ${KAKAO_REST_API_KEY:}
 
 management:
   endpoints:

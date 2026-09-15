@@ -70,7 +70,7 @@ class RouteSearchServiceWireTest {
                 new TransferRule.TransferKey("B", "L1", "L2"), 60));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
-                RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
     }
 
