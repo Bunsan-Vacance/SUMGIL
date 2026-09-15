@@ -235,10 +235,17 @@ Kafka ClusterIP 는 `10.43.134.226` 으로 이전과 같아 AI 쪽 `/etc/hosts` 
 
 ### 알아둘 것
 
-- **`be` 이미지가 함께 갱신된다.** 수집기 코드가 같은 이미지에 있어 재빌드가 필수인데, 그러면 A 파트의
-  카카오 도보 geometry 연동(`5862767`)도 포함된다. `be` Deployment 는 스펙이 안 바뀌어 재시작되지 않으므로
-  당장은 이전 이미지로 돌지만, **어떤 이유로든 `be` 가 재시작되면 새 이미지를 받고 `KAKAO_REST_API_KEY` 가
-  prod 에 없어 도보 geometry 호출이 실패한다.** 키 소유가 A 파트라 173 범위 밖으로 두고 별도 전달했다.
+- **`sumgil-be:latest` 가 함께 갱신된다 — `be` 재시작이 곧 185·186 배포다.** 수집기 코드가 같은 이미지에
+  있어 재빌드가 필수다. `be` Deployment 는 스펙이 안 바뀌어 재시작되지 않으므로 배포 후에도
+  **09-14 14:15 무렵 이미지(`sha256:f2c1e1cc…`)로 계속 돈다** — 185(14:51)·186(14:52)·ROUTE 통합(14:57)이
+  그 뒤라 지금 `be` 에는 좌표 기반 경로 검색·도보 geometry 코드가 없다. 올리는 시점은 A 파트가 정한다:
+  `sudo kubectl rollout restart deployment/be -n prod` (`apply.sh` 는 `latest` 재push 만으로 rollout 을
+  일으키지 않는다).
+- **`KAKAO_REST_API_KEY` 가 없는 것은 현재 정상이다.** `KakaoWalkProperties.isConfigured()` 가 키가 비면
+  카카오 호출 자체를 건너뛰고 빈 값을 돌려준다(186 주석: "원천 선정·쿼터·요금은 팀 합의 사항이라 실제 키는
+  아직 없다"). 키 없이 재시작해도 장애가 아니라 도보 구간 geometry 가 안 나오는 정도다. 키가 생기면
+  `be-secret` 에 넣고 `be.yaml` 의 `envFrom` 에 `secretRef: be-secret` 을 붙인다 — Secret 자리는 173 에서
+  이미 만들었다.
 - **로컬과 prod 가 같은 서울시 키를 쓴다.** 하루 1,000회 예산을 나눠 쓰므로 prod 수집기가 뜨면 로컬 수집기는
   중단한다. AI 파트도 EC2 에서 D−1 승하차를 수집하므로(S15P21A104-201) 같은 키인지 확인이 필요하다.
 - **지하철 운영 창이 `10:00-15:30` 이다.** 발표가 그 밖이면 `collector.env` 의 `COLLECT_SUBWAY_WINDOW` 를
