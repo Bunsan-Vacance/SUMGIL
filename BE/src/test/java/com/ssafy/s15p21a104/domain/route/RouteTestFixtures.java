@@ -213,14 +213,14 @@ public final class RouteTestFixtures {
     public static RouteLegResponse bikeLeg(String from) {
         return new RouteLegResponse(TravelMode.BIKE,
                 from, "출발", LAT, LNG, "C", "도착", LAT, LNG,
-                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable");
+                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable", null, null);
     }
 
     /** SUBWAY leg 응답 (게이트 판정용). */
     public static RouteLegResponse subwayLeg() {
         return new RouteLegResponse(TravelMode.SUBWAY,
                 "A", "출발", LAT, LNG, "C", "도착", LAT, LNG,
-                "L1", 15.0, null, "unavailable");
+                "L1", 15.0, null, "unavailable", null, null);
     }
 
     // 경계·혼합 OD 세트
@@ -269,7 +269,8 @@ public final class RouteTestFixtures {
         }
         lenient().when(registry.stationInfos()).thenReturn(infos);
         return new RouteSearchService(stationRepository, registry, new TransferRule(180),
-                new RailGeometryRegistry(null, null), noopWalkGeometryRegistry());
+                new RailGeometryRegistry(null, null), noopWalkGeometryRegistry(),
+                noopRouteLineRepository(), noopBusRouteRepository());
     }
 
     /**
@@ -278,5 +279,15 @@ public final class RouteTestFixtures {
      */
     public static WalkGeometryRegistry noopWalkGeometryRegistry() {
         return new WalkGeometryRegistry(new KakaoWalkDirectionsClient(new KakaoWalkProperties(null, null)));
+    }
+
+    /** 이름 조회가 필요 없는 테스트용 mock. {@code findAllById}는 기본값(빈 목록)을 준다(S15P21A104-150). */
+    public static com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository noopRouteLineRepository() {
+        return mock(com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository.class);
+    }
+
+    /** 이름 조회가 필요 없는 테스트용 mock. {@code findAllById}는 기본값(빈 목록)을 준다(S15P21A104-150). */
+    public static com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository noopBusRouteRepository() {
+        return mock(com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository.class);
     }
 }

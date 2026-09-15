@@ -60,7 +60,8 @@ class RouteSearchServiceTest {
                 new Edge("0222", "0221", "2", 300, 0, TravelMode.SUBWAY)));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
-                RouteTestFixtures.noopWalkGeometryRegistry());
+                RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
     }
 
     @Test
@@ -86,7 +87,8 @@ class RouteSearchServiceTest {
     void 미적재시_빈배열() {
         RouteSearchService unloaded = new RouteSearchService(
                 stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null),
-                RouteTestFixtures.noopWalkGeometryRegistry());
+                RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
 
         List<RouteSearchResponse> result = unloaded.search("0222", "0221", null, null, null);
 

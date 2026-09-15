@@ -76,7 +76,8 @@ public final class RouteMapper {
         }
 
         double totalMinutes = enginePath.totalSeconds() / 60.0;
-        return Optional.of(new RouteSearchResponse(routeType, totalMinutes, List.copyOf(legs), source));
+        return Optional.of(new RouteSearchResponse(
+                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount()));
     }
 
     /**
@@ -164,7 +165,8 @@ public final class RouteMapper {
         }
 
         double totalMinutes = enginePath.totalSeconds() / 60.0;
-        return Optional.of(new RouteSearchResponse(routeType, totalMinutes, List.copyOf(legs), source));
+        return Optional.of(new RouteSearchResponse(
+                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount()));
     }
 
     /** 환승역 자신의 출발·도착으로 환승 도보 leg를 만든다. */
@@ -176,7 +178,8 @@ public final class RouteMapper {
                 info.stationId(), info.name(), info.lat(), info.lng(),
                 info.stationId(), info.name(), info.lat(), info.lng(),
                 null, seconds / 60.0,
-                null, "unavailable");
+                null, "unavailable",
+                null, null);
     }
 
     private static List<EngineSegment> validate(
@@ -253,8 +256,10 @@ public final class RouteMapper {
                 to.stationId(), to.name(), to.lat(), to.lng(),
                 first.routeId(),
                 sum / 60.0,
-                // KTDB geometry는 RouteMapper가 모른다(DB 비의존 순수 함수) — RouteSearchService가 후처리로 채운다.
-                null, "unavailable"
+                // KTDB geometry·거리·노선명은 RouteMapper가 모른다(DB 비의존 순수 함수) —
+                // RouteSearchService가 후처리로 채운다.
+                null, "unavailable",
+                null, null
         );
     }
 
