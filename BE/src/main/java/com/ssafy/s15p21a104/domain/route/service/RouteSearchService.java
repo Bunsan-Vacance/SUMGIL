@@ -92,7 +92,12 @@ public class RouteSearchService {
         findStation(destStationId);
         // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
         DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
-        return filterByModes(algorithmCandidates(graph, originStationId, destStationId, departureSlot), modes);
+        List<RouteSearchResponse> candidates = algorithmCandidates(
+                graph, originStationId, destStationId, departureSlot);
+        // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
+        // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
+        // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다.
+        return relabelByRank(filterByModes(candidates, modes));
     }
 
     /**
@@ -100,8 +105,10 @@ public class RouteSearchService {
      *
      * <p>같은 최단경로 알고리즘을 조합 수만큼 서로 다른 하위 그래프에 적용할 뿐,
      * 알고리즘 자체는 그대로다. 조합마다 나온 후보 중 leg 구성이 같은 것은 중복 제거하고,
-     * 소요시간이 가장 짧은 것부터 정렬해 {@link RouteType#SHORTEST} 하나와 나머지
-     * {@link RouteType#ALTERNATIVE}로 표시한 뒤 최대 {@value #MAX_CANDIDATES}개까지만 담는다.
+     * 소요시간이 가장 짧은 것부터 정렬해 최대 {@value #MAX_CANDIDATES}개까지만 담는다.
+     * routeType 배정({@link RouteType#SHORTEST}/{@link RouteType#ALTERNATIVE})은 여기서
+     * 하지 않는다 — {@code modes} 필터가 아직 안 걸린 시점이라 "가장 빠른 것"이 필터 후에도
+     * 그대로 유지된다는 보장이 없다({@link #relabelByRank} 참고).
      */
     private List<RouteSearchResponse> algorithmCandidates(
             RouteGraph graph, String originStationId, String destStationId, DepartureSlot departureSlot) {
@@ -116,17 +123,25 @@ public class RouteSearchService {
                     .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
         }
 
-        List<RouteSearchResponse> sorted = byLegSignature.values().stream()
+        return byLegSignature.values().stream()
                 .sorted(Comparator.comparingDouble(RouteSearchResponse::totalMinutes))
                 .limit(MAX_CANDIDATES)
+                .map(this::withGeometry)
                 .toList();
+    }
 
+    /**
+     * 소요시간순으로 이미 정렬된 후보 목록의 첫 번째를 {@link RouteType#SHORTEST}로,
+     * 나머지를 {@link RouteType#ALTERNATIVE}로 다시 매긴다. {@code modes} 필터 "다음"에
+     * 호출해야 한다 — 필터로 원래 최단 후보가 빠져도 남은 것 중 첫 번째가 SHORTEST가 된다.
+     */
+    private List<RouteSearchResponse> relabelByRank(List<RouteSearchResponse> candidates) {
         List<RouteSearchResponse> ranked = new ArrayList<>();
-        for (int i = 0; i < sorted.size(); i++) {
-            RouteSearchResponse candidate = sorted.get(i);
+        for (int i = 0; i < candidates.size(); i++) {
+            RouteSearchResponse candidate = candidates.get(i);
             RouteType routeType = i == 0 ? RouteType.SHORTEST : RouteType.ALTERNATIVE;
-            ranked.add(withGeometry(new RouteSearchResponse(
-                    routeType, candidate.totalMinutes(), candidate.legs(), candidate.source())));
+            ranked.add(new RouteSearchResponse(
+                    routeType, candidate.totalMinutes(), candidate.legs(), candidate.source()));
         }
         return ranked;
     }
