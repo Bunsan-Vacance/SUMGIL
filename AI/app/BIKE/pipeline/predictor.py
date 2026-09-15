@@ -55,6 +55,10 @@ from app.BIKE.pipeline.lookup import StockProfileBaseline
 OUTPUT_COLS = ["rental_id", "dow_type", "time_slot", "exp_bikes", "p_empty", "p_full"]
 DATE_OUTPUT_COLS = ["rental_id", "pred_date", "time_slot", "exp_bikes", "p_empty", "p_full"]
 Z_90 = 1.2816
+KEY_COLS = ["rental_id", "dow_type", "time_slot"]
+VALUE_COLS = ["exp_bikes", "p_empty", "p_full"]
+DOW_TYPES = [0, 1, 2]
+TIME_SLOTS = list(range(48))
 
 
 @runtime_checkable
@@ -85,8 +89,54 @@ class AvgPredictor:
 
     def predict_all(self, target_date: date | None = None) -> pd.DataFrame:
         out = self.baseline.predict()
+        out = complete_station_fallback_grid(out)
         out["source"] = "avg"
-        return out.reindex(columns=[*OUTPUT_COLS, "source"])
+        return out.reindex(columns=[*OUTPUT_COLS, "source", "prediction_source"])
+
+
+def complete_station_fallback_grid(table: pd.DataFrame) -> pd.DataFrame:
+    """관측 대여소별 3×48 grid를 만들고 같은 대여소 내부 평균으로만 채운다."""
+    observed = table.reindex(columns=OUTPUT_COLS).copy()
+    observed = observed.dropna(subset=KEY_COLS)
+    observed = observed.drop_duplicates(subset=KEY_COLS, keep="last")
+
+    stations = sorted(observed["rental_id"].unique())
+    grid = pd.MultiIndex.from_product([stations, DOW_TYPES, TIME_SLOTS], names=KEY_COLS).to_frame(
+        index=False
+    )
+
+    out = grid.merge(observed, on=KEY_COLS, how="left")
+    observed_mask = out[VALUE_COLS].notna().all(axis=1)
+    out["prediction_source"] = pd.NA
+    out.loc[observed_mask, "prediction_source"] = "observed_avg"
+
+    station_time = (
+        observed.groupby(["rental_id", "time_slot"], as_index=False)[VALUE_COLS]
+        .mean()
+        .rename(columns={col: f"{col}_station_time" for col in VALUE_COLS})
+    )
+    out = out.merge(station_time, on=["rental_id", "time_slot"], how="left")
+    _fill_missing(out, "station_time", "station_time_fallback")
+
+    station_global = (
+        observed.groupby("rental_id", as_index=False)[VALUE_COLS]
+        .mean()
+        .rename(columns={col: f"{col}_station_global" for col in VALUE_COLS})
+    )
+    out = out.merge(station_global, on="rental_id", how="left")
+    _fill_missing(out, "station_global", "station_global_fallback")
+
+    return out.reindex(columns=[*OUTPUT_COLS, "prediction_source"])
+
+
+def _fill_missing(frame: pd.DataFrame, suffix: str, prediction_source: str) -> None:
+    missing = frame[VALUE_COLS].isna().any(axis=1)
+    fallback_cols = [f"{col}_{suffix}" for col in VALUE_COLS]
+    available = frame[fallback_cols].notna().all(axis=1)
+    mask = missing & available
+    for col in VALUE_COLS:
+        frame.loc[mask, col] = frame.loc[mask, f"{col}_{suffix}"]
+    frame.loc[mask, "prediction_source"] = prediction_source
 
 
 class LightGBMPredictor:
