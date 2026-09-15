@@ -83,7 +83,8 @@ class RouteSearchIntegrationTest {
                 subway("B", "C", "L1", 100)));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180),
-                new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry());
+                new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
     }
 
     @Test

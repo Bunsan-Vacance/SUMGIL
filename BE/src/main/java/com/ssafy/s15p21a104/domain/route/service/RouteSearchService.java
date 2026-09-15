@@ -1,5 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
+import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
+import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
@@ -18,12 +20,15 @@ import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
+import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
+import com.ssafy.s15p21a104.domain.station.entity.Line;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
+import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -70,6 +76,8 @@ public class RouteSearchService {
     private final TransferRule transferRule;
     private final RailGeometryRegistry railGeometryRegistry;
     private final WalkGeometryRegistry walkGeometryRegistry;
+    private final RouteLineRepository routeLineRepository;
+    private final BusRouteRepository busRouteRepository;
 
     public List<RouteSearchResponse> search(
             String originStationId,
@@ -82,10 +90,11 @@ public class RouteSearchService {
             throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
         }
 
-        // 그래프 미로드(미적재) 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
+        // 그래프 미적재는 "경로 없음"(빈 배열)과 다른 상태다 — FE-175 항목9 지적사항.
+        // 데이터가 아예 없어서 계산 자체를 못 한 것이므로 503으로 구분해 알린다.
         RouteGraph graph = graphRegistry == null ? null : graphRegistry.graph();
         if (graph == null) {
-            return List.of();
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
 
         findStation(originStationId);
@@ -96,8 +105,9 @@ public class RouteSearchService {
                 graph, originStationId, destStationId, departureSlot);
         // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
         // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
-        // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다.
-        return relabelByRank(filterByModes(candidates, modes));
+        // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
+        // 후보 수가 줄어든 다음(필터+재라벨링 이후)에 배치로 붙인다(FE-175 항목8).
+        return withRouteNames(relabelByRank(filterByModes(candidates, modes)));
     }
 
     /**
@@ -134,6 +144,9 @@ public class RouteSearchService {
      * 소요시간순으로 이미 정렬된 후보 목록의 첫 번째를 {@link RouteType#SHORTEST}로,
      * 나머지를 {@link RouteType#ALTERNATIVE}로 다시 매긴다. {@code modes} 필터 "다음"에
      * 호출해야 한다 — 필터로 원래 최단 후보가 빠져도 남은 것 중 첫 번째가 SHORTEST가 된다.
+     *
+     * <p>geometry·거리는 {@link #algorithmCandidates}에서 이미 붙어 있으므로 여기서 다시
+     * 계산하지 않는다 — 다시 부르면 카카오 도보 API를 후보마다 한 번 더 호출하게 된다.
      */
     private List<RouteSearchResponse> relabelByRank(List<RouteSearchResponse> candidates) {
         List<RouteSearchResponse> ranked = new ArrayList<>();
@@ -141,7 +154,8 @@ public class RouteSearchService {
             RouteSearchResponse candidate = candidates.get(i);
             RouteType routeType = i == 0 ? RouteType.SHORTEST : RouteType.ALTERNATIVE;
             ranked.add(new RouteSearchResponse(
-                    routeType, candidate.totalMinutes(), candidate.legs(), candidate.source()));
+                    routeType, candidate.totalMinutes(), candidate.legs(), candidate.source(),
+                    candidate.totalDistanceMeters(), candidate.transferCount()));
         }
         return ranked;
     }
@@ -213,7 +227,9 @@ public class RouteSearchService {
         List<RouteLegResponse> legs = response.legs().stream()
                 .map(this::withGeometry)
                 .toList();
-        return new RouteSearchResponse(response.routeType(), response.totalMinutes(), legs, response.source());
+        return new RouteSearchResponse(
+                response.routeType(), response.totalMinutes(), legs, response.source(),
+                totalDistanceOf(legs), response.transferCount());
     }
 
     private RouteLegResponse withGeometry(RouteLegResponse leg) {
@@ -233,7 +249,96 @@ public class RouteSearchService {
                 leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
                 leg.routeId(), leg.minutes(),
-                geometry.get(), "available"
+                geometry.get(), "available",
+                distanceOf(geometry.get()), leg.routeName()
+        );
+    }
+
+    /**
+     * geometry 좌표를 따라 실제 이동 거리를 더한다(FE-175 항목8). geometry가 없으면(직선거리로
+     * 대체하지 않고) 호출하지 않는다 — {@link #withGeometry(RouteLegResponse)}에서만 쓴다.
+     */
+    private double distanceOf(MultiLineStringResponse geometry) {
+        double total = 0;
+        for (List<List<Double>> line : geometry.coordinates()) {
+            for (int i = 0; i + 1 < line.size(); i++) {
+                List<Double> from = line.get(i);
+                List<Double> to = line.get(i + 1);
+                total += GeoDistance.haversineMeters(from.get(1), from.get(0), to.get(1), to.get(0));
+            }
+        }
+        return total;
+    }
+
+    /** legs 전부가 distanceMeters를 확보한 경우에만 합을 낸다. 하나라도 없으면 null(FE-175 항목8). */
+    private Double totalDistanceOf(List<RouteLegResponse> legs) {
+        double sum = 0;
+        for (RouteLegResponse leg : legs) {
+            if (leg.distanceMeters() == null) {
+                return null;
+            }
+            sum += leg.distanceMeters();
+        }
+        return sum;
+    }
+
+    /**
+     * 사람이 읽는 노선 이름을 배치로 붙인다(FE-175 항목8). SUBWAY는 {@code line.name},
+     * BUS는 {@code bus_route.name} — 그 외 수단은 의미 있는 노선명이 없어 null로 둔다.
+     */
+    private List<RouteSearchResponse> withRouteNames(List<RouteSearchResponse> responses) {
+        Set<String> subwayLineIds = new HashSet<>();
+        Set<String> busRouteIds = new HashSet<>();
+        for (RouteSearchResponse response : responses) {
+            for (RouteLegResponse leg : response.legs()) {
+                if (leg.routeId() == null) {
+                    continue;
+                }
+                if (leg.mode() == TravelMode.SUBWAY) {
+                    subwayLineIds.add(leg.routeId());
+                } else if (leg.mode() == TravelMode.BUS) {
+                    busRouteIds.add(leg.routeId());
+                }
+            }
+        }
+        Map<String, String> lineNames = new HashMap<>();
+        for (Line line : routeLineRepository.findAllById(subwayLineIds)) {
+            lineNames.put(line.getLineId(), line.getName());
+        }
+        Map<String, String> busNames = new HashMap<>();
+        for (BusRoute busRoute : busRouteRepository.findAllById(busRouteIds)) {
+            busNames.put(busRoute.getRouteId(), busRoute.getName());
+        }
+
+        List<RouteSearchResponse> named = new ArrayList<>();
+        for (RouteSearchResponse response : responses) {
+            List<RouteLegResponse> legs = response.legs().stream()
+                    .map(leg -> withRouteName(leg, lineNames, busNames))
+                    .toList();
+            named.add(new RouteSearchResponse(
+                    response.routeType(), response.totalMinutes(), legs, response.source(),
+                    response.totalDistanceMeters(), response.transferCount()));
+        }
+        return named;
+    }
+
+    private RouteLegResponse withRouteName(
+            RouteLegResponse leg, Map<String, String> lineNames, Map<String, String> busNames) {
+        String routeName = switch (leg.mode()) {
+            case SUBWAY -> lineNames.get(leg.routeId());
+            case BUS -> busNames.get(leg.routeId());
+            default -> null;
+        };
+        if (routeName == null) {
+            return leg;
+        }
+        return new RouteLegResponse(
+                leg.mode(),
+                leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
+                leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
+                leg.routeId(), leg.minutes(),
+                leg.geometry(), leg.geometryStatus(),
+                leg.distanceMeters(), routeName
         );
     }
 
