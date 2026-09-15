@@ -143,7 +143,37 @@ DL은 `seq_days`=14). 배치는 `max(HISTORY_DAYS, predictor.required_history_da
 **lookup을 넘는다**(144 V0은 −7.9 / −3.9였다). 그래서 "이력이 전무하면 lookup"이라는 143 규칙의 대체 후보가
 처음으로 생겼다. 가용성별 예측기 선택(이력 완비 → LightGBM, 결손·전무 → GRU)은 여전히 145 판정 사항이다.
 
-## 5. 이 코드들이 바뀌는 경우
+## 5. 변환 층 산출물 — 배율표도 아티팩트처럼 추적한다
+
+모델만 버전이 있는 게 아니다. **배율표(`data/CROWD/processed/crowd_congestion_calibration.parquet`)는
+모든 혼잡도 산출의 승수**라, 이게 바뀌면 같은 모델·같은 승하차에서도 화면 값이 통째로 바뀐다.
+그래서 199부터 모델 아티팩트와 같은 수준으로 추적한다 — 옆에 `crowd_congestion_calibration.meta.json`을
+동봉하고, 이전 파일은 `data/CROWD/processed/_archive/`로 옮긴다(둘 다 gitignore).
+
+| 항목 | 값(현행) |
+| --- | --- |
+| 변형 코드 | `branch_anchored-segment1_all` (199 채택 = A1 + B1s + C1) |
+| 적합 스냅샷판 | 2025-11-30판(서울 열린데이터광장 OA-12928, 142 §1에서 식별) |
+| 승하차 창 | `all` — 2024-01-01 ~ 2026-01-31(762일) |
+| 방향 대응 | `congestion.BRANCH_DIRECTION_MAP`(146) — 성수지선 하선→외선 / 신정지선 하선→내선, 분기역 제외 |
+| 경계 처리 | B1s — 절단 구간 raw에 경계 유입 상수 주입(`raw_offset` 컬럼), `anchored` 적합·구간 전체 |
+| 행 / 결측 | 67,145 / 3,103 |
+| sha256 | `f315a207…` (이전 `163b5318…`) |
+
+`meta.json`에 들어가는 키: `ticket, snapshot_release, snapshot_source, label_source, ridership_window,
+direction_mapping, boundary_variant, variant, variant_code, rows, ratio_defined, ratio_missing,
+diagnostics, previous_sha256, previous_archived_as, generated_at, sha256`.
+
+**언제 다시 만드나** — 새 연도판 스냅샷이 나왔을 때(분기 갱신), 승하차 원천이 연장·개통·집계 정의
+변화로 끊겼을 때(142 §4), 적합 규칙을 바꿀 때. 명령은
+`python -m DATA_ENGINE.eda.build_congestion_calibration`(변형은 `--variant`, 88 현행 재현은
+`--variant current`)이고, 하류 `crowd_congestion_label_calibrated_2024_2026.parquet`도 같이 다시 만든다.
+
+out-of-sample 성능(연도 홀드아웃)은 셀 MAE 2.147(2023→2024) / 1.428(2024→2025)%p, 등급 일치율
+96.776 / 97.965%다 — 수치 원본은 `validation/CROWD/calibration-refit/RESULTS.md`(199)와
+`calibration-holdout/RESULTS.md`(142).
+
+## 6. 이 코드들이 바뀌는 경우
 
 - 세트 정의가 바뀌면 `FEATURE_SETS`에 **새 이름을 추가**하고 옛 이름은 남긴다(기록·재현). 파생 규칙이 바뀌면 `DERIVED_VERSION`을 올린다.
 - 배포 세트 교체는 `train.py` 기본값 + 이 문서 2·3절 + 해당 RESULTS.md 판정이 한 커밋.

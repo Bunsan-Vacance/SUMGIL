@@ -28,15 +28,30 @@
 전부 "휴일" 하나로 묶어 맞춘다 — 이건 추정이 아니라 원천이 스스로 쓰는 정의를 그대로
 따르는 것이다.
 
-## 알려진 잔여 결측 — 2호선 지선의 방향 라벨 스킴이 다르다
+## 199 — 변형(`CalibrationVariant`)으로 적합 규칙을 고른다
 
-스냅샷은 2호선을 본선·지선 구분 없이 54역 전부 **내선/외선**으로만 보고한다(2026-09-10
-대조 확인). 그런데 `line_topology.yaml`의 성수지선·신정지선은 `circular` 플래그가 없어
-`build_congestion_label.py`가 상선/하선으로 계산한다 — 그 결과 지선 역(용답·신답·신설동·
-도림천·양천구청·신정네거리 등) 3,393행이 매칭 실패로 남는다. 이건 수치 오류가 아니라
-**방향 라벨 체계 자체가 다른 것**이라 여기서 임의로 맞추지 않는다(원칙 1) — 지선을
-순환선으로 취급할지 여부는 `line_topology.yaml`/`build_congestion_label.py` 쪽에서
-따로 판단할 문제라 이 모듈의 스코프 밖에 남겨 둔다.
+88이 "이 모듈의 스코프 밖"으로 남겼던 두 결측 원인을 199가 여기서 푼다. 규칙을 상수로 박지 않고
+`CalibrationVariant`로 받아, `validation/CROWD/calibration-refit/`가 **같은 심판(홀드아웃·등급
+일치율·`data_status`)으로 후보를 재고** 채택안을 기본값으로 둔다. 현행(88) 재현은
+`CalibrationVariant.current()`다 — 바이트 단위로 같은 표가 나온다.
+
+- **2호선 지선 방향 대응(`branch_direction_map`).** 스냅샷은 2호선 54역 전부를 **내/외선**으로
+  보고하는데(2026-09-10 대조 확인) `line_topology.yaml`의 성수·신정지선은 `circular`가 아니라
+  재귀식이 **상/하선**으로 계산한다 → 조인 공집합. 146이 두 지선의 대응이 서로 반대임을 실측
+  출퇴근 비대칭·상관으로 확정해 `congestion.BRANCH_DIRECTION_MAP`에 고정했다. 그 대응표를 여기
+  조인 직전에 적용한다(라벨 파일은 건드리지 않는다).
+- **절단면 경계 유입(`boundary_inflow`).** `truncated: true` 구간은 절단면 바깥에서 들어와
+  구간을 통과하는 승객이 있는데 재귀식은 닫힌 OD를 가정해 그 승객을 못 본다 — 진행방향 끝
+  링크의 재차가 정의상 0이 되어 배율이 산출조차 안 된다. 146 §4-C가 `meas ≈ s·raw + c` 적합에서
+  상수항이 정원의 20~30%로 실재함을 확인했다. 여기서는 그 상수를 **정원 % 단위(`c/s`)로 환산해
+  raw에 더한 뒤 배율을 다시 적합**하고, 더한 양을 `raw_offset` 컬럼으로 표에 같이 싣는다.
+  서빙(`congestion.apply_calibration`)은 `(raw + raw_offset) × ratio`를 계산하므로 오프셋 0인
+  표에서는 기존과 완전히 같다. 146 §4-D의 (a)가 실패한 이유(기존 배율표 위에 상수를 더한 이중
+  계상)는 여기서 생기지 않는다 — 상수를 넣은 raw로 배율을 **다시** 적합하기 때문이다.
+- **적합 창(`fit_window`).** 스냅샷 기준일과 승하차 평균 창의 어긋남(142 §2-B·§6)을 고르는 축이다.
+
+진짜 종점(6호선 응암 순환 시작, 5호선 지선 종점 등)은 재차 0이 **정답**이라 대상이 아니다 —
+`truncated` 플래그가 붙은 구간만 본다.
 
 ## 9호선 스냅샷은 (station, direction, day_type, time_slot) 키가 원래 중복이다
 
@@ -66,16 +81,24 @@ XLSX 원본(9호선 혼잡도 자료)에 역명만 있고 역번호 컬럼이 �
 
 실행:
     cd AI
-    python -m DATA_ENGINE.eda.build_congestion_calibration
+    python -m DATA_ENGINE.eda.build_congestion_calibration            # 채택 변형(기본값)
+    python -m DATA_ENGINE.eda.build_congestion_calibration --variant current   # 88 현행 재현
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
+import json
 import re
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
 
+from app.CROWD.pipeline.congestion import bucket_direction
+from DATA_ENGINE.eda.boundary_inflow import boundary_offsets
 from DATA_ENGINE.eda.build_crowd_panel import attach_calendar
 from DATA_ENGINE.eda.parsers_crowd_line9_daily_ridership import load_station_master
 
@@ -87,6 +110,10 @@ LABEL_NAME = "crowd_congestion_label_2024_2026.parquet"
 SNAPSHOT_NAME = "crowd_congestion_long.parquet"
 OUTPUT_NAME = "crowd_congestion_calibration.parquet"
 OUTPUT_NAME_EXPRESS = "crowd_congestion_calibration_express.parquet"
+ARCHIVE_DIR = CROWD_PROCESSED / "_archive"
+
+# 배율표가 선 실측 스냅샷의 기준일(142 1절에서 2025-11-30판과 완전 일치함을 확인).
+SNAPSHOT_RELEASE = "2025-11-30"
 
 # 9호선 스냅샷의 day_type 정의를 그대로 따른다 — 주말+공휴일을 "휴일" 하나로 묶는다.
 _LINE9_DAY_TYPE_BUCKET = {"평일": "평일", "토요일": "휴일", "일요일": "휴일", "휴일": "휴일"}
@@ -101,6 +128,87 @@ _LINE2_BRANCH_STATIONS = {211, 244, 245, 250, 246, 234, 247, 248, 249}
 _LINE9_CALIBRATION_YEAR = 2025
 
 _SLOT_PATTERN = re.compile(r"^(\d{2}):(\d{2})$")
+
+
+@dataclass(frozen=True)
+class CalibrationVariant:
+    """배율 적합 규칙의 축 세 개(199). 후보 비교와 재생성이 같은 코드를 쓰게 하는 장치다.
+
+    - `branch_direction_map` — 2호선 지선의 상/하선을 스냅샷의 내/외선으로 옮기고 조인한다(A1).
+    - `boundary_inflow` / `boundary_scale` — 절단 구간에 경계 유입 상수를 주입한 raw로 재적합한다(B1).
+      `boundary_scale=0.0`이면 상수가 전부 0이라 **주입하지 않은 표와 바이트 단위로 같다**(테스트로 고정).
+    - `fit_window` — raw 평균을 낼 승하차 날짜 창. `all`(현행) / `snapshot_year`(스냅샷 기준일의
+      연도만) / `snapshot_season`(기준일 ±`window_weeks`주).
+    """
+
+    branch_direction_map: bool = True
+    boundary_inflow: bool = True
+    boundary_method: str = "anchored"
+    boundary_apply: str = "segment"
+    boundary_scale: float = 1.0
+    fit_window: str = "all"
+    snapshot_release: str = SNAPSHOT_RELEASE
+    window_weeks: int = 13
+
+    @classmethod
+    def current(cls) -> CalibrationVariant:
+        """88이 만든 현행 표를 그대로 재현하는 설정 — 모든 비교의 기준선."""
+        return cls(branch_direction_map=False, boundary_inflow=False, fit_window="all")
+
+    @property
+    def code(self) -> str:
+        parts = [
+            "branch" if self.branch_direction_map else "nobranch",
+            (
+                f"{self.boundary_method}-{self.boundary_apply}{self.boundary_scale:g}"
+                if self.boundary_inflow
+                else "noinflow"
+            ),
+            self.fit_window,
+        ]
+        return "_".join(parts)
+
+
+def fit_window_mask(dates: pd.Series, variant: CalibrationVariant) -> pd.Series:
+    """적합 창 — raw 평균에 넣을 승하차 날짜를 고른다.
+
+    `snapshot_season`은 스냅샷 기준일 ±`window_weeks`주다. 기준일 주변만 남기면 계절이 맞는 대신
+    셀당 표본이 줄어 분산이 커진다 — 어느 쪽이 나은지는 홀드아웃이 판정한다(142 §6 미해결).
+    """
+    if variant.fit_window == "all":
+        return pd.Series(True, index=dates.index)
+    ref = pd.Timestamp(variant.snapshot_release)
+    if variant.fit_window == "snapshot_year":
+        return dates.dt.year == ref.year
+    if variant.fit_window == "snapshot_season":
+        span = pd.Timedelta(weeks=variant.window_weeks)
+        return (dates >= ref - span) & (dates <= ref + span)
+    raise ValueError(f"알 수 없는 적합 창: {variant.fit_window!r}")
+
+
+def attach_boundary_offset(
+    merged: pd.DataFrame, labels: pd.DataFrame, variant: CalibrationVariant
+) -> pd.DataFrame:
+    """`merged`에 `raw_offset`을 붙인다 — 절단 구간만 값이 있고 나머지는 0이다(199 B).
+
+    상수 적합은 `DATA_ENGINE/eda/boundary_inflow.py`에 있고, 연도 홀드아웃 하네스도 같은 함수를
+    쓴다. 끄면(`boundary_inflow=False`) 전 셀 0이라 88 현행 표와 수치가 같다.
+    """
+    out = merged.copy()
+    if not variant.boundary_inflow:
+        out["raw_offset"] = 0.0
+        return out
+    cell_key = ["station_no", "direction", "day_type", "time_slot"]
+    offsets = boundary_offsets(
+        out,
+        available=set(labels["station_no"].astype("int64").unique()),
+        method=variant.boundary_method,
+        apply_to=variant.boundary_apply,
+        scale=variant.boundary_scale,
+    )
+    return out.merge(offsets, on=cell_key, how="left").assign(
+        raw_offset=lambda f: f["raw_offset"].fillna(0.0)
+    )
 
 
 def dedupe_snapshot_keys(snapshot: pd.DataFrame, line9_train_type: str = "일반") -> pd.DataFrame:
@@ -174,16 +282,30 @@ def bucket_day_type(line: pd.Series, day_type: pd.Series) -> pd.Series:
     return bucketed
 
 
-def raw_hourly_mean(labels: pd.DataFrame) -> pd.DataFrame:
+def raw_hourly_mean(
+    labels: pd.DataFrame, variant: CalibrationVariant | None = None
+) -> pd.DataFrame:
     """(station_no, direction, line, day_type_bucket, time_slot) 별 raw 평균과 표본 날짜 수.
 
     `crowd_congestion_label_2024_2026.parquet`에는 `day_type`이 없다 — 승하차 패널과
     달리 재귀식 결과는 (date, station_no, ...) 원자 단위라 요일유형을 안 들고 있어서,
     `build_crowd_panel.attach_calendar`로 `date`에서 다시 파생한다.
+
+    `variant.branch_direction_map`이 켜지면 2호선 지선의 상/하선을 **조인 직전에** 내/외선으로
+    옮긴다(146 대응표). 라벨 파일은 그대로 두고 여기서만 접는 것이라, 88·146이 낸 라벨 수치는
+    흔들리지 않는다. `variant.fit_window`는 평균에 넣을 날짜를 좁힌다.
     """
+    variant = variant or CalibrationVariant()
     frame = attach_calendar(labels.copy())
+    frame = frame[fit_window_mask(frame["date"], variant)]
     frame["day_type_bucket"] = bucket_day_type(frame["line"], frame["day_type"])
     frame = frame.dropna(subset=["day_type_bucket"])
+    if variant.branch_direction_map:
+        frame["direction"] = bucket_direction(
+            frame["segment"] if "segment" in frame.columns else None,
+            frame["direction"],
+            frame["station_no"],
+        )
 
     grouped = frame.groupby(
         ["station_no", "direction", "line", "day_type_bucket", "time_slot"], observed=True
@@ -193,13 +315,17 @@ def raw_hourly_mean(labels: pd.DataFrame) -> pd.DataFrame:
 
 def build_calibration_ratio(
     line9_train_type: str = "일반",
+    variant: CalibrationVariant | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """배율표를 만든다. `line9_train_type`을 `"급행"`으로 주면 급행 6역용 배율표가 된다.
 
     두 호출 모두 같은 raw 평균(분모, 재귀식은 열차 종류를 구분하지 않는다)을 쓰고
     분자(실측)만 갈라서 계산한다 — "raw가 실제로 몇 배 과대한가"를 일반·급행 두
     시선으로 각각 보는 것이다. 하나가 다른 하나에서 유도되는 관계가 아니다.
+
+    `variant`가 적합 규칙(지선 방향 대응·경계 유입·적합 창)을 정한다 — 모듈 docstring 참고.
     """
+    variant = variant or CalibrationVariant()
     labels = pd.read_parquet(CROWD_PROCESSED / LABEL_NAME)
     snapshot = pd.read_parquet(CROWD_INTERIM / SNAPSHOT_NAME)
 
@@ -216,7 +342,7 @@ def build_calibration_ratio(
             "남아 있다 — 배율표가 조인 시 행 수를 부풀린다. 원인을 먼저 확인할 것."
         )
 
-    raw_mean = raw_hourly_mean(labels)
+    raw_mean = raw_hourly_mean(labels, variant)
 
     merged = snapshot.merge(
         raw_mean,
@@ -225,14 +351,17 @@ def build_calibration_ratio(
         how="left",
         suffixes=("", "_raw"),
     )
-    merged["ratio"] = merged["congestion_pct"] / merged["raw_mean"]
-    # raw_mean이 0이면 나눗셈이 inf가 된다 — 0으로 나눈 결과는 배율이 아니라 결측이다.
-    merged.loc[merged["raw_mean"] == 0, "ratio"] = pd.NA
+    merged = attach_boundary_offset(merged, labels, variant)
+    fitted_raw = merged["raw_mean"] + merged["raw_offset"]
+    merged["ratio"] = merged["congestion_pct"] / fitted_raw
+    # 더해 준 뒤에도 0이면 나눗셈이 inf가 된다 — 0으로 나눈 결과는 배율이 아니라 결측이다.
+    merged.loc[fitted_raw == 0, "ratio"] = pd.NA
 
     diagnostics = {
         "스냅샷_행": len(snapshot),
         "raw_평균_매칭_실패": int(merged["raw_mean"].isna().sum()),
         "배율_계산됨": int(merged["ratio"].notna().sum()),
+        "경계_유입_주입_셀": int((merged["raw_offset"] > 0).sum()),
     }
 
     cols = [
@@ -247,6 +376,8 @@ def build_calibration_ratio(
         "n_dates",
         "ratio",
     ]
+    if variant.boundary_inflow:
+        cols.append("raw_offset")
     return merged[cols], diagnostics
 
 
@@ -255,6 +386,76 @@ def save_calibration(ratio: pd.DataFrame, output_name: str = OUTPUT_NAME) -> Pat
     out_path = CROWD_PROCESSED / output_name
     ratio.to_parquet(out_path, index=False)
     return out_path
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def archive_previous(path: Path) -> Path | None:
+    """이전 산출물을 `processed/_archive/`로 옮긴다 — 덮어쓰기 전에 되돌릴 수 있게 남긴다.
+
+    `_archive/`는 `data/` 아래라 gitignore 대상이다(용량·재생성 가능). 파일명에 이전 파일의
+    수정 시각을 붙여 여러 벌이 겹치지 않게 한다.
+    """
+    if not path.exists():
+        return None
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime("%Y%m%d-%H%M%S")
+    target = ARCHIVE_DIR / f"{path.stem}_{stamp}{path.suffix}"
+    path.replace(target)
+    return target
+
+
+def calibration_meta(
+    ratio: pd.DataFrame,
+    variant: CalibrationVariant,
+    diagnostics: dict[str, int],
+    previous_sha256: str | None,
+    previous_archived: str | None,
+) -> dict:
+    """`crowd_congestion_calibration.meta.json` 내용 — 이 표가 무엇으로 만들어졌는지(199 규칙 1).
+
+    배율표는 모든 혼잡도 산출의 승수라 모델 아티팩트와 같은 수준으로 추적한다
+    (`app/CROWD/pipeline/MODEL_REGISTRY.md` "변환 층 산출물").
+    """
+    labels_path = CROWD_PROCESSED / LABEL_NAME
+    dates = pd.read_parquet(labels_path, columns=["date"])["date"]
+    kept = dates[fit_window_mask(dates, variant)]
+    return {
+        "ticket": "S15P21A104-199",
+        "snapshot_release": variant.snapshot_release,
+        "snapshot_source": str(CROWD_INTERIM / SNAPSHOT_NAME),
+        "label_source": str(labels_path),
+        "ridership_window": {
+            "mode": variant.fit_window,
+            "window_weeks": variant.window_weeks if variant.fit_window else None,
+            "start": str(kept.min().date()) if len(kept) else None,
+            "end": str(kept.max().date()) if len(kept) else None,
+            "n_dates": int(kept.dt.normalize().nunique()),
+        },
+        "direction_mapping": (
+            "congestion.BRANCH_DIRECTION_MAP(146) — 성수지선 하선→외선 / 신정지선 하선→내선, "
+            "분기역(211·234) 제외"
+            if variant.branch_direction_map
+            else "없음(88 현행) — 2호선 지선은 상/하선 그대로라 조인이 공집합"
+        ),
+        "boundary_variant": (
+            f"B1 경계 유입 주입(정원 % 단위, scale={variant.boundary_scale:g}) — "
+            "truncated 구간만, 9호선 제외"
+            if variant.boundary_inflow
+            else "B3 현행 유지 — 경계 셀은 ratio NaN"
+        ),
+        "variant": asdict(variant),
+        "variant_code": variant.code,
+        "rows": len(ratio),
+        "ratio_defined": int(ratio["ratio"].notna().sum()),
+        "ratio_missing": int(ratio["ratio"].isna().sum()),
+        "diagnostics": diagnostics,
+        "previous_sha256": previous_sha256,
+        "previous_archived_as": previous_archived,
+        "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+    }
 
 
 def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_path: Path) -> None:
@@ -278,7 +479,19 @@ def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_pa
         )
     zero_raw = ratio[ratio["raw_mean"] == 0]
     if len(zero_raw):
-        print(f"  raw 평균이 0이라 배율을 정의할 수 없어 제외한 행: {len(zero_raw):,}행")
+        rescued = int(zero_raw["ratio"].notna().sum())
+        print(
+            f"  raw 평균이 0인 행: {len(zero_raw):,}행 "
+            f"(그중 경계 유입 주입으로 배율이 정의된 행 {rescued:,})"
+        )
+    if "raw_offset" in ratio.columns:
+        injected = ratio[ratio["raw_offset"] > 0]
+        print(
+            f"  경계 유입 주입 셀 {len(injected):,}행 · 상수 중위 "
+            f"{injected['raw_offset'].median():.1f}% 정원"
+            if len(injected)
+            else "  경계 유입 주입 셀 없음"
+        )
     print("[배율 분포] 호선별 요약:")
     print(
         ratio.dropna(subset=["ratio"])
@@ -290,15 +503,57 @@ def _report(label: str, ratio: pd.DataFrame, diagnostics: dict[str, int], out_pa
     print(f"저장 완료: {out_path} ({len(ratio):,}행)")
 
 
-def main() -> None:
-    local_ratio, local_diag = build_calibration_ratio(line9_train_type="일반")
+VARIANT_PRESETS: dict[str, CalibrationVariant] = {
+    "adopted": CalibrationVariant(),
+    "current": CalibrationVariant.current(),
+    "branch_only": CalibrationVariant(boundary_inflow=False),
+    "branch_year": CalibrationVariant(boundary_inflow=False, fit_window="snapshot_year"),
+    "branch_season": CalibrationVariant(boundary_inflow=False, fit_window="snapshot_season"),
+}
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--variant", default="adopted", choices=sorted(VARIANT_PRESETS))
+    ap.add_argument(
+        "--boundary-scale",
+        type=float,
+        default=None,
+        help="경계 유입 상수의 배수(0이면 주입하지 않은 표와 같은 수치가 나온다)",
+    )
+    ap.add_argument("--no-archive", action="store_true", help="이전 산출물을 옮기지 않는다")
+    args = ap.parse_args(argv)
+
+    variant = VARIANT_PRESETS[args.variant]
+    if args.boundary_scale is not None:
+        variant = replace(variant, boundary_scale=args.boundary_scale)
+
+    local_path = CROWD_PROCESSED / OUTPUT_NAME
+    previous_sha = sha256_of(local_path) if local_path.exists() else None
+
+    local_ratio, local_diag = build_calibration_ratio(line9_train_type="일반", variant=variant)
+    archived = None if args.no_archive else archive_previous(local_path)
     local_path = save_calibration(local_ratio, OUTPUT_NAME)
-    _report("일반", local_ratio, local_diag, local_path)
+    meta = calibration_meta(
+        local_ratio, variant, local_diag, previous_sha, archived.name if archived else None
+    )
+    meta["sha256"] = sha256_of(local_path)
+    local_path.with_suffix(".meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    _report(f"일반 · 변형 {variant.code}", local_ratio, local_diag, local_path)
+    print(f"메타: {local_path.with_suffix('.meta.json')}")
+    if archived:
+        print(f"이전 표 보관: {archived}")
 
     # 급행은 9호선에만 있는 개념이라(1~8호선은 train_type 자체가 없다) dedupe_snapshot_keys가
     # 1~8호선 행을 그대로 통과시켜도, 여기서는 9호선만 남긴다 — "급행" 산출물에 급행이
-    # 없는 호선의 행이 섞여 있으면 헷갈린다.
-    express_ratio, _ = build_calibration_ratio(line9_train_type="급행")
+    # 없는 호선의 행이 섞여 있으면 헷갈린다. 9호선은 199 스코프 밖이라 변형을 적용하지 않는다.
+    express_ratio, _ = build_calibration_ratio(
+        line9_train_type="급행", variant=CalibrationVariant.current()
+    )
     express_ratio = express_ratio[express_ratio["line"] == "9호선"].reset_index(drop=True)
     express_diag = {
         "스냅샷_행": len(express_ratio),

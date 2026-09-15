@@ -175,13 +175,25 @@ uvicorn app.main:app --port 8000
 - 예측기는 `app/CROWD/pipeline/predictor.py`의 `Predictor` 인터페이스로 갈아 끼운다. `CROWD_PREDICTOR`
   설정값 `auto`(기본)는 아티팩트가 있으면 `lightgbm`, 없으면 `lookup`(요일유형×역×시간대 평균)이다.
   `llm`은 자리만 있고 `CROWD_LLM_API_KEY`가 설정되면 구현한다.
+- **변환 층(승하차 → 혼잡도)에도 버전이 있다.** 예측 승하차를 화면 값으로 바꾸는 것은 재귀식과
+  **배율표**(`data/CROWD/processed/crowd_congestion_calibration.parquet`)인데, 배율표는 모든 셀의
+  승수라 갈아 끼우면 같은 모델·같은 승하차에서도 값이 통째로 바뀐다. 그래서 모델 아티팩트와 같은
+  수준으로 추적한다 — 옆에 `crowd_congestion_calibration.meta.json`(적합 스냅샷판·승하차 창·방향 대응
+  규칙·경계 처리 안·이전 파일 sha256)을 두고 이전 파일은 `processed/_archive/`로 옮긴다. 재생성은
+  `python -m DATA_ENGINE.eda.build_congestion_calibration`(88 현행 재현은 `--variant current`)이고,
+  하류 `crowd_congestion_label_calibrated_2024_2026.parquet`도 같이 다시 만든다. 현재 버전과 갱신
+  기준은 [`app/CROWD/pipeline/MODEL_REGISTRY.md`](app/CROWD/pipeline/MODEL_REGISTRY.md) 5절
+  "변환 층 산출물", 재적합 판정 근거는
+  [`validation/CROWD/calibration-refit/RESULTS.md`](validation/CROWD/calibration-refit/RESULTS.md)(199).
 - **피처 세트·아티팩트·예측기 코드가 각각 무엇인지**(어느 티켓, 수치, 현재 배포 세트 `festival_selflag_d1sd_d7_resid`)는
   [`app/CROWD/pipeline/MODEL_REGISTRY.md`](app/CROWD/pipeline/MODEL_REGISTRY.md)에 있다.
 - 등급 임계치는 `CROWD_GRADE_THRESHOLDS`(기본 `50,100`, %). 값을 낼 수 없는 셀은 0으로 채우지 않고
   `data_status`로 응답한다 — 우선순위 순으로 `no_lookup`(기준선 없음) / `ok` / `calibration_fallback`
-  (1~8호선 공휴일이라 일요일 배율을 빌려 쓴 셀, 값은 있다) / `line1_truncated`(1호선 절단면 종점 링크 —
-  서울역 상선·청량리 하선) / `no_calibration`(결번 역 등 그 밖의 배율 결측). 그 날짜 표가 없으면
-  404(배치 미실행). 근거는 [`validation/CROWD/congestion-criteria-check/RESULTS.md`](validation/CROWD/congestion-criteria-check/RESULTS.md).
+  (1~8호선 공휴일이라 일요일 배율을 빌려 쓴 셀, 값은 있다) / `segment_truncated`(절단 구간의 종점 링크 —
+  1·3·4·7호선 본선과 2호선 신정지선 중 경계 유입 상수를 못 구한 셀) / `no_calibration`(결번 역 등 그 밖의
+  배율 결측). 그 날짜 표가 없으면 404(배치 미실행). 근거는
+  [`validation/CROWD/congestion-criteria-check/RESULTS.md`](validation/CROWD/congestion-criteria-check/RESULTS.md)(146)와
+  [`validation/CROWD/calibration-refit/RESULTS.md`](validation/CROWD/calibration-refit/RESULTS.md)(199).
 - 미래 날짜는 달력(요일유형)·이벤트 골격 위에 최근 7일 시차로 예측한다. 최근 7일 실측은 패널(2025-12까지) 뒤에
   D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`, 매일 09:00·13:00)가 쌓은 파일을 이어붙여 채운다(143).
   전날 실측이 없으면 `lag1d_available=false`로 표시되고, 이력이 하나도 없으면 LightGBM 대신 lookup으로 예측한다
@@ -260,7 +272,9 @@ powershell -File scripts/install_drive_sync_hook.ps1
   `app/<도메인>/service.py` 또는 `pipeline/`으로 옮긴 뒤 라우터에 연결한다. 반대 방향(`app/`이
   `validation/`을 import)은 하지 않는다.
 - 피처 엔지니어링 함수는 **학습 코드와 Spark 양쪽에서 재사용 가능하게** numpy/pandas 기반 순수 함수로 작성한다. Spark에서는 `pandas_udf`로 감싸 쓴다.
-- 노트북 커밋 전 출력(output)을 비운다. diff가 읽히지 않는다.
+- **노트북 출력(output)은 지우지 않는다.** 출력이 들어 있는 ipynb는 리뷰어·팀원이 실행 없이 바로
+  보라고 의도적으로 남긴 산출물이다(`AI/CLAUDE.md` "실험 실행 효율"). 노트북은 `_build_notebook.py`
+  같은 생성 스크립트로 만들고 실행까지 해서 커밋한다.
 - API 키·인증 정보는 `.env`에 두고 커밋하지 않는다.
 - 커밋 전 로컬에서 `ruff check .`, `black --check .`, `pytest -q`를 돌려서 확인한다
   (`requirements-dev.txt` 설치 필요).

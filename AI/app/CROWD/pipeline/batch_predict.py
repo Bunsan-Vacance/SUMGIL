@@ -31,7 +31,9 @@ lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 �
     no_lookup            기준선(lookup) 자체가 없음 — 혼잡도 이전 단계에서 끊김
     ok                   예측·배율 모두 정상
     calibration_fallback 1~8호선 공휴일이라 일요일 배율을 빌려 씀(값은 있다, 대체 사실을 밝히는 것)
-    line1_truncated      1호선 절단면의 종점 링크(서울역 상선·청량리 하선) — 구조적으로 재차 0이라 배율 없음
+    segment_truncated    절단 구간의 종점 링크 — 구조적으로 재차 0이라 배율이 없는 셀(199에서 1호선 전용
+                         `line1_truncated`를 전 절단 구간으로 넓혔다. 경계 유입을 반영한 배율표에서는
+                         대부분 `ok`가 되고, 상수를 못 구한 셀만 여기 남는다)
     no_calibration       그 밖의 배율표 결측(결번 역, 대응 못 한 2호선 지선)
 
 실행:
@@ -261,7 +263,7 @@ def to_congestion_table(
         "calibration_fallback",
         status,
     )
-    status = np.where((status == "ok") & missing & boundary, "line1_truncated", status)
+    status = np.where((status == "ok") & missing & boundary, "segment_truncated", status)
     status = np.where((status == "ok") & missing, "no_calibration", status)
     out["data_status"] = status
     return out.reindex(columns=OUTPUT_COLS)

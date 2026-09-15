@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from DATA_ENGINE.eda.build_congestion_calibration import bucket_day_type
+from app.CROWD.pipeline import congestion
 from DATA_ENGINE.eda.build_crowd_panel import attach_calendar
 
 AI_ROOT = Path(__file__).resolve().parents[2]
@@ -68,21 +68,20 @@ def explode_to_30min(labels: pd.DataFrame) -> pd.DataFrame:
     return out.explode("time_slot_30min", ignore_index=True)
 
 
-def apply_calibration(labels: pd.DataFrame, calibration: pd.DataFrame) -> pd.DataFrame:
-    """30분 단위로 펼친 재귀식 라벨에 배율을 곱해 보정 혼잡도를 낸다."""
+def apply_calibration(
+    labels: pd.DataFrame, calibration: pd.DataFrame, holiday_fallback: str | None = None
+) -> pd.DataFrame:
+    """30분 단위로 펼친 재귀식 라벨에 배율을 곱해 보정 혼잡도를 낸다.
+
+    **계산은 서빙 경로와 같은 `congestion.apply_calibration` 하나로 한다(199).** 여기에 같은 식을
+    한 벌 더 두면 배율표 스키마가 바뀔 때(199의 `raw_offset`) 한쪽만 고쳐져 조용히 어긋난다 —
+    실제로 그 위험이 있어 합쳤다. 날짜에서 요일유형을 파생하는 것만 여기서 하고 넘긴다.
+
+    `holiday_fallback`은 기본이 `None`이다 — **라벨 산출물은 대체하지 않는다**(146: 대체를 켤지는
+    부르는 쪽이 정하고, 서빙 변환만 켠다).
+    """
     frame = attach_calendar(labels.copy())
-    frame["day_type_bucket"] = bucket_day_type(frame["line"], frame["day_type"])
-    frame = explode_to_30min(frame)
-
-    ratio_key = calibration[["station_no", "direction", "day_type", "time_slot", "ratio"]].rename(
-        columns={"day_type": "day_type_bucket", "time_slot": "time_slot_30min"}
-    )
-
-    merged = frame.merge(
-        ratio_key, on=["station_no", "direction", "day_type_bucket", "time_slot_30min"], how="left"
-    )
-    merged["congestion_pct_calibrated"] = merged["congestion_raw_pct"] * merged["ratio"]
-    return merged
+    return congestion.apply_calibration(frame, calibration, holiday_fallback=holiday_fallback)
 
 
 def verify_calibration_identity(
@@ -93,7 +92,9 @@ def verify_calibration_identity(
     배율이 `실측 ÷ mean(raw)`로 정의됐으니, `mean(raw) × 배율`의 평균은 정의상 실측과
     같아야 한다 — 다른 값이 나오면 조인 키가 잘못됐다는 뜻이다. 차이가 있는 행만 돌려준다.
     """
-    key = ["station_no", "direction", "day_type_bucket", "time_slot_30min"]
+    key = ["station_no", "direction_bucket", "day_type_bucket", "time_slot_30min"]
+    if "direction_bucket" not in calibrated.columns:
+        calibrated = calibrated.assign(direction_bucket=calibrated["direction"])
     recomputed = (
         calibrated.dropna(subset=["congestion_pct_calibrated"])
         .groupby(key, observed=True)["congestion_pct_calibrated"]
@@ -102,7 +103,11 @@ def verify_calibration_identity(
         .reset_index()
     )
     reference = calibration.rename(
-        columns={"day_type": "day_type_bucket", "time_slot": "time_slot_30min"}
+        columns={
+            "direction": "direction_bucket",
+            "day_type": "day_type_bucket",
+            "time_slot": "time_slot_30min",
+        }
     )[[*key, "congestion_pct"]]
     compared = recomputed.merge(reference, on=key, how="inner")
     mismatch = (compared["recomputed_mean"] - compared["congestion_pct"]).abs() > 1e-6
@@ -129,6 +134,8 @@ def build_calibrated_label() -> tuple[pd.DataFrame, pd.DataFrame]:
         "ratio",
         "congestion_pct_calibrated",
     ]
+    if "raw_offset" in calibrated.columns:
+        cols.insert(cols.index("ratio"), "raw_offset")
     return calibrated[cols].rename(columns={"time_slot_30min": "time_slot"}), identity_mismatch
 
 
