@@ -1,7 +1,7 @@
 import { ArrowLeft } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import { modeIcons } from '../features/route/ModeIcon'
-import { arrival, remaining, roundMinutes } from '../features/route/selectors'
+import { remaining, roundMinutes, routeArrival } from '../features/route/selectors'
 import type { Route } from '../features/route/types'
 import type { Navigate } from '../app/useNavigation'
 import LegList from '../features/route/LegList'
@@ -60,7 +60,7 @@ export default function GuidePage({ selected, step, train, destinationName, go, 
             <strong>{destinationName}</strong>
           </div>
           <div>
-            <strong>{arrival(selected.minutes, selected.departedAt)}</strong>
+            <strong>{routeArrival(selected.minutes, selected.departedAt)}</strong>
             <small>도착</small>
             <b>{roundMinutes(remaining(selected, step))}분</b>
             <small>남음</small>

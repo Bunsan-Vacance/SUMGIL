@@ -24,44 +24,45 @@ export default function App() {
     if (screen !== 'search' && screen !== 'browse') title.current?.focus()
   }, [screen])
   return (
-    <div className="workspace">
-      <PreviewToolbar
-        guiding={screen === 'guide'}
-        lastStep={guidance.step === (guidance.route?.legs.length ?? 0) - 1}
-        onProposal={() => setModal('proposal')}
-        onTrain={() => setModal('train')}
-        onNext={planner.advance}
-        onHome={() => {
-          setModal(null)
-          go('home')
-        }}
-      />
+    <div className={`workspace workspace-${screen}`}>
+      {screen !== 'results' && (
+        <PreviewToolbar
+          guiding={screen === 'guide'}
+          lastStep={guidance.step === (guidance.route?.legs.length ?? 0) - 1}
+          onProposal={() => setModal('proposal')}
+          onTrain={() => setModal('train')}
+          onNext={planner.advance}
+          onHome={() => {
+            setModal(null)
+            go('home')
+          }}
+        />
+      )}
       <main className={`app-shell screen-${screen}`}>
         <div className="page-viewport">
           <h1 ref={title} tabIndex={-1} className="sr-only">
             {screenTitles[screen]}
           </h1>
-          {screen !== 'search' && screen !== 'arrival' && screen !== 'browse' && (
-            <KakaoMap
-              key={screen}
-              origin={screen === 'guide' ? guidance.origin || trip.origin : trip.origin}
-              destination={
-                screen === 'guide'
-                  ? guidance.destination
-                  : screen === 'home'
-                    ? null
-                    : trip.destination
-              }
-              route={
-                screen === 'guide'
-                  ? guidance.route
-                  : screen === 'results' || screen === 'detail'
-                    ? trip.selected
-                    : null
-              }
-              onMessage={planner.setMessage}
-            />
-          )}
+          {screen !== 'search' &&
+            screen !== 'arrival' &&
+            screen !== 'browse' &&
+            screen !== 'results' && (
+              <KakaoMap
+                key={screen}
+                origin={screen === 'guide' ? guidance.origin || trip.origin : trip.origin}
+                destination={
+                  screen === 'guide'
+                    ? guidance.destination
+                    : screen === 'home'
+                      ? null
+                      : trip.destination
+                }
+                route={
+                  screen === 'guide' ? guidance.route : screen === 'detail' ? trip.selected : null
+                }
+                onMessage={planner.setMessage}
+              />
+            )}
           {screen === 'home' && (
             <HomePage
               origin={trip.origin}
@@ -108,9 +109,10 @@ export default function App() {
               openSearch={planner.openSearch}
               onBackToInput={planner.returnToRouteInput}
               go={go}
-              startGuide={planner.startGuide}
               canSwap={!!trip.destination}
               swapPlaces={planner.swapPlaces}
+              departureTime={trip.departureTime ?? undefined}
+              onDepartureTimeChange={trip.setDepartureTime}
             />
           )}
           {screen === 'detail' && trip.selected && (

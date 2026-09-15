@@ -522,7 +522,7 @@ describe('일반 지도 장소 마커', () => {
       expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(2),
     )
     const routeLines = document.querySelectorAll('.route-svg-overlay polyline')
-    expect(routeLines[0].getAttribute('stroke')).toBe('#6379bd')
+    expect(routeLines[0].getAttribute('stroke')).toBe('#00A84D')
     expect(routeLines[1].getAttribute('stroke')).toBe('#2f80c0')
     await waitFor(() => expect(rendered.customOverlays).toHaveLength(3))
     expect(

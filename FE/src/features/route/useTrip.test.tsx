@@ -9,7 +9,10 @@ import { previewTrip } from '../../app/preview'
 import type { TripState } from './tripReducer'
 import { useTrip } from './useTrip'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 const loadedTrip: TripState = {
   ...previewTrip,
@@ -262,5 +265,44 @@ describe('경로 검색 요청 수명', () => {
       expect.any(AbortSignal),
     )
     expect(result.current).toMatchObject({ origin: places[3], destination: places[1] })
+  })
+
+  it('선택한 출발 시각을 서울 날짜의 ISO 시각으로 요청하고 재검색에도 유지한다', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-15T00:30:00.000Z'))
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+
+    await act(async () => {
+      result.current.setDepartureTime('09:15')
+      await Promise.resolve()
+    })
+    expect(result.current.departureTime).toBe('09:15')
+    expect(repository.search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ departedAt: '2026-09-15T00:15:00.000Z' }),
+      expect.any(AbortSignal),
+    )
+
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+    expect(repository.search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ departedAt: '2026-09-15T00:15:00.000Z' }),
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('잘못된 출발 시각은 상태와 검색을 바꾸지 않는다', () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+
+    let accepted!: boolean
+    act(() => {
+      accepted = result.current.setDepartureTime('24:00')
+    })
+
+    expect(accepted).toBe(false)
+    expect(result.current.departureTime).toBeNull()
+    expect(repository.search).not.toHaveBeenCalled()
   })
 })

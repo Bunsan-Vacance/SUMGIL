@@ -18,14 +18,33 @@ export function getRoutes(routes: Route[], enabled: Mode[], priority: Priority) 
     ...visible.filter((r) => r.id !== 'fast' && r.id !== 'calm').sort(compare),
   ]
 }
+function parseDeparture(value?: string) {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)
+  const date = new Date(
+    hasTimeZone ? trimmed : `${trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`}+09:00`,
+  )
+  return Number.isFinite(date.getTime()) ? date : null
+}
+export function clockTime(value?: string) {
+  const date = parseDeparture(value)
+  if (!date) return undefined
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const hour = parts.find((part) => part.type === 'hour')?.value
+  const minute = parts.find((part) => part.type === 'minute')?.value
+  return hour && minute ? `${hour}:${minute}` : undefined
+}
+export function routeArrival(minutes: number, departedAt?: string) {
+  return clockTime(departedAt) ? arrival(minutes, departedAt) : '준비중입니다'
+}
 export function arrival(minutes: number, departedAt?: string) {
-  const trimmed = departedAt?.trim()
-  const hasTimeZone = trimmed ? /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed) : false
-  const departure = trimmed
-    ? new Date(
-        hasTimeZone ? trimmed : `${trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`}+09:00`,
-      )
-    : null
+  const departure = parseDeparture(departedAt)
   const elapsedMinutes = Math.round(minutes)
   if (!departure || !Number.isFinite(departure.getTime())) {
     const totalMinutes = (9 * 60 + 41 + elapsedMinutes) % (24 * 60)
