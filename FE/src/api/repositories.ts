@@ -159,6 +159,7 @@ export function createKakaoPlaceRepository(loadMaps: MapsLoader = loadKakaoMaps)
 
 function apiErrorCode(status: number, error: unknown) {
   const value = isRecord(error) ? text(error.code) : text(error)
+  if (value === 'ROUTE_DATA_NOT_READY') return 'route-data-not-ready' as const
   if (value === 'SAME_ORIGIN_DEST') return 'same-origin-destination' as const
   if (value === 'STATION_NOT_FOUND') return 'station-not-found' as const
   if (value === 'ACCESS_CANDIDATE_NOT_READY') return 'coordinate-not-ready' as const
@@ -196,7 +197,12 @@ function mapStationSearchResult(value: unknown): StationSearchResult {
   }
 }
 
-async function requestApi<T>(url: string, signal: AbortSignal, init: RequestInit = {}): Promise<T> {
+export async function requestApi<T>(
+  url: string,
+  signal: AbortSignal,
+  init: RequestInit = {},
+  allowEmpty = false,
+): Promise<T> {
   let response: Response
   try {
     response = await fetch(url, {
@@ -216,21 +222,28 @@ async function requestApi<T>(url: string, signal: AbortSignal, init: RequestInit
   } catch {
     throw new RepositoryError('invalid-response', '서버 응답을 읽지 못했어요.', response.status)
   }
-  if (!response.ok || !isRecord(body) || body.success !== true || !('data' in body)) {
+  if (
+    !response.ok ||
+    !isRecord(body) ||
+    body.success !== true ||
+    (!allowEmpty && !('data' in body))
+  ) {
     const error = isRecord(body) ? body.error : undefined
     const code = apiErrorCode(response.status, error)
     const message =
-      code === 'same-origin-destination'
-        ? '출발지와 도착지는 다른 장소를 선택해 주세요.'
-        : code === 'station-not-found'
-          ? '역 정보를 찾지 못했어요.'
-          : code === 'coordinate-not-ready'
-            ? '좌표 기반 경로는 아직 준비 중이에요.'
-            : code === 'invalid-coordinate'
-              ? '출발지와 도착지 좌표를 확인해 주세요.'
-              : response.status === 404
-                ? '역 정보를 찾지 못했어요.'
-                : '서버에서 요청을 처리하지 못했어요.'
+      code === 'route-data-not-ready'
+        ? '경로 데이터를 준비하고 있어요. 잠시 후 다시 시도해 주세요.'
+        : code === 'same-origin-destination'
+          ? '출발지와 도착지는 다른 장소를 선택해 주세요.'
+          : code === 'station-not-found'
+            ? '역 정보를 찾지 못했어요.'
+            : code === 'coordinate-not-ready'
+              ? '좌표 기반 경로는 아직 준비 중이에요.'
+              : code === 'invalid-coordinate'
+                ? '출발지와 도착지 좌표를 확인해 주세요.'
+                : response.status === 404
+                  ? '역 정보를 찾지 못했어요.'
+                  : '서버에서 요청을 처리하지 못했어요.'
     throw new RepositoryError(code, message, response.status)
   }
   return body.data as T
@@ -240,7 +253,7 @@ function finite(value: unknown, min: number, max: number) {
   return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
 }
 
-function backendDepartureTime(value: string) {
+export function backendDepartureTime(value: string) {
   const trimmed = value.trim()
   if (!trimmed) return undefined
   const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)
@@ -352,6 +365,14 @@ function mapEndpoint(
   }
 }
 
+function optionalDistance(value: unknown) {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new RepositoryError('invalid-response', '경로 거리 응답이 올바르지 않아요.')
+  }
+  return value
+}
+
 function mapBackendRoute(value: unknown, index: number, departedAt: string): Route {
   if (!isRecord(value) || !text(value.routeType) || !finite(value.totalMinutes, 0, 24 * 60)) {
     throw new RepositoryError('invalid-response', '경로 응답이 올바르지 않아요.')
@@ -379,6 +400,9 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
     const fromName = text(rawLeg.fromNodeName) || text(rawLeg.fromNodeId) || '출발 지점'
     const toName = text(rawLeg.toNodeName) || text(rawLeg.toNodeId) || '도착 지점'
     const routeId = text(rawLeg.routeId)
+    if (rawLeg.routeName != null && !text(rawLeg.routeName)) {
+      throw new RepositoryError('invalid-response', '노선명 응답이 올바르지 않아요.')
+    }
     const geometry = parseGeometry(rawLeg.geometry, rawLeg.geometryStatus)
     const transfer = mappedMode.transfer === true
     const from = mapEndpoint(rawLeg, 'from')
@@ -387,7 +411,8 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
       mode: mappedMode.mode,
       transfer,
       title: transfer ? `${fromName}에서 환승` : `${fromName} → ${toName}`,
-      note: routeLineName(routeId) || (transfer ? '환승' : '이동 구간'),
+      note: text(rawLeg.routeName) || routeLineName(routeId) || (transfer ? '환승' : '이동 구간'),
+      distanceMeters: optionalDistance(rawLeg.distanceMeters),
       minutes: rawLeg.minutes as number,
       ...(geometry ? { geometry } : {}),
       ...(routeId ? { routeId } : {}),
@@ -399,7 +424,9 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
   const lineNames = [
     ...new Set(
       rawLegs
-        .map((leg) => (isRecord(leg) ? routeLineName(text(leg.routeId)) : undefined))
+        .map((leg) =>
+          isRecord(leg) ? text(leg.routeName) || routeLineName(text(leg.routeId)) : undefined,
+        )
         .filter((line): line is string => !!line),
     ),
   ]
@@ -411,7 +438,19 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
   const routeTransitions = transitRouteIds
     .slice(1)
     .reduce((count, routeId, index) => count + (routeId !== transitRouteIds[index] ? 1 : 0), 0)
-  const transfers = explicitTransfers || routeTransitions
+  if (
+    value.transferCount != null &&
+    (!Number.isInteger(value.transferCount) || (value.transferCount as number) < 0)
+  ) {
+    throw new RepositoryError('invalid-response', '환승 횟수 응답이 올바르지 않아요.')
+  }
+  const transfers =
+    (value.transferCount as number | undefined) ?? (explicitTransfers || routeTransitions)
+  const walkingLegs = legs.filter((leg) => leg.mode === 'walk' && !leg.transfer)
+  const walk =
+    walkingLegs.length && walkingLegs.every((leg) => leg.distanceMeters !== undefined)
+      ? walkingLegs.reduce((sum, leg) => sum + leg.distanceMeters!, 0)
+      : undefined
   const label =
     routeType === 'SHORTEST'
       ? '빠른 경로'
@@ -423,6 +462,8 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
     label,
     minutes: value.totalMinutes as number,
     transfers,
+    totalDistanceMeters: optionalDistance(value.totalDistanceMeters),
+    ...(walk !== undefined ? { walk: Math.round(walk) } : {}),
     modes: [...new Set(legs.filter((leg) => !leg.transfer).map((leg) => leg.mode))],
     ...(lineNames.length ? { line: lineNames.join(' · ') } : {}),
     legs,

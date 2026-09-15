@@ -1,4 +1,5 @@
 export type RepositoryErrorCode =
+  | 'route-data-not-ready'
   | 'same-origin-destination'
   | 'station-not-found'
   | 'coordinate-not-ready'

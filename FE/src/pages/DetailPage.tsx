@@ -42,6 +42,12 @@ export default function DetailPage({ origin, destinationName, selected, go, star
           <b className={selected.id === 'calm' ? 'calm-text' : 'fast-text'}>{selected.label}</b>
         </div>
         <div className="stats">
+          {selected.totalDistanceMeters !== undefined && (
+            <div>
+              <strong>{Math.round(selected.totalDistanceMeters).toLocaleString('ko-KR')}m</strong>
+              <small>전체 거리</small>
+            </div>
+          )}
           <div>
             <strong>{selected.transfers}회</strong>
             <small>환승</small>
