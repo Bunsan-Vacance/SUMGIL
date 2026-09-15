@@ -90,10 +90,11 @@ public class RouteSearchService {
             throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
         }
 
-        // 그래프 미로드(미적재) 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
+        // 그래프 미적재는 "경로 없음"(빈 배열)과 다른 상태다 — FE-175 항목9 지적사항.
+        // 데이터가 아예 없어서 계산 자체를 못 한 것이므로 503으로 구분해 알린다.
         RouteGraph graph = graphRegistry == null ? null : graphRegistry.graph();
         if (graph == null) {
-            return List.of();
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
 
         findStation(originStationId);

@@ -83,16 +83,17 @@ class RouteSearchServiceTest {
     }
 
     @Test
-    @DisplayName("그래프 미적재 시 빈 배열로 응답한다(가짜 후보 없음)")
-    void 미적재시_빈배열() {
+    @DisplayName("그래프 미적재 시 503 ROUTE_DATA_NOT_READY다(경로 없음과 구분, FE-175 항목9)")
+    void 미적재시_503() {
         RouteSearchService unloaded = new RouteSearchService(
                 stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null),
                 RouteTestFixtures.noopWalkGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
 
-        List<RouteSearchResponse> result = unloaded.search("0222", "0221", null, null, null);
+        DomainException exception = assertThrows(DomainException.class,
+                () -> unloaded.search("0222", "0221", null, null, null));
 
-        assertTrue(result.isEmpty());
+        assertEquals(ErrorType.ROUTE_DATA_NOT_READY, exception.getErrorType());
     }
 
     private Station mockStation(String id, String name) {
