@@ -15,6 +15,9 @@ export default function RouteCard({ route, onDetail }: { route: Route; onDetail:
     .filter((leg) => leg.mode === 'walk' && !leg.transfer)
     .reduce((total, leg) => total + leg.minutes, 0)
   const facts = [
+    route.totalDistanceMeters !== undefined
+      ? `총 ${Math.round(route.totalDistanceMeters).toLocaleString('ko-KR')}m`
+      : null,
     `환승 ${route.transfers ? `${route.transfers}회` : '없음'}`,
     walkingMinutes ? `도보 ${roundMinutes(walkingMinutes)}분` : null,
     route.congestionPercent === undefined

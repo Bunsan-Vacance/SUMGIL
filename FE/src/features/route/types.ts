@@ -24,6 +24,7 @@ export interface RouteEndpoint {
   lng?: number
 }
 export interface Leg {
+  distanceMeters?: number
   mode: Mode
   title: string
   note: string
@@ -35,6 +36,7 @@ export interface Leg {
   geometry?: RouteGeometry
 }
 export interface Route {
+  totalDistanceMeters?: number
   id: string
   label: string
   minutes: number

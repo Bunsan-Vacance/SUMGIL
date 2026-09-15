@@ -329,6 +329,59 @@ describe('백엔드 repository', () => {
     ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
   })
 
+  it('새 경로 필드를 보존하고 null 거리와 0회 환승을 구분한다', async () => {
+    const payload = {
+      routeType: 'SHORTEST',
+      totalMinutes: 5,
+      source: 'ALGORITHM',
+      transferCount: 0,
+      totalDistanceMeters: 1234,
+      legs: [
+        { mode: 'WALK', minutes: 1, distanceMeters: 100 },
+        { mode: 'BUS', routeId: 'bus-id', routeName: '740', minutes: 4, distanceMeters: null },
+      ],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: [payload] }),
+      })),
+    )
+    const repository = createBackendRouteRepository('http://be.test')
+    const request = { origin: station('역삼'), destination: station('강변') }
+    const result = await repository.search(request, new AbortController().signal)
+    expect(result[0]).toMatchObject({ totalDistanceMeters: 1234, transfers: 0, walk: 100 })
+    expect(result[0].legs[1].note).toBe('740')
+    expect(result[0].legs[1].distanceMeters).toBeUndefined()
+    payload.totalDistanceMeters = -1
+    await expect(repository.search(request, new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid-response',
+    })
+  })
+
+  it('그래프 미적재 503은 재시도 가능한 준비 안내로 구분한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({ success: false, error: { code: 'ROUTE_DATA_NOT_READY' } }),
+      })),
+    )
+    await expect(
+      createBackendRouteRepository('http://be.test').search(
+        { origin: station('역삼'), destination: station('강변') },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      code: 'route-data-not-ready',
+      status: 503,
+      message: '경로 데이터를 준비하고 있어요. 잠시 후 다시 시도해 주세요.',
+    })
+  })
+
   it('경로 응답을 화면 모델로 변환하고 geometry 선을 보존한다', async () => {
     const fetchMock = vi.fn(async () => ({
       status: 200,
