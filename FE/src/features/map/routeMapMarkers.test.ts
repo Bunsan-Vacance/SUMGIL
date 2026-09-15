@@ -102,6 +102,68 @@ describe('경로 지도 선과 지점', () => {
     ])
   })
 
+  it('연속된 자전거 구간은 대여·반납 경계만 표시한다', () => {
+    const rental = endpoint('bike-rental', '대여소', 37.5, 127.03)
+    const middle = endpoint('bike-middle', '중간 지점', 37.51, 127.04)
+    const returned = endpoint('bike-return', '반납소', 37.52, 127.05)
+    const route: Route = {
+      id: 'bike-route',
+      label: '따릉이 경로',
+      minutes: 12,
+      transfers: 0,
+      modes: ['walk', 'bike'],
+      legs: [
+        { mode: 'walk', title: '대여소까지 이동', note: '', minutes: 1, to: rental },
+        { mode: 'bike', title: '자전거 이동', note: '', minutes: 4, from: rental, to: middle },
+        { mode: 'bike', title: '자전거 이동', note: '', minutes: 4, from: middle, to: returned },
+        { mode: 'walk', title: '목적지까지 이동', note: '', minutes: 3, from: returned },
+      ],
+    }
+
+    const candidates = getRouteEndpointCandidates(route)
+    expect(candidates.map(({ endpoint, bikeRoles }) => [endpoint.id, bikeRoles])).toEqual([
+      ['bike-rental', ['대여']],
+      ['bike-return', ['반납']],
+    ])
+    expect(candidates.some(({ endpoint }) => endpoint.id === 'bike-middle')).toBe(false)
+  })
+
+  it('자전거 반납 지점에 겹친 승차 역할은 자전거 표시에 흡수한다', () => {
+    const station = endpoint('station', '환승역 대여소', 37.51, 127.04)
+    const route: Route = {
+      id: 'bike-transit-route',
+      label: '따릉이 포함 경로',
+      minutes: 10,
+      transfers: 0,
+      modes: ['bike', 'subway'],
+      legs: [
+        {
+          mode: 'bike',
+          title: '따릉이 이동',
+          note: '',
+          minutes: 4,
+          from: endpoint('rental', '출발 대여소', 37.5, 127.03),
+          to: station,
+        },
+        {
+          mode: 'subway',
+          title: '지하철 이동',
+          note: '',
+          minutes: 6,
+          from: station,
+          to: endpoint('destination', '도착역', 37.52, 127.05),
+        },
+      ],
+    }
+
+    const candidate = getRouteEndpointCandidates(route).find(
+      ({ endpoint }) => endpoint.id === 'station',
+    )
+    expect(candidate).toMatchObject({ roles: ['승차'], bikeRoles: ['반납'] })
+    expect(routeEndpointPlace(candidate!).address).toBe('따릉이 반납')
+    expect(routeEndpointPlace(candidate!).kind).toBe('따릉이 대여소')
+  })
+
   it('좌표가 없는 endpoint는 마커 후보에서 생략한다', () => {
     const route: Route = {
       id: 'route',
@@ -141,8 +203,8 @@ describe('경로 지도 선과 지점', () => {
       strokeStyle: 'solid',
     })
     expect(routeLineStyle({ mode: 'walk', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#7b8591',
-      strokeStyle: 'dashed',
+      strokeColor: '#6379bd',
+      strokeStyle: 'solid',
     })
     expect(
       routeLineStyle({ mode: 'walk', transfer: true, title: '', note: '', minutes: 1 }),

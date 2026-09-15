@@ -23,9 +23,11 @@ import {
   createRouteEndpointOverlay,
   createRouteSvgOverlay,
   getRouteEndpointCandidates,
+  routeEndpointPlace,
   routeLineStyle,
   type RouteLineEntry,
   type RouteSvgOverlay,
+  type RouteEndpointCandidate,
   type RouteEndpointOverlay,
 } from './routeMapMarkers'
 
@@ -64,6 +66,9 @@ export function useKakaoMap(
   const stationListRef = useRef(bikeStationRepository ? [] : bikeStations)
   const routeLinesRef = useRef<RouteSvgOverlay | null>(null)
   const routeEndpointOverlaysRef = useRef<RouteEndpointOverlay[]>([])
+  const routeBikeStationOverlaysRef = useRef<BikeStationOverlay[]>([])
+  const routeBikeEndpointsRef = useRef<RouteEndpointCandidate[]>([])
+  const syncStationMarkersRef = useRef<(() => void) | null>(null)
   const routeBoundsRef = useRef<MapBounds | null>(null)
   const mapsRef = useRef<Awaited<ReturnType<typeof loadKakaoMaps>> | null>(null)
   messageRef.current = onMessage
@@ -148,7 +153,16 @@ export function useKakaoMap(
         })
         map.current = instance
         const syncStationMarkers = () => {
-          const groups = groupVisibleBikeStations(maps, instance, stationListRef.current)
+          const routeBikeIds = new Set(
+            routeBikeEndpointsRef.current
+              .map((candidate) => candidate.endpoint.id?.trim())
+              .filter((id): id is string => Boolean(id)),
+          )
+          const groups = groupVisibleBikeStations(
+            maps,
+            instance,
+            stationListRef.current.filter((station) => !routeBikeIds.has(station.id)),
+          )
           const individualGroups = groups.filter((group) => group.stations.length === 1)
           const visibleIds = new Set(individualGroups.map((group) => group.stations[0].id))
           stationMarkers.current.forEach((marker, id) => {
@@ -193,6 +207,7 @@ export function useKakaoMap(
               )
             })
         }
+        syncStationMarkersRef.current = syncStationMarkers
         const loadNearbyStations = () => {
           if (!bikeStationRepository) return
           const center = instance.getCenter()
@@ -342,6 +357,10 @@ export function useKakaoMap(
       routeLinesRef.current = null
       routeEndpointOverlaysRef.current.forEach((overlay) => overlay.destroy())
       routeEndpointOverlaysRef.current = []
+      routeBikeStationOverlaysRef.current.forEach((overlay) => overlay.destroy())
+      routeBikeStationOverlaysRef.current = []
+      routeBikeEndpointsRef.current = []
+      syncStationMarkersRef.current = null
       routeBoundsRef.current = null
       canvas.replaceChildren()
     }
@@ -352,6 +371,10 @@ export function useKakaoMap(
     routeLinesRef.current = null
     routeEndpointOverlaysRef.current.forEach((overlay) => overlay.destroy())
     routeEndpointOverlaysRef.current = []
+    routeBikeStationOverlaysRef.current.forEach((overlay) => overlay.destroy())
+    routeBikeStationOverlaysRef.current = []
+    routeBikeEndpointsRef.current = []
+    syncStationMarkersRef.current?.()
     routeBoundsRef.current = null
     const maps = mapsRef.current
     const instance = map.current
@@ -359,6 +382,9 @@ export function useKakaoMap(
     const bounds = new maps.LatLngBounds()
     let pointCount = 0
     const endpointCandidates = getRouteEndpointCandidates(route)
+    const bikeCandidates = endpointCandidates.filter((candidate) => candidate.bikeRoles?.length)
+    routeBikeEndpointsRef.current = bikeCandidates
+    syncStationMarkersRef.current?.()
     endpointCandidates.forEach(({ endpoint }) => {
       bounds.extend(new maps.LatLng(endpoint.lat, endpoint.lng))
       pointCount += 1
@@ -394,9 +420,28 @@ export function useKakaoMap(
       validLineCount += 1
     })
     if (validLineCount) routeLinesRef.current = createRouteSvgOverlay(maps, instance, lineEntries)
-    routeEndpointOverlaysRef.current = endpointCandidates.map((candidate) =>
-      createRouteEndpointOverlay(maps, instance, candidate, (place) => placeRef.current?.(place)),
+    routeBikeStationOverlaysRef.current = bikeCandidates.map((candidate) =>
+      createBikeStationOverlay(
+        maps,
+        instance,
+        {
+          id: `route-bike-endpoint:${candidate.endpoint.id || `${candidate.endpoint.lat}:${candidate.endpoint.lng}`}`,
+          name: candidate.endpoint.name?.trim() || '따릉이 대여소',
+          address: candidate.bikeRoles!.map((role) => `따릉이 ${role}`).join(' · '),
+          lat: candidate.endpoint.lat,
+          lng: candidate.endpoint.lng,
+        },
+        false,
+        () => placeRef.current?.(routeEndpointPlace(candidate)),
+        false,
+        10,
+      ),
     )
+    routeEndpointOverlaysRef.current = endpointCandidates
+      .filter((candidate) => !candidate.bikeRoles?.length)
+      .map((candidate) =>
+        createRouteEndpointOverlay(maps, instance, candidate, (place) => placeRef.current?.(place)),
+      )
     if (pointCount > 1) {
       routeBoundsRef.current = bounds
       instance.setBounds(bounds, 40, 35, 35, 35)
@@ -408,6 +453,10 @@ export function useKakaoMap(
       routeLinesRef.current = null
       routeEndpointOverlaysRef.current.forEach((overlay) => overlay.destroy())
       routeEndpointOverlaysRef.current = []
+      routeBikeStationOverlaysRef.current.forEach((overlay) => overlay.destroy())
+      routeBikeStationOverlaysRef.current = []
+      routeBikeEndpointsRef.current = []
+      syncStationMarkersRef.current?.()
       routeBoundsRef.current = null
     }
   }, [route, status])

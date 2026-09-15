@@ -26,6 +26,7 @@ export function createBikeStationOverlay(
   selected: boolean,
   onSelect: () => void,
   routeActive = false,
+  zIndex = 1,
 ): BikeStationOverlay {
   const element = document.createElement('button')
   element.type = 'button'
@@ -53,7 +54,7 @@ export function createBikeStationOverlay(
     position: new maps.LatLng(station.lat, station.lng),
     content: element,
     clickable: true,
-    zIndex: 1,
+    zIndex,
   })
   return {
     element,
