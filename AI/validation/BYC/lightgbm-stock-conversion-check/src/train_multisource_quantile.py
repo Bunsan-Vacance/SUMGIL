@@ -61,7 +61,9 @@ def main(argv: list[str] | None = None) -> None:
     from lightgbm import LGBMRegressor, early_stopping, log_evaluation
     from sklearn.isotonic import IsotonicRegression
 
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--train-months", nargs="+", required=True)
     ap.add_argument("--valid-months", nargs="+", required=True, help="isotonic 보정기 fit용")
     ap.add_argument("--test-months", nargs="+", required=True)
@@ -113,13 +115,20 @@ def main(argv: list[str] | None = None) -> None:
     t0 = time.time()
     for q in QUANTILES:
         m = LGBMRegressor(
-            objective="quantile", alpha=q,
-            n_estimators=args.n_estimators, learning_rate=args.learning_rate,
-            num_leaves=args.num_leaves, subsample=0.8, colsample_bytree=0.8,
-            n_jobs=-1, verbose=-1,
+            objective="quantile",
+            alpha=q,
+            n_estimators=args.n_estimators,
+            learning_rate=args.learning_rate,
+            num_leaves=args.num_leaves,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            n_jobs=-1,
+            verbose=-1,
         )
         m.fit(
-            x_train, y_train, eval_set=[(x_valid, y_valid)],
+            x_train,
+            y_train,
+            eval_set=[(x_valid, y_valid)],
             callbacks=[early_stopping(args.early_stopping_rounds), log_evaluation(0)],
             **cat_kwargs,
         )
@@ -155,12 +164,16 @@ def main(argv: list[str] | None = None) -> None:
     actual_full = merged["is_full_future"].to_numpy()
 
     print("\n=== p_empty ===")
-    print(f"  avg               Brier={brier(merged['avg_p_empty'].fillna(0).to_numpy(), actual_empty):.4f}")
+    print(
+        f"  avg               Brier={brier(merged['avg_p_empty'].fillna(0).to_numpy(), actual_empty):.4f}"
+    )
     print(f"  model(보정 전)     Brier={brier(p_empty_test, actual_empty):.4f}")
     print(f"  model(isotonic후) Brier={brier(p_empty_cal, actual_empty):.4f}")
 
     print("\n=== p_full ===")
-    print(f"  avg               Brier={brier(merged['avg_p_full'].fillna(0).to_numpy(), actual_full):.4f}")
+    print(
+        f"  avg               Brier={brier(merged['avg_p_full'].fillna(0).to_numpy(), actual_full):.4f}"
+    )
     print(f"  model(보정 전)     Brier={brier(p_full_test, actual_full):.4f}")
     print(f"  model(isotonic후) Brier={brier(p_full_cal, actual_full):.4f}")
 

@@ -34,8 +34,13 @@ from app.BIKE.pipeline.features import (
 
 EXTRA_COLS = ["rack_count"]
 READ_COLS = [
-    "od_station_id", "date", *BASE_FEATURE_COLS, *EXTRA_COLS,
-    TARGET_COL, "target_rent_count", "target_return_count",
+    "od_station_id",
+    "date",
+    *BASE_FEATURE_COLS,
+    *EXTRA_COLS,
+    TARGET_COL,
+    "target_rent_count",
+    "target_return_count",
 ]
 
 QUANTILES = [0.1, 0.5, 0.9]
@@ -59,7 +64,9 @@ def normal_cdf(x, mu, sigma):
     return norm.cdf(x, loc=mu, scale=sigma)
 
 
-def raw_probabilities(model_preds: dict, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def raw_probabilities(
+    model_preds: dict, df: pd.DataFrame
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """quantile 예측 -> (p_empty_raw, p_full_raw, actual_empty, actual_full)."""
     q10, q50, q90 = model_preds[0.1], model_preds[0.5], model_preds[0.9]
     mu, sigma = q50, (q90 - q10) / (2 * Z_90)
@@ -83,9 +90,11 @@ def brier_score(p, actual) -> float:
 def calibration_table(p, actual, n_bins=N_BINS) -> pd.DataFrame:
     bins = pd.qcut(p, n_bins, duplicates="drop")
     df = pd.DataFrame({"bin": bins, "pred": p, "actual": actual})
-    return df.groupby("bin", observed=True).agg(
-        n=("actual", "size"), mean_pred=("pred", "mean"), actual_rate=("actual", "mean")
-    ).reset_index()
+    return (
+        df.groupby("bin", observed=True)
+        .agg(n=("actual", "size"), mean_pred=("pred", "mean"), actual_rate=("actual", "mean"))
+        .reset_index()
+    )
 
 
 def main() -> None:
@@ -98,9 +107,15 @@ def main() -> None:
     holidays = load_holidays()
 
     print("[보정] 데이터 로딩(train/valid/test 3-way)...")
-    train_df = load_paths(train_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42)
-    valid_df = load_paths(valid_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42)
-    test_df = load_paths(test_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42)
+    train_df = load_paths(
+        train_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42
+    )
+    valid_df = load_paths(
+        valid_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42
+    )
+    test_df = load_paths(
+        test_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42
+    )
     train_df = _attach_holiday_flag(train_df, holidays)
     valid_df = _attach_holiday_flag(valid_df, holidays)
     test_df = _attach_holiday_flag(test_df, holidays)
@@ -110,7 +125,9 @@ def main() -> None:
     valid_df = profile.transform(valid_df)
     test_df = profile.transform(test_df)
 
-    station_ids = scan_station_ids(train_paths) | scan_station_ids(valid_paths) | scan_station_ids(test_paths)
+    station_ids = (
+        scan_station_ids(train_paths) | scan_station_ids(valid_paths) | scan_station_ids(test_paths)
+    )
     dtype = build_station_dtype(station_ids)
     apply_station_code(train_df, dtype, "train")
     apply_station_code(valid_df, dtype, "valid")
@@ -131,8 +148,13 @@ def main() -> None:
     models = {}
     for q in QUANTILES:
         m = LGBMRegressor(
-            objective="quantile", alpha=q, n_estimators=300, learning_rate=0.05,
-            num_leaves=63, n_jobs=-1, verbose=-1,
+            objective="quantile",
+            alpha=q,
+            n_estimators=300,
+            learning_rate=0.05,
+            num_leaves=63,
+            n_jobs=-1,
+            verbose=-1,
         )
         m.fit(x_train, y_train)
         models[q] = m

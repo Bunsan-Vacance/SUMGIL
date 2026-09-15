@@ -36,25 +36,58 @@ AI_ROOT = Path(__file__).resolve().parents[4]
 INTERIM_DIR = AI_ROOT / "data" / "BIKE" / "interim"
 
 READ_COLS = [
-    "od_station_id", "rack_count", "date", "base_time", "horizon_min",
-    "stock_anchor_hour", "target_net_flow",
-    "is_holiday", "is_rain", "temp", "is_kbo_game_jamsil",
+    "od_station_id",
+    "rack_count",
+    "date",
+    "base_time",
+    "horizon_min",
+    "stock_anchor_hour",
+    "target_net_flow",
+    "is_holiday",
+    "is_rain",
+    "temp",
+    "is_kbo_game_jamsil",
 ]
 
 MODEL_FEATURE_COLS = [
-    "target_hour", "target_minute", "target_dow", "target_is_weekend", "target_month",
-    "target_sin_hour", "target_cos_hour",
-    "is_holiday", "is_rain", "temp", "is_kbo_game_jamsil",
-    "hist_mean", "hist_std", "station_code",
-    "lag1d_stock", "lag1d_stock_available", "lag7d_stock", "lag7d_stock_available",
+    "target_hour",
+    "target_minute",
+    "target_dow",
+    "target_is_weekend",
+    "target_month",
+    "target_sin_hour",
+    "target_cos_hour",
+    "is_holiday",
+    "is_rain",
+    "temp",
+    "is_kbo_game_jamsil",
+    "hist_mean",
+    "hist_std",
+    "station_code",
+    "lag1d_stock",
+    "lag1d_stock_available",
+    "lag7d_stock",
+    "lag7d_stock_available",
 ]
 
 # lag lookup은 train/valid/test 경계를 넘어서 조인해야 한다(예: valid 12월 1일의 D-1은
 # train 11월 30일에 있음) — 그래서 항상 전체 기간으로 한 번만 만든다.
 ALL_MONTHS = [
-    "202401", "202402", "202403", "202404", "202405", "202406",
-    "202407", "202408", "202409", "202410", "202411", "202412",
-    "202507", "202508", "202509",
+    "202401",
+    "202402",
+    "202403",
+    "202404",
+    "202405",
+    "202406",
+    "202407",
+    "202408",
+    "202409",
+    "202410",
+    "202411",
+    "202412",
+    "202507",
+    "202508",
+    "202509",
 ]
 
 
@@ -115,7 +148,13 @@ def build_lag_lookup() -> pd.DataFrame:
     for m in ALL_MONTHS:
         df = pd.read_parquet(
             month_path(m),
-            columns=["od_station_id", "base_time", "horizon_min", "stock_anchor_hour", "target_net_flow"],
+            columns=[
+                "od_station_id",
+                "base_time",
+                "horizon_min",
+                "stock_anchor_hour",
+                "target_net_flow",
+            ],
         )
         df = df[df["horizon_min"] == 30].dropna(subset=["stock_anchor_hour", "target_net_flow"])
         target_dt = pd.to_datetime(df["base_time"]) + pd.Timedelta(minutes=30)
@@ -133,7 +172,8 @@ def build_lag_lookup() -> pd.DataFrame:
     combined = pd.concat(frames, ignore_index=True)
     return (
         combined.groupby(["od_station_id", "lag_date", "lag_time_slot"])["lag_stock"]
-        .mean().reset_index()
+        .mean()
+        .reset_index()
     )
 
 
@@ -145,9 +185,7 @@ def attach_lag(df: pd.DataFrame, lookup: pd.DataFrame, days: int, out_col: str) 
     key = df[["od_station_id", "time_slot"]].copy()
     key["lag_date"] = df["date"] - pd.Timedelta(days=days)
     key["lag_time_slot"] = df["time_slot"]
-    merged = key.merge(
-        lookup, on=["od_station_id", "lag_date", "lag_time_slot"], how="left"
-    )
+    merged = key.merge(lookup, on=["od_station_id", "lag_date", "lag_time_slot"], how="left")
     df[out_col] = merged["lag_stock"].to_numpy()
     df[f"{out_col}_available"] = df[out_col].notna().astype("int8")
     return df
@@ -186,16 +224,22 @@ def fill_lag_fallback(df: pd.DataFrame) -> pd.DataFrame:
 def fit_baselines(train_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     b1 = (
         train_df.groupby(["od_station_id", "dow_type", "time_slot"])["target_stock"]
-        .mean().reset_index().rename(columns={"target_stock": "b1_pred"})
+        .mean()
+        .reset_index()
+        .rename(columns={"target_stock": "b1_pred"})
     )
     b2 = (
         train_df.groupby(["od_station_id", "target_month", "dow_type", "time_slot"])["target_stock"]
-        .mean().reset_index().rename(columns={"target_stock": "b2_pred"})
+        .mean()
+        .reset_index()
+        .rename(columns={"target_stock": "b2_pred"})
     )
     return b1, b2
 
 
-def evaluate(test_df: pd.DataFrame, b1: pd.DataFrame, b2: pd.DataFrame, model, station_dtype) -> pd.DataFrame:
+def evaluate(
+    test_df: pd.DataFrame, b1: pd.DataFrame, b2: pd.DataFrame, model, station_dtype
+) -> pd.DataFrame:
     df = test_df.merge(b1, on=["od_station_id", "dow_type", "time_slot"], how="left")
     df = df.merge(b2, on=["od_station_id", "target_month", "dow_type", "time_slot"], how="left")
 
@@ -206,7 +250,11 @@ def evaluate(test_df: pd.DataFrame, b1: pd.DataFrame, b2: pd.DataFrame, model, s
     df["model_pred"] = df["hist_mean"].to_numpy() + model.predict(x)
 
     rows = []
-    for col, name in [("b1_pred", "baseline1_avg"), ("b2_pred", "baseline2_month"), ("model_pred", "lightgbm")]:
+    for col, name in [
+        ("b1_pred", "baseline1_avg"),
+        ("b2_pred", "baseline2_month"),
+        ("model_pred", "lightgbm"),
+    ]:
         valid = df.dropna(subset=[col])
         mae = (valid[col] - valid["target_stock"]).abs().mean()
         rows.append({"source": name, "n": len(valid), "mae": mae})
@@ -216,9 +264,13 @@ def evaluate(test_df: pd.DataFrame, b1: pd.DataFrame, b2: pd.DataFrame, model, s
 def main(argv: list[str] | None = None) -> None:
     from lightgbm import LGBMRegressor
 
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--train-months", nargs="+", required=True)
-    ap.add_argument("--valid-months", nargs="+", default=None, help="early stopping용(생략 시 미사용)")
+    ap.add_argument(
+        "--valid-months", nargs="+", default=None, help="early stopping용(생략 시 미사용)"
+    )
     ap.add_argument("--test-months", nargs="+", required=True)
     ap.add_argument("--n-estimators", type=int, default=500)
     ap.add_argument("--learning-rate", type=float, default=0.05)
@@ -237,9 +289,11 @@ def main(argv: list[str] | None = None) -> None:
     train_df = load_and_prepare(args.train_months, holidays)
     train_df = attach_lag(train_df, lag_lookup, 1, "lag1d_stock")
     train_df = attach_lag(train_df, lag_lookup, 7, "lag7d_stock")
-    print(f"[학습] train {len(train_df):,}행, "
-          f"lag1d 가용률 {train_df['lag1d_stock_available'].mean():.1%}, "
-          f"lag7d 가용률 {train_df['lag7d_stock_available'].mean():.1%}")
+    print(
+        f"[학습] train {len(train_df):,}행, "
+        f"lag1d 가용률 {train_df['lag1d_stock_available'].mean():.1%}, "
+        f"lag7d 가용률 {train_df['lag7d_stock_available'].mean():.1%}"
+    )
 
     profile = fit_station_dow_hour_profile(train_df)
     global_mean = float(train_df["target_stock"].mean())
@@ -268,9 +322,13 @@ def main(argv: list[str] | None = None) -> None:
     print("[학습] LightGBM 학습...")
     t0 = time.time()
     model = LGBMRegressor(
-        n_estimators=args.n_estimators, learning_rate=args.learning_rate,
-        num_leaves=args.num_leaves, subsample=0.8, colsample_bytree=0.8,
-        n_jobs=-1, verbose=-1,
+        n_estimators=args.n_estimators,
+        learning_rate=args.learning_rate,
+        num_leaves=args.num_leaves,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        n_jobs=-1,
+        verbose=-1,
     )
     if args.valid_months:
         from lightgbm import early_stopping, log_evaluation
@@ -284,7 +342,9 @@ def main(argv: list[str] | None = None) -> None:
         x_valid = valid_df[MODEL_FEATURE_COLS].fillna(0)
         y_valid = valid_df["target_stock"] - valid_df["hist_mean"]
         model.fit(
-            x_train, y_train, eval_set=[(x_valid, y_valid)],
+            x_train,
+            y_train,
+            eval_set=[(x_valid, y_valid)],
             callbacks=[early_stopping(args.early_stopping_rounds), log_evaluation(0)],
             **cat_kwargs,
         )
@@ -298,9 +358,11 @@ def main(argv: list[str] | None = None) -> None:
     test_df = attach_lag(test_df, lag_lookup, 7, "lag7d_stock")
     test_df = attach_profile(test_df, profile, global_mean)
     test_df = fill_lag_fallback(test_df)
-    print(f"[평가] test {len(test_df):,}행, "
-          f"lag1d 가용률 {test_df['lag1d_stock_available'].mean():.1%}, "
-          f"lag7d 가용률 {test_df['lag7d_stock_available'].mean():.1%}")
+    print(
+        f"[평가] test {len(test_df):,}행, "
+        f"lag1d 가용률 {test_df['lag1d_stock_available'].mean():.1%}, "
+        f"lag7d 가용률 {test_df['lag7d_stock_available'].mean():.1%}"
+    )
 
     report = evaluate(test_df, b1, b2, model, station_dtype)
     print("\n[결과] MAE 비교 (트랙 B, target_stock 기준)")

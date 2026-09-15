@@ -36,7 +36,9 @@ from app.BIKE.pipeline.dataset import monthly_paths
 
 AI_ROOT = Path(__file__).resolve().parents[4]
 VENUE_CONF = AI_ROOT / "DATA_ENGINE" / "conf" / "venue_coordinates.yaml"
-KBO_PARQUET = AI_ROOT / "data" / "EXTERNAL" / "events" / "processed" / "kbo_games_with_attendance.parquet"
+KBO_PARQUET = (
+    AI_ROOT / "data" / "EXTERNAL" / "events" / "processed" / "kbo_games_with_attendance.parquet"
+)
 ASOS_DIR = AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw" / "asos"
 ASOS_FILES = ["SURFACE_ASOS_108_HR_2024_2024_2025.csv", "SURFACE_ASOS_108_HR_2025_2025_2026.csv"]
 OUT_DIR = AI_ROOT / "data" / "BIKE" / "interim"
@@ -87,7 +89,13 @@ def jamsil_nearby_stations(sample_path: Path) -> set:
     return set(df.loc[d <= JAMSIL_RADIUS_KM, "od_station_id"])
 
 
-def build_month(path: Path, weather: pd.DataFrame, holidays: pd.DataFrame, jamsil_dates: set, jamsil_stations: set) -> pd.DataFrame:
+def build_month(
+    path: Path,
+    weather: pd.DataFrame,
+    holidays: pd.DataFrame,
+    jamsil_dates: set,
+    jamsil_stations: set,
+) -> pd.DataFrame:
     df = pd.read_parquet(path)
     df["date"] = pd.to_datetime(df["date"]).dt.normalize()
 
@@ -95,15 +103,19 @@ def build_month(path: Path, weather: pd.DataFrame, holidays: pd.DataFrame, jamsi
     df = df.merge(holidays, on="date", how="left")
     df["is_holiday"] = df["is_holiday"].fillna(False)
 
-    df["is_kbo_game_jamsil"] = (
-        df["od_station_id"].isin(jamsil_stations) & df["date"].isin(jamsil_dates)
+    df["is_kbo_game_jamsil"] = df["od_station_id"].isin(jamsil_stations) & df["date"].isin(
+        jamsil_dates
     )
     return df
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--months", nargs="+", default=None, help="YYYYMM 목록(생략 시 전체 train+valid+test)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--months", nargs="+", default=None, help="YYYYMM 목록(생략 시 전체 train+valid+test)"
+    )
     args = ap.parse_args(argv)
 
     weather = load_weather()

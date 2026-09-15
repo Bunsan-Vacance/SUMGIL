@@ -50,8 +50,10 @@ def _smoke_test() -> None:
     )
     df = df[df["horizon_min"] == 5].dropna(subset=["stock_anchor_hour", "target_net_flow"])
     labeled = add_future_stock_labels(df)
-    print(f"[labels] {len(labeled):,}행 — empty_rate={labeled['is_empty_future'].mean():.4f}, "
-          f"full_rate={labeled['is_full_future'].mean():.4f}")
+    print(
+        f"[labels] {len(labeled):,}행 — empty_rate={labeled['is_empty_future'].mean():.4f}, "
+        f"full_rate={labeled['is_full_future'].mean():.4f}"
+    )
 
 
 if __name__ == "__main__":

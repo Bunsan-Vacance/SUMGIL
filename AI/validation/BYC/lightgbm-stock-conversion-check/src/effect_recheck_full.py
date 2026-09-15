@@ -102,7 +102,9 @@ def summarize(df: pd.DataFrame, group_col: str, label: str) -> None:
 def main() -> None:
     weather = load_asos()
     holidays = load_holidays()
-    all_paths = monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    all_paths = (
+        monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    )
 
     rows = []
     for p in all_paths:
@@ -120,7 +122,19 @@ def main() -> None:
         df = df.merge(holidays, on="date", how="left")
         df["is_holiday"] = df["is_holiday"].fillna(False)
 
-        rows.append(df[["is_rain", "temp", "is_holiday", "activity", "target_net_flow", "is_empty_future", "is_full_future"]])
+        rows.append(
+            df[
+                [
+                    "is_rain",
+                    "temp",
+                    "is_holiday",
+                    "activity",
+                    "target_net_flow",
+                    "is_empty_future",
+                    "is_full_future",
+                ]
+            ]
+        )
 
     combined = pd.concat(rows, ignore_index=True)
     print(f"[재검증] 전체 {len(combined):,}행")

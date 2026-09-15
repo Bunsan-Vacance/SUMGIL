@@ -28,7 +28,14 @@ from app.BIKE.pipeline.features import (
     make_xy,
 )
 
-READ_COLS = ["od_station_id", "date", *BASE_FEATURE_COLS, TARGET_COL, "target_rent_count", "target_return_count"]
+READ_COLS = [
+    "od_station_id",
+    "date",
+    *BASE_FEATURE_COLS,
+    TARGET_COL,
+    "target_rent_count",
+    "target_return_count",
+]
 
 QUANTILES = [0.1, 0.5, 0.9]
 SAMPLE_FRAC = 0.05  # 소규모 — 1개월치의 5%
@@ -52,8 +59,12 @@ def main() -> None:
     holidays = load_holidays()
 
     print(f"[B1] train 1개월, sample_frac={SAMPLE_FRAC} 로 로딩...")
-    train_df = load_paths(train_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42)
-    valid_df = load_paths(valid_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42)
+    train_df = load_paths(
+        train_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42
+    )
+    valid_df = load_paths(
+        valid_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42
+    )
     train_df = _attach_holiday_flag(train_df, holidays)
     valid_df = _attach_holiday_flag(valid_df, holidays)
 
@@ -98,11 +109,15 @@ def main() -> None:
         f"q10>q50 {violation_10_50}건({violation_10_50 / n:.1%}), "
         f"q50>q90 {violation_50_90}건({violation_50_90 / n:.1%}) / 전체 {n:,}행"
     )
-    print(f"[B1] q10 범위 [{q10.min():.2f}, {q10.max():.2f}], "
-          f"q50 범위 [{q50.min():.2f}, {q50.max():.2f}], "
-          f"q90 범위 [{q90.min():.2f}, {q90.max():.2f}]")
-    print(f"[B1] 실측(target_net_flow) 범위 [{y_valid.min():.2f}, {y_valid.max():.2f}], "
-          f"평균 {y_valid.mean():.3f}, 표준편차 {y_valid.std():.3f}")
+    print(
+        f"[B1] q10 범위 [{q10.min():.2f}, {q10.max():.2f}], "
+        f"q50 범위 [{q50.min():.2f}, {q50.max():.2f}], "
+        f"q90 범위 [{q90.min():.2f}, {q90.max():.2f}]"
+    )
+    print(
+        f"[B1] 실측(target_net_flow) 범위 [{y_valid.min():.2f}, {y_valid.max():.2f}], "
+        f"평균 {y_valid.mean():.3f}, 표준편차 {y_valid.std():.3f}"
+    )
 
 
 if __name__ == "__main__":

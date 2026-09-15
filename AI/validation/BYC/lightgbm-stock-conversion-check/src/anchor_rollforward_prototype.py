@@ -29,7 +29,11 @@ import pandas as pd
 
 from app.BIKE.pipeline.calendar import load_holidays
 from app.BIKE.pipeline.dataset import monthly_paths, scan_station_ids
-from app.BIKE.pipeline.features import HistoricalProfileBuilder, MODEL_FEATURE_COLS, build_station_dtype
+from app.BIKE.pipeline.features import (
+    MODEL_FEATURE_COLS,
+    HistoricalProfileBuilder,
+    build_station_dtype,
+)
 from app.BIKE.pipeline.lookup import StockProfileBaseline
 
 ARTIFACT = "models/BIKE/v3-holiday-tuned_20260913-1558"
@@ -51,7 +55,12 @@ def load_profile(artifact: str) -> HistoricalProfileBuilder:
 
 
 def build_feature_row(
-    station: str, time_slot: int, anchor: float, rack_count: float, is_holiday: int, profile: HistoricalProfileBuilder
+    station: str,
+    time_slot: int,
+    anchor: float,
+    rack_count: float,
+    is_holiday: int,
+    profile: HistoricalProfileBuilder,
 ) -> dict:
     hour = (time_slot * 30) // 60
     minute = (time_slot * 30) % 60
@@ -92,7 +101,8 @@ def main() -> None:
     # ── station_code dtype: 학습 시 카테고리와 동일해야 한다 ──
     import json
 
-    meta = json.load(open(f"{ARTIFACT}/meta.json", encoding="utf-8"))
+    with open(f"{ARTIFACT}/meta.json", encoding="utf-8") as f:
+        meta = json.load(f)
     n_categories = meta["station_categories"]
     print(f"[A1] 학습 당시 station 카테고리 수(메타): {n_categories}")
 
@@ -135,7 +145,9 @@ def main() -> None:
 
     rows = []
     for station in stations:
-        avg_s = avg_train[(avg_train["od_station_id"] == station) & (avg_train["dow_type"] == DOW_TYPE)]
+        avg_s = avg_train[
+            (avg_train["od_station_id"] == station) & (avg_train["dow_type"] == DOW_TYPE)
+        ]
         avg_by_slot = dict(zip(avg_s["time_slot"], avg_s["exp_bikes"], strict=False))
         gt_s = gt[gt["od_station_id"] == station]
         gt_by_slot = dict(zip(gt_s["time_slot"], gt_s["exp_bikes"], strict=False))

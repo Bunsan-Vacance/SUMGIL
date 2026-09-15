@@ -25,7 +25,9 @@ from app.BIKE.pipeline.dataset import monthly_paths
 
 AI_ROOT = Path(__file__).resolve().parents[4]
 VENUE_CONF = AI_ROOT / "DATA_ENGINE" / "conf" / "venue_coordinates.yaml"
-KBO_PARQUET = AI_ROOT / "data" / "EXTERNAL" / "events" / "processed" / "kbo_games_with_attendance.parquet"
+KBO_PARQUET = (
+    AI_ROOT / "data" / "EXTERNAL" / "events" / "processed" / "kbo_games_with_attendance.parquet"
+)
 
 EARTH_RADIUS_KM = 6371.0
 
@@ -50,10 +52,14 @@ def load_bike_stations() -> pd.DataFrame:
     return df.drop_duplicates("od_station_id").dropna(subset=["lat_stock", "lon_stock"])
 
 
-def match_stations_to_stadiums(stations: pd.DataFrame, stadiums: pd.DataFrame, radius_km: float) -> pd.DataFrame:
+def match_stations_to_stadiums(
+    stations: pd.DataFrame, stadiums: pd.DataFrame, radius_km: float
+) -> pd.DataFrame:
     rows = []
     for _, st in stadiums.iterrows():
-        d = haversine_km(stations["lat_stock"].to_numpy(), stations["lon_stock"].to_numpy(), st["lat"], st["lon"])
+        d = haversine_km(
+            stations["lat_stock"].to_numpy(), stations["lon_stock"].to_numpy(), st["lat"], st["lon"]
+        )
         near = stations.loc[d <= radius_km, "od_station_id"]
         for sid in near:
             rows.append({"od_station_id": sid, "stadium": st["stadium"]})
@@ -79,7 +85,9 @@ def main() -> None:
     games = pd.read_parquet(KBO_PARQUET)
     games = games.dropna(subset=["attendance"])  # 관중수 있는 4구장 실제 경기만
     games["date"] = pd.to_datetime(games["date"]).dt.normalize()
-    print(f"[KBO] 관중수 있는 경기 {len(games):,}건, 기간 {games['date'].min().date()} ~ {games['date'].max().date()}")
+    print(
+        f"[KBO] 관중수 있는 경기 {len(games):,}건, 기간 {games['date'].min().date()} ~ {games['date'].max().date()}"
+    )
 
     # ── 구장별 경기일 집합 ──
     game_dates_by_stadium = games.groupby("stadium")["date"].apply(set).to_dict()
@@ -94,15 +102,15 @@ def main() -> None:
 
     rows = []
     for p in all_paths:
-        df = pd.read_parquet(
-            p, columns=["od_station_id", "date", "horizon_min", "target_net_flow"]
-        )
+        df = pd.read_parquet(p, columns=["od_station_id", "date", "horizon_min", "target_net_flow"])
         df = df[(df["od_station_id"].isin(target_ids)) & (df["horizon_min"] == 5)]
         if df.empty:
             continue
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
         df["stadium"] = df["od_station_id"].map(id_to_stadium)
-        df["is_game_day"] = df.apply(lambda r: r["date"] in game_dates_by_stadium.get(r["stadium"], set()), axis=1)
+        df["is_game_day"] = df.apply(
+            lambda r: r["date"] in game_dates_by_stadium.get(r["stadium"], set()), axis=1
+        )
         rows.append(df[["stadium", "is_game_day", "target_net_flow"]])
 
     if not rows:
@@ -111,7 +119,9 @@ def main() -> None:
 
     combined = pd.concat(rows, ignore_index=True)
     print("\n[KBO] 구장별 경기일 vs 비경기일 net_flow 평균/표준편차:")
-    summary = combined.groupby(["stadium", "is_game_day"])["target_net_flow"].agg(["mean", "std", "count"])
+    summary = combined.groupby(["stadium", "is_game_day"])["target_net_flow"].agg(
+        ["mean", "std", "count"]
+    )
     print(summary.to_string())
 
 
@@ -130,22 +140,32 @@ def hourly_breakdown() -> None:
 
     target_ids = set(matched["od_station_id"])
     id_to_stadium = dict(zip(matched["od_station_id"], matched["stadium"], strict=False))
-    all_paths = monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    all_paths = (
+        monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    )
 
     rows = []
     for p in all_paths:
-        df = pd.read_parquet(p, columns=["od_station_id", "date", "hour", "horizon_min", "target_net_flow"])
+        df = pd.read_parquet(
+            p, columns=["od_station_id", "date", "hour", "horizon_min", "target_net_flow"]
+        )
         df = df[(df["od_station_id"].isin(target_ids)) & (df["horizon_min"] == 5)]
         if df.empty:
             continue
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
         df["stadium"] = df["od_station_id"].map(id_to_stadium)
-        df["is_game_day"] = df.apply(lambda r: r["date"] in game_dates_by_stadium.get(r["stadium"], set()), axis=1)
+        df["is_game_day"] = df.apply(
+            lambda r: r["date"] in game_dates_by_stadium.get(r["stadium"], set()), axis=1
+        )
         rows.append(df[["stadium", "hour", "is_game_day", "target_net_flow"]])
 
     combined = pd.concat(rows, ignore_index=True)
     print("\n[KBO] 시간대별 경기일 vs 비경기일 net_flow 평균 (구장별):")
-    piv = combined.groupby(["stadium", "hour", "is_game_day"])["target_net_flow"].mean().unstack("is_game_day")
+    piv = (
+        combined.groupby(["stadium", "hour", "is_game_day"])["target_net_flow"]
+        .mean()
+        .unstack("is_game_day")
+    )
     piv["diff"] = piv[True] - piv[False]
     print(piv.to_string())
 
@@ -166,11 +186,19 @@ def three_metric_recheck() -> None:
 
     target_ids = set(matched["od_station_id"])
     id_to_stadium = dict(zip(matched["od_station_id"], matched["stadium"], strict=False))
-    all_paths = monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    all_paths = (
+        monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    )
 
     cols = [
-        "od_station_id", "date", "horizon_min", "stock_anchor_hour", "rack_count",
-        "target_net_flow", "target_rent_count", "target_return_count",
+        "od_station_id",
+        "date",
+        "horizon_min",
+        "stock_anchor_hour",
+        "rack_count",
+        "target_net_flow",
+        "target_rent_count",
+        "target_return_count",
     ]
     rows = []
     for p in all_paths:
@@ -181,12 +209,25 @@ def three_metric_recheck() -> None:
         df = df.dropna(subset=["stock_anchor_hour", "target_net_flow"])
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
         df["stadium"] = df["od_station_id"].map(id_to_stadium)
-        df["is_game_day"] = df.apply(lambda r: r["date"] in game_dates_by_stadium.get(r["stadium"], set()), axis=1)
+        df["is_game_day"] = df.apply(
+            lambda r: r["date"] in game_dates_by_stadium.get(r["stadium"], set()), axis=1
+        )
         df["activity"] = df["target_rent_count"] + df["target_return_count"]
         future_stock = df["stock_anchor_hour"] + df["target_net_flow"]
         df["is_empty_future"] = future_stock <= 0
         df["is_full_future"] = future_stock >= df["rack_count"]
-        rows.append(df[["stadium", "is_game_day", "activity", "target_net_flow", "is_empty_future", "is_full_future"]])
+        rows.append(
+            df[
+                [
+                    "stadium",
+                    "is_game_day",
+                    "activity",
+                    "target_net_flow",
+                    "is_empty_future",
+                    "is_full_future",
+                ]
+            ]
+        )
 
     combined = pd.concat(rows, ignore_index=True)
     print(f"\n[KBO 3지표 재검증] 전체 {len(combined):,}행")

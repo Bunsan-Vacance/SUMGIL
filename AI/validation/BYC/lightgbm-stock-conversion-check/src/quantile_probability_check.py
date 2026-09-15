@@ -79,7 +79,9 @@ def normal_cdf(x, mu, sigma):
     return norm.cdf(x, loc=mu, scale=sigma)
 
 
-def calibration_table(predicted_p: np.ndarray, actual: np.ndarray, n_bins: int = N_BINS) -> pd.DataFrame:
+def calibration_table(
+    predicted_p: np.ndarray, actual: np.ndarray, n_bins: int = N_BINS
+) -> pd.DataFrame:
     """예측 확률을 n_bins개 구간으로 나눠, 구간별 평균 예측확률 vs 실제 발생률을 비교한다."""
     bins = pd.qcut(predicted_p, n_bins, duplicates="drop")
     df = pd.DataFrame({"bin": bins, "pred": predicted_p, "actual": actual})
@@ -101,8 +103,12 @@ def main() -> None:
     holidays = load_holidays()
 
     print("[B2] 데이터 로딩...")
-    train_df = load_paths(train_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42)
-    valid_df = load_paths(valid_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42)
+    train_df = load_paths(
+        train_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42
+    )
+    valid_df = load_paths(
+        valid_paths, READ_COLS, TARGET_COL, sample_frac=SAMPLE_FRAC, random_state=42
+    )
     train_df = _attach_holiday_flag(train_df, holidays)
     valid_df = _attach_holiday_flag(valid_df, holidays)
 
@@ -123,8 +129,13 @@ def main() -> None:
     t0 = time.time()
     for q in QUANTILES:
         model = LGBMRegressor(
-            objective="quantile", alpha=q, n_estimators=300, learning_rate=0.05,
-            num_leaves=63, n_jobs=-1, verbose=-1,
+            objective="quantile",
+            alpha=q,
+            n_estimators=300,
+            learning_rate=0.05,
+            num_leaves=63,
+            n_jobs=-1,
+            verbose=-1,
         )
         model.fit(x_train, y_train)
         preds[q] = model.predict(x_valid)
@@ -137,8 +148,10 @@ def main() -> None:
     cov10 = float((y_true <= q10).mean())
     cov50 = float((y_true <= q50).mean())
     cov90 = float((y_true <= q90).mean())
-    print(f"[B2] coverage — q10 목표 10% 실제 {cov10:.1%} / q50 목표 50% 실제 {cov50:.1%} / "
-          f"q90 목표 90% 실제 {cov90:.1%}")
+    print(
+        f"[B2] coverage — q10 목표 10% 실제 {cov10:.1%} / q50 목표 50% 실제 {cov50:.1%} / "
+        f"q90 목표 90% 실제 {cov90:.1%}"
+    )
 
     # ── ② 정규분포 근사로 p_empty/p_full 계산 ──
     mu = q50
@@ -154,12 +167,16 @@ def main() -> None:
     actual_empty = (future_stock_actual <= 0).astype(float)
     actual_full = (future_stock_actual >= rack_count).astype(float)
 
-    print(f"\n[B2] p_empty — 평균 예측 {p_empty_pred.mean():.3f} vs 실측 발생률 {actual_empty.mean():.3f}, "
-          f"Brier={brier_score(p_empty_pred, actual_empty):.4f}")
+    print(
+        f"\n[B2] p_empty — 평균 예측 {p_empty_pred.mean():.3f} vs 실측 발생률 {actual_empty.mean():.3f}, "
+        f"Brier={brier_score(p_empty_pred, actual_empty):.4f}"
+    )
     print(calibration_table(p_empty_pred, actual_empty).to_string(index=False))
 
-    print(f"\n[B2] p_full — 평균 예측 {p_full_pred.mean():.3f} vs 실측 발생률 {actual_full.mean():.3f}, "
-          f"Brier={brier_score(p_full_pred, actual_full):.4f}")
+    print(
+        f"\n[B2] p_full — 평균 예측 {p_full_pred.mean():.3f} vs 실측 발생률 {actual_full.mean():.3f}, "
+        f"Brier={brier_score(p_full_pred, actual_full):.4f}"
+    )
     print(calibration_table(p_full_pred, actual_full).to_string(index=False))
 
 

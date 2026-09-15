@@ -71,9 +71,13 @@ def load_asos() -> pd.DataFrame:
 
 def main() -> None:
     weather = load_asos()
-    print(f"[날씨] {len(weather):,}행, 기간 {weather['date'].min().date()} ~ {weather['date'].max().date()}")
+    print(
+        f"[날씨] {len(weather):,}행, 기간 {weather['date'].min().date()} ~ {weather['date'].max().date()}"
+    )
 
-    all_paths = monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    all_paths = (
+        monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    )
 
     rows = []
     for p in all_paths:
@@ -91,7 +95,11 @@ def main() -> None:
 
     print("\n[날씨] 기온 구간별 net_flow 평균/표준편차:")
     combined["temp_bin"] = pd.cut(combined["temp"], bins=[-30, 0, 10, 20, 30, 45])
-    print(combined.groupby("temp_bin", observed=True)["target_net_flow"].agg(["mean", "std", "count"]).to_string())
+    print(
+        combined.groupby("temp_bin", observed=True)["target_net_flow"]
+        .agg(["mean", "std", "count"])
+        .to_string()
+    )
 
 
 if __name__ == "__main__":
@@ -102,7 +110,9 @@ def activity_volume_check() -> None:
     """net_flow(순증감)는 비가 와도 안 변할 수 있지만, 대여+반납 '총량'(활동량) 자체는 줄어들 수 있다.
     사용자 지적대로 이걸 직접 확인한다."""
     weather = load_asos()
-    all_paths = monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    all_paths = (
+        monthly_paths("train", None) + monthly_paths("valid", None) + monthly_paths("test", None)
+    )
 
     rows = []
     for p in all_paths:
@@ -113,7 +123,9 @@ def activity_volume_check() -> None:
         df["date"] = pd.to_datetime(df["date"]).dt.normalize()
         merged = df.merge(weather, on=["date", "hour"], how="inner")
         merged["activity"] = merged["target_rent_count"] + merged["target_return_count"]
-        rows.append(merged[["is_rain", "temp", "activity", "target_rent_count", "target_return_count"]])
+        rows.append(
+            merged[["is_rain", "temp", "activity", "target_rent_count", "target_return_count"]]
+        )
 
     combined = pd.concat(rows, ignore_index=True)
     print(f"\n[활동량] 조인된 행수: {len(combined):,}")
@@ -126,11 +138,17 @@ def activity_volume_check() -> None:
     print(f"\n[활동량] 비 올 때 활동량 변화율: {(rain - base) / base:.1%}")
 
     print("\n[활동량] 강수 여부별 대여량/반납량 평균 (따로):")
-    print(combined.groupby("is_rain")[["target_rent_count", "target_return_count"]].mean().to_string())
+    print(
+        combined.groupby("is_rain")[["target_rent_count", "target_return_count"]].mean().to_string()
+    )
 
     print("\n[활동량] 기온 구간별 활동량 평균:")
     combined["temp_bin"] = pd.cut(combined["temp"], bins=[-30, 0, 10, 20, 30, 45])
-    print(combined.groupby("temp_bin", observed=True)["activity"].agg(["mean", "std", "count"]).to_string())
+    print(
+        combined.groupby("temp_bin", observed=True)["activity"]
+        .agg(["mean", "std", "count"])
+        .to_string()
+    )
 
 
 if __name__ == "__main__":

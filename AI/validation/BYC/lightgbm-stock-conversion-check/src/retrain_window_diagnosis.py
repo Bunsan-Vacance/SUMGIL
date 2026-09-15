@@ -40,7 +40,9 @@ def main() -> None:
 
     print("[진단] ground truth(2025-07 실측) 계산...")
     gt = StockProfileBaseline().fit_streaming(monthly_paths("test", ["202507"]), holidays).table_
-    gt = gt.rename(columns={"exp_bikes": "gt_exp_bikes"})[["od_station_id", "dow_type", "time_slot", "gt_exp_bikes"]]
+    gt = gt.rename(columns={"exp_bikes": "gt_exp_bikes"})[
+        ["od_station_id", "dow_type", "time_slot", "gt_exp_bikes"]
+    ]
     print(f"[진단] ground truth {len(gt):,}행")
 
     results = {}
@@ -55,7 +57,11 @@ def main() -> None:
     print("\n=== 요약 ===")
     summary = pd.DataFrame(
         {
-            name: {"비교행수": len(df), "MAE": df["abs_err"].mean(), "중앙값 오차": df["abs_err"].median()}
+            name: {
+                "비교행수": len(df),
+                "MAE": df["abs_err"].mean(),
+                "중앙값 오차": df["abs_err"].median(),
+            }
             for name, df in results.items()
         }
     ).T
