@@ -2,17 +2,17 @@
 
 ## 현재 연결 상태
 
-| 영역                           | 실제 구현                                                      | 연결 위치                                                 |
-| ------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------- |
-| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                              | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`         |
-| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회           | `features/map/useCurrentLocation.ts`                      |
-| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                             | `features/map/MapPlacePicker.tsx`                         |
-| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                           | `lib/kakao/sdk.ts`, `api/repositories.ts`                 |
-| 실제 경로 입력의 장소·역 후보  | 백엔드 역 검색과 카카오 장소·주소 검색 결과                    | `api/repositories.ts`, `features/route/usePlaceSearch.ts` |
-| 추천 경로                      | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 샘플           | `api/repositories.ts`                                     |
+| 영역                           | 실제 구현                                                                          | 연결 위치                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                                                  | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`         |
+| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회                               | `features/map/useCurrentLocation.ts`                      |
+| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                                                 | `features/map/MapPlacePicker.tsx`                         |
+| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                                               | `lib/kakao/sdk.ts`, `api/repositories.ts`                 |
+| 실제 경로 입력의 장소·역 후보  | 백엔드 역 검색과 카카오 장소·주소 검색 결과                                        | `api/repositories.ts`, `features/route/usePlaceSearch.ts` |
+| 추천 경로                      | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 샘플                               | `api/repositories.ts`                                     |
 | 정렬·이동수단 필터             | 요청 modes는 서버에 전달하고 결과에도 같은 필터를 적용, 우선순위 정렬은 클라이언트 | `api/repositories.ts`, `features/route`                   |
-| 경로선·실제 길찾기·혼잡 추정   | 경로 API·좌표 연결, 혼잡도는 응답에 있을 때만 표시             | `api/repositories.ts`, `features/map`                     |
-| 따릉이 대여소 데이터·지도 마커 | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay               | `api/repositories.ts`, `features/map/bikeStations.ts`     |
+| 경로선·실제 길찾기·혼잡 추정   | 경로 API·좌표 연결, 혼잡도는 응답에 있을 때만 표시                                 | `api/repositories.ts`, `features/map`                     |
+| 따릉이 대여소 데이터·지도 마커 | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay                                   | `api/repositories.ts`, `features/map/bikeStations.ts`     |
 
 ### 따릉이 대여소 정적 데이터
 
