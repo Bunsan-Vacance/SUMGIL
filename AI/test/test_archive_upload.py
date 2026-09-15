@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,23 @@ from DATA_ENGINE.archive.upload_raw_partitions import (
     main,
     snapshot_files,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stable_archive_clock(monkeypatch):
+    """이 파일의 테스트는 전부 `older_than_hours=0`으로 방금 쓴 파일의 mtime과
+    now_ts를 여유 없이 비교한다 — 파일시스템 mtime 해상도·clock skew로 아주
+    드물게 mtime이 now_ts를 앞질러 파티션이 통째로 걸러지는 레이스가 있었다
+    (S15P21A104-132 도입 당시 플레이키, S15P21A104-195 병합 중 발견).
+    now_ts가 호출 시점마다 실제 현재 시각보다 5초 미래로 이동해 그 레이스를 없앤다.
+    패치 전에 원본 time.time을 real_time으로 캡처해둔다 — targets.py의 time과
+    이 파일의 time은 같은 모듈 객체라, 패치 후 lambda 안에서 time.time()을 다시
+    부르면 패치된 자기 자신을 호출하는 무한 재귀가 된다."""
+    real_time = time.time
+    monkeypatch.setattr(
+        "DATA_ENGINE.archive.targets.time.time",
+        lambda: real_time() + 5,
+    )
 
 
 def write_snapshot(path: Path, *, size: int = 10) -> Path:

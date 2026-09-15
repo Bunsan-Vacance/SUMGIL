@@ -12,7 +12,10 @@ station×horizon → horizon 전체 — `validation/BYC/reference-notes`의 원�
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+
+from app.BIKE.pipeline.calendar import attach_dow_type
 
 # ── Phase 1 최소셋 ──
 BASE_FEATURE_COLS = [
@@ -176,3 +179,97 @@ class HistoricalProfileBuilder:
         )
         model.global_ = pd.read_parquet(out_dir / "historical_profile_global.parquet")
         return model
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# B4-2: 날짜축 멀티소스 모델(anchor 없음) — 위 v3(anchor+horizon)와 별개 축.
+# `validation/BYC/lightgbm-stock-conversion-check/RESULTS.md`에서 검증 완료
+# (exp_bikes -11.6%, p_full -12.4%, p_empty -1.8%, 전부 avg를 넘김).
+# ═══════════════════════════════════════════════════════════════════════════
+
+MULTISOURCE_TARGET_COL = "target_stock"
+
+MULTISOURCE_FEATURE_COLS = [
+    "target_hour",
+    "target_minute",
+    "target_dow",
+    "target_is_weekend",
+    "target_month",
+    "target_sin_hour",
+    "target_cos_hour",
+    "is_holiday",
+    "is_rain",
+    "temp",
+    "is_kbo_game_jamsil",
+    "hist_mean",
+    "hist_std",
+    "station_code",
+    "lag1d_stock",
+    "lag1d_stock_available",
+    "lag7d_stock",
+    "lag7d_stock_available",
+]
+
+
+def add_future_stock_labels(df: pd.DataFrame) -> pd.DataFrame:
+    """`stock_anchor_hour + target_net_flow`로 미래 절대 재고 라벨을 만든다(anchor 없는
+    모델의 학습 타깃). 여러 스크립트에 계산이 흩어지지 않게 여기 한 곳에 고정한다."""
+    df = df.copy()
+    df["target_stock"] = df["stock_anchor_hour"] + df["target_net_flow"]
+    df["target_stock_ratio"] = df["target_stock"] / df["rack_count"].replace(0, np.nan)
+    df["is_empty_future"] = df["target_stock"] <= 0
+    df["is_full_future"] = df["target_stock"] >= df["rack_count"]
+    return df
+
+
+def compute_target_time_features(df: pd.DataFrame, holidays: pd.DataFrame) -> pd.DataFrame:
+    """`base_time + horizon_min`(=target_datetime) 기준으로 시간 피처를 계산한다.
+
+    anchor(base_time) 기준 hour를 그대로 쓰면 최대 30분 어긋난다(horizon_min=30 고정
+    사용 전제) — 이 모델이 예측하는 대상은 "미래 시점 자체"라 그 시점의 요일·시간이어야
+    맞다. `dow_type`도 서빙 중인 avg와 완전히 같은 규칙(`calendar.attach_dow_type`)을
+    재사용해야 공정 비교/재사용이 된다.
+    """
+    df = df.copy()
+    df["base_time"] = pd.to_datetime(df["base_time"])
+    target_dt = df["base_time"] + pd.Timedelta(minutes=30)
+    df["target_hour"] = target_dt.dt.hour
+    df["target_minute"] = target_dt.dt.minute
+    df["target_dow"] = target_dt.dt.dayofweek
+    df["target_is_weekend"] = (df["target_dow"] >= 5).astype("int8")
+    df["target_month"] = target_dt.dt.month
+    df["target_sin_hour"] = np.sin(2 * np.pi * df["target_hour"] / 24)
+    df["target_cos_hour"] = np.cos(2 * np.pi * df["target_hour"] / 24)
+    df["date"] = target_dt.dt.normalize()
+    df = attach_dow_type(df, holidays)
+    df["time_slot"] = df["target_hour"] * 2 + (df["target_minute"] >= 30).astype(int)
+    return df
+
+
+def fit_station_dow_time_slot_profile(train_df: pd.DataFrame) -> pd.DataFrame:
+    """B4-2 모델용 historical profile — **avg baseline과 완전히 같은 그룹핑**
+    (station×dow_type×time_slot). 요일을 안 묶고 계산하면 avg보다 노이즈가 커져서
+    모델 성능이 avg를 못 넘는다(원인 진단, RESULTS.md) — 반드시 이 그룹핑을 써야 한다."""
+    return (
+        train_df.groupby(["od_station_id", "dow_type", "time_slot"])[MULTISOURCE_TARGET_COL]
+        .agg(hist_mean="mean", hist_std="std")
+        .reset_index()
+    )
+
+
+def attach_multisource_profile(
+    df: pd.DataFrame, profile: pd.DataFrame, global_mean: float
+) -> pd.DataFrame:
+    merged = df.merge(profile, on=["od_station_id", "dow_type", "time_slot"], how="left")
+    merged["hist_mean"] = merged["hist_mean"].fillna(global_mean)
+    merged["hist_std"] = merged["hist_std"].fillna(0.0)
+    return merged
+
+
+def fill_lag_fallback(df: pd.DataFrame) -> pd.DataFrame:
+    """lag1d_stock/lag7d_stock 결측(데이터 경계)을 hist_mean으로 채운다 — CROWD의
+    "이력이 전혀 없으면 lookup으로 대체"와 동일 관례. `{col}_available` 플래그는
+    그대로 둬서 모델이 실측인지 대체값인지 구분하게 한다."""
+    for col in ("lag1d_stock", "lag7d_stock"):
+        df[col] = df[col].fillna(df["hist_mean"])
+    return df

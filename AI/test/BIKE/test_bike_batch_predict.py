@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import pandas as pd
 
@@ -13,7 +14,7 @@ class FakePredictor:
     kind = "avg"
     version = "avg:test"
 
-    def predict_all(self) -> pd.DataFrame:
+    def predict_all(self, target_date: date | None = None) -> pd.DataFrame:
         return pd.DataFrame(
             [
                 {
