@@ -1,10 +1,13 @@
-import { ArrowLeft, ArrowLeftRight, Navigation, SlidersHorizontal } from 'lucide-react'
-import BottomSheet from '../components/BottomSheet'
+import { useState } from 'react'
+import { ArrowLeftRight, ChevronDown, Gauge, SlidersHorizontal, UsersRound, X } from 'lucide-react'
+import DepartureTimeDialog from '../features/route/DepartureTimeDialog'
 import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
+import { clockTime } from '../features/route/selectors'
 import { isBackendConfigured } from '../api/repositories'
+
 interface Props {
   origin: Place
   destinationName: string
@@ -21,16 +24,18 @@ interface Props {
   openSearch: (target: 'origin' | 'destination') => void
   onBackToInput: () => void
   go: Navigate
-  startGuide: () => void
+  startGuide?: () => void
   canSwap: boolean
   swapPlaces: () => void
   isLiveApi?: boolean
+  departureTime?: string
+  onDepartureTimeChange?: (time: string) => void
 }
+
 export default function ResultsPage({
   origin,
   destinationName,
   visible,
-  selectedId,
   setSelectedId,
   status,
   retry,
@@ -42,77 +47,116 @@ export default function ResultsPage({
   openSearch,
   onBackToInput,
   go,
-  startGuide,
   canSwap,
   swapPlaces,
   isLiveApi,
+  departureTime,
+  onDepartureTimeChange,
 }: Props) {
+  const [choosingTime, setChoosingTime] = useState(false)
   const hasCongestion = visible.some((route) => route.congestionPercent !== undefined)
   const liveApi = isLiveApi ?? isBackendConfigured
+  const departure = departureTime || clockTime(visible[0]?.departedAt)
+
   return (
-    <>
-      <div className="trip-summary">
-        <button
-          type="button"
-          className="icon-button summary-back"
-          aria-label="경로 입력으로 돌아가기"
-          onClick={onBackToInput}
-        >
-          <ArrowLeft size={17} />
-        </button>
-        <div>
+    <section className="results-screen" aria-label="경로 검색 결과">
+      <header className="results-top">
+        <div className="results-trip-card">
           <button
             type="button"
-            className="trip-summary-field"
-            aria-label="출발지 수정"
-            onClick={() => openSearch('origin')}
+            className="results-swap"
+            aria-label="출발지와 도착지 교환"
+            disabled={!canSwap}
+            onClick={swapPlaces}
           >
-            <i className="dot start" />
-            출발 <b>{origin.name}</b>
+            <ArrowLeftRight size={22} />
           </button>
+          <div className="results-trip-fields">
+            <button
+              type="button"
+              className="results-trip-field"
+              aria-label="출발지 수정"
+              onClick={() => openSearch('origin')}
+            >
+              <i className="dot start" />
+              <span>{origin.name}</span>
+            </button>
+            <button
+              type="button"
+              className="results-trip-field"
+              aria-label="도착지 수정"
+              onClick={() => openSearch('destination')}
+            >
+              <i className="dot end" />
+              <span>{destinationName}</span>
+            </button>
+          </div>
           <button
             type="button"
-            className="trip-summary-field"
-            aria-label="도착지 수정"
-            onClick={() => openSearch('destination')}
+            className="results-close"
+            aria-label="경로 입력으로 돌아가기"
+            onClick={onBackToInput}
           >
-            <i className="dot end" />
-            도착 <b>{destinationName}</b>
+            <X size={27} />
           </button>
         </div>
-        <button
-          className="icon-button summary-swap"
-          aria-label="출발지와 도착지 교환"
-          disabled={!canSwap}
-          onClick={swapPlaces}
-        >
-          <ArrowLeftRight size={17} />
-        </button>
-      </div>
-      <BottomSheet
-        key="results"
-        footer={
-          status === 'success' &&
-          !!selectedId &&
-          visible.some((route) => route.id === selectedId) ? (
-            <>
-              <button className="secondary" onClick={() => go('detail')}>
-                선택한 경로 상세
-              </button>
-              <button className="primary" onClick={startGuide}>
-                이 경로로 안내
-              </button>
-            </>
-          ) : undefined
-        }
-      >
+        <div className="results-priority" role="group" aria-label="경로 우선순위">
+          <button
+            type="button"
+            aria-pressed={priority === 'fast'}
+            onClick={() => setPriority('fast')}
+          >
+            <Gauge size={20} aria-hidden="true" />
+            <span>속도</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={priority === 'calm'}
+            aria-label="혼잡"
+            disabled={!hasCongestion}
+            onClick={() => setPriority('calm')}
+          >
+            <UsersRound size={20} aria-hidden="true" />
+            <span>혼잡</span>
+            {!hasCongestion && <small>준비중입니다</small>}
+          </button>
+        </div>
+      </header>
+
+      <div className="results-scroll">
+        <div className="results-sort-row">
+          <button
+            type="button"
+            className="results-departure"
+            aria-label="출발 시간 선택"
+            onClick={() => setChoosingTime(true)}
+          >
+            {departure ? (
+              <>
+                오늘 <b>{departure}</b> 출발
+              </>
+            ) : (
+              '출발 시간 선택'
+            )}
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+          <button type="button" className="results-filter" onClick={openFilter}>
+            <SlidersHorizontal size={14} aria-hidden="true" />
+            이동수단
+            <span className="sr-only">{enabled.length}/4 선택됨</span>
+          </button>
+          <span className="results-sort" aria-label="정렬 기준">
+            {priority === 'calm' ? '혼잡도 낮은 순' : '빠른 순'}
+          </span>
+        </div>
+
         {status === 'loading' ? (
-          <div className="empty" role="status">
+          <div className="empty results-state" role="status">
             <span className="spinner" />
             <h2>경로를 찾고 있어요</h2>
           </div>
         ) : status === 'error' ? (
-          <div className="empty" role="alert">
+          <div className="empty results-state" role="alert">
             <h2>{error || '경로를 불러오지 못했어요.'}</h2>
             <button className="primary" onClick={retry}>
               다시 시도
@@ -120,43 +164,21 @@ export default function ResultsPage({
           </div>
         ) : (
           <>
-            <header className="row between results-header">
-              <div>
-                <h2>추천 경로</h2>
-                <p>
-                  {visible.length}개 경로{!liveApi && ' · 09:41 출발 기준'}
-                </p>
-              </div>
-              <button className="secondary filter-button" onClick={openFilter}>
-                <SlidersHorizontal size={16} />
-                이동수단 <small>{enabled.length}/4</small>
-              </button>
-            </header>
-            <div className="priority" role="group" aria-label="경로 우선순위">
-              <button aria-pressed={priority === 'fast'} onClick={() => setPriority('fast')}>
-                빠름 우선
-              </button>
-              <button
-                aria-pressed={priority === 'calm'}
-                disabled={!hasCongestion}
-                onClick={() => setPriority('calm')}
-              >
-                덜 붐빔 우선
-              </button>
-            </div>
+            {!liveApi && <p className="results-sample">시안 · 예시 데이터</p>}
             <div className="route-list">
               {visible.map((route) => (
                 <RouteCard
                   key={route.id}
                   route={route}
-                  selected={selectedId === route.id}
-                  onSelect={() => setSelectedId(route.id)}
+                  onDetail={() => {
+                    setSelectedId(route.id)
+                    go('detail')
+                  }}
                 />
               ))}
             </div>
             {!visible.length && (
               <div className="empty">
-                <Navigation />
                 <h3>해당 수단으로는 경로가 없어요</h3>
                 <button className="secondary" onClick={openFilter}>
                   조건 변경
@@ -165,7 +187,17 @@ export default function ResultsPage({
             )}
           </>
         )}
-      </BottomSheet>
-    </>
+      </div>
+      {choosingTime && (
+        <DepartureTimeDialog
+          initialValue={departure || clockTime(new Date().toISOString()) || '00:00'}
+          onClose={() => setChoosingTime(false)}
+          onApply={(time) => {
+            onDepartureTimeChange?.(time)
+            setChoosingTime(false)
+          }}
+        />
+      )}
+    </section>
   )
 }

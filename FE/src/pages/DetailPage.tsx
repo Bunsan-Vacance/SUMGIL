@@ -1,7 +1,7 @@
 import { ArrowLeft, Navigation } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import LegList from '../features/route/LegList'
-import { arrival, roundMinutes } from '../features/route/selectors'
+import { routeArrival, roundMinutes } from '../features/route/selectors'
 import type { Place, Route } from '../features/route/types'
 import type { Navigate } from '../app/useNavigation'
 interface Props {
@@ -38,7 +38,7 @@ export default function DetailPage({ origin, destinationName, selected, go, star
             {roundMinutes(selected.minutes)}
             <small>분</small>
           </h2>
-          <span>{arrival(selected.minutes, selected.departedAt)} 도착 예상</span>
+          <span>{routeArrival(selected.minutes, selected.departedAt)} 도착 예상</span>
           <b className={selected.id === 'calm' ? 'calm-text' : 'fast-text'}>{selected.label}</b>
         </div>
         <div className="stats">

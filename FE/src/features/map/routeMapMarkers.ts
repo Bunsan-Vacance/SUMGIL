@@ -1,5 +1,6 @@
 import type { KakaoMapInstance, KakaoMaps, MapOverlay } from '../../lib/kakao/sdk'
 import type { GeometryLineString, Leg, Place, Route, RouteEndpoint } from '../route/types'
+import { lineColor } from '../route/lineColor'
 
 export type RouteEndpointRole = '승차' | '환승' | '하차'
 export type BikeEndpointRole = '대여' | '반납'
@@ -26,6 +27,8 @@ export interface RouteLineEntry {
 
 export function routeLineStyle(leg: Leg) {
   if (leg.transfer) return ROUTE_LINE_STYLES.transfer
+  const color = lineColor(leg)
+  if (color) return { strokeColor: color, strokeStyle: 'solid' as const }
   return ROUTE_LINE_STYLES[leg.mode]
 }
 
