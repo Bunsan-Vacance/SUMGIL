@@ -344,6 +344,24 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
+    @DisplayName("IT12c: 필터로 SHORTEST가 빠지면 남은 첫 후보가 SHORTEST로 재라벨링된다(FE-175 지적)")
+    void it12c_필터후_재라벨링() {
+        // 버스(240초)가 원래 SHORTEST, 지하철(900초)이 ALTERNATIVE. SUBWAY만 필터하면
+        // 지하철 혼자 남는데, 이때도 routeType은 ALTERNATIVE가 아니라 SHORTEST여야 한다.
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "C", "L1", 900),
+                bus("A", "T1", "B100", 120),
+                bus("T1", "C", "B100", 120)));
+
+        List<RouteSearchResponse> subwayOnly = routeSearchService.search(
+                "A", "C", List.of(TravelMode.SUBWAY), null, null);
+
+        assertEquals(1, subwayOnly.size());
+        assertEquals(RouteType.SHORTEST, subwayOnly.get(0).routeType());
+        assertEquals(TravelMode.SUBWAY, subwayOnly.get(0).legs().get(0).mode());
+    }
+
+    @Test
     @DisplayName("IT13: 혼합(지하철+버스) 경로가 응답된다")
     void it13_혼합_지하철버스() {
         // A→B 지하철 100초, B→T1→C 버스 240초 vs A→B→C 지하철 500초(환승 포함).
