@@ -1,9 +1,9 @@
 # 프론트엔드 작업 안내
 
-- 시작점은 `README.md`와 `docs/README.md`다. 구조 변경 전 `docs/architecture.md`, 상태 변경 전 `docs/state.md`, API 변경 전 `docs/data-integration.md`를 읽는다.
+- 최초로 저장소 또는 FE 구조를 파악할 때만 `README.md`와 `docs/README.md`를 읽는다. 같은 작업에서 이미 확인한 내용은 재사용한다. 구조 변경 전 `docs/architecture.md`, 상태 변경 전 `docs/state.md`, API 변경 전 `docs/data-integration.md`를 읽는다.
 - 현재 구현 기준은 `docs`와 실제 코드다. `docs/history`의 초기 계획은 현재 요구사항으로 적용하지 않는다. 팀 기능/정책은 Notion 원문과 사용자 지시를 우선한다.
 - `App.tsx`는 페이지·지도·모달 조립, `app/useRoutePlanner`는 기능 간 흐름 연결에 집중한다. 계산·상태 규칙·SDK 처리·샘플 데이터를 다시 모으지 않는다.
 - 화면 전용 상태는 가까운 컴포넌트에, 여러 화면의 검색 상태는 `useTrip`, 안내 상태는 `useGuidance`에 둔다. 각 페이지에서 공유 훅을 다시 호출해 별도 상태를 만들지 않는다.
 - 기능 컴포넌트는 `features`, 범용 UI는 `components`, 외부 데이터 접근은 `api`, 카카오 SDK 로드는 `lib/kakao`에 둔다. 실제 재사용 필요 없이 추상화를 늘리지 않는다.
 - API 규격을 임의로 확정하지 않는다. 샘플/실제 연결의 차이를 문서에 명시한다. 환경 변수 값이나 키를 문서·로그·커밋에 넣지 않는다.
-- 변경한 책임에 맞는 문서를 함께 갱신한다. `docs/development.md`의 검증 기준에 따라 빌드·관련 테스트·관련 화면을 확인한다.
+- 변경한 책임에 대응하는 문서가 있는 경우에만 그 문서를 갱신한다. `docs/development.md`의 변경별 검증 기준에 따라 해당 변경에 필요한 빌드·관련 테스트·관련 화면만 확인한다.
