@@ -9,6 +9,7 @@ CROWD의 `day_type`(평일/토요일/일요일/휴일 4분류)과는 분류 체�
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -56,3 +57,62 @@ def attach_dow_type(frame: pd.DataFrame, holidays: pd.DataFrame | None = None) -
 def slot_5m_to_time_slot(slot_5m: pd.Series) -> pd.Series:
     """5분 슬롯(0~287, 내부 학습 데이터 기준) → 30분 슬롯(0~47, BE bike_stock_pred 기준)."""
     return (slot_5m // 6).astype("int16")
+
+
+def dow_type_for_date(when: date, holidays: pd.DataFrame) -> int:
+    """단일 날짜용 dow_type. `attach_dow_type`과 완전히 같은 우선순위를 쓴다.
+
+    토요일(1) → 일요일 또는 공휴일(2) → 평일(0). 순서를 바꾸면 토요일이면서
+    공휴일인 날이 조용히 dow_type=2로 잘못 판정된다.
+    """
+    normalized = pd.Timestamp(when).normalize()
+
+    if normalized.dayofweek == 5:
+        return 1
+
+    if holidays.empty:
+        is_holiday = False
+    else:
+        is_holiday = bool((holidays["date"] == normalized).any())
+
+    if normalized.dayofweek == 6 or is_holiday:
+        return 2
+
+    return 0
+
+
+def dow_type_and_time_slot(when: datetime, holidays: pd.DataFrame) -> tuple[int, int]:
+    """실시간 서빙용: 임의 datetime → (dow_type, time_slot).
+
+    time_slot 공식은 `features.py`의 `hour*2 + (minute>=30)`과 동일해야
+    avg 표의 키(dow_type·time_slot)와 맞는다.
+    """
+    dow_type = dow_type_for_date(when.date(), holidays)
+
+    if when.minute >= 30:
+        half_hour = 1
+    else:
+        half_hour = 0
+
+    time_slot = when.hour * 2 + half_hour
+    return dow_type, time_slot
+
+
+_holidays_cache: tuple[float, pd.DataFrame] | None = None
+
+
+def get_holidays_cached(path: Path = DEFAULT_HOLIDAY_PATH) -> pd.DataFrame:
+    """`load_holidays()`의 mtime 캐시 버전 — 실시간 요청마다 parquet을 다시 읽지 않는다."""
+    global _holidays_cache
+
+    resolved_path = Path(path)
+    if not resolved_path.exists():
+        return load_holidays(resolved_path)
+
+    mtime = resolved_path.stat().st_mtime
+    if _holidays_cache is not None and _holidays_cache[0] == mtime:
+        return _holidays_cache[1]
+
+    frame = load_holidays(resolved_path)
+    _holidays_cache = (mtime, frame)
+    return frame
