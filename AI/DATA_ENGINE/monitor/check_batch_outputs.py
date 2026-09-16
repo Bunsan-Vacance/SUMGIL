@@ -60,13 +60,13 @@ WEATHER_FEATURE_COLUMNS = ["t1h", "rn1", "reh", "wsd", "pty"]
 WEATHER_SOURCES = {"observed", "forecast"}
 
 # 197: CROWD 서빙 표는 `dt=`/`part.parquet` 파티션이 아니라 날짜별 단일 parquet
-# (`predictions_YYYY-MM-DD.parquet`)이다. `boarding_pred`·`alighting_pred`·`pred_clipped`는
+# (`predictions_YYYY-MM-DD.parquet`)이다. `boarding_pred`·`alighting_pred`·`pred_source`는
 # BIKE·weather 산출물에는 없는 컬럼이라 이 점검은 CROWD 전용이다(check_crowd_output에서만 쓴다).
 CROWD_REQUIRED_COLUMNS = [
     "station_no",
     "boarding_pred",
     "alighting_pred",
-    "pred_clipped",
+    "pred_source",
 ]
 
 
@@ -286,9 +286,10 @@ def check_weather_output(check: BatchOutputCheck) -> BatchOutputResult:
 def check_crowd_output(check: BatchOutputCheck) -> BatchOutputResult:
     """CROWD 서빙 표 전용 — 197: 음수 인원(`boarding_pred`/`alighting_pred`) 0건을 단정한다.
 
-    등급 계산은 이미 클립된 값을 쓰므로 여기서 음수가 나오면 `to_congestion_table`의 클립이
-    출력까지 전파되지 않은 것이다(`SERVING_CONTRACT.md` 5.1 참고). BIKE·weather 산출물은 이
-    컬럼 자체가 없어 `check_bike_output`/`check_weather_output`과는 별도 함수로 둔다.
+    등급 계산은 이미 대체된(음수 → lookup, lookup도 없으면 0) 값을 쓰므로 여기서 음수가 나오면
+    `to_congestion_table`의 lookup 대체가 출력까지 전파되지 않은 것이다(`SERVING_CONTRACT.md` 5.1
+    참고). BIKE·weather 산출물은 이 컬럼 자체가 없어 `check_bike_output`/`check_weather_output`과는
+    별도 함수로 둔다.
     """
     df, error = read_output(check.name, check.path)
     if error is not None:
@@ -313,11 +314,12 @@ def check_crowd_output(check: BatchOutputCheck) -> BatchOutputResult:
             rows,
         )
 
-    clipped_rows = int(df["pred_clipped"].sum())
+    lookup_substituted_rows = int((df["pred_source"] == "lookup_negative").sum())
     return ok(
         check.name,
         check.path,
-        f"batch output: rows={rows} clipped_rows={clipped_rows} path={check.path}",
+        f"batch output: rows={rows} lookup_substituted_rows={lookup_substituted_rows} "
+        f"path={check.path}",
         rows,
     )
 
