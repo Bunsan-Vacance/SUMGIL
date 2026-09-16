@@ -26,17 +26,57 @@ else
 fi
 AI_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-if [[ -x "${AI_ROOT}/.venv/bin/python" ]]; then
-  PYTHON="${AI_ROOT}/.venv/bin/python"
-elif [[ -x "${AI_ROOT}/.venv/Scripts/python.exe" ]]; then
-  PYTHON="${AI_ROOT}/.venv/Scripts/python.exe"
-elif command -v python3 >/dev/null 2>&1; then
-  PYTHON="$(command -v python3)"
-elif command -v python >/dev/null 2>&1; then
-  PYTHON="$(command -v python)"
-else
-  printf '%s\n' \
-    "FAIL python executable not found: ${AI_ROOT}/.venv/bin/python, ${AI_ROOT}/.venv/Scripts/python.exe, python3, or python"
+is_supported_python() {
+  "$1" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+}
+
+python_version() {
+  "$1" - <<'PY' 2>/dev/null
+import sys
+print(".".join(map(str, sys.version_info[:3])))
+PY
+}
+
+PYTHON=""
+PYTHON_CANDIDATES=(
+  "${AI_ROOT}/.venv/bin/python"
+  "${AI_ROOT}/.venv/Scripts/python.exe"
+)
+
+if command -v python3.12 >/dev/null 2>&1; then
+  PYTHON_CANDIDATES+=("$(command -v python3.12)")
+fi
+if command -v python3.11 >/dev/null 2>&1; then
+  PYTHON_CANDIDATES+=("$(command -v python3.11)")
+fi
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_CANDIDATES+=("$(command -v python3)")
+fi
+if command -v python >/dev/null 2>&1; then
+  PYTHON_CANDIDATES+=("$(command -v python)")
+fi
+
+for candidate in "${PYTHON_CANDIDATES[@]}"; do
+  if [[ -x "${candidate}" ]] && is_supported_python "${candidate}"; then
+    PYTHON="${candidate}"
+    break
+  fi
+done
+
+if [[ -z "${PYTHON}" ]]; then
+  printf '%s\n' "FAIL Python 3.10+ executable not found."
+  printf '%s\n' "Checked candidates:"
+  for candidate in "${PYTHON_CANDIDATES[@]}"; do
+    if [[ -x "${candidate}" ]]; then
+      printf '  - %s (version: %s)\n' "${candidate}" "$(python_version "${candidate}")"
+    else
+      printf '  - %s (not executable or missing)\n' "${candidate}"
+    fi
+  done
+  printf '%s\n' "Create an AI venv with Python 3.10+ first, then rerun this script."
   exit 1
 fi
 
