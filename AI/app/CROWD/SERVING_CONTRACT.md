@@ -10,6 +10,12 @@
 > **이 문서는 테스트가 강제한다**(197 C부). `test/CROWD/test_crowd_serving_contract.py`가 1절 컬럼 표·
 > 2절 상태 표·3절 메타 표·4절 경로·파라미터·응답 예시를 각각 `OUTPUT_COLS`·`DATA_STATUS_VALUES`·
 > `META_KEYS`·OpenAPI·`schemas.py`와 대조한다. 코드만 고치면 CI가 막힌다.
+>
+> **테스트가 못 막는 것 — 사람이 챙긴다.** 아래 셋은 리포 밖이거나 값이라서 CI가 잡지 못한다.
+> 1. **예시 값**(1절 실제 2행, 4절 응답 JSON) — 테스트는 키와 타입만 보고 값은 안 본다. **배치를
+>    재생성하면 같이 갱신한다.** 실제로 197에서 4절 예시가 라우팅 이전 값으로 남아 있었다.
+> 2. **Notion 프로덕션 페이지**(실험실 / 혼잡도 프로덕션 / 서빙 출력·API 입출력 명세) — 이 문서의 사본이다.
+> 3. **BE 통지문** — 컬럼·필드가 바뀌면 `.claude/handoff/TO_BE-crowd-contract-change-NN.md`로 알린다.
 
 AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 날짜별 예측 표를 만들고, API는 그 표만 읽는다.
 
@@ -204,8 +210,8 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "predictor_version": "dl:dl_gru_s14_noev_s42_20260914-1358",
   "lag1d_available": false,
   "slots": [
-    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.9, "grade": 0, "data_status": "ok", "pred_source": "model"},
-    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 13.3, "grade": 0, "data_status": "ok", "pred_source": "model"}
+    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 6.282879, "grade": 0, "data_status": "ok", "pred_source": "model"},
+    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 4.556710, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -228,7 +234,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "line": "2호선",
   "time_slot_30min": "08:30",
   "stations": [
-    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 71.2, "grade": 1, "data_status": "ok", "pred_source": "model"}
+    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 24.063364, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
