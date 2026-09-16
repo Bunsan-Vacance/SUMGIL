@@ -9,6 +9,7 @@ namespace: prod
 resources:
   - be.yaml
   - be-collector.yaml
+  - be-consumer.yaml
   - ingress.yaml
 images:
   - name: sumgil-be
@@ -21,6 +22,9 @@ configMapGenerator:
   - name: be-collector-config
     envs:
       - collector.env
+  - name: be-consumer-config
+    envs:
+      - consumer.env
 # 앱 고유 비밀 (S15P21A104-173). .env.secret 은 커밋하지 않으므로 노드에 먼저 두어야 apply 가 된다
 # — 키 이름은 .env.example 참고. sync-to-nodes.sh 는 이 파일을 tar 에서 제외하므로 별도로 scp 한다.
 secretGenerator:

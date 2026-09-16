@@ -8,7 +8,14 @@ import com.ssafy.s15p21a104.collect.http.RetryingHttpFetcher;
 import com.ssafy.s15p21a104.collect.publish.EventPublisher;
 import com.ssafy.s15p21a104.collect.publish.KafkaEventPublisher;
 import com.ssafy.s15p21a104.collect.publish.LoggingEventPublisher;
+import com.ssafy.s15p21a104.collect.publish.RedisApplyingPublisher;
 import com.ssafy.s15p21a104.collect.source.BikeStockSource;
+import com.ssafy.s15p21a104.consume.BikeStockApplier;
+import com.ssafy.s15p21a104.consume.EventApplier;
+import com.ssafy.s15p21a104.consume.RedisTemplateWriter;
+import com.ssafy.s15p21a104.consume.RedisWriter;
+import com.ssafy.s15p21a104.consume.StatnIdMap;
+import com.ssafy.s15p21a104.consume.SubwayArrivalApplier;
 import com.ssafy.s15p21a104.collect.source.SourceAdapter;
 import com.ssafy.s15p21a104.collect.source.SubwayArrivalSource;
 import com.ssafy.s15p21a104.collect.source.WeatherNowcastSource;
@@ -25,11 +32,13 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -50,6 +59,12 @@ import tools.jackson.databind.json.JsonMapper;
 public class CollectConfig {
 
     private static final String DRY_RUN = "collect.dry-run";
+    /**
+     * Kafka 빈을 만드는 조건 — dry-run 이 아니고 publisher 가 kafka 일 때만. publisher=redis 면 브로커에 아예 붙지 않는다
+     * (S15P21A104-171 보험 스위치). 조건이 둘이라 @ConditionalOnProperty 로는 못 쓴다.
+     */
+    private static final String KAFKA_ENABLED =
+            "'${collect.publisher:kafka}' == 'kafka' and !${collect.dry-run:false}";
 
     @Bean
     Clock collectClock() {
@@ -114,7 +129,7 @@ public class CollectConfig {
     // ── Kafka (dry-run 이 아닐 때만) ──────────────────────────────────────────────
 
     @Bean
-    @ConditionalOnProperty(name = DRY_RUN, havingValue = "false", matchIfMissing = true)
+    @ConditionalOnExpression(KAFKA_ENABLED)
     DefaultKafkaProducerFactory<String, String> collectProducerFactory(CollectProperties props) {
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.kafka().bootstrapServers());
@@ -134,13 +149,13 @@ public class CollectConfig {
     }
 
     @Bean
-    @ConditionalOnProperty(name = DRY_RUN, havingValue = "false", matchIfMissing = true)
+    @ConditionalOnExpression(KAFKA_ENABLED)
     KafkaTemplate<String, String> collectKafkaTemplate(DefaultKafkaProducerFactory<String, String> collectProducerFactory) {
         return new KafkaTemplate<>(collectProducerFactory);
     }
 
     @Bean
-    @ConditionalOnProperty(name = DRY_RUN, havingValue = "false", matchIfMissing = true)
+    @ConditionalOnExpression(KAFKA_ENABLED)
     KafkaAdmin collectKafkaAdmin(CollectProperties props) {
         KafkaAdmin admin = new KafkaAdmin(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, props.kafka().bootstrapServers()));
         // 브로커 없이 수집기는 쓸모가 없다 — 기동 시 바로 실패시켜 주소 오설정을 첫 로그에서 잡는다
@@ -151,16 +166,33 @@ public class CollectConfig {
     }
 
     @Bean
-    @ConditionalOnProperty(name = DRY_RUN, havingValue = "false", matchIfMissing = true)
+    @ConditionalOnExpression(KAFKA_ENABLED)
     KafkaAdmin.NewTopics collectTopics(CollectProperties props) {
         return new KafkaAdmin.NewTopics(CollectTopics.define(props).toArray(NewTopic[]::new));
     }
 
     @Bean
-    @ConditionalOnProperty(name = DRY_RUN, havingValue = "false", matchIfMissing = true)
+    @ConditionalOnExpression(KAFKA_ENABLED)
     EventPublisher kafkaEventPublisher(KafkaTemplate<String, String> collectKafkaTemplate, CollectEventJson collectEventJson,
                                        CollectProperties props) {
         return new KafkaEventPublisher(collectKafkaTemplate, collectEventJson, props.kafka().sendTimeout());
+    }
+
+    /**
+     * 보험 경로 (S15P21A104-171). Kafka 를 건너뛰고 컨슈머와 <b>같은 반영기</b>로 Redis 에 바로 쓴다.
+     * 반영 로직이 갈라지면 스위치를 돌린 순간 서비스가 달라지므로 코드를 공유한다.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "collect.publisher", havingValue = CollectProperties.PUBLISHER_REDIS)
+    EventPublisher redisApplyingPublisher(RedisTemplate<String, Object> redisTemplate, CollectProperties props,
+                                          Clock collectClock) {
+        RedisWriter writer = new RedisTemplateWriter(redisTemplate);
+        List<EventApplier> appliers = List.of(
+                new BikeStockApplier(writer, collectClock),
+                new SubwayArrivalApplier(writer, StatnIdMap.fromClasspath(),
+                        OperatingWindow.parse(props.subway().window()), collectClock));
+        log.info("collect.publisher=redis — Kafka 를 건너뛰고 Redis 에 바로 반영한다. AI 컨슈머는 아무것도 받지 못한다");
+        return new RedisApplyingPublisher(appliers);
     }
 
     @Bean

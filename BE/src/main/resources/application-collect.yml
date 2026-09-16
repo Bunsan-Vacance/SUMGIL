@@ -12,6 +12,11 @@ spring:
 collect:
   dry-run: false          # true 면 호출·파싱만 하고 Kafka 에 보내지 않는다 (Kafka 빈 없음)
   run-once: false         # true 면 활성 소스를 한 회차씩 돌리고 종료
+  # kafka(기본) — 회차를 토픽에 넣는다. AI 컨슈머(ai-spark)도 여기서 받는다
+  # redis        — Kafka 를 건너뛰고 수집기가 Redis 에 바로 반영한다 (S15P21A104-171 보험 스위치).
+  #                브로커가 죽었을 때 되돌릴 경로이자 perf 규약 원칙 2 의 비교 스위치다.
+  #                이 경로에서는 AI 가 아무것도 받지 못하고 weather.nowcast 는 반영기가 없어 버려진다.
+  publisher: ${COLLECT_PUBLISHER:kafka}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}   # 파드에서는 kafka:9092
     send-timeout: 30s
