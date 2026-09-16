@@ -2,7 +2,7 @@
 # 도메인 소유가 아니라 사용권만 있어 DNS-01은 불가 — HTTP-01로 간다.
 # 80포트로 해당 도메인을 서빙 중이므로 제어 증명이 성립한다. 외부 DNS 변경 불필요.
 # 순서는 반드시 staging → 확인 → prod. rate limit 회피용.
-# ACME_EMAIL은 만료 알림 수신용 — 적용 전에 실제 주소로 교체한다 (⬜).
+# ACME_EMAIL은 만료 알림 수신용. 값은 노드 적용 시점에 교체한다 (커밋에는 플레이스홀더 유지).
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
