@@ -170,6 +170,36 @@ public final class RouteGraph {
     }
 
     /**
+     * 추가 엣지를 합친 새 그래프를 만든다(S15P21A104-187, 좌표 접근 임시 간선용).
+     *
+     * <p>원본 그래프는 바꾸지 않는다(이 그래프도 불변) — 요청마다 이 메서드로 새 그래프를
+     * 만들어 쓰고 버리면, 공유 그래프(레지스트리가 들고 있는 원본)가 다른 요청의 좌표로
+     * 오염되지 않는다.
+     *
+     * @param extraEdges 합칠 엣지 목록(예: 좌표→역 임시 WALK 엣지). null·빈 목록 허용
+     * @return 기존 엣지 + 추가 엣지로 다시 조립한 그래프
+     */
+    public RouteGraph withExtraEdges(List<Edge> extraEdges) {
+        if (extraEdges == null || extraEdges.isEmpty()) {
+            return this;
+        }
+        Set<String> newNodes = new LinkedHashSet<>(nodes);
+        Map<String, List<Edge>> newAdjacency = new LinkedHashMap<>();
+        adjacency.forEach((node, edges) -> newAdjacency.put(node, new ArrayList<>(edges)));
+        Map<String, Set<String>> newLines = new LinkedHashMap<>();
+        stationLines.forEach((node, lines) -> newLines.put(node, new LinkedHashSet<>(lines)));
+
+        for (Edge edge : extraEdges) {
+            newNodes.add(edge.fromNode());
+            newNodes.add(edge.toNode());
+            newAdjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
+            newLines.computeIfAbsent(edge.fromNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
+            newLines.computeIfAbsent(edge.toNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
+        }
+        return RouteGraph.of(newNodes, newAdjacency, newLines);
+    }
+
+    /**
      * 역(정점)의 소속 노선 집합.
      *
      * <p>역 하나가 여러 노선에 걸친 경우(예: st_B가 L2·L9 환승) {@code {L2, L9}}처럼

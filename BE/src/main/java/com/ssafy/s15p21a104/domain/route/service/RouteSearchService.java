@@ -26,6 +26,7 @@ import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
 import com.ssafy.s15p21a104.domain.station.entity.Line;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
@@ -108,7 +109,7 @@ public class RouteSearchService {
         // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
         DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
         List<RouteSearchResponse> candidates = algorithmCandidates(
-                graph, originStationId, destStationId, departureSlot);
+                graph, originStationId, destStationId, graphRegistry.stationInfos());
         // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
         // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
         // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
@@ -191,15 +192,15 @@ public class RouteSearchService {
      * 그대로 유지된다는 보장이 없다({@link #relabelByRank} 참고).
      */
     private List<RouteSearchResponse> algorithmCandidates(
-            RouteGraph graph, String originStationId, String destStationId, DepartureSlot departureSlot) {
-        // departureSlot은 이번 커밋(API 파라미터, S15P21A104-63)에서는 아직 안 쓴다 — 그래프 슬롯 선택과
-        // 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 graph()/ShortestPathFinder 호출에 넘긴다.
+            RouteGraph graph, String originStationId, String destStationId,
+            Map<String, RouteMapper.StationInfo> stationInfos) {
+        // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(graphRegistry.transferTimes());
 
         Map<String, RouteSearchResponse> byLegSignature = new LinkedHashMap<>();
         for (Set<TravelMode> coreModes : CANDIDATE_CORE_MODE_SETS) {
             RouteGraph subgraph = graph.filterByModes(withWalk(coreModes));
-            searchOne(subgraph, rule, originStationId, destStationId)
+            searchOne(subgraph, rule, originStationId, destStationId, stationInfos)
                     .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
         }
 
@@ -232,7 +233,8 @@ public class RouteSearchService {
 
     /** 하위 그래프 하나에 최단경로 알고리즘을 1회 적용한다. 경로 없음·재고 게이트 탈락이면 빈 값. */
     private Optional<RouteSearchResponse> searchOne(
-            RouteGraph subgraph, TransferRule rule, String originStationId, String destStationId) {
+            RouteGraph subgraph, TransferRule rule, String originStationId, String destStationId,
+            Map<String, RouteMapper.StationInfo> stationInfos) {
         try {
             FoundPath found = new ShortestPathFinder(rule).find(subgraph, originStationId, destStationId);
             List<RouteMapper.EngineSegment> segments = found.edges().stream()
@@ -254,7 +256,7 @@ public class RouteSearchService {
             // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.
             Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
                     new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
-                    graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM,
+                    stationInfos, RouteType.SHORTEST, RouteSource.ALGORITHM,
                     transferSecs, graphRegistry.rentalIds());
             return response.filter(r -> BikeStockGate.passesEdges(
                     found.edges().stream().map(Edge::fromNode).toList(),
@@ -505,17 +507,31 @@ public class RouteSearchService {
         );
     }
 
+    /** 좌표 검색 전용 임시 노드 ID(S15P21A104-187). 요청 하나 안에서만 쓰고 그래프에 남기지 않는다. */
+    private static final String PLACE_ORIGIN_ID = "PLACE-ORIGIN";
+
+    private static final String PLACE_DEST_ID = "PLACE-DEST";
+
+    /** 좌표→역·정류장·대여소 접근 간선 연결 반경(m). {@link com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder}와 같은 값. */
+    private static final double ACCESS_RADIUS_M = 500.0;
+
+    /** 접근 후보 상한(가까운 순). 무제한 탐색을 막아 탐색량을 억제한다(S15P21A104-187 완료기준). */
+    private static final int MAX_ACCESS_CANDIDATES = 5;
+
     /**
-     * 좌표 기반 통합 길찾기 진입점(S15P21A104-185). 이 티켓 범위는 요청 계약과 입력 검증까지다.
+     * 좌표 기반 통합 길찾기 진입점(S15P21A104-185/187).
      *
-     * <p>좌표를 실제 교통망(역·정류장·대여소)에 연결하는 접근 후보 탐색과 보행 계산은
-     * 후속 작업의 책임이다(FE-좌표기반-통합길찾기-API-협의요청.md 6·7절). 유효한 요청이어도
-     * 아직 {@link ErrorType#ACCESS_CANDIDATE_NOT_READY}를 반환한다 — 빈 배열로 조용히
-     * "경로 없음"인 척하지 않고, 미구현 상태임을 명시적으로 알린다.
+     * <p>일반 장소(건물 등)는 역 DB에 없으므로, 좌표 주변 보행 접근 가능한 역·정류장·대여소를
+     * 찾아 임시 WALK 간선으로 이어 붙인 뒤(요청마다 새로 만들고 버리는 그래프라 공유 그래프를
+     * 오염시키지 않는다, {@link RouteGraph#withExtraEdges}) 같은 탐색·후보 파이프라인
+     * ({@link #algorithmCandidates})을 그대로 태운다. 최단경로 알고리즘·기존 역 검색 경로는
+     * 건드리지 않는다.
      *
      * @throws DomainException 좌표가 비어있거나 유효 범위를 벗어나면 {@link ErrorType#INVALID_COORDINATE},
      *         출발·도착 좌표가 완전히 같으면 {@link ErrorType#SAME_ORIGIN_DEST},
-     *         입력이 유효하면 {@link ErrorType#ACCESS_CANDIDATE_NOT_READY}
+     *         그래프 미적재면 {@link ErrorType#ROUTE_DATA_NOT_READY},
+     *         출발·도착 어느 한쪽이라도 반경 안에 접근 가능한 후보가 없으면
+     *         {@link ErrorType#ACCESS_CANDIDATE_NOT_FOUND}
      */
     public List<RouteSearchResponse> searchByCoordinate(CoordinateRouteSearchRequest request) {
         RoutePlaceRequest origin = requireValidPlace(request == null ? null : request.origin());
@@ -523,7 +539,79 @@ public class RouteSearchService {
         if (origin.lat().equals(destination.lat()) && origin.lng().equals(destination.lng())) {
             throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
         }
-        throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_READY);
+
+        RouteGraph graph = graphRegistry == null ? null : graphRegistry.graph();
+        if (graph == null) {
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
+        }
+
+        Map<String, RouteMapper.StationInfo> baseInfos = graphRegistry.stationInfos();
+        List<Edge> originAccessEdges = accessEdges(PLACE_ORIGIN_ID, origin, baseInfos, graph, true);
+        List<Edge> destAccessEdges = accessEdges(PLACE_DEST_ID, destination, baseInfos, graph, false);
+        if (originAccessEdges.isEmpty() || destAccessEdges.isEmpty()) {
+            throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_FOUND);
+        }
+
+        List<Edge> accessEdges = new ArrayList<>(originAccessEdges);
+        accessEdges.addAll(destAccessEdges);
+        RouteGraph augmentedGraph = graph.withExtraEdges(accessEdges);
+
+        Map<String, RouteMapper.StationInfo> stationInfos = new HashMap<>(baseInfos);
+        stationInfos.put(PLACE_ORIGIN_ID, new RouteMapper.StationInfo(
+                PLACE_ORIGIN_ID, origin.name(), origin.lat(), origin.lng()));
+        stationInfos.put(PLACE_DEST_ID, new RouteMapper.StationInfo(
+                PLACE_DEST_ID, destination.name(), destination.lat(), destination.lng()));
+
+        DepartureSlot departureSlot = DepartureSlot.of(
+                request.departureTime() != null ? request.departureTime() : LocalDateTime.now());
+        List<RouteSearchResponse> candidates = algorithmCandidates(
+                augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, stationInfos);
+        List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, request.modes()));
+        if (request.priority() == RoutePriority.COMFORT) {
+            ranked = applyComfortPriority(ranked, departureSlot);
+        }
+        return withRouteNames(ranked);
+    }
+
+    /**
+     * 좌표 주변 보행 접근 가능한 역·정류장·대여소를 반경 {@value #ACCESS_RADIUS_M}m 안에서
+     * 가까운 순으로 최대 {@value #MAX_ACCESS_CANDIDATES}개 찾아 임시 WALK 엣지로 만든다.
+     * 실제 그래프에 연결돼 있지 않은 정점(좌표만 있고 고립된 경우)은 후보에서 뺀다 — 접근은
+     * 됐는데 그 다음이 막힌 후보를 만들지 않기 위함이다.
+     *
+     * @param placeNodeId 이 좌표를 나타낼 임시 노드 ID
+     * @param place 좌표
+     * @param stationInfos 역·정류장·대여소 좌표 전체(그래프 레지스트리 원본)
+     * @param graph 실제 연결 여부 확인용 그래프(임시 엣지 추가 전)
+     * @param outgoing true면 좌표→후보 방향(출발지), false면 후보→좌표 방향(도착지)
+     * @return 임시 WALK 엣지 목록. 반경 안 후보가 없으면 빈 목록
+     */
+    private List<Edge> accessEdges(
+            String placeNodeId, RoutePlaceRequest place,
+            Map<String, RouteMapper.StationInfo> stationInfos, RouteGraph graph, boolean outgoing) {
+        record Candidate(String nodeId, double distanceM) {
+        }
+        List<Candidate> candidates = new ArrayList<>();
+        for (RouteMapper.StationInfo info : stationInfos.values()) {
+            if (info.lat() == null || info.lng() == null || !graph.containsNode(info.stationId())) {
+                continue;
+            }
+            double distanceM = GeoDistance.haversineMeters(place.lat(), place.lng(), info.lat(), info.lng());
+            if (distanceM > ACCESS_RADIUS_M) {
+                continue;
+            }
+            candidates.add(new Candidate(info.stationId(), distanceM));
+        }
+        candidates.sort(Comparator.comparingDouble(Candidate::distanceM));
+
+        List<Edge> edges = new ArrayList<>();
+        for (Candidate candidate : candidates.subList(0, Math.min(MAX_ACCESS_CANDIDATES, candidates.size()))) {
+            int sec = (int) Math.round(candidate.distanceM() / WalkEdgeBuilder.METERS_PER_SEC);
+            edges.add(outgoing
+                    ? new Edge(placeNodeId, candidate.nodeId(), WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK)
+                    : new Edge(candidate.nodeId(), placeNodeId, WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK));
+        }
+        return edges;
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {
