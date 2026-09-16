@@ -69,9 +69,10 @@ export default function ResultsPage({
     document.addEventListener('pointerdown', dismiss)
     return () => document.removeEventListener('pointerdown', dismiss)
   }, [choosingSort])
-  const canSortByCongestion =
-    visible.length > 1 && visible.every((route) => route.congestionPercent !== undefined)
   const liveApi = isLiveApi ?? isBackendConfigured
+  const canSortByCongestion =
+    liveApi ||
+    (visible.length > 1 && visible.every((route) => route.congestionPercent !== undefined))
   const departure = departureTime || clockTime(visible[0]?.departedAt)
   const fastestRoute = visible.reduce<Route | undefined>(
     (fastest, route) => (!fastest || route.minutes < fastest.minutes ? route : fastest),

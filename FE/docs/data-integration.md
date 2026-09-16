@@ -38,13 +38,13 @@
 
 - `PlaceRepository.search(query, signal): Promise<Place[]>`
 - `RouteRepository.search({ origin, destination, modes?, priority?, departedAt? }, signal): Promise<Route[]>`
-- `useTrip`은 검색 시 `modes`, 현재 `priority`, 검색 시각 또는 사용자가 선택한 오늘(Asia/Seoul)의 출발 시각 `departedAt`을 전달하며 WALK를 항상 포함한다. 필터 변경과 전체 수단 복원은 이미 목적지가 있고 검색된 상태에서만 같은 조건으로 재요청하고, priority 변경은 후보를 로컬 정렬만 한다.
+- `useTrip`은 검색 시 `modes`, 현재 `priority`, 검색 시각 또는 사용자가 선택한 오늘(Asia/Seoul)의 출발 시각 `departedAt`을 전달하며 WALK를 항상 포함한다. 필터 변경과 전체 수단 복원은 이미 목적지가 있고 검색된 상태에서만 같은 조건으로 재요청하고, priority 변경도 직전 출발 시각을 유지해 TIME/COMFORT로 재요청한다. 진행 중 요청은 취소하고 늦은 응답은 무시한다.
 - `Route.departedAt`가 있으면 해당 시각을 기준으로 도착 예정 시각을 계산하고, 없으면 샘플의 `09:41` 기준을 유지한다. 백엔드 요청의 `departureTime`은 같은 순간을 Asia/Seoul 기준 timezone 없는 `LocalDateTime`으로 변환한다.
 - `Route.congestionPercent`·`walk`·`line`은 화면 모델의 선택 필드다. `walk`는 모든 비환승 WALK 구간의 `distanceMeters`가 있을 때만 합산한다. `line`과 구간 표시명은 `routeName`을 우선하고 기존 `routeId` 매핑을 대체값으로 사용한다. 경로 전체 혼잡도는 별도 합산하지 않는다. 샘플·모델·UI가 지원하는 것과 BE 응답 매핑 여부를 구분한다.
-- 역 ID가 있는 기존 GET `/api/routes/search`는 여러 경로 후보를 배열로 반환하며, 좌표 기반 POST `/api/routes/search/coordinate`도 같은 후보 변환 규칙을 사용한다. 요청 `modes`에는 `WALK`가 항상 포함되고 응답 구간에는 `WALK`·`TRANSFER`가 포함될 수 있다. 저장소 변환 단계는 응답 순서와 중복 `ALTERNATIVE` 후보를 보존한다. `SHORTEST`는 `빠른 경로`, `ALTERNATIVE`는 이동수단 포함 여부와 관계없이 `다른 경로`로 표시하며, `SHORTEST_WITH_BIKE`만 `따릉이 포함 경로`로 표시한다. 요청한 이동수단으로 필터한 결과가 비어도 조회 성공으로 처리해 `해당 수단으로는 경로가 없어요`를 표시한다. 혼잡도는 현재 backend route mapper가 읽지 않으므로 서버 응답에 값이 있어도 live 화면에 표시되지 않는다. FE 모델·샘플·UI에 값이 있더라도 근거 없는 혼잡도나 덜 붐빔을 주장하지 않는다.
+- 역 ID가 있는 기존 GET `/api/routes/search`는 여러 경로 후보를 배열로 반환하며, 좌표 기반 POST `/api/routes/search/coordinate`도 같은 후보 변환 규칙을 사용한다. 요청 `modes`에는 `WALK`가 항상 포함되고 응답 구간에는 `WALK`·`TRANSFER`가 포함될 수 있다. 저장소 변환 단계는 응답 순서와 중복 `ALTERNATIVE` 후보를 보존한다. `LOW_CONGESTION`은 `덜 붐비는 경로`, `SHORTEST`는 `빠른 경로`, `ALTERNATIVE`는 이동수단 포함 여부와 관계없이 `다른 경로`로 표시하며, `SHORTEST_WITH_BIKE`만 `따릉이 포함 경로`로 표시한다. 요청한 이동수단으로 필터한 결과가 비어도 조회 성공으로 처리해 `해당 수단으로는 경로가 없어요`를 표시한다. 현재 BE 응답에는 경로 전체 혼잡도 수치가 없어 백분율을 생성하거나 표시하지 않는다. LOW_CONGESTION 표시는 서버 분류를 근거로 한다. live 화면은 전체 혼잡도 수치가 없어도 쾌적 기준을 선택할 수 있다. FE 모델·샘플·UI에 값이 있더라도 근거 없는 혼잡도나 덜 붐빔을 주장하지 않는다.
 - 경로 구간 표시명은 서버 `routeName`을 우선하며, 없으면 `routeId`의 노선 매핑을 적용한다. `BIKE`는 `자전거`, `WALK`는 `도보`로 표시하고 원본 ID는 보존한다.
 
-위의 응답 순서 보존은 저장소 변환 단계 기준이다. 화면의 `getRoutes`는 허용 수단을 다시 필터링하고 우선순위에 따라 로컬 정렬하므로 서버 배열 순서를 무조건 고정하는 것은 아니다.
+화면의 `getRoutes`도 API 후보의 routeType을 확인해 허용 수단만 필터링하고 서버 배열 순서를 유지한다. 샘플 후보만 우선순위에 따라 로컬 정렬한다.
 
 `api/repositories.ts`에서 사용할 구현을 선택한다. 페이지에서는 `fixtures`를 import하지 않는다. `app/preview.ts`는 초기 후보를 만들지 않고 미리보기 시나리오의 제안 경로만 주입한다.
 
@@ -55,7 +55,7 @@
 1. 팀과 요청·응답·오류 형식을 합의한다. 임의 endpoint나 HTTP 응답 타입을 먼저 확정하지 않는다.
 2. 서버 DTO와 화면용 `Place`/`Route` 타입의 차이를 확인한다. 서버 응답 검증과 변환은 데이터 접근 계층에 둔다.
 3. `api`에 실제 저장소 구현을 추가하고 `api/repositories.ts`의 연결을 바꾼다. 기본 URL은 `VITE_API_BASE_URL` 환경 변수로 받는다.
-4. 역 ID가 둘 다 있는 경로 검색은 요청한 `modes`, `priority`, `departureTime`을 기존 GET 쿼리로 전달한다. 좌표 장소가 포함되면 같은 값을 JSON body에 담아 `/api/routes/search/coordinate`로 POST한다. `departureTime`은 Asia/Seoul 현지 `LocalDateTime`으로 보내며, `priority`와 `departureTime`은 현재 서버 계산에는 사용하지 않고 계약상 전달한다. 현재 화면의 후보 정렬은 클라이언트에서 유지한다. 좌표 API의 `ACCESS_CANDIDATE_NOT_READY`(501)는 준비 중 안내로 표시하며 `ROUTE_DATA_NOT_READY`(503)는 경로 데이터 준비 중 안내와 재시도를 제공한다. 최신 `develop-BE`의 좌표 검색은 입력 검증 후 501을 반환하며, 역간 검색은 그래프 미적재 상태이면 503을 반환한다.
+4. 역 ID가 둘 다 있는 경로 검색은 요청한 `modes`, `priority`, `departureTime`을 기존 GET 쿼리로 전달한다. 좌표 장소가 포함되면 같은 값을 JSON body에 담아 `/api/routes/search/coordinate`로 POST한다. `departureTime`은 Asia/Seoul 현지 `LocalDateTime`으로 보내며, 서버는 `priority`와 `departureTime`을 LINE 혼잡도 기반 추천 계산에 사용하며 화면은 서버 추천 순서를 유지한다. 좌표 API의 `ACCESS_CANDIDATE_NOT_READY`(501)는 준비 중 안내로 표시하며 `ROUTE_DATA_NOT_READY`(503)는 경로 데이터 준비 중 안내와 재시도를 제공한다. 최신 `develop-BE`는 좌표 검색을 구현했고 접근 후보가 없으면 ACCESS_CANDIDATE_NOT_FOUND(404)를 반환한다. 해당 오류의 전용 FE 안내는 별도 작업이며, 역간 검색은 그래프 미적재 상태이면 503을 반환한다.
 5. 경로 좌표가 제공되면 지도 훅에서 선택 경로의 선을 표시한다. `MultiLineString`은 원래 선분 배열을 유지하며 좌표가 없으면 직선으로 대체하지 않는다.
 6. 미리보기 초기 상태는 빈 후보 목록이며, 직접 해시 접근은 현재 검색·선택·안내 상태를 검증하는 화면 접근 규칙을 따른다.
 

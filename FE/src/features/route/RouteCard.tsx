@@ -28,11 +28,10 @@ export default function RouteCard({
       : null,
     `환승 ${route.transfers ? `${route.transfers}회` : '없음'}`,
     walkingMinutes ? `도보 ${roundMinutes(walkingMinutes)}분` : null,
-    route.congestionPercent === undefined ? '혼잡도 준비중입니다' : null,
   ].filter((fact): fact is string => fact !== null)
   const congestion =
     route.congestionPercent === undefined
-      ? '혼잡도 준비중입니다'
+      ? undefined
       : `혼잡도 ${Math.round(route.congestionPercent)}%`
 
   return (
