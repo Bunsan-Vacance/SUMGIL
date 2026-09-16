@@ -268,6 +268,10 @@ def to_congestion_table(
     )
     out = cal.merge(per_row, on=["date", "station_no", "time_slot"], how="left")
     out = out.rename(columns={"congestion_pct_calibrated": "congestion_pct"})
+    # 재귀식·배율 부동소수 잔차로 −1e-13 수준의 음수가 나온다(2026-09-13 표에서 20행). 값 왜곡이
+    # 아니라 표현 오차이고, 소비자(BE `congestion.level`)가 0 이상을 가정하므로 하한을 0으로 맞춘다.
+    # NaN은 그대로 둔다 — 그건 배율표 결측이고 채우지 않는다(원칙 8).
+    out["congestion_pct"] = out["congestion_pct"].clip(lower=0.0)
     missing = out["congestion_pct"].isna().to_numpy()
     boundary = (
         pd.MultiIndex.from_arrays([out["station_no"], out["direction"]])
