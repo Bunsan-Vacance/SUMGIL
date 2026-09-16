@@ -2,6 +2,9 @@
 # GitLab protected 변수 → *-secret.env 렌더 (S15P21A104-210 ③).
 # secretGenerator가 읽는 실파일을 만든다. 값은 커밋하지 않는다.
 #
+# 키 목록의 유일 원본은 *.env.example 이다. 스크립트가 example 키 × 환경변수 값으로
+# 직접 렌더하므로 별도 템플릿이 필요 없다 (envsubst 불필요).
+#
 # 사용 (값이 있는 셸에서 — 로컬 또는 GitLab manual job):
 #   export DB_PASSWORD=... SEOUL_SUBWAY_KEY=... SEOUL_API_KEY=... SEOUL_BIKE_KEY=... KMA_API_KEY=...
 #   bash Infra/k8s/scripts/render-secrets.sh
@@ -11,42 +14,36 @@
 #   scp BE/k8s/prod/be-secret.env a104:~/sumgil/BE/k8s/prod/be-secret.env
 #   scp Infra/k8s/prod/data-secret.env a104:~/sumgil/Infra/k8s/prod/data-secret.env
 #
-# 전제: envsubst (없으면 apk add gettext / apt install gettext).
 # 디버그 출력(set -x)은 절대 켜지 않는다 — 값이 로그에 샌다.
 
 set -euo pipefail
 
-command -v envsubst >/dev/null 2>&1 || {
-  echo "envsubst 없음. alpine: apk add gettext / debian: apt install gettext" >&2
-  exit 1
-}
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
-# $1=템플릿 $2=출력 $3...=필수 변수. 미정의·빈값이면 즉시 실패 (빈 비밀번호 배포 방지).
-# 렌더 후 남은 $가 있으면 실패 — 변수명 오타는 envsubst가 조용히 빈값으로 두므로.
+# $1=키목록 파일(*.env.example) $2=출력. example 키마다 환경변수가 비어있지 않아야 한다.
 render() {
-  local template="$1" output="$2"
-  shift 2
-  local var
-  for var in "$@"; do
-    if [ -z "${!var:-}" ]; then
-      echo "${var} 없음 또는 빈값. export 후 재실행." >&2
-      exit 1
-    fi
-  done
-  envsubst < "${REPO_ROOT}/${template}" > "${REPO_ROOT}/${output}"
-  if grep -q '\${' "${REPO_ROOT}/${output}"; then
-    echo "렌더 잔재 \${...} 발견 (${output}). 템플릿 변수명 오타 확인." >&2
-    rm -f "${REPO_ROOT}/${output}"
+  local keys_file="$1" output="$2"
+  local keys var
+  keys=$(grep -v '^[[:space:]]*#' "${REPO_ROOT}/${keys_file}" | grep -v '^[[:space:]]*$' | cut -d= -f1 | grep -v '^[[:space:]]*$')
+  if [ -z "${keys}" ]; then
+    echo "키 없음: ${keys_file}" >&2
     exit 1
   fi
-  chmod 600 "${REPO_ROOT}/${output}"
+  local tmp
+  tmp=$(mktemp)
+  for var in ${keys}; do
+    if [ -z "${!var:-}" ]; then
+      echo "${var} 없음 또는 빈값. export 후 재실행." >&2
+      rm -f "${tmp}"
+      exit 1
+    fi
+    printf '%s=%s\n' "${var}" "${!var}" >> "${tmp}"
+  done
+  chmod 600 "${tmp}"
+  mv "${tmp}" "${REPO_ROOT}/${output}"
   echo "rendered ${output}"
 }
 
-render BE/k8s/prod/be-secret.env.template BE/k8s/prod/be-secret.env \
-  SEOUL_SUBWAY_KEY SEOUL_API_KEY SEOUL_BIKE_KEY KMA_API_KEY
-render Infra/k8s/prod/data-secret.env.template Infra/k8s/prod/data-secret.env \
-  DB_PASSWORD
+render BE/k8s/prod/be-secret.env.example BE/k8s/prod/be-secret.env
+render Infra/k8s/prod/data-secret.env.example Infra/k8s/prod/data-secret.env
