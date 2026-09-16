@@ -46,6 +46,9 @@ def test_build_archive_datasets_uses_ai_data_paths(tmp_path):
     assert datasets[1].name == "weather"
     assert datasets[1].base_path == tmp_path / "data/EXTERNAL/weather/raw/nowcast"
     assert datasets[1].archive_prefix.as_posix() == "EXTERNAL/weather/raw/nowcast"
+    assert datasets[2].name == "subway"
+    assert datasets[2].base_path == tmp_path / "data/SUBWAY/raw/arrival"
+    assert datasets[2].archive_prefix.as_posix() == "SUBWAY/raw/arrival"
 
 
 def test_filter_datasets_returns_all_or_named_dataset(tmp_path):
@@ -53,6 +56,7 @@ def test_filter_datasets_returns_all_or_named_dataset(tmp_path):
 
     assert filter_datasets(datasets, "all") == datasets
     assert [item.name for item in filter_datasets(datasets, "bike")] == ["bike"]
+    assert [item.name for item in filter_datasets(datasets, "subway")] == ["subway"]
 
 
 def test_filter_datasets_rejects_unknown_dataset(tmp_path):

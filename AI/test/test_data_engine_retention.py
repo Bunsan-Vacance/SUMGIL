@@ -63,6 +63,7 @@ def test_build_retention_targets_uses_whitelisted_raw_snapshot_bases(tmp_path):
     assert targets == [
         RetentionTarget("bike", tmp_path / "data/BIKE/raw/realtime"),
         RetentionTarget("weather", tmp_path / "data/EXTERNAL/weather/raw/nowcast"),
+        RetentionTarget("subway", tmp_path / "data/SUBWAY/raw/arrival"),
     ]
 
 

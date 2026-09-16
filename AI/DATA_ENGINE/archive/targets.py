@@ -12,6 +12,7 @@ from DATA_ENGINE.collect.common import KST
 
 DEFAULT_BIKE_BASE = Path("data/BIKE/raw/realtime")
 DEFAULT_WEATHER_BASE = Path("data/EXTERNAL/weather/raw/nowcast")
+DEFAULT_SUBWAY_BASE = Path("data/SUBWAY/raw/arrival")
 SNAPSHOT_PATTERN = "snapshot_*.parquet"
 
 
@@ -55,6 +56,11 @@ def build_archive_datasets(ai_root: Path) -> list[ArchiveDataset]:
             base_path=ai_root / DEFAULT_WEATHER_BASE,
             archive_prefix=Path("EXTERNAL/weather/raw/nowcast"),
         ),
+        ArchiveDataset(
+            name="subway",
+            base_path=ai_root / DEFAULT_SUBWAY_BASE,
+            archive_prefix=Path("SUBWAY/raw/arrival"),
+        ),
     ]
 
 
@@ -63,7 +69,7 @@ def filter_datasets(datasets: Iterable[ArchiveDataset], dataset: str) -> list[Ar
         return list(datasets)
     filtered = [item for item in datasets if item.name == dataset]
     if not filtered:
-        raise ValueError("dataset must be one of: all, bike, weather")
+        raise ValueError("dataset must be one of: all, bike, weather, subway")
     return filtered
 
 
