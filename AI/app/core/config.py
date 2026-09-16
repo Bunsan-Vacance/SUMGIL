@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     # 참고 — B4 model 소스 변환 미검증)이라 auto 분기 없이 기본값을 avg로 고정한다.
     bike_predictor: str = "avg"
 
+    # ── BIKE 실시간(현재고) ──
+    # Kafka 컨슈머가 station별 upsert로 유지하는 최신 스냅샷 파일. Redis 아님 — 컨슈머와
+    # 서빙 앱이 같은 서버/파일시스템을 공유한다는 전제 위에서 성립한다.
+    bike_live_stock_path: Path = (
+        AI_ROOT / "data" / "BIKE" / "raw" / "realtime" / "latest_stock.parquet"
+    )
+    # 이 시간(초)보다 오래된 updated_at은 신뢰하지 않고 "없음"으로 취급한다.
+    bike_live_stock_max_staleness_seconds: float = 300.0
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]
