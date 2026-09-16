@@ -363,3 +363,69 @@ docker exec sumgil-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server local
 ```
 
 측정 결과는 [perf/2026-09-16-consumer-backlog.md](../perf/2026-09-16-consumer-backlog.md).
+
+---
+
+## 9. 적용 결과 (2026-09-16)
+
+`be-consumer-65f4b5b755-6lvjb` · 기동 31.6초 · 롤아웃 성공.
+
+**설정이 의도대로 물었다.**
+
+```
+컨슈머 — 그룹 be-redis · 토픽 [subway.arrival, bike.stock] · 오프셋 latest · 배치 최대 500건 · 브로커 kafka:9092
+지하철 역 대응표 680건 · 운영 시간 창 10:00-15:30
+```
+
+창이 `10:00-15:30` 으로 찍혔다 — `be-collector-config` 를 물린 것이 동작했다는 뜻이다
+(안 물렸으면 기본값 `07:30-13:00` 이 나와 13시대에 `outside_window` 로 오판했을 것이다).
+
+**Flyway 가 V4 를 적용했다** — `Successfully applied 1 migration`. `FlywayConfig` 에 프로파일 제한이 없어
+컨슈머 기동 때 마이그레이션이 돈다. 컨슈머를 올리면 DB 마이그레이션도 함께 간다는 뜻이니 알아둘 것.
+
+**Redis · LAG (13:27 기준)**
+
+| 확인 | 결과 |
+| --- | --- |
+| `subway:arrival:*` | 555키 (매핑표 680역 중. 최근 3분 안에 열차가 잡힌 역만 남는다 — TTL 180초) |
+| `bike:stock:*` | 2,735키 (09-15 실측 2,738건과 사실상 같다 = 전 대여소) |
+| `subway:arrival:status` | `{"state":"ok","last_poll_run_at":"...13:27:14+09:00","window":"10:00-15:30"}` |
+| 컨슈머 그룹 LAG | `subway.arrival` 0 · `bike.stock` 0 |
+
+### prod 지연 — 로컬에서 못 재던 구간
+
+배치 로그에서 두 구간이 나왔다. **기준선(관측치)이며 정식 기록이 아니다** — 워밍업·반복을 설계한 측정이 아니라
+운영 중 로그를 읽은 것이다.
+
+| 구간 | 값 | 읽는 법 |
+| --- | --- | --- |
+| **produce** (`ingested_at` → 레코드 timestamp) | median 41~188 ms | **Kafka 가 얹은 실제 비용.** 배치 안 편차가 2~4 ms 로 안정적이다. 로컬 벤치의 66 ms 와 자릿수가 맞는다 |
+| **consume** (레코드 timestamp → `written_at`) | 7 ms → 4,500 ms 로 올랐다가 리셋 | **지연이 아니라 회차 소화 진행도다.** 한 회차(약 3,000건)가 배치 6~8개로 잘려 들어오는 동안 뒤쪽 배치가 기다린 시간이고, 새 회차가 오면 0 으로 돌아간다 |
+
+**회차 하나를 다 소화하는 데 5~9초**다. 주기가 60초라 여유가 크다. 로컬 백로그 실험의 836건/초와 비교하면
+prod 는 초당 330~600건으로 같은 자릿수이고, 파드 리소스(1Gi · 1 CPU)가 실습실 PC 보다 작은 것을 감안하면 예상 범위다.
+
+배치당 미매핑 2~10건은 **정상이다** — GTX-A 9역과 1호선 지제의 도착 정보가 회차마다 계속 들어오므로 매번 세어진다.
+
+### 배포 때 밟은 것 — `be` server-side apply 충돌
+
+`apply.sh` 가 `be` 에서 멈췄다.
+
+```
+error: Apply failed with 2 conflicts: conflicts with "kubectl-patch" using apps/v1:
+- .spec.template.spec.containers[name="be"].envFrom
+conflicts with "kubectl-set" using apps/v1:
+- .spec.template.spec.containers[name="be"].image
+```
+
+누군가 `kubectl patch`·`kubectl set image` 로 `be` 를 git 밖에서 바꿔 둔 상태라 server-side apply 가 거부했다.
+**우리 배포가 만든 문제가 아니고** `be-consumer`·`be-collector`·ConfigMap 은 모두 정상 적용됐다.
+오히려 `be` 가 전혀 건드려지지 않아 의도대로였다.
+
+다만 두 가지가 남는다.
+
+- `set -euo pipefail` 이라 스크립트가 여기서 멈춰 **`fe` apply 와 rollout 대기가 실행되지 않았다.** `fe` 는 이미 돌던 그대로다.
+- **git 과 prod 가 갈라져 있다.** 다음에 누가 `apply.sh` 를 돌려도 같은 곳에서 멈춘다.
+
+`--force-conflicts` 는 쓰지 않았다 — 그 수동 패치의 이유를 모르는 상태에서 덮어쓰면 `be` 가 재시작되고
+누군가의 의도를 되돌리게 된다. **플랫폼 담당이 정리할 문제로 넘긴다.**
