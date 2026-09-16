@@ -61,7 +61,8 @@ class RouteSearchServiceTest {
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
                 RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
-                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository());
     }
 
     @Test
@@ -88,7 +89,8 @@ class RouteSearchServiceTest {
         RouteSearchService unloaded = new RouteSearchService(
                 stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null),
                 RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
-                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository());
 
         DomainException exception = assertThrows(DomainException.class,
                 () -> unloaded.search("0222", "0221", null, null, null));

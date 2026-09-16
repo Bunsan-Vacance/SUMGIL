@@ -85,7 +85,8 @@ class RouteSearchIntegrationTest {
                 stationRepository, graphRegistry, new TransferRule(180),
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 RouteTestFixtures.noopBikeGeometryRegistry(),
-                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository());
     }
 
     @Test
