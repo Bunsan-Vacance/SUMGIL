@@ -60,7 +60,10 @@ _HEADERS = {
 
 def _extract_hidden_fields(html: str) -> dict[str, str]:
     """페이지 GET 응답에서 ASP.NET WebForms 히든 필드 3종을 뽑는다."""
-    soup = BeautifulSoup(html, "html.parser")
+    # html.parser는 이 페이지에서 __VIEWSTATE를 못 찾는다(2026-09-16 확인) — 앞쪽 <script>가
+    # EUC-KR 주석을 섞어 놔서(문서 전체는 UTF-8) 트리 파싱이 그 지점에서 깨진다. lxml은
+    # 이 마크업을 그대로 회복해서 파싱한다.
+    soup = BeautifulSoup(html, "lxml")
     fields: dict[str, str] = {}
     for name in ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"):
         tag = soup.find("input", id=name)
@@ -100,7 +103,7 @@ def parse_crowd_table(update_panel_html: str) -> list[dict]:
     표 헤더가 "날짜,요일,홈,방문,구장,관중수" 순서임을 페이지 summary 속성으로 확인했다
     (2026-09-09). 관중수의 쉼표 구분자는 int 변환 시 제거한다.
     """
-    soup = BeautifulSoup(update_panel_html, "html.parser")
+    soup = BeautifulSoup(update_panel_html, "lxml")
     games = []
     for tr in soup.select("table.tData tbody tr.order"):
         cells = [td.get_text(strip=True) for td in tr.find_all("td")]
