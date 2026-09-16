@@ -53,8 +53,12 @@ FEATURE_COLS = [*BASE_FEATURE_COLS, *HISTORICAL_FEATURE_COLS, "is_holiday"]
 MODEL_FEATURE_COLS = [*FEATURE_COLS, "station_code"]
 
 # ── v4: + KBO·D-1/D-7 lag (성능 고도화, S15P21A104-160) ──
-# 날씨는 제외한다 — 실시간 소스가 없고, 검증 결과(validation/BYC/lightgbm-stock-conversion
-# -check/RESULTS.md) D-1/D-7 lag가 날씨보다 기여도가 훨씬 크다.
+# 검증 결과(2026-09-16, v4-kbo-lag_20260916-1651 vs v3-holiday-tuned_20260913-1558, 같은
+# train/valid/test 분할) KBO+lag를 같이 넣었더니 MAE/RMSE/R² 전부 v3보다 근소하게
+# 나빠졌다 — anchor+horizon 모델은 이미 stock_anchor_hour(실시간 재고)가 있어서, 그
+# 신호가 없던 날짜축 모델과 달리 D-1/D-7 lag의 추가 기여가 거의 없었던 것으로 보인다.
+# KBO와 lag를 같이 묶어 테스트해서 둘 중 뭐가 원인인지는 분리 안 됨 — 이 세트는 채택 안
+# 하고 기록용으로만 남긴다.
 KBO_LAG_FEATURE_COLS = [
     "is_kbo_game_jamsil",
     "lag1d_stock",
@@ -65,9 +69,22 @@ KBO_LAG_FEATURE_COLS = [
 FEATURE_COLS_V4 = [*FEATURE_COLS, *KBO_LAG_FEATURE_COLS]
 MODEL_FEATURE_COLS_V4 = [*FEATURE_COLS_V4, "station_code"]
 
+# ── v4_weather: + 날씨(is_rain·temp) (성능 고도화, S15P21A104-160) ──
+# 검증 결과(2026-09-16, v4-weather_20260916-1725 vs v3-holiday-tuned_20260913-1558, 같은
+# train/valid/test 분할, validation/BYC/anchor-horizon-feature-check/RESULTS.md) v3 대비
+# MAE/RMSE/R² 전부, 모든 split(valid·202507·202508·202509)에서 일관되게 개선 — **채택**.
+# KBO_LAG(위)와 독립적으로 검증했다(한 번에 묶으면 원인 구분이 안 됨, KBO_LAG가 그 실수).
+# ASOS 실측이 학습·평가 기간을 이미 커버해서 오프라인 학습은 문제없지만, 실시간 서빙에
+# 쓰려면 weather.nowcast Kafka 토픽을 bike.stock처럼 최신 스냅샷화하는 별도 인프라가
+# 아직 필요하다(미착수).
+WEATHER_FEATURE_COLS = ["is_rain", "temp"]
+FEATURE_COLS_V4_WEATHER = [*FEATURE_COLS, *WEATHER_FEATURE_COLS]
+MODEL_FEATURE_COLS_V4_WEATHER = [*FEATURE_COLS_V4_WEATHER, "station_code"]
+
 FEATURE_SETS = {
     "v3": MODEL_FEATURE_COLS,
     "v4_kbo_lag": MODEL_FEATURE_COLS_V4,
+    "v4_weather": MODEL_FEATURE_COLS_V4_WEATHER,
 }
 
 TARGET_COL = "target_net_flow"
