@@ -1,0 +1,22 @@
+# FE 테스트 (React 19 / TypeScript / Vite)
+# 트리거는 FE 소스·빌드 정의로만 한정한다. FE/k8s 매니페스트 변경은 manifests.yml이 맡는다.
+fe-check:
+  image: node:24-slim
+  tags:
+    - CI
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "FE/src/**/*"
+        - "FE/package.json"
+        - "FE/package-lock.json"
+        - "FE/vite.config.*"
+        - "FE/tsconfig*"
+        - ".gitlab/ci/fe.yml"
+  before_script:
+    - cd FE
+    - npm ci
+  script:
+    - npm run format:check
+    - npm test
+    - npm run build

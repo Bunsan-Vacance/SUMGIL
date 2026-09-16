@@ -1,0 +1,47 @@
+# BE 테스트 (Java 21 / Spring Boot 4.1.1 / Gradle)
+# 트리거는 BE 소스·빌드 정의로만 한정한다. BE/k8s 매니페스트 변경은 manifests.yml이 맡는다.
+be-test:
+  stage: test
+  image: eclipse-temurin:21-jdk-jammy
+  tags:
+    - CI
+  rules:
+    - changes:
+        - "BE/src/**/*"
+        - "BE/build.gradle"
+        - "BE/settings.gradle"
+        - "BE/gradle/**/*"
+        - "BE/gradlew*"
+        - ".gitlab/ci/be.yml"
+  services:
+    # ⚠️ alias를 이미지 이름(postgres/redis)과 같게 두면 러너가 자동 생성하는 별칭과
+    #    충돌해 "alias is already in use"로 skip되고, 그 결과 호스트명이 해석되지 않아
+    #    DB 연결이 실패한다. 충돌 없는 이름을 쓴다.
+    - name: postgres:16
+      alias: db
+    - name: redis:7
+      alias: cache
+  variables:
+    # postgres 서비스 컨테이너가 읽는 값. 여기서 DB·계정이 만들어진다.
+    POSTGRES_DB: sumgil
+    POSTGRES_USER: sumgil
+    POSTGRES_PASSWORD: sumgil1234
+  cache:
+    key: "be-gradle-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - BE/.gradle/
+  before_script:
+    - cd BE
+    - chmod +x gradlew
+    # application.yml은 DB_URL/DB_USERNAME/DB_PASSWORD/REDIS_HOST/REDIS_PORT를
+    # 환경변수로 읽는다 (비밀번호를 yml에 직접 쓰지 않는 팀 규칙 — BE/README.md 9절).
+    # 값은 위 POSTGRES_*에서 파생시켜 서비스가 실제로 만든 DB·계정과 어긋나지 않게 한다.
+    - export DB_URL="jdbc:postgresql://db:5432/${POSTGRES_DB}"
+    - export DB_USERNAME="$POSTGRES_USER" DB_PASSWORD="$POSTGRES_PASSWORD"
+    - export REDIS_HOST=cache REDIS_PORT=6379
+    # 서비스 준비 확인. 여기서 끊으면 원인이 "DB/Redis 연결"임이 분명해진다.
+    # (없으면 Hibernate가 dialect 결정 실패로 죽어 원인 파악이 어렵다)
+    - 'timeout 30 bash -c "until (echo > /dev/tcp/db/5432) 2>/dev/null; do sleep 1; done" || { echo "TCP 연결 실패 - db:5432"; exit 1; }'
+    - 'timeout 30 bash -c "until (echo > /dev/tcp/cache/6379) 2>/dev/null; do sleep 1; done" || { echo "TCP 연결 실패 - cache:6379"; exit 1; }'
+  script:
+    - ./gradlew build --no-daemon --build-cache -Dgradle.user.home=.gradle
