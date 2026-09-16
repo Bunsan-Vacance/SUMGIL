@@ -8,12 +8,13 @@ include:
   - local: .gitlab/ci/fe.yml
   - local: .gitlab/ci/manifests.yml
 
-# MR 이벤트에서만 파이프라인을 만든다. 이게 없으면 브랜치 push(예: MR 머지로 develop-*에
-# 커밋이 반영되는 순간)도 rules:changes만 보고 별도 파이프라인을 또 만들어서, 같은 diff를
-# MR 때 한 번·머지 때 한 번 이렇게 중복 검증하게 된다.
+# MR + main push에서만 파이프라인을 만든다. 브랜치 push는 MR 파이프라인과
+# 중복 검증이 되므로 만들지 않는다 (MR 머지가 main push 파이프라인 1회로 이어진다).
+# main push 허용은 SHA 배포(210-②)의 전제다.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
     - when: never
 
 # AI·BE 검사 대상이 없는 MR도 빈 파이프라인으로 실패하지 않게 한다.

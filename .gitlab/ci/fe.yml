@@ -13,6 +13,14 @@ fe-check:
         - "FE/vite.config.*"
         - "FE/tsconfig*"
         - ".gitlab/ci/fe.yml"
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - "FE/src/**/*"
+        - "FE/package.json"
+        - "FE/package-lock.json"
+        - "FE/vite.config.*"
+        - "FE/tsconfig*"
+        - ".gitlab/ci/fe.yml"
   before_script:
     - cd FE
     - npm ci
