@@ -99,7 +99,7 @@ def station_congestion(
                 "congestion_pct": _num(r["congestion_pct"]),
                 "grade": _int(r["grade"]),
                 "data_status": r["data_status"],
-                "pred_clipped": bool(r["pred_clipped"]),
+                "pred_source": r["pred_source"],
             }
             for _, r in rows.iterrows()
         ],
@@ -125,7 +125,7 @@ def line_congestion(day: date_type, line: str, time_slot_30min: str) -> dict | N
                 "congestion_pct": _num(r["congestion_pct"]),
                 "grade": _int(r["grade"]),
                 "data_status": r["data_status"],
-                "pred_clipped": bool(r["pred_clipped"]),
+                "pred_source": r["pred_source"],
             }
             for _, r in rows.iterrows()
         ],
