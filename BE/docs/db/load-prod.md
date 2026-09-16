@@ -106,7 +106,7 @@ ssh -i "$PEM" "$NODE" 'sudo kubectl rollout restart deployment/be -n prod && \
   sudo kubectl rollout status deployment/be -n prod --timeout=300s'
 ```
 
-`replicas: 2` 라 롤링으로 바뀌어 무중단이다. 매니페스트를 바꾸는 게 아니라 운영 명령이므로 배포 계약(`Infra/k8s/CONTRACT.md`)의 "`k8s/**` 는 플랫폼 소유"에 걸리지 않지만, **실행 후 리드에게 알린다**(S15P21A104-173 의 재배포 주의 항목과 같은 맥락).
+`replicas: 1` 이라 재기동 중 잠깐 끊긴다. 매니페스트를 바꾸는 게 아니라 운영 명령이므로 배포 계약(`Infra/k8s/CONTRACT.md`)의 "`k8s/**` 는 플랫폼 소유"에 걸리지 않지만, **실행 후 리드에게 알린다**(S15P21A104-173 의 재배포 주의 항목과 같은 맥락).
 
 CI/CD 는 재기동을 일으키지 않는다 — CI 는 `lint`·`test`·매니페스트 검증뿐이고, `apply.sh` 는 `rollout status`(완료 대기)만 있지 `rollout restart` 가 없다. GitOps 미도입이라 전부 수동이다.
 
