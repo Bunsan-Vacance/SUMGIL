@@ -1,0 +1,277 @@
+# CROWD 혼잡도 — 서빙 산출물·API 명세 (BE 전달용)
+
+작성 2026-09-16 · 기준 커밋 `8890cec`(develop-AI) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13.parquet`
+
+> **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
+> `batch_predict.OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 · 등급 임계값
+> (`crowd_grade_thresholds`) · 예측기 계열 추가·교체 · 배율표 판 교체 · API 경로·파라미터.
+> 모델 성능·피처 세트는 이 문서가 아니라 `pipeline/MODEL_REGISTRY.md`에 적는다.
+
+AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 날짜별 예측 표를 만들고, API는 그 표만 읽는다.
+
+```
+배치(batch_predict.py) → data/CROWD/serving/predictions_YYYY-MM-DD.parquet + .meta.json
+                       → GET /crowd/... 가 이 파일만 조회
+```
+
+---
+
+## 0. 먼저 읽을 것 — 지금 상태에서 BE가 조심할 것 3가지
+
+| # | 내용 | BE 조치 |
+| --- | --- | --- |
+| 1 | **`boarding_pred`·`alighting_pred`에 음수가 나온다.** 2026-09-13 표에서 **3,744행 / 21,606행 = 17.3%**, 최솟값 **−457.9명**. 그중 3,194행은 `data_status`가 **`ok`**라서 상태값으로는 감지되지 않는다 | 인원 필드를 그대로 노출하지 말 것. 수정 배포 전까지 `max(0, x)`로 감싸거나 **노출 보류**. 아래 5절 참고 |
+| 2 | **`boarding_pred`는 1시간 값이고, 30분 행 2개에 같은 값이 중복된다.** 승하차 예측은 1시간 단위이고 30분 분해는 혼잡도(`congestion_pct`)에만 적용된다 | **절대 합산하지 말 것.** `06:00`과 `06:30` 행의 `boarding_pred`를 더하면 2배가 된다 |
+| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. 1번 음수 비율이 높은 이유이기도 하다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
+
+---
+
+## 1. 배치 산출물 — parquet
+
+경로: `AI/data/CROWD/serving/predictions_{YYYY-MM-DD}.parquet`
+크기: 1일치 **21,606행** (역 × 20슬롯 × 방향 × 30분 2슬롯)
+
+| 컬럼 | 타입 | 의미 | null 가능 |
+| --- | --- | --- | --- |
+| `date` | datetime64[us] | 대상 날짜(자정) | 없음 |
+| `station_no` | int64 | 역번호(서울시 표준) | 없음 |
+| `station_name` | str | 역명 | 있음 |
+| `line` | str | 호선(`"1호선"` 형식) | 있음 |
+| `direction` | str | `상선` / `하선` / `내선` / `외선`(2호선) | 없음 |
+| `time_slot_30min` | str | 30분 슬롯 시작 시각, `"08:30"` | 없음 |
+| `time_slot` | str | 원천 1시간 슬롯, `"08-09"`. 첫 슬롯 `"~06"`, 마지막 `"24~"` | 없음 |
+| `congestion_pct` | float64 | **보정 혼잡도(%)**, 정원 100% 기준 | **있음** — 배율표 결측 |
+| `grade` | float64 | 등급 `0.0`/`1.0`/`2.0`. parquet에서는 **float**이고(NaN을 담기 위해) **API는 int로 변환해 내려준다** | **있음** |
+| `data_status` | str | 셀 상태, 2절 | 없음 |
+| `boarding_pred` | float64 | 승차 예측(명), **1시간 값** | 있음 |
+| `alighting_pred` | float64 | 하차 예측(명), **1시간 값** | 있음 |
+| `boarding_lookup` | float64 | 기준선(요일유형×역×시간대 평균) 승차 | 있음 |
+| `alighting_lookup` | float64 | 기준선 하차 | 있음 |
+| `actual_boarding` | float64 | 실측 승차 — **과거 날짜만** 채워짐 | 있음 |
+| `actual_alighting` | float64 | 실측 하차 — 과거 날짜만 | 있음 |
+| `train_capacity` | int64 | 편성 정원(명). 혼잡도 분모 | 없음 |
+
+### 실제 2행
+
+```json
+[
+ {
+  "date": "2026-09-14T00:00:00.000",
+  "station_no": 150,
+  "station_name": "서울역",
+  "line": "1호선",
+  "direction": "하선",
+  "time_slot_30min": "06:00",
+  "time_slot": "06-07",
+  "congestion_pct": 8.9055909495,
+  "grade": 0.0,
+  "data_status": "ok",
+  "boarding_pred": 676.4768745769,
+  "alighting_pred": 2258.5182661606,
+  "boarding_lookup": 542.6489795918,
+  "alighting_lookup": 2115.8204081633,
+  "actual_boarding": null,
+  "actual_alighting": null,
+  "train_capacity": 1600
+ },
+ {
+  "date": "2026-09-14T00:00:00.000",
+  "station_no": 150,
+  "station_name": "서울역",
+  "line": "1호선",
+  "direction": "하선",
+  "time_slot_30min": "06:30",
+  "time_slot": "06-07",
+  "congestion_pct": 13.2788722193,
+  "grade": 0.0,
+  "data_status": "ok",
+  "boarding_pred": 676.4768745769,
+  "alighting_pred": 2258.5182661606,
+  "boarding_lookup": 542.6489795918,
+  "alighting_lookup": 2115.8204081633,
+  "actual_boarding": null,
+  "actual_alighting": null,
+  "train_capacity": 1600
+ }
+]
+```
+
+두 행의 `boarding_pred`가 **같다**(676.47). 0절 2번이 말하는 지점이다. `congestion_pct`는 8.9 → 13.3으로 30분마다 다르다.
+
+---
+
+## 2. `data_status` — 값을 채우지 않고 상태로 알린다
+
+숫자를 낼 수 없는 셀은 **`null`로 두고 이유를 남긴다**(팀 원칙 8: 표본 부족 구간에 값을 채우지 않는다). BE·FE는 이 셀을 "데이터 부족"으로 표시하고, **임의로 0이나 이웃 값으로 채우지 말 것.**
+
+| 값 | 의미 | `congestion_pct` | 화면 처리 |
+| --- | --- | --- | --- |
+| `ok` | 정상 | 있음 | 정상 표출 |
+| `calibration_fallback` | 1~8호선 공휴일이라 **일요일 배율**을 빌려 씀 | 있음 | 값은 쓰되 "공휴일 추정" 구분 표시 권장 |
+| `segment_truncated` | 절단 구간 종점 링크(코레일·인천교통공사 직결 구간이 원천에 없음). 재차인원이 구조적으로 0 | 없음 | "해당 없음" |
+| `no_calibration` | 그 밖의 배율표 결측(결번 역, 미대응 2호선 지선) | 없음 | "데이터 부족" |
+| `no_lookup` | 기준선 자체가 없음(학습 구간에 없는 요일유형×역×시간대) | 없음 | "데이터 부족" |
+| `no_data` | **API 전용** — 그 날짜 표가 아직 없음(배치 미실행) | — | 404로 내려감 |
+
+2026-09-13 실측 분포: `ok` 20,163 / `no_calibration` 1,443.
+
+### 등급 임계값
+
+`grade`는 `congestion_pct`를 임계값으로 자른 값이고, 임계값은 **설정에서 온다**(`crowd_grade_thresholds`, 현재 `"50,100"`).
+
+| grade | 범위 | 뜻 |
+| --- | --- | --- |
+| `0` | < 50% | 여유 |
+| `1` | 50% ≤ x < 100% | 보통 |
+| `2` | ≥ 100% | 혼잡 |
+
+**임계값을 BE에 하드코딩하지 말 것.** `GET /crowd/meta`의 `grade_thresholds`를 읽어 쓴다 — 바뀔 수 있다(국토부 고시의 150/170/190은 우리 타깃 분포에서 판별력이 없어 50/100을 쓰고 있다).
+
+---
+
+## 3. 배치 메타 — `.meta.json`
+
+경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다.
+
+| 키 | 예시 | 의미 |
+| --- | --- | --- |
+| `target_date` | `"2026-09-13"` | 대상 날짜 |
+| `in_panel` | `false` | 그 날짜가 학습 패널에 있는지(과거 재현 여부). `false`면 실운영 예측 |
+| `history_window_days` | `7` | 이력 창 길이. **현재 산출 파일에는 없다**(구 버전이 만든 파일). 다음 배치부터 들어가므로 `.get()`으로 읽을 것 |
+| `history_days_present` | `6` | 실제로 확보된 이력 일수 |
+| `history_dates` | `["2026-09-06", …]` | 확보된 이력 날짜 |
+| **`lag1d_available`** | **`false`** | **전날 실측 유무. `false`면 정확도 저하** |
+| `lag7d_available` | `true` | 1주 전 실측 유무 |
+| `predictor` | `"lightgbm"` | 쓰인 예측기 종류 |
+| `predictor_version` | `"lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340"` | 아티팩트까지 포함한 버전 |
+| `predictor_fallback` | `null` | `"no_history"`면 이력이 전무해 **lookup으로 대체**된 것 |
+| `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
+| `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
+| `rows` | `21606` | 표 행 수 |
+| `status_counts` | `{"ok": 20163, "no_calibration": 1443}` | 상태별 행 수 |
+| `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
+| `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
+| `generated_at` | `"2026-09-13T03:41:17+09:00"` | 생성 시각(KST) |
+
+---
+
+## 4. 조회 API — 3종
+
+prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
+
+### 4.1 `GET /crowd/meta`
+
+가용 날짜·임계값·모델 버전. **BE 시작 시 1회 읽어 캐시할 값들이다.**
+
+```json
+{
+  "available_dates": ["2026-09-13", "2026-09-14"],
+  "grade_thresholds": [50.0, 100.0],
+  "predictor": "lightgbm",
+  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340",
+  "generated_at": "2026-09-13T03:41:17+09:00",
+  "status_counts": {"ok": 20163, "no_calibration": 1443},
+  "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}]
+}
+```
+
+### 4.2 `GET /crowd/stations/{station_no}/congestion`
+
+| 파라미터 | 필수 | 설명 |
+| --- | --- | --- |
+| `station_no` (path) | O | 역번호 |
+| `date` (query) | O | `YYYY-MM-DD` |
+| `direction` (query) | X | `상선`/`하선`/`내선`/`외선`. 생략 시 전부 |
+
+```json
+{
+  "date": "2026-09-13",
+  "station_no": 150,
+  "station_name": "서울역",
+  "line": "1호선",
+  "train_capacity": 1600,
+  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340",
+  "lag1d_available": false,
+  "slots": [
+    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.9, "grade": 0, "data_status": "ok"},
+    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 13.3, "grade": 0, "data_status": "ok"}
+  ]
+}
+```
+
+`slots[].congestion_pct`·`grade`는 **`null`일 수 있다**(2절).
+
+### 4.3 `GET /crowd/lines/{line}/congestion`
+
+노선 한 개의 특정 30분 시점 스냅샷.
+
+| 파라미터 | 필수 | 설명 |
+| --- | --- | --- |
+| `line` (path) | O | `1호선` 등 |
+| `date` (query) | O | `YYYY-MM-DD` |
+| `time` (query) | O | 30분 슬롯 시작, `08:30` (**쿼리 키가 `time`이다**, 응답 키는 `time_slot_30min`) |
+
+```json
+{
+  "date": "2026-09-13",
+  "line": "2호선",
+  "time_slot_30min": "08:30",
+  "stations": [
+    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 71.2, "grade": 1, "data_status": "ok"}
+  ]
+}
+```
+
+### 4.4 에러 규약
+
+| 상황 | 응답 |
+| --- | --- |
+| **그 날짜 표가 없음**(배치 미실행) | **404** — `{"detail": "2026-09-20 예측 표가 없다 — 배치 미실행 (GET /crowd/meta 참고)"}` |
+| **존재하지 않는 역** | **200** + `slots: []` (역 목록은 BE가 관리) |
+
+이 둘을 구분한 의도는 **"데이터가 아직 없다"와 "그런 역이 없다"를 BE가 다르게 처리**할 수 있게 하려는 것이다.
+
+---
+
+## 5. 알려진 결함 — 수정 예정
+
+### 5.1 인원 예측 음수 유출 (조치 필요)
+
+- **현상**: `boarding_pred`·`alighting_pred`가 음수로 내려간다. 2026-09-13 표에서 **17.3%(3,744행)**, 최솟값 **−457.9명**. 그중 **3,194행은 `data_status="ok"`**라 상태값으로 감지 불가.
+- **원인**: 배치가 재귀식 입력에는 0 클립을 적용하지만(`batch_predict.py:229`), 출력 표의 `*_pred` 컬럼은 **클립 전 원본을 그대로 싣는다**. 그래서 같은 행에서 `boarding_pred < 0`인데 `congestion_pct`는 0을 넣고 계산한 값이라 **표 내부가 불일치**한다.
+- **왜 지금 많은가**: 현재 `lag1d_available: false`(전날 실측 없음)인 이력 결손 상태라 잔차 예측이 크게 흔들린다. 이력이 완비되면 비율이 크게 내려간다(2025 평가 전체에서는 0.47%).
+- **수정 방향**: 출력 `*_pred`를 등급이 쓴 클립 값과 일치시키고, 클립된 행을 `pred_clipped`(bool) 컬럼으로 노출. 별도 티켓으로 처리.
+- **그때까지 BE**: 인원 필드를 노출하려면 `max(0, x)`로 감싸거나 노출을 보류한다. **`congestion_pct`·`grade`는 영향 없다** — 이미 클립된 값으로 계산됐다.
+
+### 5.2 구 모델로 만들어진 잔존 파일
+
+`predictions_2026-09-14.parquet`은 `generated_at 2026-09-13T03:33`로, 현재 배포 아티팩트(`..._20260913-0340`, 03:40 학습)보다 **먼저** 생성돼 구 모델(`festival_selflag_d1d7_resid_20260911-1533`)을 쓴다. 배치를 다시 돌리면 갱신된다. 모델 선택 로직 자체는 정상이다.
+
+→ **BE는 `meta.predictor_version`을 로깅해 두는 게 좋다.** 표마다 모델이 다를 수 있다.
+
+---
+
+## 6. 이번 검증(S15P21A104-145)이 만든 변경
+
+**실행되는 프로덕션 코드 변경은 없다.** 145는 검증 티켓이고, 18개 변경 파일 중 `app/` 아래는 문서 1건뿐이다.
+
+| 경로 | 성격 |
+| --- | --- |
+| `app/CROWD/pipeline/MODEL_REGISTRY.md` (+17/−3) | **문서** — 가용성별 예측기 선택 판정표 추가 |
+| `test/CROWD/test_crowd_stat_models.py` | 테스트 |
+| `validation/CROWD/{stat-model,family,split-tuning}-check/*` | 검증 스크립트·결과·노트북 |
+
+즉 **BE가 지금 당장 바꿔야 할 것은 없다.** 다만 145가 5.1 결함과 아래 후속을 드러냈다.
+
+### BE에 영향이 갈 후속 예정
+
+| 항목 | 내용 | BE 영향 |
+| --- | --- | --- |
+| 인원 음수 수정(5.1) | `*_pred` 클립 + `pred_clipped` 컬럼 추가 | **컬럼 1개 추가** — parquet 스키마·API 응답 확장 |
+| 가용성별 3단 예측기(197) | 이력 완비/결손/전무에 따라 LightGBM·GRU·lookup을 갈아 씀 | `meta.predictor`·`predictor_version` 값이 날짜마다 달라진다. 이미 내려가는 필드라 스키마 변경은 없음 |
+
+---
+
+## 문의
+
+수치 원본은 `AI/validation/CROWD/*/RESULTS.md`, 모델 명세는 `AI/app/CROWD/pipeline/MODEL_REGISTRY.md`.
