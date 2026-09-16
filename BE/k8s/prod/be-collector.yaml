@@ -23,6 +23,8 @@ spec:
       containers:
         - name: be-collector
           image: sumgil-be:latest
+          # SHA 태그는 불변이라 재pull이 필요 없다. :latest는 호환용으로만 push된다.
+          imagePullPolicy: IfNotPresent
           env:
             # be-config 의 SPRING_PROFILES_ACTIVE=prod 를 덮는다 (env 가 envFrom 보다 우선).
             - name: SPRING_PROFILES_ACTIVE

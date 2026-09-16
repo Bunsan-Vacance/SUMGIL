@@ -16,6 +16,8 @@ spec:
       containers:
         - name: fe
           image: sumgil-fe:latest
+          # SHA 태그는 불변이라 재pull이 필요 없다. :latest는 호환용으로만 push된다.
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
           livenessProbe:
