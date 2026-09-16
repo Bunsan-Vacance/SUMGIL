@@ -33,4 +33,3 @@ docker build -t sumgil-fe:latest .
 ## 이 디렉토리
 
 - `k8s/prod/` — FE 워크로드 매니페스트(플랫폼 템플릿).
-- `k8s/argocd-application.yaml` — GitOps 전환용(설치 후순위).

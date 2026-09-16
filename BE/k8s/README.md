@@ -48,4 +48,3 @@ docker build -t sumgil-be:latest .
 
 - `k8s/prod/` — BE 워크로드 매니페스트(Deployment·Service·Ingress·config·secret).
 - 데이터 계층(Postgres·Redis·Kafka)은 BE가 아니라 Infra 소유다(`Infra/k8s/prod/`).
-- `k8s/argocd-application.yaml` — GitOps 전환용(설치 후순위).
