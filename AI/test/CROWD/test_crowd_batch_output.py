@@ -1,9 +1,11 @@
-"""197 — `to_congestion_table` 출력 클립 일관성 회귀 테스트.
+"""197 — `to_congestion_table` 출력 안전성 회귀 테스트(A부 클립 일관성 + B부 lookup 대체).
 
 배치가 재귀식 입력에는 0 클립을 적용하면서 출력 표의 `boarding_pred`·`alighting_pred`는 클립 전
-원본을 그대로 실어 음수 인원이 새던 결함(`SERVING_CONTRACT.md` 5.1)의 재발을 막는다. 합성 예측
-표로 (1) 출력 인원이 항상 0 이상인지, (2) `pred_clipped`가 클립된 행만 True인지, (3) `congestion_pct`가
-클립된 입력으로 계산됐는지(클립 전 값과 다름), (4) `OUTPUT_COLS`와 실제 출력 컬럼이 일치하는지를 본다.
+원본을 그대로 실어 음수 인원이 새던 결함(`SERVING_CONTRACT.md` 5.1)의 재발을 막는다. B부에서는
+단순 0 클립을 lookup 대체로 바꿨다(145 family-check 7절: 모델이 음수를 낸 셀은 lookup이 더
+정확하다). 합성 예측 표로 (1) 출력 인원이 항상 0 이상인지, (2) 음수 셀이 `pred_source`로 식별되고
+실제로 lookup 값으로 바뀌었는지, (3) lookup도 없거나 음수면 0으로 떨어지는지, (4) `congestion_pct`가
+대체된 입력으로 계산됐는지(대체 전 값과 다름), (5) `OUTPUT_COLS`와 실제 출력 컬럼이 일치하는지를 본다.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ from app.CROWD.pipeline.batch_predict import OUTPUT_COLS, to_congestion_table
 from app.CROWD.pipeline.congestion import apply_calibration, recursive_congestion
 
 CAPACITY = {"car_capacity": 160, "cars_per_train": {"1호선": 10}}
-STATIONS = [150, 151, 158]  # 150: 승차 음수, 151: 하차 음수, 158: 둘 다 정상(클립 없음)
+# 150: 승차 음수(lookup 있음) · 151: 하차 음수(lookup 있음) · 158: 둘 다 정상(대체 없음)
+# 159: 승차 음수인데 lookup도 NaN — 최종 하한 0으로 떨어져야 한다
+STATIONS = [150, 151, 158, 159]
 
 
 def _predicted() -> pd.DataFrame:
@@ -24,16 +28,16 @@ def _predicted() -> pd.DataFrame:
         {
             "date": pd.Timestamp("2025-10-03"),
             "station_no": STATIONS,
-            "station_name": ["서울역", "시청", "청량리"],
+            "station_name": ["서울역", "시청", "청량리", "왕십리"],
             "line": "1호선",
             "time_slot": "08-09",
             "day_type": "평일",
-            "boarding": [300.0, 100.0, 80.0],
-            "alighting": [0.0, 100.0, 30.0],
-            "boarding_pred": [-50.0, 120.0, 80.0],  # 150만 음수
-            "alighting_pred": [10.0, -5.0, 30.0],  # 151만 음수
-            "boarding_lookup": [280.0, 110.0, 75.0],
-            "alighting_lookup": [5.0, 90.0, 28.0],
+            "boarding": [300.0, 100.0, 80.0, 40.0],
+            "alighting": [0.0, 100.0, 30.0, 20.0],
+            "boarding_pred": [-50.0, 120.0, 80.0, -10.0],  # 150·159만 음수
+            "alighting_pred": [10.0, -5.0, 30.0, 15.0],  # 151만 음수
+            "boarding_lookup": [280.0, 110.0, 75.0, np.nan],  # 159는 lookup도 없음
+            "alighting_lookup": [5.0, 90.0, 28.0, 12.0],
         }
     )
 
@@ -78,34 +82,54 @@ def table() -> pd.DataFrame:
     )
 
 
-def test_negative_predictions_are_clipped_in_output(table):
+def test_negative_predictions_are_never_output(table):
     assert (table["boarding_pred"] >= 0).all()
     assert (table["alighting_pred"] >= 0).all()
 
 
-def test_clipped_rows_are_flagged_true(table):
-    for station in (150, 151):
-        rows = table[table["station_no"] == station]
-        assert rows["pred_clipped"].all(), station
+def test_negative_cells_are_substituted_with_lookup_value(table):
+    row150 = table[table["station_no"] == 150].iloc[0]
+    assert row150["boarding_pred"] == pytest.approx(280.0)  # boarding_lookup
+    assert row150["pred_source"] == "lookup_negative"
+
+    row151 = table[table["station_no"] == 151].iloc[0]
+    assert row151["alighting_pred"] == pytest.approx(90.0)  # alighting_lookup
+    assert row151["pred_source"] == "lookup_negative"
 
 
-def test_rows_without_negative_predictions_are_not_flagged(table):
+def test_negative_cell_without_lookup_floors_to_zero(table):
+    row159 = table[table["station_no"] == 159].iloc[0]
+    assert row159["boarding_pred"] == 0.0  # lookup이 NaN이라 최종 하한 0
+    assert row159["pred_source"] == "lookup_negative"
+
+
+def test_rows_without_negative_predictions_are_flagged_model(table):
     rows = table[table["station_no"] == 158]
-    assert not rows["pred_clipped"].any()
+    assert (rows["pred_source"] == "model").all()
 
 
-def test_congestion_pct_matches_clipped_input_not_raw(table):
+def test_congestion_pct_matches_substituted_input_not_raw(table):
     predicted = _predicted()
     cal = _calibration(STATIONS)
 
-    # 클립된 입력으로 재계산 — to_congestion_table의 congestion_pct와 같아야 한다.
-    clipped = predicted.copy()
+    # 대체된 입력(음수 → lookup, lookup도 없으면 0)으로 재계산 — to_congestion_table의
+    # congestion_pct와 같아야 한다.
+    substituted = predicted.copy()
     for t in ("boarding", "alighting"):
-        clipped[t] = np.clip(clipped[f"{t}_pred"].to_numpy(dtype=float), 0.0, None)
-    cal_clipped = _recompute_congestion_pct(clipped, cal)
+        raw = substituted[f"{t}_pred"].to_numpy(dtype=float)
+        lookup = substituted[f"{t}_lookup"].to_numpy(dtype=float)
+        negative = raw < 0
+        values = raw.copy()
+        values[negative] = lookup[negative]
+        still_bad = negative & (np.isnan(values) | (values < 0))
+        values[still_bad] = 0.0
+        substituted[t] = values
+    cal_substituted = _recompute_congestion_pct(substituted, cal)
 
     merged = table.merge(
-        cal_clipped[["station_no", "direction", "time_slot_30min", "congestion_pct_calibrated"]],
+        cal_substituted[
+            ["station_no", "direction", "time_slot_30min", "congestion_pct_calibrated"]
+        ],
         on=["station_no", "direction", "time_slot_30min"],
         how="left",
     )
@@ -113,20 +137,23 @@ def test_congestion_pct_matches_clipped_input_not_raw(table):
         merged["congestion_pct_calibrated"].to_numpy()
     )
 
-    # 클립 전(원본) 입력으로 계산하면 다른 값이 나온다 — 클립이 실제로 결과를 바꾼다는 근거.
+    # 대체 전(원본) 입력으로 계산하면 다른 값이 나온다 — 대체가 실제로 결과를 바꾼다는 근거.
     # 기존 actual boarding/alighting 컬럼은 버리고 예측값을 그 자리에 넣는다(중복 컬럼 방지).
-    unclipped = predicted.drop(columns=["boarding", "alighting"]).rename(
+    unsubstituted = predicted.drop(columns=["boarding", "alighting"]).rename(
         columns={"boarding_pred": "boarding", "alighting_pred": "alighting"}
     )
-    cal_unclipped = _recompute_congestion_pct(unclipped, cal)
-    merged_unclipped = table.merge(
-        cal_unclipped[["station_no", "direction", "time_slot_30min", "congestion_pct_calibrated"]],
+    cal_unsubstituted = _recompute_congestion_pct(unsubstituted, cal)
+    merged_unsubstituted = table.merge(
+        cal_unsubstituted[
+            ["station_no", "direction", "time_slot_30min", "congestion_pct_calibrated"]
+        ],
         on=["station_no", "direction", "time_slot_30min"],
         how="left",
     )
     assert not np.allclose(
-        merged_unclipped["congestion_pct"].to_numpy(),
-        merged_unclipped["congestion_pct_calibrated"].to_numpy(),
+        merged_unsubstituted["congestion_pct"].to_numpy(),
+        merged_unsubstituted["congestion_pct_calibrated"].to_numpy(),
+        equal_nan=True,
     )
 
 

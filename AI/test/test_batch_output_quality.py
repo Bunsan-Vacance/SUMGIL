@@ -74,7 +74,7 @@ def crowd_frame() -> pd.DataFrame:
             "station_no": [150, 150],
             "boarding_pred": [676.4, 0.0],
             "alighting_pred": [2258.5, 12.3],
-            "pred_clipped": [False, True],
+            "pred_source": ["model", "lookup_negative"],
         }
     )
 

@@ -38,7 +38,7 @@ def _table() -> pd.DataFrame:
                     "data_status": "no_calibration" if np.isnan(pct) else "ok",
                     "boarding_pred": 1000.0,
                     "alighting_pred": 900.0,
-                    "pred_clipped": False,
+                    "pred_source": "model",
                     "boarding_lookup": 950.0,
                     "alighting_lookup": 880.0,
                     "actual_boarding": np.nan,
