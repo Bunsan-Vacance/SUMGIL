@@ -88,4 +88,40 @@ class RouteGraphTest {
         assertEquals(2, graph.edgeCount());
         assertTrue(graph.containsNode("C"));
     }
+
+    /**
+     * {@link RouteGraph#withExtraEdges} 단위 테스트(S15P21A104-187, 좌표 접근 임시 간선).
+     */
+    @Test
+    @DisplayName("추가 엣지가 있으면 새 정점·엣지가 합쳐진 그래프를 돌려준다")
+    void withExtraEdges_추가엣지_합쳐짐() {
+        RouteGraph graph = graphOf(new Edge("A", "B", "L1", 100, 0, TravelMode.SUBWAY));
+
+        RouteGraph extended = graph.withExtraEdges(
+                List.of(new Edge("PLACE", "A", "WALK", 30, 0, TravelMode.WALK)));
+
+        assertEquals(2, extended.edgeCount());
+        assertTrue(extended.containsNode("PLACE"));
+        assertTrue(extended.findEdge("PLACE", "A").isPresent());
+    }
+
+    @Test
+    @DisplayName("withExtraEdges는 원본 그래프를 바꾸지 않는다")
+    void withExtraEdges_원본은_불변() {
+        RouteGraph graph = graphOf(new Edge("A", "B", "L1", 100, 0, TravelMode.SUBWAY));
+
+        graph.withExtraEdges(List.of(new Edge("PLACE", "A", "WALK", 30, 0, TravelMode.WALK)));
+
+        assertEquals(1, graph.edgeCount());
+        assertFalse(graph.containsNode("PLACE"));
+    }
+
+    @Test
+    @DisplayName("추가 엣지가 없으면(null·빈 목록) 같은 내용의 그래프를 그대로 돌려준다")
+    void withExtraEdges_빈목록_변화없음() {
+        RouteGraph graph = graphOf(new Edge("A", "B", "L1", 100, 0, TravelMode.SUBWAY));
+
+        assertEquals(1, graph.withExtraEdges(List.of()).edgeCount());
+        assertEquals(1, graph.withExtraEdges(null).edgeCount());
+    }
 }
