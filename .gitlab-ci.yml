@@ -1,3 +1,8 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - when: never
+
 stages:
   - lint
   - test
@@ -7,11 +12,13 @@ stages:
   tags:
     - CI
   rules:
-    - changes:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
         - "AI/**/*.py"
         - "AI/pyproject.toml"
         - "AI/requirements.txt"
         - "AI/requirements-dev.txt"
+        - ".gitlab-ci.yml"
   variables:
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   cache:
@@ -34,3 +41,20 @@ ai-test:
   stage: test
   script:
     - pytest -q
+
+fe-check:
+  image: node:24-slim
+  tags:
+    - CI
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "FE/**/*"
+        - ".gitlab-ci.yml"
+  before_script:
+    - cd FE
+    - npm ci
+  script:
+    - npm run format:check
+    - npm test
+    - npm run build
