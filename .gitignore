@@ -54,9 +54,10 @@ venv/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
+AI/.tmp/
 
 # ── 데이터 · 모델 산출물 (용량이 커 저장소에 올리지 않음) ──
-# raw/processed뿐 아니라 도메인별 서브폴더(예: AI/data/CROWD/)도 전부 대상.
+# raw/processed뿐 아니라 도메인별 서브폴더(AI/data/CROWD/, AI/data/BIKE/, AI/data/EXTERNAL/ 등)도 전부 대상.
 AI/data/**
 AI/models/*
 !AI/data/**/
@@ -67,3 +68,12 @@ AI/models/*
 *.onnx
 *.pkl
 *.parquet
+
+# DATA_ENGINE 리포트는 데이터로부터 재생성되는 산출물 — download_guide.md 등 직접 쓴 문서만 추적.
+AI/DATA_ENGINE/reports/bike_weather_eda.md
+AI/DATA_ENGINE/reports/crowd_eda.md
+AI/DATA_ENGINE/reports/figures/*
+!AI/DATA_ENGINE/reports/figures/.gitkeep
+
+# AI 팀 로컬 Drive 동기화 — 팀원마다 드라이브 문자·경로가 달라 로컬 전용 설정.
+AI/scripts/.drive-sync-path.local

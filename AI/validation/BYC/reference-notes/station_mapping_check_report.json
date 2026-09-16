@@ -1,0 +1,147 @@
+{
+  "master_rows": 3430,
+  "master_valid_coord_rows": 3353,
+  "excel_2024_rows": 2766,
+  "excel_2025_rows": 2799,
+  "hourly_2024_station_numbers": 3127,
+  "hourly_2025_station_numbers": 2804,
+  "od_station_ids_2024_2025_q3": 2848,
+  "od_ids_in_master": 2847,
+  "coord_mapping_6": {
+    "2024": 2525,
+    "2025": 2559,
+    "intersection_od_ids": 2491
+  },
+  "coord_mapping_5": {
+    "2024": 2333,
+    "2025": 2361
+  },
+  "usable_with_hourly_stock": {
+    "2024": 2511,
+    "2025": 2541,
+    "intersection_od_ids": 2477
+  },
+  "number_based_exact_matches": {
+    "2024": 1848,
+    "2025": 1828,
+    "2024_large_coord_gap_gt_0_01": 1841,
+    "2025_large_coord_gap_gt_0_01": 1821
+  },
+  "sample_checks": [
+    {
+      "od_station_id": "ST-987",
+      "master": [
+        {
+          "od_station_id": "ST-987",
+          "addr1": "서울특별시 광진구 아차산로 304",
+          "addr2": "원일교회",
+          "lat": 37.538052,
+          "lon": 127.076599,
+          "od_no_int": 987,
+          "coord_key_6": "37.538052,127.076599",
+          "coord_key_5": "37.53805,127.0766",
+          "coord_key_4": "37.5381,127.0766"
+        }
+      ],
+      "coord_2024": [
+        {
+          "od_station_id": "ST-987",
+          "station_no": "03504",
+          "station_name": " 원일교회",
+          "district": "광진구",
+          "address": "서울특별시 광진구 아차산로 304 원일교회",
+          "lat_stock": 37.53805161,
+          "lon_stock": 127.07659912
+        }
+      ],
+      "coord_2025": [
+        {
+          "od_station_id": "ST-987",
+          "station_no": "03504",
+          "station_name": " 원일교회",
+          "district": "광진구",
+          "address": "서울특별시 광진구 아차산로 304 원일교회",
+          "lat_stock": 37.53805161,
+          "lon_stock": 127.07659912
+        }
+      ]
+    },
+    {
+      "od_station_id": "ST-1002",
+      "master": [
+        {
+          "od_station_id": "ST-1002",
+          "addr1": "서울특별시 양천구 목동동로 316-6",
+          "addr2": "서울시 도로환경관리센터",
+          "lat": 37.5299,
+          "lon": 126.876541,
+          "od_no_int": 1002,
+          "coord_key_6": "37.5299,126.876541",
+          "coord_key_5": "37.5299,126.87654",
+          "coord_key_4": "37.5299,126.8765"
+        }
+      ],
+      "coord_2024": [
+        {
+          "od_station_id": "ST-1002",
+          "station_no": "00731",
+          "station_name": " 서울시 도로환경관리센터",
+          "district": "양천구",
+          "address": "서울특별시 양천구 목동동로 316-6",
+          "lat_stock": 37.5298996,
+          "lon_stock": 126.87654114
+        }
+      ],
+      "coord_2025": [
+        {
+          "od_station_id": "ST-1002",
+          "station_no": "00731",
+          "station_name": " 서울시 도로환경관리센터",
+          "district": "양천구",
+          "address": "서울특별시 양천구 목동동로 316-6",
+          "lat_stock": 37.5298996,
+          "lon_stock": 126.87654114
+        }
+      ]
+    },
+    {
+      "od_station_id": "ST-102",
+      "master": [
+        {
+          "od_station_id": "ST-102",
+          "addr1": "서울특별시 광진구 아차산로 355",
+          "addr2": "타워더모스트 광진아크로텔",
+          "lat": 37.53701,
+          "lon": 127.082245,
+          "od_no_int": 102,
+          "coord_key_6": "37.53701,127.082245",
+          "coord_key_5": "37.53701,127.08224",
+          "coord_key_4": "37.537,127.0822"
+        }
+      ],
+      "coord_2024": [
+        {
+          "od_station_id": "ST-102",
+          "station_no": "00505",
+          "station_name": " 자양사거리 광진아크로텔 앞",
+          "district": "광진구",
+          "address": "서울특별시 광진구 아차산로 355 타워더모스트 광진아크로텔",
+          "lat_stock": 37.53701019,
+          "lon_stock": 127.08224487
+        }
+      ],
+      "coord_2025": [
+        {
+          "od_station_id": "ST-102",
+          "station_no": "00505",
+          "station_name": " 자양사거리 광진아크로텔 앞",
+          "district": "광진구",
+          "address": "서울특별시 광진구 아차산로 355 타워더모스트 광진아크로텔",
+          "lat_stock": 37.53701019,
+          "lon_stock": 127.08224487
+        }
+      ]
+    }
+  ],
+  "conclusion": "Coordinate-based mapping is available. Numeric-only ST-ID to station number mapping is invalid."
+}
