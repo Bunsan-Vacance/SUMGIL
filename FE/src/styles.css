@@ -1021,40 +1021,6 @@ small {
   flex-shrink: 0;
   color: #657585;
 }
-.results-priority {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin-top: 8px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  overflow: hidden;
-}
-.results-priority button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 5px 8px;
-  font-size: 14px;
-  font-weight: 650;
-}
-.results-priority button + button {
-  border-left: 1px solid var(--line);
-}
-.results-priority button[aria-pressed='true'] {
-  color: var(--primary-dark);
-  background: var(--primary-soft);
-}
-.results-priority button small {
-  font-size: 10px;
-  font-weight: 400;
-}
-.results-priority button:disabled {
-  opacity: 1;
-  color: #667780;
-  background: #f7f9f8;
-}
 .results-scroll {
   min-height: 0;
   flex: 1;
@@ -1086,11 +1052,54 @@ small {
   font-size: inherit;
   font-weight: 650;
 }
-.results-sort {
+.results-sort-control {
+  position: relative;
   justify-self: end;
+}
+.results-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 6px;
   color: #586671;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
+}
+.results-sort-trigger[aria-expanded='true'] {
+  color: var(--primary-dark);
+}
+.results-sort-menu {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  right: 0;
+  width: 176px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 5px 18px #233c3326;
+}
+.results-sort-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 14px;
+}
+.results-sort-menu button[aria-checked='true'] {
+  color: var(--primary-dark);
+  font-weight: 650;
+}
+.results-sort-menu button:hover,
+.results-sort-menu button:focus-visible {
+  background: var(--primary-soft);
 }
 .results-filter {
   display: inline-flex;
@@ -1139,6 +1148,18 @@ small {
   justify-content: space-between;
   margin-bottom: 7px;
 }
+.route-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.route-card-congestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #586b64;
+  font-size: 12px;
+}
 .route-badge {
   color: var(--primary-dark);
   font-size: 13px;
@@ -1153,6 +1174,15 @@ small {
   align-items: flex-start;
   gap: 3px;
   font-size: 15px;
+}
+.route-comparison {
+  display: table;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: var(--primary-dark);
+  font-size: 12px;
+  background: var(--primary-soft);
 }
 .route-time b {
   font-size: 36px;
@@ -1173,7 +1203,7 @@ small {
 }
 .mode-strip {
   display: flex;
-  gap: 2px;
+  gap: 0;
   width: 100%;
   margin-top: 12px;
   border-radius: 6px;
@@ -1185,21 +1215,42 @@ small {
   align-items: center;
   justify-content: center;
   flex-basis: 0;
-  min-width: 22px;
-  gap: 3px;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: route-segment;
   height: 22px;
-  padding: 0 3px;
+  padding: 0;
   color: #465968;
   background: #edf0f2;
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
 }
+.mode-strip-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+@container route-segment (max-width: 65px) {
+  .mode-strip-transfer-label {
+    display: none;
+  }
+}
+@container route-segment (max-width: 42px) {
+  .mode-strip-label svg {
+    display: none;
+  }
+}
+@container route-segment (max-width: 24px) {
+  .mode-strip-label {
+    display: none;
+  }
+}
 .mode-strip-item svg {
   flex-shrink: 0;
 }
 .mode-strip-item.transfer {
-  min-width: 66px;
   color: #46515e;
   background: #d6dde4;
 }
@@ -1837,9 +1888,6 @@ small {
   }
   .results-top {
     padding-top: calc(10px + env(safe-area-inset-top));
-  }
-  .results-priority button {
-    min-height: 38px;
   }
   .results-scroll {
     padding-bottom: calc(20px + env(safe-area-inset-bottom));

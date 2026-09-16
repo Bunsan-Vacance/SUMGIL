@@ -1,11 +1,11 @@
-import { useState } from 'react'
-import { ArrowLeftRight, ChevronDown, Gauge, SlidersHorizontal, UsersRound, X } from 'lucide-react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { ArrowLeftRight, Check, ChevronDown, SlidersHorizontal, X } from 'lucide-react'
 import DepartureTimeDialog from '../features/route/DepartureTimeDialog'
 import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
-import { clockTime } from '../features/route/selectors'
+import { clockTime, roundMinutes } from '../features/route/selectors'
 import { isBackendConfigured } from '../api/repositories'
 
 interface Props {
@@ -54,9 +54,29 @@ export default function ResultsPage({
   onDepartureTimeChange,
 }: Props) {
   const [choosingTime, setChoosingTime] = useState(false)
-  const hasCongestion = visible.some((route) => route.congestionPercent !== undefined)
+  const [choosingSort, setChoosingSort] = useState(false)
+  const sortControl = useRef<HTMLDivElement>(null)
+  const sortTrigger = useRef<HTMLButtonElement>(null)
+  const sortMenuId = useId()
+  useEffect(() => {
+    if (!choosingSort) return
+    sortControl.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !sortControl.current?.contains(event.target)) {
+        setChoosingSort(false)
+      }
+    }
+    document.addEventListener('pointerdown', dismiss)
+    return () => document.removeEventListener('pointerdown', dismiss)
+  }, [choosingSort])
+  const canSortByCongestion =
+    visible.length > 1 && visible.every((route) => route.congestionPercent !== undefined)
   const liveApi = isLiveApi ?? isBackendConfigured
   const departure = departureTime || clockTime(visible[0]?.departedAt)
+  const fastestRoute = visible.reduce<Route | undefined>(
+    (fastest, route) => (!fastest || route.minutes < fastest.minutes ? route : fastest),
+    undefined,
+  )
 
   return (
     <section className="results-screen" aria-label="경로 검색 결과">
@@ -100,27 +120,6 @@ export default function ResultsPage({
             <X size={27} />
           </button>
         </div>
-        <div className="results-priority" role="group" aria-label="경로 우선순위">
-          <button
-            type="button"
-            aria-pressed={priority === 'fast'}
-            onClick={() => setPriority('fast')}
-          >
-            <Gauge size={20} aria-hidden="true" />
-            <span>속도</span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={priority === 'calm'}
-            aria-label="혼잡"
-            disabled={!hasCongestion}
-            onClick={() => setPriority('calm')}
-          >
-            <UsersRound size={20} aria-hidden="true" />
-            <span>혼잡</span>
-            {!hasCongestion && <small>준비중입니다</small>}
-          </button>
-        </div>
       </header>
 
       <div className="results-scroll">
@@ -145,9 +144,87 @@ export default function ResultsPage({
             이동수단
             <span className="sr-only">{enabled.length}/4 선택됨</span>
           </button>
-          <span className="results-sort" aria-label="정렬 기준">
-            {priority === 'calm' ? '혼잡도 낮은 순' : '빠른 순'}
-          </span>
+          {canSortByCongestion && (
+            <div
+              className="results-sort-control"
+              ref={sortControl}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setChoosingSort(false)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setChoosingSort(false)
+                  sortTrigger.current?.focus()
+                }
+              }}
+            >
+              <button
+                type="button"
+                className="results-sort-trigger"
+                ref={sortTrigger}
+                aria-label={`경로 정렬: ${priority === 'fast' ? '빠른 순' : '덜 붐비는 순'}`}
+                aria-haspopup="menu"
+                aria-expanded={choosingSort}
+                aria-controls={choosingSort ? sortMenuId : undefined}
+                onClick={() => setChoosingSort((open) => !open)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    setChoosingSort(true)
+                  }
+                }}
+              >
+                {priority === 'fast' ? '빠른 순' : '덜 붐비는 순'}
+                <ChevronDown size={14} aria-hidden="true" />
+              </button>
+              {choosingSort && (
+                <div
+                  className="results-sort-menu"
+                  id={sortMenuId}
+                  role="menu"
+                  aria-label="경로 정렬 기준"
+                  onKeyDown={(event) => {
+                    const items = Array.from(
+                      event.currentTarget.querySelectorAll<HTMLButtonElement>('button'),
+                    )
+                    const index = items.indexOf(document.activeElement as HTMLButtonElement)
+                    const next =
+                      event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? items.length - 1
+                          : event.key === 'ArrowDown'
+                            ? (index + 1) % items.length
+                            : event.key === 'ArrowUp'
+                              ? (index + items.length - 1) % items.length
+                              : -1
+                    if (next >= 0) {
+                      event.preventDefault()
+                      items[next].focus()
+                    }
+                  }}
+                >
+                  {(['fast', 'calm'] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={priority === value}
+                      onClick={() => {
+                        setPriority(value)
+                        setChoosingSort(false)
+                        sortTrigger.current?.focus()
+                      }}
+                    >
+                      {value === 'fast' ? '빠른 순' : '덜 붐비는 순'}
+                      {priority === value && <Check size={18} aria-hidden="true" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {status === 'loading' ? (
@@ -170,6 +247,14 @@ export default function ResultsPage({
                 <RouteCard
                   key={route.id}
                   route={route}
+                  comparison={
+                    fastestRoute?.congestionPercent !== undefined &&
+                    route.congestionPercent !== undefined &&
+                    route.minutes > fastestRoute.minutes &&
+                    route.congestionPercent < fastestRoute.congestionPercent
+                      ? `${roundMinutes(route.minutes - fastestRoute.minutes)}분 더 걸림 · 혼잡도 ${Math.round(fastestRoute.congestionPercent - route.congestionPercent)}%p 낮음`
+                      : undefined
+                  }
                   onDetail={() => {
                     setSelectedId(route.id)
                     go('detail')
