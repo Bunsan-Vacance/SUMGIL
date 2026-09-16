@@ -73,7 +73,11 @@ def dow_type_for_date(when: date, holidays: pd.DataFrame) -> int:
     if holidays.empty:
         is_holiday = False
     else:
-        is_holiday = bool((holidays["date"] == normalized).any())
+        matched = holidays.loc[holidays["date"] == normalized, "is_holiday"]
+        if matched.empty:
+            is_holiday = False
+        else:
+            is_holiday = bool(matched.iloc[0])
 
     if normalized.dayofweek == 6 or is_holiday:
         return 2
