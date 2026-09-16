@@ -1,0 +1,47 @@
+# 실시간 수집기 워크로드 (S15P21A104-173). be 와 같은 sumgil-be 이미지에 collect 프로파일만 켠 것이다
+# — 수집기 코드가 같은 jar 안에 있어(BE/README.md 9절) 별도 이미지가 필요 없다. API 서버는 뜨지 않는다
+# (application-collect.yml 의 web-application-type: none).
+#
+# replicas 1 고정 · Recreate 전략: 서울 열린데이터 키가 하루 1,000회다. 파드가 둘이거나 롤아웃 중
+# 구·신 파드가 겹쳐 돌면 예산을 두 배로 태운다 (S15P21A104-170).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: be-collector
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: be-collector
+  template:
+    metadata:
+      labels:
+        app: be-collector
+    spec:
+      containers:
+        - name: be-collector
+          image: sumgil-be:latest
+          env:
+            # be-config 의 SPRING_PROFILES_ACTIVE=prod 를 덮는다 (env 가 envFrom 보다 우선).
+            - name: SPRING_PROFILES_ACTIVE
+              value: prod,collect
+          envFrom:
+            - configMapRef:
+                name: be-config             # DB_URL·REDIS_HOST 등. collect 프로파일도 컨텍스트를 공유해 필요하다
+            - configMapRef:
+                name: be-collector-config   # 수집 주기·운영 시간 창·브로커 주소 (collector.env)
+            - secretRef:
+                name: data-secret           # DB_PASSWORD (데이터 계층 소유)
+            - secretRef:
+                name: be-secret             # 외부 API 인증키 (.env.secret, 앱 고유 비밀 — CONTRACT.md 4절)
+          # HTTP 포트가 없어 httpGet 프로브를 걸 수 없다. v1 은 프로브 없이 두고 프로세스가 죽으면
+          # restartPolicy(Always) 로 다시 뜨게 한다. 행(hang) 감지가 필요해지면 exec 프로브를 붙인다.
+          resources:
+            requests:
+              memory: 384Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m

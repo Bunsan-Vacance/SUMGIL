@@ -23,3 +23,6 @@ gradlew.bat  text eol=crlf
 
 # 문서 diff 가독성
 *.md diff=markdown
+
+# 압축 원천 (열차운행시각표 4.4 MB) — 바이너리
+*.gz   binary

@@ -1,0 +1,12 @@
+# FE Kustomize (S15P21A104-125/126). namespace 생성 없음.
+# 레지스트리: 클러스터 내장 NodePort. 주소 단일 소스는 Infra/k8s/scripts/env.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - fe.yaml
+  - ingress.yaml
+images:
+  - name: sumgil-fe
+    newName: 100.103.156.53:30500/sumgil-fe
+    newTag: latest

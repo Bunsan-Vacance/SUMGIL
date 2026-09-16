@@ -13,7 +13,7 @@ S15P21A104/
 ├─ AI/       분석 파이프라인 · 피처 엔지니어링 · 모델 (Python)
 ├─ BE/       API 서버 (Java · Spring Boot)
 ├─ FE/       웹 클라이언트 (React · TypeScript)
-├─ Infra/    배포 구성 (Docker · Nginx)
+├─ Infra/    배포 구성 (EC2 · k3s · Kustomize)
 └─ Docs/
    ├─ Convention/     팀 규칙 (Git · JIRA)
    └─ Service Design/ 기획 · 데이터 검토 문서
@@ -26,7 +26,7 @@ S15P21A104/
 | AI & Data | Python, PyTorch, PySpark | [AI/README.md](./AI/README.md) |
 | Backend | Java, Spring Boot | [BE/README.md](./BE/README.md) |
 | Frontend | React, TypeScript, TailwindCSS | [FE/README.md](./FE/README.md) |
-| Infra | AWS EC2, Nginx, Docker | [Infra/README.md](./Infra/README.md) |
+| Infra | AWS EC2, k3s, Kustomize | [Infra/README.md](./Infra/README.md) |
 
 ## 진행 상황
 
@@ -35,8 +35,10 @@ S15P21A104/
 | 주제 검토 및 데이터 검증 | ✅ 완료 — [문서](#기획-문서) |
 | 팀 컨벤션 수립 | ✅ 완료 |
 | 저장소 구조화 | ✅ 완료 |
-| FE / BE 프로젝트 초기화 | ⬜ 대기 — 각 README의 초기화 절차 참조 |
+| BE 프로젝트 초기화 | ✅ 완료 — Java 21 · Spring Boot 4.1.1 |
+| FE 프로젝트 초기화 | ⬜ 대기 — [FE/README.md](./FE/README.md) 초기화 절차 참조 (배포용 placeholder는 있음) |
 | Python 환경 구축 | ⬜ 대기 — 개발 환경에 Python 미설치 |
+| 1차 인프라 배포 | ✅ 완료 (2026-09-11) — EC2 2대 k3s, [Infra/README.md](./Infra/README.md) |
 
 ## 기획 문서
 

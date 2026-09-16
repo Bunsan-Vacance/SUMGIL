@@ -1,0 +1,22 @@
+# BE GitOps Application (S15P21A104-129). 작성만, 설치 제외.
+# 전제: ArgoCD 컨트롤러 설치 (후순위). targetRevision은 트랙 브랜치 초기값.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sumgil-be
+  namespace: argocd
+spec:
+  destination:
+    namespace: prod
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    path: BE/k8s/prod
+    repoURL: https://lab.ssafy.com/s15-bigdata-dist-sub1/S15P21A104
+    targetRevision: develop-BE
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

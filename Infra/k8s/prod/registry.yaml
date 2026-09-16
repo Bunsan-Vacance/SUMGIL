@@ -1,0 +1,73 @@
+# 프라이빗 레지스트리 — 플랫폼 서비스(데이터 아님). 클러스터 내장 (S15P21A104-125).
+# 글랩 5050 차단(2026-09-11 실측) 대체. VPN 평문 경유라 평문 HTTP로 둔다.
+# 데이터는 PVC (local-path 20Gi). 레지스트리 유실 시 이미지 재push면 되니 백업 제외.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-data
+  labels:
+    app.kubernetes.io/part-of: sumgil-platform
+    app.kubernetes.io/component: registry
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  labels:
+    app.kubernetes.io/part-of: sumgil-platform
+    app.kubernetes.io/component: registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry
+  template:
+    metadata:
+      labels:
+        app: registry
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - containerPort: 5000
+          env:
+            - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+              value: /var/lib/registry
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: registry-data
+---
+# ClusterIP (클러스터 내부 pull용) + NodePort (EC2 docker push용, VPN 경유).
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  labels:
+    app.kubernetes.io/part-of: sumgil-platform
+    app.kubernetes.io/component: registry
+spec:
+  selector:
+    app: registry
+  ports:
+    - name: http
+      port: 5000
+      nodePort: 30500
+  type: NodePort

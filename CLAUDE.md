@@ -12,9 +12,9 @@ JIRA 프로젝트 키는 `S15P21A104`, 원격은 GitLab(`lab.ssafy.com/s15-bigda
 
 ```
 AI/       분석 파이프라인 · 모델 (Python, PyTorch, PySpark)
-BE/       API 서버 (Java 21, Spring Boot 3.x, Gradle)
+BE/       API 서버 (Java 21, Spring Boot 4.x, Gradle)
 FE/       웹 클라이언트 (React, TypeScript, TailwindCSS, Vite)
-Infra/    배포 구성 (Docker, Nginx, AWS EC2)
+Infra/    배포 구성 (EC2, k3s, Kustomize)
 Docs/
   Convention/      팀 규칙
   Service Design/  기획 · 데이터 검토 문서
@@ -24,9 +24,11 @@ Docs/
 
 ## 현재 상태
 
-- **FE / BE는 프로젝트가 초기화되지 않았다.** 폴더와 README만 있으며, 스캐폴딩 도구(`npm create vite`, Spring Initializr)가 구조를 만들 예정이라 하위 폴더를 미리 만들지 않았다. 충돌을 피하려는 의도이므로 임의로 채우지 않는다.
+- **BE는 초기화·구현 진행 중** — Java 21 · Spring Boot 4.1.1 · Gradle Wrapper. `domain/`(station·bike·bus·congestion·route)·`global/`·`load/` 구조, Flyway 마이그레이션, `GET /api/stations/search`·`GET /api/routes/search`·`GET /api/bike-stations/nearby`가 있다.
+- **FE는 아직 초기화되지 않았다.** 폴더와 README만 있으며, 스캐폴딩 도구(`npm create vite`)가 구조를 만든다. 충돌을 피하려 하위 폴더를 미리 만들지 않는다. (1차 배포용 `FE/docker/placeholder/`는 예외)
+- **1차 인프라는 EC2 2대 k3s에 배포 완료 (2026-09-11).** 자세한 구성은 [Infra/README.md](./Infra/README.md).
 - **개발 환경에 Python이 설치돼 있지 않다.** AI 파트 작업 전 확인이 필요하다.
-- 설치 확인된 도구: Node 24.19, npm 11.17, JDK 21, Docker 29.6. Gradle은 Wrapper를 쓴다.
+- 설치 확인된 도구: Node 24.19, npm 11.17, JDK 21, Docker 29.6, kubectl/Kustomize. Gradle은 Wrapper를 쓴다.
 
 ## 커밋·브랜치 규칙
 
@@ -37,8 +39,6 @@ Docs/
 - 브랜치는 **작업이 속한 스토리** 키를 쓴다 (`feat/{스토리 키}-{작업 내용}`, 예: `feat/S15P21A104-3-planning-docs`). **스토리 없이 에픽에 바로 달린 예외 작업**은 스토리 키 대신 에픽 prefix를 쓴다(예: `feat/INFRA-ai-fastapi-scaffold`) — 이때도 커밋 메시지의 JIRA 키는 그 작업(Task) 이슈의 실제 키를 그대로 쓴다.
 - `main`, `develop-*`에는 직접 커밋하지 않고 MR로 반영한다.
 
-> 현재 로컬 브랜치는 `main`이지만 원격은 `master`다. 이름이 어긋나 있어 푸시 전 확인이 필요하다.
-
 ## 작업 시 주의
 
 **커밋·푸시는 요청받았을 때만 한다.** 파일 생성·수정 후에는 무엇을 바꿨는지 보고하고 커밋 여부는 사용자 판단에 맡긴다.
@@ -46,6 +46,11 @@ Docs/
 **시크릿을 커밋하지 않는다.** `.env`, `*.pem`, `*.key`는 `.gitignore`에 등록돼 있다. 공공데이터 API 키, DB 접속 정보, EC2 키페어가 여기 해당한다.
 
 **데이터·모델 산출물을 커밋하지 않는다.** `AI/data/`, `AI/models/`는 추적 제외다. 용량이 크고 재생성이 가능하다.
+실제 데이터 파일은 대신 팀 공유 Google Drive([SUMGIL](https://drive.google.com/drive/folders/1C_x37kCT3wfeLqqw1aApt_ODWNks8THw))의
+`data/` 폴더에 올린다 — `AI/data/`는 도메인(JIRA 에픽 prefix) 우선 구조다: `CROWD/`, `BIKE/`처럼 도메인마다
+`raw/`(원본) → `interim/`(중간 산출물) → `processed/`(분석·모델링용 최종본) 3단계를 갖고, 여러 도메인이 공유하는
+외부 요인(날씨 등)은 `EXTERNAL/`에 같은 3단계로 둔다. Drive에도 이 구조를 그대로 미러링하고,
+새 도메인·서브폴더를 로컬에 추가하면 Drive에도 동일한 경로로 폴더를 만든다.
 
 **문서는 한국어로 쓴다.** 기존 문서가 전부 한국어이며, 코드 주석도 한국어를 쓴다.
 
