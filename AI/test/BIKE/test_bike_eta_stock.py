@@ -196,7 +196,8 @@ def test_midnight_rollover_changes_dow_type(avg_dir, live_dir):
 def test_http_happy_path_returns_200(avg_dir, live_dir, monkeypatch):
     live_dir(current_stock=5, updated_at=NOW)
     monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda: pd.Timestamp(NOW)))
-    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 45})
+    # NOW=14:00 + 30분 = 14:30 -> slot 29(경계값, le=30 허용치 안)
+    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 30})
     assert r.status_code == 200
     assert r.json()["predicted_stock"] == 8.0
 
@@ -205,7 +206,7 @@ def test_http_missing_live_stock_returns_404(avg_dir, tmp_path, monkeypatch):
     missing_path = tmp_path / "does_not_exist.parquet"
     monkeypatch.setattr(service, "_live_store", service.LiveStockStore(missing_path))
     monkeypatch.setattr(service, "get_live_stock_store", lambda settings=None: service._live_store)
-    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 45})
+    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
     assert r.status_code == 404
 
 

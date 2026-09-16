@@ -27,7 +27,7 @@ DowTypeQ = Annotated[
     int | None, Query(ge=0, le=2, description="0 평일 / 1 토 / 2 일·공휴일. 생략 시 전부")
 ]
 
-EtaMinutesQ = Annotated[int, Query(ge=0, le=180, description="도착까지 예상 분(0~180)")]
+EtaMinutesQ = Annotated[int, Query(ge=0, le=30, description="도착까지 예상 분(0~30)")]
 
 
 def _no_table() -> HTTPException:
