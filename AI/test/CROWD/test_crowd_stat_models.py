@@ -171,6 +171,27 @@ def test_sarimax_handles_missing_values_without_raising():
     assert res["pred"].notna().all()
 
 
+def test_sarimax_enforce_stationarity_flag_is_passed_through():
+    """제약을 켠 변형도 같은 인터페이스로 돌아야 한다 — 발산 재발 방지책 비교의 전제."""
+    pytest.importorskip("statsmodels")
+    idx = pd.date_range("2024-01-01", "2025-02-28", freq="D")
+    rng = np.random.default_rng(0)
+    values = 100 + 10 * np.sin(np.arange(len(idx)) * 2 * np.pi / 7) + rng.normal(0, 1, len(idx))
+    series = pd.Series(values, index=idx)
+    res = sm.fit_predict_sarimax(
+        series,
+        order=(1, 0, 0),
+        seasonal_order=(1, 0, 0, 7),
+        split_date=pd.Timestamp("2025-01-01"),
+        forecast_start=pd.Timestamp("2025-01-01"),
+        trend="c",
+        enforce_stationarity=True,
+        enforce_invertibility=True,
+    )
+    assert res["ok"] is True
+    assert res["pred"].notna().any()
+
+
 def test_sarimax_insufficient_train_obs_returns_nan_without_exception():
     pytest.importorskip("statsmodels")
     dates = pd.date_range("2024-01-01", "2024-03-01", freq="D")
@@ -233,3 +254,119 @@ def test_build_wide_series_and_run_sarima_batch_smoke():
     assert (
         out.groupby(["station_no", "time_slot"]).size() == int((dates >= forecast_start).sum())
     ).all()
+
+
+# ── 청크 캐시 지문 ──
+def _sig_frame(values: list[float]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+            "station_no": [150, 150, 150],
+            "time_slot": ["08-09"] * 3,
+            "boarding": values,
+        }
+    )
+
+
+def test_source_signature_changes_when_values_change_but_rows_do_not():
+    """행 수·날짜 범위가 같아도 값이 바뀌면 지문이 달라야 한다 — 88번 요일유형 수정판이 그런 경우다."""
+    before = sm.source_signature(_sig_frame([1.0, 2.0, 3.0]), ["boarding"])
+    after = sm.source_signature(_sig_frame([1.0, 2.0, 4.0]), ["boarding"])
+    assert before["rows"] == after["rows"] and before["date_max"] == after["date_max"]
+    assert before != after
+
+
+def test_source_signature_counts_missing_without_filling():
+    sig = sm.source_signature(_sig_frame([1.0, np.nan, 3.0]), ["boarding"])
+    assert sig["n_finite"] == 2
+    assert sig["checksum"] == pytest.approx(4.0)
+
+
+def test_chunk_cache_valid_survives_json_roundtrip_but_catches_spec_change():
+    import json
+
+    spec = {"order": (1, 0, 1), "seasonal_order": (0, 1, 1, 7), "trend": None}
+    source = sm.source_signature(_sig_frame([1.0, 2.0, 3.0]), ["boarding"])
+    want = sm.chunk_signature(
+        source, spec, pd.Timestamp("2025-01-01"), pd.Timestamp("2025-01-01"), [150, 151]
+    )
+    # 파일에 저장했다 읽은 형태(튜플 → 리스트)여도 같다고 봐야 한다.
+    assert sm.chunk_cache_valid(json.loads(json.dumps(want)), want)
+    assert not sm.chunk_cache_valid(None, want)
+
+    other_order = sm.chunk_signature(
+        {**source},
+        {**spec, "order": (2, 0, 1)},
+        pd.Timestamp("2025-01-01"),
+        pd.Timestamp("2025-01-01"),
+        [150, 151],
+    )
+    assert not sm.chunk_cache_valid(other_order, want)
+
+    enforced = sm.chunk_signature(
+        {**source},
+        {**spec, "enforce_stationarity": True},
+        pd.Timestamp("2025-01-01"),
+        pd.Timestamp("2025-01-01"),
+        [150, 151],
+    )
+    assert not sm.chunk_cache_valid(enforced, want)
+
+    other_stations = sm.chunk_signature(
+        {**source}, spec, pd.Timestamp("2025-01-01"), pd.Timestamp("2025-01-01"), [150, 152]
+    )
+    assert not sm.chunk_cache_valid(other_stations, want)
+
+    stale_source = sm.chunk_signature(
+        sm.source_signature(_sig_frame([1.0, 2.0, 99.0]), ["boarding"]),
+        spec,
+        pd.Timestamp("2025-01-01"),
+        pd.Timestamp("2025-01-01"),
+        [150, 151],
+    )
+    assert not sm.chunk_cache_valid(stale_source, want)
+
+
+# ── 발산 처리 ──
+def test_divergence_bounds_come_from_train_only():
+    """상한은 학습 구간 실측 최댓값 — 평가 구간의 더 큰 값을 보면 안 된다(누수)."""
+    train = pd.DataFrame({"boarding": [10.0, 500.0, np.nan], "alighting": [1.0, 2.0, 3.0]})
+    bounds = sm.divergence_bounds(train, ["boarding", "alighting"])
+    assert bounds["boarding"] == (0.0, 500.0)
+    assert bounds["alighting"] == (0.0, 3.0)
+
+
+def test_apply_bounds_clip_scores_divergence_instead_of_dropping_it():
+    """clip은 발산 행을 상한으로 **채점에 남기고**, drop은 결측으로 되돌려 평가에서 뺀다."""
+    values = np.array([-3.0, 120.0, 1.0e14, np.nan])
+    clipped, counts = sm.apply_bounds(values, 0.0, 1000.0, "clip")
+    assert counts == {"n_low": 1, "n_high": 1}
+    assert clipped[0] == 0.0  # 음수 인원은 0으로
+    assert clipped[1] == 120.0  # 정상 행은 그대로
+    assert clipped[2] == 1000.0  # 발산 행이 사라지지 않는다 — 큰 오차로 남는다
+    assert np.isnan(clipped[3])
+
+    dropped, counts_drop = sm.apply_bounds(values, 0.0, 1000.0, "drop")
+    assert counts_drop == counts
+    assert np.isnan(dropped[2])
+
+    raw, counts_raw = sm.apply_bounds(values, 0.0, 1000.0, "raw")
+    assert counts_raw == counts
+    assert raw[0] == -3.0 and raw[2] == 1.0e14
+
+
+def test_apply_bounds_rejects_unknown_mode():
+    with pytest.raises(ValueError):
+        sm.apply_bounds(np.array([1.0]), 0.0, 10.0, "그냥")
+
+
+# ── 피처 누락 가드 ──
+def test_missing_feature_columns_catches_silently_nan_filled_features():
+    """`build_matrix`가 없는 컬럼을 NaN으로 채우므로, 평가 전에 여기서 걸러야 한다."""
+    feature_cols = ["game_count", "festival_count", "lag1d_boarding_resid"]
+    frame_cols = ["date", "station_no", "lag1d_boarding_resid"]
+    assert sm.missing_feature_columns(frame_cols, feature_cols) == ["game_count", "festival_count"]
+    assert (
+        sm.missing_feature_columns([*frame_cols, "game_count", "festival_count"], feature_cols)
+        == []
+    )
