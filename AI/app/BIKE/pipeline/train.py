@@ -23,6 +23,10 @@ LightGBM은 `target_net_flow`를 예측하는 모델이고, **avg 소스(exp_bik
 
 전체 실행 (11개월 train, 45% 샘플링 — 메모리 실측 근거는 RESULTS.md):
     python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v3
+
+v4(KBO·D-1/D-7 lag 추가, S15P21A104-160) 스모크:
+    python -m app.BIKE.pipeline.train --train-months 202401 202402 --valid-months 202412 \
+        --test-months 202507 --tag smoke-v4 --feature-set v4_kbo_lag
 """
 
 from __future__ import annotations
@@ -39,14 +43,22 @@ from sklearn.metrics import mean_absolute_error, r2_score
 
 from app.BIKE.pipeline.calendar import load_holidays
 from app.BIKE.pipeline.dataset import load_paths, monthly_paths, scan_station_ids
+from app.BIKE.pipeline.external_features import (
+    attach_kbo,
+    jamsil_nearby_stations,
+    load_jamsil_game_dates,
+)
 from app.BIKE.pipeline.features import (
     BASE_FEATURE_COLS,
+    FEATURE_SETS,
     TARGET_COL,
     HistoricalProfileBuilder,
     apply_station_code,
+    attach_anchor_time_slot,
     build_station_dtype,
     make_xy,
 )
+from app.BIKE.pipeline.lag_features import attach_lag, build_lag_lookup
 from app.BIKE.pipeline.lookup import StockProfileBaseline
 
 AI_ROOT = Path(__file__).resolve().parents[3]
@@ -89,11 +101,13 @@ def fit_lightgbm(
     valid_df: pd.DataFrame,
     random_state: int = 42,
     params: dict | None = None,
+    feature_cols: list[str] | None = None,
 ):
     from lightgbm import LGBMRegressor, early_stopping, log_evaluation
 
-    x_train, y_train = make_xy(train_df)
-    x_valid, y_valid = make_xy(valid_df)
+    kwargs = {"feature_cols": feature_cols} if feature_cols is not None else {}
+    x_train, y_train = make_xy(train_df, **kwargs)
+    x_valid, y_valid = make_xy(valid_df, **kwargs)
     model = LGBMRegressor(**{**DEFAULT_PARAMS, **(params or {})}, random_state=random_state)
     t0 = time.time()
     model.fit(
@@ -105,8 +119,11 @@ def fit_lightgbm(
     return model, time.time() - t0
 
 
-def evaluate_lightgbm(model, df: pd.DataFrame, label: str) -> dict:
-    x, y = make_xy(df)
+def evaluate_lightgbm(
+    model, df: pd.DataFrame, label: str, feature_cols: list[str] | None = None
+) -> dict:
+    kwargs = {"feature_cols": feature_cols} if feature_cols is not None else {}
+    x, y = make_xy(df, **kwargs)
     pred = model.predict(x)
     acc, macro_f1 = _direction_metrics(y.to_numpy(), pred)
     return {
@@ -120,6 +137,23 @@ def evaluate_lightgbm(model, df: pd.DataFrame, label: str) -> dict:
     }
 
 
+def _attach_v4_features(
+    df: pd.DataFrame,
+    feature_set: str,
+    jamsil_dates: set | None,
+    jamsil_stations: set | None,
+    lag_lookup: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """feature_set이 v4_kbo_lag일 때만 KBO·D-1/D-7 lag를 붙인다. v3는 그대로 통과."""
+    if feature_set != "v4_kbo_lag":
+        return df
+    df = attach_kbo(df, jamsil_dates, jamsil_stations, date_col="date")
+    df = attach_anchor_time_slot(df)
+    df = attach_lag(df, lag_lookup, 1, "lag1d_stock")
+    df = attach_lag(df, lag_lookup, 7, "lag7d_stock")
+    return df
+
+
 def run(
     train_months: list[str] | None = None,
     valid_months: list[str] | None = None,
@@ -127,8 +161,13 @@ def run(
     sample_frac: float | None = None,
     random_state: int = 42,
     tag: str = "v3",
+    feature_set: str = "v3",
     out_root: Path = MODELS_DIR,
 ) -> Path:
+    if feature_set not in FEATURE_SETS:
+        raise ValueError(f"알 수 없는 feature_set: {feature_set} (가능: {list(FEATURE_SETS)})")
+    feature_cols = FEATURE_SETS[feature_set]
+
     train_paths = monthly_paths("train", train_months)
     valid_paths = monthly_paths("valid", valid_months)
     test_paths = monthly_paths("test", test_months)
@@ -139,7 +178,25 @@ def run(
     avg_baseline = StockProfileBaseline().fit_streaming(train_paths, holidays)
     print(f"[avg] station×dow_type×time_slot {len(avg_baseline.table_):,}행")
 
-    # ── LightGBM: target_net_flow (historical profile + 공휴일 feature) ──
+    # ── v4 전용 재료(KBO 일정, jamsil 인근역, D-1/D-7 lag lookup) — v3면 전부 None ──
+    jamsil_dates = jamsil_stations = lag_lookup = None
+    if feature_set == "v4_kbo_lag":
+        jamsil_dates = load_jamsil_game_dates()
+        coords = pd.read_parquet(
+            train_paths[0], columns=["od_station_id", "lat_stock", "lon_stock"]
+        )
+        jamsil_stations = jamsil_nearby_stations(coords)
+        lag_months = None
+        if train_months or valid_months or test_months:
+            lag_months = sorted(
+                {*(train_months or []), *(valid_months or []), *(test_months or [])}
+            )
+        print("[v4] D-1/D-7 lag lookup 생성...")
+        t0 = time.time()
+        lag_lookup = build_lag_lookup(lag_months)
+        print(f"[v4] lag lookup {len(lag_lookup):,}행, {time.time() - t0:.1f}초")
+
+    # ── LightGBM: target_net_flow (historical profile + 공휴일 feature [+ v4 피처]) ──
     station_ids = (
         scan_station_ids(train_paths) | scan_station_ids(valid_paths) | scan_station_ids(test_paths)
     )
@@ -147,25 +204,34 @@ def run(
 
     train_df = load_paths(train_paths, TRAIN_READ_COLS, TARGET_COL, sample_frac, random_state)
     train_df = _attach_holiday_flag(train_df, holidays)
+    train_df = _attach_v4_features(train_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup)
     profile = HistoricalProfileBuilder().fit(train_df)
     train_df = profile.transform(train_df)
     apply_station_code(train_df, station_dtype, "train")
 
     valid_df = load_paths(valid_paths, BASE_READ_COLS, TARGET_COL)
     valid_df = _attach_holiday_flag(valid_df, holidays)
+    valid_df = _attach_v4_features(valid_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup)
     valid_df = profile.transform(valid_df)
     apply_station_code(valid_df, station_dtype, "valid")
 
-    model, train_time_sec = fit_lightgbm(train_df, valid_df, random_state)
-    reports = [evaluate_lightgbm(model, valid_df, "valid")]
+    model, train_time_sec = fit_lightgbm(
+        train_df, valid_df, random_state, feature_cols=feature_cols
+    )
+    reports = [evaluate_lightgbm(model, valid_df, "valid", feature_cols=feature_cols)]
     del train_df, valid_df
 
     for p in test_paths:
         test_df = load_paths([p], BASE_READ_COLS, TARGET_COL)
         test_df = _attach_holiday_flag(test_df, holidays)
+        test_df = _attach_v4_features(
+            test_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup
+        )
         test_df = profile.transform(test_df)
         apply_station_code(test_df, station_dtype, f"test:{p.stem}")
-        reports.append(evaluate_lightgbm(model, test_df, f"test:{p.stem[-6:]}"))
+        reports.append(
+            evaluate_lightgbm(model, test_df, f"test:{p.stem[-6:]}", feature_cols=feature_cols)
+        )
         del test_df
 
     # ── 아티팩트 저장 ──
@@ -177,10 +243,11 @@ def run(
     model.booster_.save_model(str(out_dir / "model.txt"))
     meta = {
         "tag": tag,
+        "feature_set": feature_set,
         "train_months": [p.stem[-6:] for p in train_paths],
         "valid_months": [p.stem[-6:] for p in valid_paths],
         "test_months": [p.stem[-6:] for p in test_paths],
-        "model_feature_cols": [*BASE_FEATURE_COLS, "station_code"],
+        "model_feature_cols": feature_cols,
         "station_categories": len(station_dtype.categories),
         "sample_frac": sample_frac,
         "train_time_sec": train_time_sec,
@@ -213,6 +280,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--sample-frac", type=float, default=None)
     ap.add_argument("--random-state", type=int, default=42)
     ap.add_argument("--tag", default="v3")
+    ap.add_argument(
+        "--feature-set",
+        default="v3",
+        choices=list(FEATURE_SETS),
+        help="v3(기본) | v4_kbo_lag(KBO·D-1/D-7 lag 추가, S15P21A104-160)",
+    )
     args = ap.parse_args(argv)
     run(
         args.train_months,
@@ -221,6 +294,7 @@ def main(argv: list[str] | None = None) -> None:
         args.sample_frac,
         args.random_state,
         args.tag,
+        args.feature_set,
     )
 
 

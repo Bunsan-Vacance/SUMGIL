@@ -52,6 +52,24 @@ HISTORICAL_FEATURE_COLS = [*PROFILE_STAT_COLS, "historical_profile_fallback_leve
 FEATURE_COLS = [*BASE_FEATURE_COLS, *HISTORICAL_FEATURE_COLS, "is_holiday"]
 MODEL_FEATURE_COLS = [*FEATURE_COLS, "station_code"]
 
+# ── v4: + KBO·D-1/D-7 lag (성능 고도화, S15P21A104-160) ──
+# 날씨는 제외한다 — 실시간 소스가 없고, 검증 결과(validation/BYC/lightgbm-stock-conversion
+# -check/RESULTS.md) D-1/D-7 lag가 날씨보다 기여도가 훨씬 크다.
+KBO_LAG_FEATURE_COLS = [
+    "is_kbo_game_jamsil",
+    "lag1d_stock",
+    "lag1d_stock_available",
+    "lag7d_stock",
+    "lag7d_stock_available",
+]
+FEATURE_COLS_V4 = [*FEATURE_COLS, *KBO_LAG_FEATURE_COLS]
+MODEL_FEATURE_COLS_V4 = [*FEATURE_COLS_V4, "station_code"]
+
+FEATURE_SETS = {
+    "v3": MODEL_FEATURE_COLS,
+    "v4_kbo_lag": MODEL_FEATURE_COLS_V4,
+}
+
 TARGET_COL = "target_net_flow"
 HORIZONS = [5, 10, 15, 30]
 
@@ -97,8 +115,25 @@ def apply_station_code(
     return df
 
 
-def make_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    return df[MODEL_FEATURE_COLS].fillna(0), df[TARGET_COL].fillna(0)
+def make_xy(
+    df: pd.DataFrame, feature_cols: list[str] = MODEL_FEATURE_COLS
+) -> tuple[pd.DataFrame, pd.Series]:
+    """`.fillna(0)`이 lag1d_stock/lag7d_stock 결측(D-1/D-7 경계 밖)에도 그대로 적용된다 —
+    별도 fallback 값을 채우지 않고 0 + `_available=0` 플래그 조합으로 "정보 없음"을
+    표현한다(원칙 8: 표본 없는 곳에 그럴듯한 값을 채우지 않는다)."""
+    return df[feature_cols].fillna(0), df[TARGET_COL].fillna(0)
+
+
+def attach_anchor_time_slot(df: pd.DataFrame) -> pd.DataFrame:
+    """anchor(hour·minute) 기준 30분 time_slot(0~47) — D-1/D-7 lag 조인 키로 쓴다.
+
+    v3/v4 데이터셋의 hour·minute·date는 base_time(anchor) 그대로다(target이 아님,
+    `train.py`의 `_attach_holiday_flag`도 같은 전제) — 그래서 날짜축 멀티소스 모델의
+    `compute_target_time_features`와 달리 target 시각을 다시 계산할 필요가 없다.
+    """
+    df = df.copy()
+    df["time_slot"] = df["hour"] * 2 + (df["minute"] >= 30).astype("int8")
+    return df
 
 
 class HistoricalProfileBuilder:

@@ -115,3 +115,21 @@ def attach_external(
         jamsil_dates
     )
     return df
+
+
+def attach_kbo(
+    df: pd.DataFrame,
+    jamsil_dates: set,
+    jamsil_stations: set,
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """`is_kbo_game_jamsil`만 붙인다(날씨 없이) — v4 anchor+horizon 피처셋(S15P21A104-160)용.
+
+    `attach_external()`과 판정 로직은 같지만 날씨 병합이 빠져 있다 — 실시간 날씨 소스가
+    없어도(Phase D 갭) 그대로 쓸 수 있게 하려고 분리했다.
+    """
+    df = df.copy()
+    df["is_kbo_game_jamsil"] = (
+        df["od_station_id"].isin(jamsil_stations) & df[date_col].isin(jamsil_dates)
+    ).astype("int8")
+    return df
