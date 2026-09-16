@@ -36,6 +36,7 @@ export interface Leg {
   geometry?: RouteGeometry
 }
 export interface Route {
+  routeType?: 'SHORTEST' | 'SHORTEST_WITH_BIKE' | 'ALTERNATIVE' | 'LOW_CONGESTION'
   totalDistanceMeters?: number
   id: string
   label: string

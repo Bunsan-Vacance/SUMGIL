@@ -381,7 +381,8 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
   if (
     routeType !== 'SHORTEST' &&
     routeType !== 'SHORTEST_WITH_BIKE' &&
-    routeType !== 'ALTERNATIVE'
+    routeType !== 'ALTERNATIVE' &&
+    routeType !== 'LOW_CONGESTION'
   ) {
     throw new RepositoryError('invalid-response', '지원하지 않는 경로 유형 응답이에요.')
   }
@@ -456,8 +457,11 @@ function mapBackendRoute(value: unknown, index: number, departedAt: string): Rou
       ? '빠른 경로'
       : routeType === 'ALTERNATIVE'
         ? '다른 경로'
-        : '따릉이 포함 경로'
+        : routeType === 'LOW_CONGESTION'
+          ? '덜 붐비는 경로'
+          : '따릉이 포함 경로'
   return {
+    routeType,
     id: `${routeType.toLowerCase()}-${index}`,
     label,
     minutes: value.totalMinutes as number,

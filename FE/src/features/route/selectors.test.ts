@@ -3,6 +3,32 @@ import { arrival, getRoutes, remaining, roundMinutes } from './selectors'
 import { bikeProposal, routes } from '../../api/mock/fixtures'
 
 describe('경로 선택과 안내 데이터', () => {
+  it('서버 후보는 혼잡도 수치 없이도 추천 순서와 필터를 유지한다', () => {
+    const serverRoutes = [
+      {
+        ...routes[1],
+        id: 'low-0',
+        minutes: 30,
+        routeType: 'LOW_CONGESTION' as const,
+        congestionPercent: undefined,
+      },
+      {
+        ...routes[0],
+        id: 'shortest-1',
+        minutes: 10,
+        routeType: 'SHORTEST' as const,
+        congestionPercent: undefined,
+      },
+      { ...routes[3], id: 'bus-2', modes: ['bus' as const], routeType: 'ALTERNATIVE' as const },
+    ]
+    expect(getRoutes(serverRoutes, ['walk', 'subway'], 'calm').map((r) => r.id)).toEqual([
+      'low-0',
+      'shortest-1',
+    ])
+    expect(
+      getRoutes(serverRoutes.slice(0, 2).reverse(), ['walk', 'subway'], 'fast').map((r) => r.id),
+    ).toEqual(['shortest-1', 'low-0'])
+  })
   it('사용하지 않는 이동수단이 포함된 경로를 제외한다', () => {
     expect(getRoutes(routes, ['walk', 'bus'], 'fast').map((r) => r.id)).toEqual(['bus'])
     expect(getRoutes(routes, ['bike'], 'fast')).toEqual([])

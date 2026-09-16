@@ -31,6 +31,94 @@ function deferred<T>() {
 }
 
 describe('경로 검색 요청 수명', () => {
+  it('쾌적 전환은 같은 조건으로 재조회하고 서버의 첫 후보를 선택한다', async () => {
+    const serverRoutes = [
+      { ...routes[1], routeType: 'LOW_CONGESTION' as const, minutes: 30 },
+      { ...routes[0], routeType: 'SHORTEST' as const, minutes: 10 },
+    ]
+    const repository: RouteRepository = { search: vi.fn(async () => serverRoutes) }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+    const departedAt = vi.mocked(repository.search).mock.calls[0][0].departedAt
+    act(() => result.current.setPriority('calm'))
+    expect(result.current).toMatchObject({ status: 'loading', selected: null, candidates: [] })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    expect(repository.search).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        priority: 'calm',
+        departedAt,
+        modes: loadedTrip.enabled,
+        origin: loadedTrip.origin,
+        destination: places[1],
+      }),
+      expect.any(AbortSignal),
+    )
+    expect(result.current.visible).toEqual(serverRoutes)
+    expect(result.current.selected).toEqual(serverRoutes[0])
+  })
+
+  it('빠른 우선순위 전환은 이전 요청을 취소하고 늦은 응답을 무시한다', async () => {
+    const first = deferred<typeof routes>()
+    const second = deferred<typeof routes>()
+    const repository: RouteRepository = {
+      search: vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise),
+    }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+    act(() => result.current.setPriority('calm'))
+    act(() => result.current.setPriority('fast'))
+    expect(vi.mocked(repository.search).mock.calls.map(([request]) => request.priority)).toEqual([
+      'calm',
+      'fast',
+    ])
+    expect(vi.mocked(repository.search).mock.calls[0][1].aborted).toBe(true)
+    await act(async () => {
+      second.resolve([routes[0]])
+    })
+    await act(async () => {
+      first.resolve([routes[1]])
+    })
+    expect(result.current).toMatchObject({
+      priority: 'fast',
+      status: 'success',
+      candidates: [routes[0]],
+      selected: routes[0],
+    })
+  })
+
+  it('쾌적 요청 실패 후 재시도에도 우선순위를 유지한다', async () => {
+    const repository: RouteRepository = {
+      search: vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([]),
+    }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+    act(() => result.current.setPriority('calm'))
+    await waitFor(() => expect(result.current.status).toBe('error'))
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+    expect(repository.search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ priority: 'calm' }),
+      expect.any(AbortSignal),
+    )
+    expect(result.current).toMatchObject({ status: 'success', candidates: [], selected: null })
+  })
+
+  it('검색 전 우선순위 변경과 동일 우선순위 선택은 불필요한 요청을 만들지 않는다', async () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(previewTrip, repository))
+    act(() => result.current.setPriority('calm'))
+    expect(repository.search).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+    act(() => result.current.setPriority('calm'))
+    expect(repository.search).toHaveBeenCalledOnce()
+    expect(repository.search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ priority: 'calm' }),
+      expect.any(AbortSignal),
+    )
+  })
   it('검색 요청에 현재 선택한 이동수단을 전달한다', async () => {
     const repository: RouteRepository = { search: vi.fn(async () => routes) }
     const { result } = renderHook(() => useTrip(previewTrip, repository))

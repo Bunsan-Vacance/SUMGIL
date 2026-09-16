@@ -149,9 +149,10 @@ describe('경로 결과 상태', () => {
       .map(({ congestionPercent: _congestionPercent, ...route }) => route)
     render(<ResultsPage {...props({ visible: liveRoutes, isLiveApi: true })} />)
 
-    expect(screen.getAllByText(/혼잡도 준비중입니다/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/혼잡도 준비중입니다/)).toBeNull()
     expect(screen.queryByText(/09:41 출발 기준/)).toBeNull()
-    expect(screen.queryByRole('button', { name: /경로 정렬:/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /경로 정렬:/ }))
+    expect(screen.getByRole('menuitemradio', { name: '덜 붐비는 순' })).toBeTruthy()
   })
 
   it('정렬 메뉴는 화살표 클릭과 키보드 이동을 지원하고 Esc 또는 바깥 클릭으로 닫힌다', () => {

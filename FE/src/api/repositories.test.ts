@@ -558,6 +558,58 @@ describe('백엔드 repository', () => {
     ])
   })
 
+  it.each(['station', 'coordinate'] as const)(
+    '%s 검색의 COMFORT 요청과 LOW_CONGESTION 응답을 연결한다',
+    async (kind) => {
+      const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [
+            {
+              routeType: 'LOW_CONGESTION',
+              totalMinutes: 30,
+              source: 'ALGORITHM',
+              legs: [{ mode: 'SUBWAY', routeId: '1002', minutes: 30 }],
+            },
+            {
+              routeType: 'SHORTEST',
+              totalMinutes: 10,
+              source: 'ALGORITHM',
+              legs: [{ mode: 'SUBWAY', routeId: '1003', minutes: 10 }],
+            },
+          ],
+        }),
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      const result = await createBackendRouteRepository('http://be.test').search(
+        {
+          origin:
+            kind === 'station'
+              ? station('역삼')
+              : { id: 'place', name: '카페', address: '', kind: '장소', lat: 37.5, lng: 127.03 },
+          destination: { ...station('강변'), lat: 37.535, lng: 127.094 },
+          priority: 'calm',
+          modes: ['walk', 'subway'],
+          departedAt: '2026-09-16T00:30:00Z',
+        },
+        new AbortController().signal,
+      )
+      expect(result.map((route) => route.routeType)).toEqual(['LOW_CONGESTION', 'SHORTEST'])
+      expect(result[0]).toMatchObject({ label: '덜 붐비는 경로', minutes: 30 })
+      expect(result[0].congestionPercent).toBeUndefined()
+      if (kind === 'station') {
+        expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('priority')).toBe('COMFORT')
+      } else {
+        expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string)).toMatchObject({
+          priority: 'COMFORT',
+          departureTime: '2026-09-16T09:30:00',
+        })
+      }
+    },
+  )
+
   it('알 수 없는 경로 유형은 성공 응답으로 숨기지 않는다', async () => {
     vi.stubGlobal(
       'fetch',

@@ -13,6 +13,8 @@ export function getRoutes(routes: Route[], enabled: Mode[], priority: Priority) 
   const visible = routes.filter((route) =>
     route.modes.every((mode) => mode === 'walk' || enabled.includes(mode)),
   )
+  // API 후보는 서버가 TIME/COMFORT 기준으로 정렬한다. 샘플만 로컬 정렬한다.
+  if (visible.every((route) => route.routeType !== undefined)) return visible
   return [
     ...visible.filter((r) => r.id === 'fast' || r.id === 'calm').sort(compare),
     ...visible.filter((r) => r.id !== 'fast' && r.id !== 'calm').sort(compare),
