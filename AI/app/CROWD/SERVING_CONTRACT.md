@@ -20,9 +20,9 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 
 | # | 내용 | BE 조치 |
 | --- | --- | --- |
-| 1 | **(수정됨, 197)** `boarding_pred`·`alighting_pred`는 이제 항상 0 이상이다 — 등급 계산이 쓰는 클립 값과 같은 값이 출력에 실린다. 클립된 셀(과거 3,744행/17.3%, 최솟값 −457.9명이었던 원인)은 새 컬럼 `pred_clipped`(bool)로 식별한다 | 인원 필드를 그대로 노출해도 된다. 정확도를 다르게 표시하고 싶으면 `pred_clipped=true`인 셀만 구분 표시. 아래 5.1절 참고 |
+| 1 | **(수정됨, 197)** `boarding_pred`·`alighting_pred`는 이제 항상 0 이상이다 — 등급 계산이 쓰는 대체 값과 같은 값이 출력에 실린다. 음수가 났던 셀(과거 3,744행/17.3%, 최솟값 −457.9명이었던 원인)은 lookup 값으로 대체되고(둘 다 없으면 0), 그 사실은 새 컬럼 `pred_source`(str: `model`/`lookup_negative`)로 식별한다 | 인원 필드를 그대로 노출해도 된다. 정확도를 다르게 표시하고 싶으면 `pred_source="lookup_negative"`인 셀만 구분 표시. 아래 5.1절 참고 |
 | 2 | **`boarding_pred`는 1시간 값이고, 30분 행 2개에 같은 값이 중복된다.** 승하차 예측은 1시간 단위이고 30분 분해는 혼잡도(`congestion_pct`)에만 적용된다 | **절대 합산하지 말 것.** `06:00`과 `06:30` 행의 `boarding_pred`를 더하면 2배가 된다 |
-| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. `clipped_rows`가 3,744(17.3%)로 큰 이유다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
+| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. `lookup_substituted_rows`가 3,744(17.3%)로 큰 이유다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
 
 ---
 
@@ -43,9 +43,9 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `congestion_pct` | float64 | **보정 혼잡도(%)**, 정원 100% 기준 | **있음** — 배율표 결측 |
 | `grade` | float64 | 등급 `0.0`/`1.0`/`2.0`. parquet에서는 **float**이고(NaN을 담기 위해) **API는 int로 변환해 내려준다** | **있음** |
 | `data_status` | str | 셀 상태, 2절 | 없음 |
-| `boarding_pred` | float64 | 승차 예측(명), **1시간 값**. 0 미만은 0으로 클립됨(197) | 있음 |
-| `alighting_pred` | float64 | 하차 예측(명), **1시간 값**. 0 미만은 0으로 클립됨(197) | 있음 |
-| `pred_clipped` | bool | 그 슬롯의 승차·하차 예측 중 하나라도 음수라 0으로 클립됐는지(197) | 없음 |
+| `boarding_pred` | float64 | 승차 예측(명), **1시간 값**. 0 미만은 lookup 값으로 대체됨(197) | 있음 |
+| `alighting_pred` | float64 | 하차 예측(명), **1시간 값**. 0 미만은 lookup 값으로 대체됨(197) | 있음 |
+| `pred_source` | str | `model`(정상) / `lookup_negative`(그 슬롯의 승차·하차 예측 중 하나라도 음수라 lookup 값으로 대체됨, 197) | 없음 |
 | `boarding_lookup` | float64 | 기준선(요일유형×역×시간대 평균) 승차 | 있음 |
 | `alighting_lookup` | float64 | 기준선 하차 | 있음 |
 | `actual_boarding` | float64 | 실측 승차 — **과거 날짜만** 채워짐 | 있음 |
@@ -69,7 +69,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "data_status": "ok",
   "boarding_pred": 676.4768745769,
   "alighting_pred": 2258.5182661606,
-  "pred_clipped": false,
+  "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
   "actual_boarding": null,
@@ -89,7 +89,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "data_status": "ok",
   "boarding_pred": 676.4768745769,
   "alighting_pred": 2258.5182661606,
-  "pred_clipped": false,
+  "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
   "actual_boarding": null,
@@ -145,14 +145,17 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `history_dates` | `["2026-09-06", …]` | 확보된 이력 날짜 |
 | **`lag1d_available`** | **`false`** | **전날 실측 유무. `false`면 정확도 저하** |
 | `lag7d_available` | `true` | 1주 전 실측 유무 |
+| `availability` | `"d7_only"` | (197) 가용성 판정 — `full`/`d1_only`/`d7_only`/`no_lag`. `routing.availability()`가 `lag1d_available`·`lag7d_available`로 정한다 |
+| `routing_rule` | `{"pred": "dl", "avail": "d7_only", "line": null, "day_type": null, "group": null}` | (197) 그 kind를 고른 라우팅 규칙(`routing.describe_policy`). `predictor_override=true`면 `null` |
 | `predictor` | `"lightgbm"` | 쓰인 예측기 종류 |
 | `predictor_version` | `"lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340"` | 아티팩트까지 포함한 버전 |
-| `predictor_fallback` | `null` | `"no_history"`면 이력이 전무해 **lookup으로 대체**된 것 |
+| `predictor_override` | `false` | (197) `--predictor` CLI로 kind를 명시해 라우팅을 건너뛰었는지 |
+| `predictor_fallback` | `null` | **(197부터 항상 `null`)** 옛 "이력 전무 시 lookup 강제 대체" 의미는 없어졌다 — 필드는 BE 계약 유지를 위해 키만 남는다 |
 | `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
 | `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
 | `rows` | `21606` | 표 행 수 |
 | `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
-| `clipped_rows` | `3744` | `pred_clipped=true`인 행 수(197) |
+| `lookup_substituted_rows` | `3744` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
 | `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
 | `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
 | `generated_at` | `"2026-09-13T03:41:17+09:00"` | 생성 시각(KST) |
@@ -197,8 +200,8 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340",
   "lag1d_available": false,
   "slots": [
-    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.9, "grade": 0, "data_status": "ok", "pred_clipped": false},
-    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 13.3, "grade": 0, "data_status": "ok", "pred_clipped": false}
+    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.9, "grade": 0, "data_status": "ok", "pred_source": "model"},
+    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 13.3, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -221,7 +224,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "line": "2호선",
   "time_slot_30min": "08:30",
   "stations": [
-    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 71.2, "grade": 1, "data_status": "ok", "pred_clipped": false}
+    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 71.2, "grade": 1, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -243,8 +246,9 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 - **발견 당시 현상**: `boarding_pred`·`alighting_pred`가 음수로 내려갔다. 2026-09-13 표에서 **17.3%(3,744행)**, 최솟값 **−457.9명**. 그중 **3,194행은 `data_status="ok"`**라 상태값으로 감지 불가했다. 당시 메타는 `lag1d_available: false`(전날 실측 없음)인 이력 결손 상태였다 — 잔차 예측이 크게 흔들려 음수 비율이 높았던 배경이다(이력이 완비되면 2025 평가 전체 기준 0.47%로 낮다).
 - **원인**: 배치가 재귀식 입력에는 0 클립을 적용하면서(`to_congestion_table`) 출력 표의 `*_pred` 컬럼은 **클립 전 원본을 그대로 실었다**. 같은 행에서 `boarding_pred < 0`인데 `congestion_pct`는 0을 넣고 계산한 값이라 표 내부가 불일치했다.
-- **수정**: `to_congestion_table`이 재귀식 입력용으로 만든 클립 값을 출력 `boarding_pred`·`alighting_pred`에도 그대로 재사용한다(클립을 두 번 계산하지 않음). 클립이 일어난 행은 새 컬럼 `pred_clipped`(bool)로 노출한다 — 인원 ≥ 0은 물리 제약이라 클립 자체는 원칙 8("값을 채우지 않는다")과 무관하고, `congestion_pct`·`grade`의 NaN처럼 여전히 채우지 않는 것은 배율표·기준선 결측뿐이다.
-- **BE 영향**: 인원 필드를 그대로 노출해도 된다(더 이상 `max(0, x)` 방어 불필요). `pred_clipped=true`인 셀은 원한다면 "예측 보정됨" 등으로 구분 표시할 수 있다. `congestion_pct`·`grade`는 수정 전후로 값이 바뀌지 않는다 — 이미 클립된 값으로 계산돼 있었다.
+- **수정 1단계(A부)**: `to_congestion_table`이 재귀식 입력용으로 만든 클립(0 하한) 값을 출력 `boarding_pred`·`alighting_pred`에도 그대로 재사용해 표 내부 불일치를 없앴다. 클립이 일어난 행은 `pred_clipped`(bool)로 노출했다.
+- **수정 2단계(B부, 197 B-2) — 음수 셀은 0 클립이 아니라 lookup 대체**: 145 `family-check/RESULTS.md` 7절에서 **모델이 음수를 낸 셀은 lookup이 더 정확하다**는 게 드러났다 — 0 클립 후 RMSE 대비 lookup RMSE가 `no_lag` **90.46 → 69.85**, `d7_only` **53.86 → 27.18**로 낮다. 그래서 음수 셀은 그 타깃의 `{target}_lookup` 값으로 대체하고, lookup도 없거나(NaN) 음수면 그때만 0을 최종 하한으로 쓴다. `pred_clipped`(bool)는 **`pred_source`**(str: `model`/`lookup_negative`)로 교체됐다 — 대체가 일어났는지뿐 아니라 무엇으로 대체됐는지(모델 그대로인지)까지 구분한다.
+- **BE 영향**: 인원 필드를 그대로 노출해도 된다(더 이상 `max(0, x)` 방어 불필요). `pred_source="lookup_negative"`인 셀은 원한다면 "예측 보정됨" 등으로 구분 표시할 수 있다. `congestion_pct`·`grade`는 A부 수정 전후로 값이 바뀌지 않았지만(이미 클립된 값으로 계산돼 있었다), **B부(lookup 대체)는 그 셀들의 `congestion_pct`·`grade`를 다시 바꾼다** — 0이 아니라 lookup 값으로 재귀식을 계산하기 때문이다.
 
 ### 5.2 구 모델로 만들어진 잔존 파일
 
@@ -270,8 +274,8 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 | 항목 | 내용 | BE 영향 |
 | --- | --- | --- |
-| 인원 음수 수정(5.1) | `*_pred` 클립 + `pred_clipped` 컬럼 추가 | **컬럼 1개 추가** — parquet 스키마·API 응답 확장 |
-| 가용성별 3단 예측기(197) | 이력 완비/결손/전무에 따라 LightGBM·GRU·lookup을 갈아 씀 | `meta.predictor`·`predictor_version` 값이 날짜마다 달라진다. 이미 내려가는 필드라 스키마 변경은 없음 |
+| 인원 음수 수정(5.1) | `*_pred` 클립 → lookup 대체 + `pred_clipped`(bool) → `pred_source`(str) 컬럼 교체 | **컬럼 1개 이름·타입 변경** — parquet 스키마·API 응답 반영 완료(197 B부) |
+| 가용성별 라우팅(197) | 이력 완비(`full`)는 LightGBM, 결손·전무(`d1_only`/`d7_only`/`no_lag`)는 GRU(`dl`)로 라우팅 | `meta.predictor`·`predictor_version` 값이 날짜마다 달라진다(이미 내려가는 필드, 스키마 변경 없음). `meta.availability`·`routing_rule`·`predictor_override` 3개 키가 새로 추가됐다 |
 
 ---
 
