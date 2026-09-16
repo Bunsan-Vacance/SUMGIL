@@ -226,40 +226,127 @@ public class RouteSearchService {
      * (순수 함수 유지) geometry 부착은 여기서 후처리로 한다 — 미승인 필드, README 참고.
      */
     private RouteSearchResponse withGeometry(RouteSearchResponse response) {
-        List<RouteLegResponse> legs = response.legs().stream()
-                .map(this::withGeometry)
-                .toList();
+        List<RouteLegResponse> legs = withGeometry(response.legs());
         return new RouteSearchResponse(
                 response.routeType(), response.totalMinutes(), legs, response.source(),
                 totalDistanceOf(legs), response.transferCount());
+    }
+
+    /**
+     * leg 목록 전체에 geometry를 붙인다. 연속된 BIKE leg(사이에 WALK·TRANSFER 없이 대여소
+     * 경계로만 나뉜 구간, {@link RouteMapper} rentalSplit 참고)는 하나의 실제 이동으로 묶어
+     * {@link #withBikeRunGeometry}로 처리한다 — leg마다 독립 호출하면 같은 대여소인데도
+     * 카카오 자전거 API의 도로 스냅 진입·이탈점이 달라져 경계가 끊겨 보인다(S15P21A104-153).
+     */
+    private List<RouteLegResponse> withGeometry(List<RouteLegResponse> legs) {
+        List<RouteLegResponse> result = new ArrayList<>();
+        int i = 0;
+        while (i < legs.size()) {
+            if (legs.get(i).mode() != TravelMode.BIKE) {
+                result.add(withGeometry(legs.get(i)));
+                i++;
+                continue;
+            }
+            int end = i;
+            while (end + 1 < legs.size() && legs.get(end + 1).mode() == TravelMode.BIKE) {
+                end++;
+            }
+            result.addAll(withBikeRunGeometry(legs.subList(i, end + 1)));
+            i = end + 1;
+        }
+        return result;
     }
 
     private RouteLegResponse withGeometry(RouteLegResponse leg) {
         if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
             return leg;
         }
-        Optional<MultiLineStringResponse> geometry;
-        if (leg.mode() == TravelMode.WALK) {
-            geometry = walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
-                    leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
-        } else if (leg.mode() == TravelMode.BIKE) {
-            geometry = bikeGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
-                    leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
-        } else {
-            geometry = railGeometryRegistry.geometryForLeg(
-                    leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
-        }
+        Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
+                ? walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
+                        leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
+                : railGeometryRegistry.geometryForLeg(
+                        leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
         if (geometry.isEmpty()) {
             return leg;
         }
+        return withGeometry(leg, geometry.get());
+    }
+
+    /**
+     * 연속 BIKE leg 묶음을 전체 구간(첫 leg 출발→마지막 leg 도착) 1회 조회로 처리한다
+     * (S15P21A104-153). 조회 결과 좌표열을 이어붙인 뒤, 각 leg의 실제 도착 좌표에 가장 가까운
+     * 지점을 경계로 잘라 나눈다 — 인접 leg가 같은 지점(좌표열의 같은 인덱스)을 공유하므로
+     * 끊김이 생기지 않는다. 좌표열이 실제 도착점과 너무 동떨어져 순서를 신뢰할 수 없으면
+     * (경계가 뒤로 가지 않으면) 원본을 그대로 두고 값을 지어내지 않는다.
+     */
+    private List<RouteLegResponse> withBikeRunGeometry(List<RouteLegResponse> run) {
+        RouteLegResponse first = run.get(0);
+        RouteLegResponse last = run.get(run.size() - 1);
+        if (first.fromLat() == null || first.fromLng() == null
+                || last.toLat() == null || last.toLng() == null) {
+            return run;
+        }
+        Optional<MultiLineStringResponse> geometry = bikeGeometryRegistry.geometryFor(
+                first.fromNodeId(), last.toNodeId(),
+                first.fromLat(), first.fromLng(), last.toLat(), last.toLng());
+        if (geometry.isEmpty()) {
+            return run;
+        }
+        List<List<Double>> points = flatten(geometry.get());
+        if (points.size() < run.size() + 1) {
+            return run;
+        }
+        List<RouteLegResponse> result = new ArrayList<>();
+        int cursor = 0;
+        for (int k = 0; k < run.size(); k++) {
+            RouteLegResponse leg = run.get(k);
+            int endIdx = k == run.size() - 1
+                    ? points.size() - 1
+                    : nearestIndex(points, cursor, leg.toLat(), leg.toLng());
+            if (endIdx <= cursor) {
+                return run;
+            }
+            MultiLineStringResponse legGeometry =
+                    MultiLineStringResponse.of(List.of(new ArrayList<>(points.subList(cursor, endIdx + 1))));
+            result.add(withGeometry(leg, legGeometry));
+            cursor = endIdx;
+        }
+        return result;
+    }
+
+    private RouteLegResponse withGeometry(RouteLegResponse leg, MultiLineStringResponse geometry) {
         return new RouteLegResponse(
                 leg.mode(),
                 leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
                 leg.routeId(), leg.minutes(),
-                geometry.get(), "available",
-                distanceOf(geometry.get()), leg.routeName()
+                geometry, "available",
+                distanceOf(geometry), leg.routeName()
         );
+    }
+
+    /** MultiLineString의 모든 LineString 좌표를 순서대로 이어붙인다. */
+    private List<List<Double>> flatten(MultiLineStringResponse geometry) {
+        List<List<Double>> points = new ArrayList<>();
+        for (List<List<Double>> line : geometry.coordinates()) {
+            points.addAll(line);
+        }
+        return points;
+    }
+
+    /** {@code fromIdx} 이후 지점 중 목표 좌표에 가장 가까운 인덱스. 역행하지 않도록 이후 구간만 본다. */
+    private int nearestIndex(List<List<Double>> points, int fromIdx, double targetLat, double targetLng) {
+        int best = fromIdx;
+        double bestDist = Double.MAX_VALUE;
+        for (int idx = fromIdx; idx < points.size(); idx++) {
+            List<Double> point = points.get(idx);
+            double dist = GeoDistance.haversineMeters(point.get(1), point.get(0), targetLat, targetLng);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = idx;
+            }
+        }
+        return best;
     }
 
     /**
