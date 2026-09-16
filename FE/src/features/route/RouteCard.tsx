@@ -1,11 +1,19 @@
-import { ArrowLeftRight, ChevronRight } from 'lucide-react'
+import { ArrowLeftRight, ChevronRight, UsersRound } from 'lucide-react'
 import { clockTime, routeArrival, roundMinutes } from './selectors'
 import type { Route } from './types'
 import { compactLegs } from './LegList'
 import { modeIcons } from './ModeIcon'
 import { lineColor, lineTextColor } from './lineColor'
 
-export default function RouteCard({ route, onDetail }: { route: Route; onDetail: () => void }) {
+export default function RouteCard({
+  route,
+  comparison,
+  onDetail,
+}: {
+  route: Route
+  comparison?: string
+  onDetail: () => void
+}) {
   const displayLegs = compactLegs(route.legs)
   const departure = clockTime(route.departedAt)
   const arrival = routeArrival(route.minutes, route.departedAt)
@@ -20,21 +28,39 @@ export default function RouteCard({ route, onDetail }: { route: Route; onDetail:
       : null,
     `환승 ${route.transfers ? `${route.transfers}회` : '없음'}`,
     walkingMinutes ? `도보 ${roundMinutes(walkingMinutes)}분` : null,
+    route.congestionPercent === undefined ? '혼잡도 준비중입니다' : null,
+  ].filter((fact): fact is string => fact !== null)
+  const congestion =
     route.congestionPercent === undefined
       ? '혼잡도 준비중입니다'
-      : `혼잡도 ${route.congestionPercent}%`,
-  ].filter((fact): fact is string => fact !== null)
+      : `혼잡도 ${Math.round(route.congestionPercent)}%`
 
   return (
     <button
       type="button"
       className="route-card"
-      aria-label={`${route.label} ${roundMinutes(route.minutes)}분 상세 경로`}
+      aria-label={[
+        route.label,
+        `${roundMinutes(route.minutes)}분`,
+        congestion,
+        comparison,
+        '상세 경로',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       onClick={onDetail}
     >
       <span className="route-card-topline">
         <span className="route-badge">{route.label}</span>
-        <ChevronRight className="route-card-chevron" size={20} aria-hidden="true" />
+        <span className="route-card-actions">
+          {route.congestionPercent !== undefined && (
+            <span className="route-card-congestion">
+              <UsersRound size={14} aria-hidden="true" />
+              혼잡도 {Math.round(route.congestionPercent)}%
+            </span>
+          )}
+          <ChevronRight className="route-card-chevron" size={20} aria-hidden="true" />
+        </span>
       </span>
       <span className="route-time">
         <span>
@@ -43,6 +69,7 @@ export default function RouteCard({ route, onDetail }: { route: Route; onDetail:
         <small>{departure ? `${departure} → ${arrival}` : '출발 시각 준비중입니다'}</small>
       </span>
       <span className="route-facts">{facts.join(' · ')}</span>
+      {comparison && <span className="route-comparison">{comparison}</span>}
       <span className="mode-strip" aria-label="구간별 이동 시간">
         {displayLegs.map((leg, index) => {
           const Icon = leg.transfer ? ArrowLeftRight : modeIcons[leg.mode]
@@ -51,16 +78,18 @@ export default function RouteCard({ route, onDetail }: { route: Route; onDetail:
               key={index}
               className={`mode-strip-item ${leg.transfer ? 'transfer' : leg.mode}`}
               style={{
-                flexGrow: Math.max(1, leg.minutes),
+                flexGrow: leg.minutes,
                 backgroundColor: lineColor(leg),
                 color: lineTextColor(leg),
               }}
               title={`${leg.transfer ? '환승' : leg.note} ${roundMinutes(leg.minutes)}분`}
             >
-              <Icon size={13} aria-hidden="true" />
-              <span>
-                {leg.transfer && '환승 '}
-                {roundMinutes(leg.minutes)}분
+              <span className="mode-strip-label">
+                <Icon size={13} aria-hidden="true" />
+                <span>
+                  {leg.transfer && <span className="mode-strip-transfer-label">환승 </span>}
+                  {roundMinutes(leg.minutes)}분
+                </span>
               </span>
             </span>
           )

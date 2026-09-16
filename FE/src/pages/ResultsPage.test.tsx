@@ -50,7 +50,7 @@ describe('경로 결과 상태', () => {
     expect(strip.querySelectorAll('.transfer')).toHaveLength(2)
     expect(strip.querySelectorAll('.transfer .lucide-arrow-left-right')).toHaveLength(2)
     expect(strip.querySelectorAll('.walk .lucide-footprints')).toHaveLength(2)
-    expect(screen.getAllByText('환승 3분')).toHaveLength(2)
+    expect(screen.getAllByTitle('환승 3분')).toHaveLength(2)
   })
   it('경로의 구간을 눌러도 해당 경로를 선택하고 상세로 이동한다', () => {
     const setSelectedId = vi.fn()
@@ -129,7 +129,18 @@ describe('경로 결과 상태', () => {
 
     expect(screen.getByText(/혼잡도 68%/)).toBeTruthy()
     expect(screen.getByText(/혼잡도 42%/)).toBeTruthy()
+    expect(screen.getByText('4분 더 걸림 · 혼잡도 26%p 낮음')).toBeTruthy()
     expect(screen.queryByText(/혼잡 \d+구간/)).toBeNull()
+  })
+
+  it('혼잡도를 비교할 수 있으면 정렬 메뉴에서 덜 붐비는 순을 선택한다', () => {
+    const setPriority = vi.fn()
+    render(<ResultsPage {...props({ visible: routes.slice(0, 2), setPriority })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '경로 정렬: 빠른 순' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '덜 붐비는 순' }))
+
+    expect(setPriority).toHaveBeenCalledWith('calm')
   })
 
   it('혼잡도 없는 결과는 준비중 상태와 고정 출발 시각을 표시하지 않는다', () => {
@@ -140,7 +151,24 @@ describe('경로 결과 상태', () => {
 
     expect(screen.getAllByText(/혼잡도 준비중입니다/).length).toBeGreaterThan(0)
     expect(screen.queryByText(/09:41 출발 기준/)).toBeNull()
-    expect((screen.getByRole('button', { name: '혼잡' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: /경로 정렬:/ })).toBeNull()
+  })
+
+  it('정렬 메뉴는 화살표 클릭과 키보드 이동을 지원하고 Esc 또는 바깥 클릭으로 닫힌다', () => {
+    render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
+    const trigger = screen.getByRole('button', { name: '경로 정렬: 빠른 순' })
+    fireEvent.click(trigger.querySelector('svg')!)
+    const fast = screen.getByRole('menuitemradio', { name: '빠른 순' })
+    expect(document.activeElement).toBe(fast)
+    fireEvent.keyDown(fast, { key: 'ArrowDown' })
+    const calm = screen.getByRole('menuitemradio', { name: '덜 붐비는 순' })
+    expect(document.activeElement).toBe(calm)
+    fireEvent.keyDown(calm, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+    fireEvent.click(trigger)
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 
   it('출발·도착 교환을 요청한다', () => {
