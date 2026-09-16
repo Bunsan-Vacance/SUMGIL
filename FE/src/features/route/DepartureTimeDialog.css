@@ -1,0 +1,83 @@
+.departure-time-help {
+  margin-top: 4px;
+}
+
+.departure-time-wheels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.departure-time-wheel-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.departure-time-wheel-label {
+  display: block;
+  margin-bottom: 7px;
+  height: 16px;
+  line-height: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.departure-time-wheel {
+  position: relative;
+  height: 220px;
+  overflow-y: auto;
+  padding: 84px 0;
+  border-radius: 16px;
+  background: #f4f8f7;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  scroll-padding-block: 84px;
+  scrollbar-width: thin;
+  scrollbar-color: #b6c5c1 transparent;
+}
+
+.departure-time-wheel > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 52px;
+  padding: 0;
+  border-radius: 11px;
+  color: #8b989d;
+  font-size: 27px;
+  font-variant-numeric: tabular-nums;
+  scroll-snap-align: center;
+}
+
+.departure-time-wheel > button[aria-selected='true'] {
+  color: #152536;
+  font-weight: 750;
+}
+
+.departure-time-wheel-selection {
+  position: absolute;
+  top: calc(16px + 7px + 84px);
+  right: 7px;
+  left: 7px;
+  height: 52px;
+  z-index: 1;
+  border: 1px solid #a9dacc;
+  border-radius: 11px;
+  background: #d2f8eb35;
+  pointer-events: none;
+}
+
+.departure-time-colon {
+  padding-top: 22px;
+  color: #53636b;
+  font-size: 28px;
+  font-weight: 750;
+}
+
+.departure-time-actions {
+  margin-top: 20px;
+}
