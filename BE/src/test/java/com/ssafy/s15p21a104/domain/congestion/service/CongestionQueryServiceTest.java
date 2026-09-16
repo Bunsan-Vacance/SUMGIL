@@ -70,6 +70,38 @@ class CongestionQueryServiceTest {
     }
 
     @Test
+    @DisplayName("LINE(노선) 대상도 STATION과 같은 방식으로 조회된다")
+    void 조회_성공_LINE() {
+        Congestion congestion = mockCongestion(
+                CongestionTarget.LINE, "1002", 0, 18, BigDecimal.valueOf(55.0), "AI");
+        LocalDateTime weekdayMorning = LocalDateTime.of(2026, 9, 14, 9, 10);
+        lenient().when(congestionRepository
+                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                                CongestionTarget.LINE, "1002", 0, 18))
+                .thenReturn(Optional.of(congestion));
+
+        CongestionResponse result = service().find(CongestionTarget.LINE, "1002", weekdayMorning);
+
+        assertEquals(CongestionTarget.LINE, result.targetType());
+        assertEquals("1002", result.targetId());
+        assertEquals(0, BigDecimal.valueOf(55.0).compareTo(result.level()));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 targetId(LINE)도 데이터 없음으로 처리된다(값을 지어내지 않음)")
+    void 존재하지않는_LINE_ID_null() {
+        when(congestionRepository
+                .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                        any(), anyString(), any(), any()))
+                .thenReturn(Optional.empty());
+
+        CongestionResponse result = service().find(
+                CongestionTarget.LINE, "9999", LocalDateTime.of(2026, 9, 14, 9, 10));
+
+        assertNull(result);
+    }
+
+    @Test
     @DisplayName("시각 미지정 시 현재 시각 기준 슬롯으로 조회한다")
     void 시각미지정_현재시각기준() {
         when(congestionRepository
