@@ -22,12 +22,13 @@ B안 (내려서 따릉이) = 출구→대여소 도보 + 대여 1분 + 주행 + 
 | --- | --- | --- | --- |
 | **착석 기회 지수** | 혼잡도 → 앉을 확률 변환. 역·시간대·요일별 | BE 조회 API | `CROWD` |
 | **자리 회전 예측** | "몇 정거장 뒤에 자리가 나는가" — 하차 피크 기반 | BE 조회 API | `CROWD` |
-| **대여소 쌍별 실측 소요시간** | 대여이력 `반납시각 − 대여시각` 분포 | 역전 판정 | `BYC` |
-| **따릉이 고갈 예측** | "20분 후 예상 잔여 대수" | 재고 검증 | `BYC` |
-| **역전 테이블** | 역 × 목적지 × 시간대 × 요일 사전계산 | BE 조회 API | `RVSL` |
+| **대여소 쌍별 실측 소요시간** | 대여이력 `반납시각 − 대여시각` 분포 | 역전 판정 | `BIKE` |
+| **따릉이 고갈 예측** | "20분 후 예상 잔여 대수" | 재고 검증 | `BIKE` |
+| **역전 테이블** | 역 × 목적지 × 시간대 × 요일 사전계산 | BE 조회 API | `ROUTE` |
 
-`RVSL`(역전 판정)은 `CROWD`·`BYC`의 산출물을 조합해서 만드는 결과물이라 별도 도메인으로 둔다.
-JIRA 에픽이 확정되면 위 도메인명(대문자)을 에픽 키에 맞춰 조정한다.
+`ROUTE`(역전 판정)은 `CROWD`·`BIKE`의 산출물을 조합해서 만드는 결과물이라 별도 도메인으로 둔다.
+위 도메인명(대문자)은 확정된 JIRA 에픽 prefix와 일치한다(`CROWD`=[CROWD] 혼잡도,
+`BIKE`=[BIKE] 따릉이, `ROUTE`=[ROUTE] 경로 추천).
 
 ## 2. 모델 계획
 
@@ -90,6 +91,7 @@ JIRA 에픽이 확정되면 위 도메인명(대문자)을 에픽 키에 맞춰 
 | --- | --- | --- |
 | ⑤ | [지하철혼잡도정보](https://data.seoul.go.kr/dataList/OA-12928/F/1/datasetView.do) · [포털판](https://www.data.go.kr/data/15071311/fileData.do) | 30분 단위 요일별·역별 혼잡도(%). **1~8호선만** 제공, 분기 갱신 |
 | ⑥ | [호선별 역별 시간대별 승하차](https://data.seoul.go.kr/dataList/OA-12252/S/1/datasetView.do) (`CardSubwayTime`) | 자리 회전 예측 · 1~8호선 외 혼잡도 추정 · 따릉이 수요 입력 |
+| ⑥′ | [서울교통공사 역별 시간대별 승하차인원(일별)](https://data.seoul.go.kr/dataList/OA-22723/A/1/datasetView.do) (`getStnPsgr`) | **D−1 갱신·최근 7일만 제공.** 배치 예측의 시차 피처 이력 창을 채우는 일 배치 원천(`DATA_ENGINE/collect/subway_ridership_daily.py`, 143). 1~8호선 273역 = 패널과 동일 |
 
 ### 따릉이
 
@@ -120,6 +122,10 @@ JIRA 에픽이 확정되면 위 도메인명(대문자)을 에픽 키에 맞춰 
 
 Windows 기준 [python.org](https://www.python.org/downloads/) 설치 시 **"Add python.exe to PATH"** 를 반드시 체크한다.
 
+macOS에서 `lightgbm`은 OpenMP 런타임(`libomp`)이 없으면 import 시점에
+`Library not loaded: @rpath/libomp.dylib`로 실패한다 — `brew install libomp`로 먼저 설치한다
+(Linux·Windows는 해당 없음).
+
 ## 6. 시작하기
 
 ```bash
@@ -134,12 +140,64 @@ source .venv/Scripts/activate   # Windows Git Bash
 # 의존성 (개발 도구 포함)
 pip install -r requirements-dev.txt
 
+# NVIDIA GPU가 있는 학습 PC — PyPI 기본 torch는 CPU 빌드라 CUDA 빌드로 덮어쓴다(드라이버 CUDA 13.x 기준)
+pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu130
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"   # '...+cu130 True'
+
 # 설치 후 버전 고정 (최초 1회, 팀 공유)
 pip freeze > requirements.lock.txt
 
 # FastAPI 서버 (AI/에서 실행 — .env를 실행 CWD 기준으로 읽는다)
 uvicorn app.main:app --reload --port 8000
 ```
+
+### CROWD 혼잡도 — 배치 추론과 조회 API
+
+모델은 요청 시점에 돌리지 않는다. 배치가 하루치 예측 표를 만들어 두고 API는 그 표만 읽는다.
+
+```bash
+cd AI
+# (최초 1회) 잔차 모델 아티팩트 — models/CROWD/<세트>_<시각>/ (약 25초)
+python -m app.CROWD.pipeline.train
+
+# 배치 추론 — data/CROWD/serving/predictions_YYYY-MM-DD.parquet + .meta.json
+python -m app.CROWD.pipeline.batch_predict --today --tomorrow          # 운영
+python -m app.CROWD.pipeline.batch_predict --date 2025-06-02           # 패널 안 날짜(재현·검증)
+python -m app.CROWD.pipeline.batch_predict --date 2026-01-05 --predictor lookup   # 기준선만
+
+# 조회
+uvicorn app.main:app --port 8000
+# GET /crowd/meta
+# GET /crowd/stations/222/congestion?date=2026-01-05&direction=내선
+# GET /crowd/lines/2호선/congestion?date=2026-01-05&time=08:30
+```
+
+- 예측기는 `app/CROWD/pipeline/predictor.py`의 `Predictor` 인터페이스로 갈아 끼운다. `CROWD_PREDICTOR`
+  설정값 `auto`(기본)는 아티팩트가 있으면 `lightgbm`, 없으면 `lookup`(요일유형×역×시간대 평균)이다.
+  `llm`은 자리만 있고 `CROWD_LLM_API_KEY`가 설정되면 구현한다.
+- **변환 층(승하차 → 혼잡도)에도 버전이 있다.** 예측 승하차를 화면 값으로 바꾸는 것은 재귀식과
+  **배율표**(`data/CROWD/processed/crowd_congestion_calibration.parquet`)인데, 배율표는 모든 셀의
+  승수라 갈아 끼우면 같은 모델·같은 승하차에서도 값이 통째로 바뀐다. 그래서 모델 아티팩트와 같은
+  수준으로 추적한다 — 옆에 `crowd_congestion_calibration.meta.json`(적합 스냅샷판·승하차 창·방향 대응
+  규칙·경계 처리 안·이전 파일 sha256)을 두고 이전 파일은 `processed/_archive/`로 옮긴다. 재생성은
+  `python -m DATA_ENGINE.eda.build_congestion_calibration`(88 현행 재현은 `--variant current`)이고,
+  하류 `crowd_congestion_label_calibrated_2024_2026.parquet`도 같이 다시 만든다. 현재 버전과 갱신
+  기준은 [`app/CROWD/pipeline/MODEL_REGISTRY.md`](app/CROWD/pipeline/MODEL_REGISTRY.md) 5절
+  "변환 층 산출물", 재적합 판정 근거는
+  [`validation/CROWD/calibration-refit/RESULTS.md`](validation/CROWD/calibration-refit/RESULTS.md)(199).
+- **피처 세트·아티팩트·예측기 코드가 각각 무엇인지**(어느 티켓, 수치, 현재 배포 세트 `festival_selflag_d1sd_d7_resid`)는
+  [`app/CROWD/pipeline/MODEL_REGISTRY.md`](app/CROWD/pipeline/MODEL_REGISTRY.md)에 있다.
+- 등급 임계치는 `CROWD_GRADE_THRESHOLDS`(기본 `50,100`, %). 값을 낼 수 없는 셀은 0으로 채우지 않고
+  `data_status`로 응답한다 — 우선순위 순으로 `no_lookup`(기준선 없음) / `ok` / `calibration_fallback`
+  (1~8호선 공휴일이라 일요일 배율을 빌려 쓴 셀, 값은 있다) / `segment_truncated`(절단 구간의 종점 링크 —
+  1·3·4·7호선 본선과 2호선 신정지선 중 경계 유입 상수를 못 구한 셀) / `no_calibration`(결번 역 등 그 밖의
+  배율 결측). 그 날짜 표가 없으면 404(배치 미실행). 근거는
+  [`validation/CROWD/congestion-criteria-check/RESULTS.md`](validation/CROWD/congestion-criteria-check/RESULTS.md)(146)와
+  [`validation/CROWD/calibration-refit/RESULTS.md`](validation/CROWD/calibration-refit/RESULTS.md)(199).
+- 미래 날짜는 달력(요일유형)·이벤트 골격 위에 최근 7일 시차로 예측한다. 최근 7일 실측은 패널(2025-12까지) 뒤에
+  D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`, 매일 09:00·13:00)가 쌓은 파일을 이어붙여 채운다(143).
+  전날 실측이 없으면 `lag1d_available=false`로 표시되고, 이력이 하나도 없으면 LightGBM 대신 lookup으로 예측한다
+  (`predictor_fallback="no_history"`) — 시차가 전부 비면 LightGBM이 lookup보다 나쁘기 때문이다.
 
 ## 7. 디렉터리 구조
 
@@ -157,16 +215,25 @@ AI/
 │  │  ├─ service.py        #     비즈니스 로직
 │  │  ├─ schemas.py        #     요청/응답 pydantic 모델
 │  │  └─ pipeline/         #     오프라인 배치(피처 집계 등)
-│  ├─ BYC/                 #   대여소 쌍별 소요시간 · 따릉이 고갈 예측 (구조는 CROWD와 동일)
-│  └─ RVSL/                #   역전 테이블 — CROWD·BYC 산출물을 조합 (구조는 CROWD와 동일)
-├─ test/                   # app/<도메인>/ 구조를 그대로 미러 (test/CROWD/, test/BYC/, ...)
+│  ├─ BIKE/                #   대여소 쌍별 소요시간 · 따릉이 고갈 예측 (구조는 CROWD와 동일)
+│  └─ ROUTE/               #   역전 테이블 — CROWD·BIKE 산출물을 조합 (구조는 CROWD와 동일)
+├─ test/                   # app/<도메인>/ 구조를 그대로 미러 (test/CROWD/, test/BIKE/, ...)
 ├─ validation/             # PoC · 스파이크 코드 — 프로덕션 아님 (관례는 validation/README.md)
-├─ data/
-│  ├─ raw/                 # 원본 수집 데이터        ← Git 추적 제외
-│  └─ processed/           # 정제·가공 데이터        ← Git 추적 제외
+├─ data/                   # 도메인(JIRA 에픽 prefix)별로 나눔      ← Git 추적 제외
+│  ├─ CROWD/               #   raw/(원본) → interim/(중간 산출물) → processed/(최종 데이터)
+│  ├─ BIKE/                #   CROWD와 동일하게 raw/interim/processed
+│  ├─ ROUTE/               #   CROWD·BIKE와 동일 구조. raw/transfer_info/ — 환승역 간 도보
+│  │                        #   소요시간(A안 경로 시간 계산 전용, 혼잡도 예측용 아님)
+│  └─ EXTERNAL/            #   여러 도메인이 공유하는 외부 요인 — 다른 도메인과 달리
+│                           #   출처(weather/, station/, population/, holiday/)가 최상위이고
+│                           #   그 밑에 각각 raw/interim/processed를 둔다(예: weather/raw/
+│                           #   {asos,forecast,nowcast}, station/raw/ — 역사 위경도, 여러
+│                           #   도메인이 참조, population/raw/ — 서울 생활인구 250m 격자,
+│                           #   holiday/raw/ — 공휴일 관리 정보)
 ├─ models/                 # 학습된 모델 산출물      ← Git 추적 제외
 ├─ requirements.txt        # 프로덕션 런타임 의존성
-├─ requirements-dev.txt    # + ruff/black/pytest/httpx
+├─ requirements-dev.txt    # + ruff/black/pytest/httpx (로컬 개발용, requirements.txt 전체 포함)
+├─ requirements-ci.txt     # CI 전용 — 테스트가 실제 쓰는 것만 (AI/CLAUDE.md 참고)
 └─ pyproject.toml          # ruff/black/pytest 설정
 ```
 
@@ -176,7 +243,28 @@ AI/
   **`test/` 아래에는 `__init__.py`를 만들지 않는다** — 표준 라이브러리 `test` 패키지와 충돌한다.
   대신 테스트 파일명이 리포 전체에서 유일해야 한다(`test_<도메인>_<대상>.py`).
 - **`data/`와 `models/`는 Git에 올리지 않는다.** 용량이 크고 재생성이 가능하기 때문이며 루트
-  `.gitignore`에서 제외 처리돼 있다. 공유가 필요하면 별도 스토리지를 쓰고 경로만 문서로 남긴다.
+  `.gitignore`에서 제외 처리돼 있다. 실제 데이터 파일은 팀 공유 Google
+  Drive([SUMGIL](https://drive.google.com/drive/folders/1C_x37kCT3wfeLqqw1aApt_ODWNks8THw))의 `data/`에
+  같은 도메인·경로 구조로 올린다.
+
+### 선택: 로컬 Drive 자동 동기화 (AI 팀 전용)
+
+Google Drive for Desktop으로 SUMGIL 폴더를 로컬에 마운트해뒀다면, `develop-AI`에 새 MR이
+merge된 뒤 `git pull`을 받을 때마다 로컬 `AI/data/`가 Drive의 최신 데이터로 자동 갱신되게
+할 수 있다. 완전히 opt-in이라 설치하지 않으면 아무 영향이 없다.
+
+```bash
+# 최초 1회 (AI 팀원 각자)
+cd AI
+powershell -File scripts/install_drive_sync_hook.ps1
+```
+
+- 설치 스크립트가 물어보는 경로는 Google Drive for Desktop이 마운트한 SUMGIL 폴더(예:
+  `G:\내 드라이브\SUMGIL`)다.
+- 이후 `develop-AI`에서 `git pull`로 새 MR을 받을 때마다 Drive → 로컬 `AI/data/` 방향으로만
+  자동 복사된다(로컬 파일이 더 최신이면 덮어쓰지 않고, 삭제도 하지 않는다).
+- 새로 만든 데이터를 Drive에 올리는 건 자동화하지 않는다 — 검증 후 직접
+  `powershell AI/scripts/sync_drive_data.ps1 -Direction Push` 로 실행한다.
 
 ## 8. 작업 규칙
 
@@ -184,7 +272,9 @@ AI/
   `app/<도메인>/service.py` 또는 `pipeline/`으로 옮긴 뒤 라우터에 연결한다. 반대 방향(`app/`이
   `validation/`을 import)은 하지 않는다.
 - 피처 엔지니어링 함수는 **학습 코드와 Spark 양쪽에서 재사용 가능하게** numpy/pandas 기반 순수 함수로 작성한다. Spark에서는 `pandas_udf`로 감싸 쓴다.
-- 노트북 커밋 전 출력(output)을 비운다. diff가 읽히지 않는다.
+- **노트북 출력(output)은 지우지 않는다.** 출력이 들어 있는 ipynb는 리뷰어·팀원이 실행 없이 바로
+  보라고 의도적으로 남긴 산출물이다(`AI/CLAUDE.md` "실험 실행 효율"). 노트북은 `_build_notebook.py`
+  같은 생성 스크립트로 만들고 실행까지 해서 커밋한다.
 - API 키·인증 정보는 `.env`에 두고 커밋하지 않는다.
 - 커밋 전 로컬에서 `ruff check .`, `black --check .`, `pytest -q`를 돌려서 확인한다
   (`requirements-dev.txt` 설치 필요).

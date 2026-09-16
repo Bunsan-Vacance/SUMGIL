@@ -1,0 +1,16 @@
+# subway-ridership-daily.service 를 하루 두 번 띄우는 타이머.
+# 원천(getStnPsgr)은 어제치를 오전 중에 올린다(정확한 시각 미확정 — 143 RESULTS.md). 09:00에 받고,
+# 그때 아직 없었으면 13:00에 다시 받는다(이미 있으면 호출 0회). Persistent=true 라 서버가 꺼져 있던 회차도
+# 켜지면 바로 실행한다 — 원천 보존 창이 7일이라 하루라도 놓치면 영구 결손이다.
+
+[Unit]
+Description=Run subway-ridership-daily twice a day
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+OnCalendar=*-*-* 13:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,8 +1,3 @@
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - when: never
-
 stages:
   - lint
   - test
@@ -13,38 +8,37 @@ stages:
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - when: never
 
-# ai-lint/ai-test·be-test는 changes:로 걸러지므로 AI/·BE/ 어느 쪽도 건드리지 않는
-# MR(FE만 고치거나 루트 문서만 고친 경우 등)은 잡이 하나도 안 생긴다. GitLab은 잡 0개
-# 파이프라인을 "No stages / jobs for this pipeline"로 거부해 MR이 실패로 표시되므로,
-# 그 경우에만 대신 실행돼 파이프라인을 비지 않게 한다.
-# ⚠️ AI만 체크하면 BE만 바꾼 MR에서 be-test와 이 잡이 같이 돌아버린다 — 반드시 둘 다 본다.
+# AI·BE 검사 대상이 없는 MR도 빈 파이프라인으로 실패하지 않게 한다.
+# 각 검사의 changes 목록을 공유해 AI 문서만 바뀐 경우에도 guard가 실행되게 한다.
 mr-guard:
   stage: lint
   image: alpine:3.20
   tags:
     - CI
   rules:
-    - changes:
-        - "AI/**/*"
+    - changes: &ai_trigger_paths
+        - "AI/**/*.py"
+        - "AI/pyproject.toml"
+        - "AI/requirements.txt"
+        - "AI/requirements-dev.txt"
+        - "AI/requirements-ci.txt"
+        - ".gitlab-ci.yml"
+      when: never
+    - changes: &be_trigger_paths
         - "BE/**/*"
       when: never
     - when: on_success
   script:
-    - echo "AI/BE 변경 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
+    - echo "AI/BE 검사 대상 변경이 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
 
 .ai_job:
   image: python:3.11-slim
   tags:
     - CI
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - "AI/**/*.py"
-        - "AI/pyproject.toml"
-        - "AI/requirements.txt"
-        - "AI/requirements-dev.txt"
-        - ".gitlab-ci.yml"
+    - changes: *ai_trigger_paths
   variables:
     PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   cache:
@@ -53,7 +47,10 @@ mr-guard:
       - .cache/pip
   before_script:
     - cd AI
-    - pip install -r requirements-dev.txt
+    # requirements-dev.txt는 requirements.txt(torch·pyspark·geopandas 등 프로덕션 전체)를
+    # 통째로 끌어와 GB 단위라 매번 오래 걸린다. CI는 실제 테스트가 쓰는 것만 담은
+    # requirements-ci.txt를 쓴다 — 갱신 기준은 그 파일 상단 주석 참고.
+    - pip install -r requirements-ci.txt
 
 ai-lint:
   extends: .ai_job
@@ -77,8 +74,7 @@ be-test:
   tags:
     - CI
   rules:
-    - changes:
-        - "BE/**/*"
+    - changes: *be_trigger_paths
   services:
     # ⚠️ alias를 이미지 이름(postgres/redis)과 같게 두면 러너가 자동 생성하는 별칭과
     #    충돌해 "alias is already in use"로 skip되고, 그 결과 호스트명이 해석되지 않아
