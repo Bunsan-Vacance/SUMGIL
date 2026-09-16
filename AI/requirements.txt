@@ -11,7 +11,10 @@ pyarrow
 
 # ── ML / DL ──
 scikit-learn
-torch
+lightgbm
+xgboost
+torch  # PyPI 기본은 CPU 빌드 — GPU 학습 PC는 README 6절대로 cu130 인덱스에서 덮어쓴다
+chronos-forecasting  # 92 모델 계열 비교(Chronos zero-shot) — CI 제외
 
 # ── 지리 공간 (격자·공간 조인) ──
 geopandas
@@ -25,9 +28,25 @@ seaborn
 
 # ── 데이터 수집 ──
 requests
+beautifulsoup4
 python-dotenv
+tenacity
+pyyaml
+chardet
+openpyxl
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+kafka-python
+
+# ── 통계 (EDA) ──
+statsmodels
 
 # ── API 서빙 ──
 fastapi
 uvicorn[standard]
 pydantic-settings
+
+# ── 진단 ──
+psutil  # 대규모 배치 스크립트 피크 메모리 측정용(BYC full-coverage-check 실측)

@@ -1,0 +1,22 @@
+# systemd 유닛 템플릿(oneshot). subway-ridership-daily.timer 가 하루 두 번 띄운다.
+# scripts/install_data_engine_services.sh 로 placeholder를 치환해 설치한다.
+#
+#   bash AI/DATA_ENGINE/scripts/install_data_engine_services.sh
+#   sudo systemctl enable --now subway-ridership-daily.timer
+#   sudo systemctl list-timers subway-ridership-daily.timer
+#
+# 어제부터 7일 중 누적 파일에 없는 날짜만 받는다(하루 ≈67회 호출, 첫 실행 ≈460회).
+
+[Unit]
+Description=Seoul Metro D-1 station ridership collector (getStnPsgr)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=<REPO_ROOT>/AI
+EnvironmentFile=<REPO_ROOT>/AI/.env
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=<VENV_PATH>/bin/python -m DATA_ENGINE.collect.subway_ridership_daily --days 7 --yes
+StandardOutput=append:<REPO_ROOT>/AI/logs/subway_ridership_daily.log
+StandardError=append:<REPO_ROOT>/AI/logs/subway_ridership_daily.log

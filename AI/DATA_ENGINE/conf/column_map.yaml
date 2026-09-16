@@ -1,0 +1,35 @@
+# 서울 열린데이터광장 "파일형" 원본 컬럼명 → 정규화 컬럼명 매핑.
+#
+# 2026-09-06, 실제 다운로드 파일(2026년 1~7월치)로 헤더 확인 완료 — 아래는 추정치가 아니라
+# 실물 대조 결과. 단, 향후 배포분에서 컬럼이 또 바뀔 수 있으니 새로 받을 때마다 헤더 대조 권장.
+
+rental_history:  # OA-15182, "대여소별 이용정보(월별)" — 건별 이력이 아니라 월별 집계다.
+  # 시간 해상도가 없어(기준년월만) 날씨-수요 상관분석엔 못 쓰고, 정류소/자치구 단위
+  # 월간 총량 파악용으로만 쓴다. encoding=UTF-8-SIG.
+  자치구: district
+  대여소명: station_name
+  기준년월: year_month
+  대여건수: rent_count
+  반납건수: return_count
+
+station_5min:  # OA-21229, "대여소별 5분단위 이용현황(O-D)" — 날씨-수요 분석의 실제 소스.
+  # 기준_날짜 + 기준_시간대(HMM/HHMM, 5분단위)를 합쳐 parsers.py에서 dt_5min(datetime)을
+  # 만든다. encoding=CP949, zip 안에 일자별 CSV.
+  기준_날짜: date
+  집계_기준: agg_basis
+  기준_시간대: time_code
+  시작_대여소_ID: start_station_id
+  시작_대여소명: start_station_name
+  종료_대여소_ID: end_station_id
+  종료_대여소명: end_station_name
+  전체_건수: trip_count
+  전체_이용_분: duration_min
+  전체_이용_거리: distance_m
+
+station_master:  # OA-21235, 대여소 좌표 마스터 — 거치대수·대여소명 없음(위경도만).
+  # 공간분석(4번 섹션)의 좌표 조인용. encoding=CP949.
+  대여소_ID: station_id
+  주소1: address1
+  주소2: address2
+  위도: latitude
+  경도: longitude

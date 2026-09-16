@@ -1,0 +1,197 @@
+{
+  "rentBikeStatus": {
+    "list_total_count": 1000,
+    "RESULT": {
+      "CODE": "INFO-000",
+      "MESSAGE": "정상 처리되었습니다."
+    },
+    "row": [
+      {
+        "rackTotCnt": "15",
+        "stationName": "102. 망원역 1번출구 앞",
+        "parkingBikeTotCnt": "5",
+        "shared": "33",
+        "stationLatitude": "37.55564880",
+        "stationLongitude": "126.91062927",
+        "stationId": "ST-4"
+      },
+      {
+        "rackTotCnt": "14",
+        "stationName": "103. 망원역 2번출구 앞",
+        "parkingBikeTotCnt": "4",
+        "shared": "29",
+        "stationLatitude": "37.55495071",
+        "stationLongitude": "126.91083527",
+        "stationId": "ST-5"
+      },
+      {
+        "rackTotCnt": "13",
+        "stationName": "104. 합정역 1번출구 앞",
+        "parkingBikeTotCnt": "8",
+        "shared": "62",
+        "stationLatitude": "37.55073929",
+        "stationLongitude": "126.91508484",
+        "stationId": "ST-6"
+      },
+      {
+        "rackTotCnt": "5",
+        "stationName": "105. 합정역 5번출구 앞",
+        "parkingBikeTotCnt": "21",
+        "shared": "420",
+        "stationLatitude": "37.55000687",
+        "stationLongitude": "126.91482544",
+        "stationId": "ST-7"
+      },
+      {
+        "rackTotCnt": "12",
+        "stationName": "106. 합정역 7번출구 앞",
+        "parkingBikeTotCnt": "4",
+        "shared": "33",
+        "stationLatitude": "37.54864502",
+        "stationLongitude": "126.91282654",
+        "stationId": "ST-8"
+      },
+      {
+        "rackTotCnt": "10",
+        "stationName": "107. 수협 연남동지점",
+        "parkingBikeTotCnt": "11",
+        "shared": "110",
+        "stationLatitude": "37.55784607",
+        "stationLongitude": "126.91871643",
+        "stationId": "ST-9"
+      },
+      {
+        "rackTotCnt": "12",
+        "stationName": "108. 서교동 사거리",
+        "parkingBikeTotCnt": "4",
+        "shared": "33",
+        "stationLatitude": "37.55274582",
+        "stationLongitude": "126.91861725",
+        "stationId": "ST-10"
+      },
+      {
+        "rackTotCnt": "10",
+        "stationName": "111. 상수역 2번출구 앞",
+        "parkingBikeTotCnt": "7",
+        "shared": "70",
+        "stationLatitude": "37.54787064",
+        "stationLongitude": "126.92353058",
+        "stationId": "ST-15"
+      },
+      {
+        "rackTotCnt": "28",
+        "stationName": "113. 홍대입구역 2번출구 앞",
+        "parkingBikeTotCnt": "24",
+        "shared": "86",
+        "stationLatitude": "37.55743790",
+        "stationLongitude": "126.92382050",
+        "stationId": "ST-18"
+      },
+      {
+        "rackTotCnt": "15",
+        "stationName": "114. 홍대입구역 8번출구 앞",
+        "parkingBikeTotCnt": "8",
+        "shared": "53",
+        "stationLatitude": "37.55706024",
+        "stationLongitude": "126.92442322",
+        "stationId": "ST-20"
+      },
+      {
+        "rackTotCnt": "15",
+        "stationName": "115. 마스타 빌딩 앞",
+        "parkingBikeTotCnt": "1",
+        "shared": "7",
+        "stationLatitude": "37.55893326",
+        "stationLongitude": "126.92711639",
+        "stationId": "ST-12"
+      },
+      {
+        "rackTotCnt": "23",
+        "stationName": "117. 홍은사거리",
+        "parkingBikeTotCnt": "5",
+        "shared": "22",
+        "stationLatitude": "37.59115982",
+        "stationLongitude": "126.94132996",
+        "stationId": "ST-17"
+      },
+      {
+        "rackTotCnt": "9",
+        "stationName": "118. 광흥창역 2번출구 앞",
+        "parkingBikeTotCnt": "1",
+        "shared": "11",
+        "stationLatitude": "37.54773331",
+        "stationLongitude": "126.93176270",
+        "stationId": "ST-19"
+      },
+      {
+        "rackTotCnt": "10",
+        "stationName": "119. 서강나루 공원",
+        "parkingBikeTotCnt": "4",
+        "shared": "40",
+        "stationLatitude": "37.54520798",
+        "stationLongitude": "126.93146515",
+        "stationId": "ST-21"
+      },
+      {
+        "rackTotCnt": "5",
+        "stationName": "120. 신수동 사거리",
+        "parkingBikeTotCnt": "2",
+        "shared": "40",
+        "stationLatitude": "37.54524231",
+        "stationLongitude": "126.93411255",
+        "stationId": "ST-22"
+      },
+      {
+        "rackTotCnt": "15",
+        "stationName": "121. 마포소방서 앞",
+        "parkingBikeTotCnt": "0",
+        "shared": "0",
+        "stationLatitude": "37.54976654",
+        "stationLongitude": "126.93317413",
+        "stationId": "ST-23"
+      },
+      {
+        "rackTotCnt": "10",
+        "stationName": "122. 신성기사식당 앞",
+        "parkingBikeTotCnt": "1",
+        "shared": "10",
+        "stationLatitude": "37.54745865",
+        "stationLongitude": "126.93837738",
+        "stationId": "ST-24"
+      },
+      {
+        "rackTotCnt": "20",
+        "stationName": "123. 문화촌 공원",
+        "parkingBikeTotCnt": "7",
+        "shared": "35",
+        "stationLatitude": "37.59432983",
+        "stationLongitude": "126.94738770",
+        "stationId": "ST-25"
+      },
+      {
+        "rackTotCnt": "35",
+        "stationName": "124. 서강대 정문 건너편",
+        "parkingBikeTotCnt": "1",
+        "shared": "3",
+        "stationLatitude": "37.55113983",
+        "stationLongitude": "126.93698883",
+        "stationId": "ST-26"
+      },
+      {
+        "rackTotCnt": "20",
+        "stationName": "126. 서강대 후문 옆",
+        "parkingBikeTotCnt": "0",
+        "shared": "0",
+        "stationLatitude": "37.55041122",
+        "stationLongitude": "126.94384766",
+        "stationId": "ST-28"
+      }
+    ]
+  },
+  "_probe": {
+    "source": "bike",
+    "originalRowCount": 1000,
+    "keptRowCount": 20,
+    "savedAt": "2026-09-08T03:58:54.434Z"
+  }
+}
