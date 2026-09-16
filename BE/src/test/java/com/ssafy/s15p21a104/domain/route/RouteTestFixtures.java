@@ -270,7 +270,7 @@ public final class RouteTestFixtures {
         lenient().when(registry.stationInfos()).thenReturn(infos);
         return new RouteSearchService(stationRepository, registry, new TransferRule(180),
                 new RailGeometryRegistry(null, null), noopWalkGeometryRegistry(), noopBikeGeometryRegistry(),
-                noopRouteLineRepository(), noopBusRouteRepository());
+                noopRouteLineRepository(), noopBusRouteRepository(), noopCongestionRepository());
     }
 
     /**
@@ -299,5 +299,13 @@ public final class RouteTestFixtures {
     /** 이름 조회가 필요 없는 테스트용 mock. {@code findAllById}는 기본값(빈 목록)을 준다(S15P21A104-150). */
     public static com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository noopBusRouteRepository() {
         return mock(com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository.class);
+    }
+
+    /**
+     * 혼잡도 조회가 필요 없는 테스트용 mock. 항상 빈 값을 준다(S15P21A104-157 — priority=COMFORT를
+     * 쓰지 않는 테스트의 기본값).
+     */
+    public static com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository noopCongestionRepository() {
+        return mock(com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository.class);
     }
 }

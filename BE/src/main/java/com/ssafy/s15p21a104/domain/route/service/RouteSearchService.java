@@ -2,6 +2,9 @@ package com.ssafy.s15p21a104.domain.route.service;
 
 import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
 import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
+import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
+import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
+import com.ssafy.s15p21a104.domain.congestion.scoring.CongestionScorer;
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
 import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
@@ -80,6 +83,7 @@ public class RouteSearchService {
     private final BikeGeometryRegistry bikeGeometryRegistry;
     private final RouteLineRepository routeLineRepository;
     private final BusRouteRepository busRouteRepository;
+    private final CongestionRepository congestionRepository;
 
     public List<RouteSearchResponse> search(
             String originStationId,
@@ -109,7 +113,71 @@ public class RouteSearchService {
         // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
         // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
         // 후보 수가 줄어든 다음(필터+재라벨링 이후)에 배치로 붙인다(FE-175 항목8).
-        return withRouteNames(relabelByRank(filterByModes(candidates, modes)));
+        List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, modes));
+        // priority=COMFORT가 아니면 순서·라벨을 전혀 건드리지 않는다(S15P21A104-157 AC2, 회귀 없음).
+        if (priority == RoutePriority.COMFORT) {
+            ranked = applyComfortPriority(ranked, departureSlot);
+        }
+        return withRouteNames(ranked);
+    }
+
+    /**
+     * priority=COMFORT일 때 혼잡도가 가장 낮은 후보를 맨 앞으로 재정렬하고
+     * {@link RouteType#LOW_CONGESTION}으로 표시한다(S15P21A104-157).
+     *
+     * <p>이미 나온 후보들을 재정렬만 할 뿐, 탐색 알고리즘·그래프는 건드리지 않는다.
+     * 혼잡도 데이터가 하나도 없으면(노선 정보 자체가 없거나 congestion 테이블에 값이 없으면)
+     * 아무것도 바꾸지 않는다 — 혼잡도를 반영한 척하지 않는다(값을 지어내지 않는다는 원칙).
+     */
+    private List<RouteSearchResponse> applyComfortPriority(
+            List<RouteSearchResponse> candidates, DepartureSlot departureSlot) {
+        Set<String> subwayRouteIds = new HashSet<>();
+        for (RouteSearchResponse candidate : candidates) {
+            for (RouteLegResponse leg : candidate.legs()) {
+                if (leg.mode() == TravelMode.SUBWAY && leg.routeId() != null) {
+                    subwayRouteIds.add(leg.routeId());
+                }
+            }
+        }
+        if (subwayRouteIds.isEmpty()) {
+            return candidates;
+        }
+        Map<String, Double> levelByRouteId = new HashMap<>();
+        for (String routeId : subwayRouteIds) {
+            congestionRepository.findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                            CongestionTarget.LINE, routeId, departureSlot.dowType(), departureSlot.timeSlot())
+                    .ifPresent(c -> levelByRouteId.put(routeId, c.getLevel().doubleValue()));
+        }
+        if (levelByRouteId.isEmpty()) {
+            return candidates;
+        }
+
+        Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
+        for (RouteSearchResponse candidate : candidates) {
+            CongestionScorer.score(candidate.legs(), levelByRouteId)
+                    .ifPresent(score -> scoreByCandidate.put(candidate, score));
+        }
+        if (scoreByCandidate.isEmpty()) {
+            return candidates;
+        }
+
+        List<RouteSearchResponse> sorted = new ArrayList<>(candidates);
+        sorted.sort(Comparator.comparingDouble(
+                candidate -> scoreByCandidate.getOrDefault(candidate, Double.MAX_VALUE)));
+
+        List<RouteSearchResponse> relabeled = new ArrayList<>();
+        boolean lowestTagged = false;
+        for (RouteSearchResponse candidate : sorted) {
+            if (!lowestTagged && scoreByCandidate.containsKey(candidate)) {
+                relabeled.add(new RouteSearchResponse(
+                        RouteType.LOW_CONGESTION, candidate.totalMinutes(), candidate.legs(),
+                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
+                lowestTagged = true;
+            } else {
+                relabeled.add(candidate);
+            }
+        }
+        return relabeled;
     }
 
     /**

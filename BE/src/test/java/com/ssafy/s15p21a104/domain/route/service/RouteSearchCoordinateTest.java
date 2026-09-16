@@ -42,7 +42,8 @@ class RouteSearchCoordinateTest {
     private RouteSearchService service() {
         return new RouteSearchService(stationRepository, graphRegistry, transferRule, railGeometryRegistry,
                 RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
-                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository());
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository());
     }
 
     @Test
