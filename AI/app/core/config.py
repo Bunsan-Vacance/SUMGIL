@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     # 이 시간(초)보다 오래된 updated_at은 신뢰하지 않고 "없음"으로 취급한다.
     bike_live_stock_max_staleness_seconds: float = 300.0
 
+    # ── BIKE D-1/D-7 lag (LightGBM anchor+horizon 서빙용, Phase 2) ──
+    # snapshot_stock_history.py(30분마다)가 쌓는 일별 관측 로그.
+    bike_stock_history_dir: Path = AI_ROOT / "data" / "BIKE" / "raw" / "realtime" / "stock_history"
+    # update_lag_lookup.py(하루 1회)가 위 로그를 집계해 만드는 표 — lag_features.attach_lag()가
+    # 그대로 읽을 수 있는 스키마(od_station_id·lag_date·lag_time_slot·lag_stock)를 쓴다.
+    bike_lag_lookup_path: Path = (
+        AI_ROOT / "data" / "BIKE" / "raw" / "realtime" / "lag_lookup_live.parquet"
+    )
+    # D-7까지만 있으면 되므로 여유를 조금 둔 보관 기간(일). 이보다 오래된 관측 로그·lookup
+    # 행은 update_lag_lookup.py가 정리한다.
+    bike_lag_lookup_retention_days: int = 10
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]
