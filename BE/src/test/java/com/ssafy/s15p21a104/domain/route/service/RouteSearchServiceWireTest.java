@@ -61,6 +61,8 @@ class RouteSearchServiceWireTest {
                 // X는 고립 정점(A에서 도달 불가). 자기 루프로 정점만 등록한다.
                 new Edge("X", "X", "L9", 10, 0, TravelMode.SUBWAY));
         lenient().when(graphRegistry.graph()).thenReturn(graph);
+        lenient().when(graphRegistry.candidateSubgraphs())
+                .thenAnswer(invocation -> RouteTestFixtures.candidateSubgraphsOf(graphRegistry.graph()));
         Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
         infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
         infos.put("B", new RouteMapper.StationInfo("B", "비역", 37.5, 127.0));
