@@ -50,7 +50,11 @@ for _p in (
 
 import holdout
 
-from app.CROWD.pipeline.batch_predict import predict_day, to_congestion_table
+from app.CROWD.pipeline.batch_predict import (
+    fixed_predictor_factory,
+    predict_day,
+    to_congestion_table,
+)
 from app.CROWD.pipeline.calendar import attach_calendar, load_holidays
 from app.CROWD.pipeline.congestion import bucket_day_type, grade
 from app.CROWD.pipeline.dataset import CROWD_INTERIM
@@ -197,7 +201,15 @@ def status_distribution(
     rows = []
     for date in dates:
         day = pd.Timestamp(date)
-        predicted, _ = predict_day(predictor, panel, day, segments, holidays, events)
+        predicted, _ = predict_day(
+            fixed_predictor_factory(predictor),
+            panel,
+            day,
+            segments,
+            holidays,
+            events,
+            override_kind=predictor.kind,
+        )
         day_type = str(predicted["day_type"].iloc[0])
         for name, table in tables.items():
             out = to_congestion_table(predicted, segments, capacity, table, thresholds)
