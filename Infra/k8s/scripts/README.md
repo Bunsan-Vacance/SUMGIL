@@ -1,6 +1,9 @@
 # Infra/k8s/scripts — 스크립트 안내
 
 > 노드 표기: **node1 = a104(CP)**, **node2 = a104a(worker)**.
+> 현행 클러스터 (2026-09-16 재구축): be·collector·consumer·fe ×1, StS ×3, Ingress tls(80,443),
+> sumgil-tls Ready (LE, 만료 12/15), be-config 단일(17키), 고아 CM·Secret 제거済.
+> 저장소-클러스터 일치 확인済 (2026-09-16). 상세 AC 기록은 티켓 210 정의서.
 
 ## 구성 (`setup/` 최초 1회 vs `deploy/` 반복, `env.sh` 공용)
 

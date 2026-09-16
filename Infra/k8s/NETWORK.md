@@ -2,7 +2,8 @@
 
 > 단일 정본. Service 추가·포트 변경 시 이 표를 먼저 고친다.
 > 노드 포트(ufw·NodePort 실측)는 `mgmt/ops/port-inventory.md`, 경계 계약은 `CONTRACT.md`.
-> 네임스페이스: 앱·데이터 전부 `prod` (ingress-nginx만 `ingress-nginx`).
+> 네임스페이스: 앱·데이터 전부 `prod` (`ingress-nginx`·`cert-manager`는 각자 ns).
+> 현행 실측 (2026-09-16): 위 표 전부 Ready. Ingress 80,443 양쪽. `sumgil-tls` Ready.
 
 ## DNS·포트표 (클러스터 내부 호출용)
 

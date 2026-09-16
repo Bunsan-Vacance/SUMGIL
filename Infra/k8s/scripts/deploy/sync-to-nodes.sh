@@ -9,6 +9,7 @@
 #   REMOTE_DIR   원격 위치 (기본 "sumgil")
 #
 # 노트: 이미지 빌드는 노드에서 하므로 BE/FE 소스가 필요하다. 시크릿(.env)은 제외한다.
+# WSL에서는 HOME·config 꼬임으로 preflight가 오탐할 수 있다 — 그 경우 PowerShell(git-bash ssh) 셸에서 실행한다.
 
 set -euo pipefail
 
