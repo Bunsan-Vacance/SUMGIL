@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml" />
+
+    <property name="LOG_HOSTNAME" value="${HOSTNAME:-localhost}" />
+    <property name="LOG_PID" value="${PID:-unknown}" />
+
+    <property name="CONSOLE_TEXT_PATTERN"
+              value="%clr([%8.8t]){faint} %clr(---){faint} %clr([%X{traceId:-SYSTEM}]){faint} %clr(%-30.30(%logger{0}:%L)){cyan} %clr(%5p) %m %n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+
+    <appender name="CONSOLE_TEXT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_TEXT_PATTERN}</pattern>
+            <charset>utf8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder" />
+    </appender>
+
+    <appender name="FILE_JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/app-log.json</file>
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <timeZone>Asia/Seoul</timeZone>
+                </timestamp>
+                <mdc>
+                    <includeMdcKeyName>traceId</includeMdcKeyName>
+                </mdc>
+                <mdc>
+                    <includeMdcKeyName>method</includeMdcKeyName>
+                </mdc>
+                <mdc>
+                    <includeMdcKeyName>uri</includeMdcKeyName>
+                </mdc>
+                <mdc>
+                    <includeMdcKeyName>status</includeMdcKeyName>
+                </mdc>
+                <logLevel />
+                <logLevelValue />
+                <loggerName />
+                <message />
+                <stackTrace />
+                <threadName />
+                <globalCustomFields>
+                    <customFields>
+                        {
+                            "hostname": "${LOG_HOSTNAME}",
+                            "pid": "${LOG_PID}"
+                        }
+                    </customFields>
+                </globalCustomFields>
+            </providers>
+        </encoder>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/app-log-%d{yyyy-MM-dd}.json</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- local·기본값: 텍스트 콘솔 + JSON 파일 -->
+    <springProfile name="local, default">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE_TEXT" />
+            <appender-ref ref="FILE_JSON" />
+        </root>
+    </springProfile>
+
+    <!-- 운영(prod): JSON 콘솔만 -->
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE_JSON" />
+        </root>
+    </springProfile>
+</configuration>

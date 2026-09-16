@@ -1,0 +1,33 @@
+# BE Kustomize (S15P21A104-125/126). namespace prod 참조 (생성은 Infra 소유).
+# 비민감 설정은 configMapGenerator(config.env → be-config).
+# 비밀은 데이터 계층이 소유한 data-secret(DB_PASSWORD)을 소비한다 (앱 → 데이터 방향).
+# 데이터 계층 매니페스트는 Infra/k8s/prod/로 이관했다 (Postgres·Redis·Kafka·Registry).
+# 레지스트리: 클러스터 내장. 노드가 클러스터 DNS를 못 풀어 NodePort 주소로 pull한다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - be.yaml
+  - be-collector.yaml
+  - be-consumer.yaml
+  - ingress.yaml
+images:
+  - name: sumgil-be
+    newName: 100.103.156.53:30500/sumgil-be
+    newTag: latest
+configMapGenerator:
+  - name: be-config
+    envs:
+      - config.env
+  - name: be-collector-config
+    envs:
+      - collector.env
+  - name: be-consumer-config
+    envs:
+      - consumer.env
+# 앱 고유 비밀 (S15P21A104-173). .env.secret 은 커밋하지 않으므로 노드에 먼저 두어야 apply 가 된다
+# — 키 이름은 .env.example 참고. sync-to-nodes.sh 는 이 파일을 tar 에서 제외하므로 별도로 scp 한다.
+secretGenerator:
+  - name: be-secret
+    envs:
+      - .env.secret

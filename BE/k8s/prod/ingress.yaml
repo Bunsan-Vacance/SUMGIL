@@ -1,0 +1,20 @@
+# BE 라우팅 (S15P21A104-126/128). BE 소유 — 자기 경로 /api/ 만 선언한다.
+# FE 경로(/)는 FE/k8s/prod/ingress.yaml 이 소유한다. 컨트롤러는 ingress-nginx.
+# 단일 호스트 고정 (와일드카드 등록 불가). 클러스터 내부는 HTTP (상위 TLS 종결).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: be
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: j15a104.p.ssafy.io
+      http:
+        paths:
+          - path: /api/
+            pathType: Prefix
+            backend:
+              service:
+                name: be
+                port:
+                  number: 8080

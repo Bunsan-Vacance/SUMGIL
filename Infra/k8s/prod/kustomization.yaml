@@ -1,0 +1,18 @@
+# prod 환경에서 Infra가 소유하는 ns-스코프 리소스 (데이터 계층 + 플랫폼 서비스).
+# 계층 구분은 라벨(app.kubernetes.io/part-of) — 네임스페이스는 환경 축(prod)을 유지한다.
+# 데이터 자격증명은 데이터 계층이 소유한다(secretGenerator data-secret). 해시 접미사는 끄고 이름을 고정한다
+# (BE 등 다른 kustomization이 이름으로 참조하므로).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - postgres.yaml
+  - redis.yaml
+  - kafka.yaml
+  - registry.yaml
+secretGenerator:
+  - name: data-secret
+    envs:
+      - .env.secret
+generatorOptions:
+  disableNameSuffixHash: true

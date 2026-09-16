@@ -1,0 +1,51 @@
+# 실시간 컨슈머 워크로드 (S15P21A104-171). be·be-collector 와 같은 sumgil-be 이미지에 consume 프로파일만 켠 것이다
+# — 컨슈머 코드가 같은 jar 안에 있어 별도 이미지가 필요 없다. API 서버는 뜨지 않는다
+# (application-consume.yml 의 web-application-type: none).
+#
+# replicas 1 고정: 토픽이 전부 파티션 1이다 (S15P21A104-168). 같은 컨슈머 그룹에 둘을 띄워도
+# 파티션 하나를 한쪽이 가져가고 나머지는 논다 — 처리량을 늘리려면 파티션부터 늘려야 한다.
+# Recreate: 롤아웃 중 구·신 파드가 겹치면 리밸런스가 두 번 일어난다. 잠깐 끊기는 편이 낫다.
+#
+# 수집기와 달리 외부 API 인증키가 필요 없다 — Kafka 에서 읽어 Redis 에 쓰기만 한다. be-secret 을 물리지 않는 이유다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: be-consumer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: be-consumer
+  template:
+    metadata:
+      labels:
+        app: be-consumer
+    spec:
+      containers:
+        - name: be-consumer
+          image: sumgil-be:latest
+          env:
+            # be-config 의 SPRING_PROFILES_ACTIVE=prod 를 덮는다 (env 가 envFrom 보다 우선).
+            - name: SPRING_PROFILES_ACTIVE
+              value: prod,consume
+          envFrom:
+            - configMapRef:
+                name: be-config             # DB_URL·REDIS_HOST 등. consume 프로파일도 컨텍스트를 공유해 필요하다
+            - configMapRef:
+                name: be-collector-config   # COLLECT_SUBWAY_WINDOW — 상태 키 판정에 쓴다. 수집기와 같은 값이어야 해서
+                                            # 별도로 두지 않고 수집기 ConfigMap 을 그대로 물린다
+            - configMapRef:
+                name: be-consumer-config    # 컨슈머 그룹·브로커 주소 (consumer.env)
+            - secretRef:
+                name: data-secret           # DB_PASSWORD (데이터 계층 소유)
+          # HTTP 포트가 없어 httpGet 프로브를 걸 수 없다. v1 은 프로브 없이 두고 프로세스가 죽으면
+          # restartPolicy(Always) 로 다시 뜨게 한다. 컨슈머가 살아 있는지는 kafka-consumer-groups 의 LAG 로 본다.
+          resources:
+            requests:
+              memory: 384Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m

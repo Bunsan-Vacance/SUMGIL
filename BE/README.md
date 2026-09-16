@@ -1,6 +1,6 @@
 # Backend
 
-**스택** Java 21 · Spring Boot 3.x · Gradle · PostgreSQL · Redis
+**스택** Java 21 · Spring Boot 4.1 · Gradle · PostgreSQL · Redis
 
 > **숨길** — 지하철 탈출 내비게이션.
 > AI 파트가 배치로 만들어둔 산출물과 실시간 스트림 결과를 **사용자 요청 시점에 조합해 두 선택지로 내려주는 파트**다.
@@ -76,13 +76,20 @@
 ```
 [AI 배치 산출물]  역전 테이블 · 착석 지수 · 소요시간표
         │
-        ├──▶ PostgreSQL   정적·준정적 데이터 (역, 대여소, 사전계산 결과)
-        │
-[Spark Streaming]  실시간 재고 · 도착정보
-        │
-        └──▶ Redis        TTL 짧은 실시간 값
+        └──▶ PostgreSQL   정적·준정적 데이터 (역, 대여소, 사전계산 결과)
                  │
-              [BE 조회] ──▶ 응답 조합
+[서울시·기상청 API]        │
+        │                 │
+   [BE 수집기]  collect 프로파일 · 주기 폴링 (S15P21A104-169)
+        │                 │
+        └──▶ Kafka  subway.arrival · bike.stock · weather.nowcast (보관 48h)
+               │           │
+               ├──▶ [BE 컨슈머]  consume 프로파일 · 그룹 be-redis (171)
+               │          └──▶ Redis   TTL 짧은 실시간 값
+               │                 │
+               └──▶ [AI Spark]  그룹 ai-spark — 같은 이벤트를 따로 읽는다. Redis 를 거치지 않는다
+                                 │
+                            [BE 조회] ──▶ 응답 조합
 ```
 
 - **Redis가 죽으면 실시간 재고를 못 읽는다.** 이 경우 자전거 추천을 차단하고 `blockedReason`으로 사유를 내려준다 — 틀린 재고로 헛걸음을 만들지 않는다.
@@ -98,7 +105,8 @@
 
 ## 6. 초기화
 
-**아직 프로젝트가 생성되지 않았다.** 폴더만 잡아둔 상태이며, [Spring Initializr](https://start.spring.io)에서 아래 설정으로 생성해 이 디렉터리에 푼다.
+프로젝트 생성 완료 (Initializr, 설정은 아래 표와 같다).
+추가 의존성: Flyway, springdoc-openapi, logstash 인코더, dotenv(로컬 전용).
 
 | 항목 | 값 |
 | --- | --- |
@@ -130,16 +138,20 @@ unzip starter.zip && rm starter.zip
 
 ```
 BE/src/main/java/com/ssafy/s15p21a104/
+├─ api/           인터페이스(*Api) + 구현(*Controller), 도메인별 하위 패키지
+├─ domain/
+│  ├─ station/     역·노선·환승 정보
+│  ├─ bus/         정류소·버스노선
+│  ├─ bike/        대여소·재고 예측
+│  ├─ congestion/  혼잡도
+│  └─ route/       경로 그래프 (엣지)
 ├─ global/
-│  ├─ config/      CORS, Swagger, Redis, JPA
+│  ├─ config/      필터·Swagger·JPA·Flyway·Redis·CORS(미사용)
 │  ├─ exception/   전역 예외 처리
-│  └─ common/      공통 응답 포맷, 유틸
-└─ domain/
-   ├─ station/     역 정보, 검색
-   ├─ escape/      A안/B안 비교 (킬러 기능)
-   ├─ congestion/  혼잡도, 착석 기회 지수
-   ├─ bike/        대여소, 실시간 재고
-   └─ route/       경로 그래프, 다익스트라, λ 반영
+│  ├─ response/    공통 응답 래퍼
+│  ├─ cache/       Redis 키 네이밍·TTL 정책
+│  └─ common/      감사 기반 엔티티
+└─ infrastructure/ 외부 연동 (향후)
 ```
 
 도메인 단위로 수직 분할한다. 레이어를 최상위에 두면 도메인이 늘어날수록 탐색이 어려워진다.
@@ -147,20 +159,28 @@ BE/src/main/java/com/ssafy/s15p21a104/
 ## 8. 실행
 
 ```bash
-./gradlew bootRun    # 개발 서버 (http://localhost:8080)
+# DB·Redis 기동 (저장소 루트에서)
+docker compose -f Infra/docker/docker-compose.yml up -d postgres redis
+
+# BE 실행 (BE 디렉토리에서, local 프로파일 필수)
+cd BE
+SPRING_PROFILES_ACTIVE=local ./gradlew bootRun    # 개발 서버 (http://localhost:8080)
 ./gradlew build      # 빌드
 ./gradlew test       # 테스트
 ```
+
+로컬 접속 정보는 `application-local.yml`(Git 제외)에 둔다.
+`BE/.env.example`에 키 목록이 있다.
 
 ## 9. 작업 규칙
 
 - **DB 접속 정보·API 키는 `application.yml`에 직접 쓰지 않는다.** 환경 변수 또는 `application-local.yml`(Git 제외)로 분리하고, `application.yml`에는 키 이름만 남긴다.
 - Entity를 Controller 응답으로 그대로 내보내지 않는다. DTO로 변환한다.
 - API 명세는 Swagger(springdoc-openapi)로 자동 생성하고 FE 타입 정의와 1:1로 맞춘다.
-- **외부 API를 BE가 직접 폴링하지 않는다.** 실시간 수집은 스트림 파이프라인이 맡고 BE는 Redis만 읽는다. 호출 한도(`bikeList` 1,000건/호출 등)를 여러 곳에서 소모하면 관리가 불가능해진다.
+- **API 서버는 외부 API를 직접 폴링하지 않는다.** 실시간 수집은 전용 프로파일(`collect`)의 수집기 프로세스가 맡고, 반영은 `consume` 컨슈머가 한다. **API 서버 컨텍스트에는 Kafka 빈도 수집기도 컨슈머도 없고 Redis를 읽기만 한다** — `KafkaBeansAbsentTest`가 이 경계를 못 박는다. 호출 한도(서울 열린데이터 1,000회/일 등)를 여러 곳에서 소모하면 관리가 불가능해지기 때문이다. 수집기는 [docs/infra/collector.md](docs/infra/collector.md), 컨슈머는 [docs/infra/consumer.md](docs/infra/consumer.md).
 
 ## 10. 다음 할 일
 
-1. Spring Initializr로 프로젝트 생성, Swagger 연결
+1. ~~Spring Initializr로 프로젝트 생성, Swagger 연결~~ — 완료
 2. **`POST /api/v1/escape` 응답 스키마를 FE와 확정** — 나머지는 여기서 파생된다
-3. 로컬 PostgreSQL·Redis를 Docker Compose로 띄우기 → [Infra](../Infra/README.md)
+3. ~~로컬 PostgreSQL·Redis를 Docker Compose로 띄우기~~ — 완료. `Infra/docker/docker-compose.yml`

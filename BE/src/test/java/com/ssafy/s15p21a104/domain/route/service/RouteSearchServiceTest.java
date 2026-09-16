@@ -1,0 +1,104 @@
+package com.ssafy.s15p21a104.domain.route.service;
+
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
+
+import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
+import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
+import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
+import com.ssafy.s15p21a104.domain.route.graph.Edge;
+import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import com.ssafy.s15p21a104.domain.station.entity.Station;
+import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
+import com.ssafy.s15p21a104.global.exception.DomainException;
+import com.ssafy.s15p21a104.global.exception.ErrorType;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+/**
+ * 경로 검색 오류·미적재 계약 검증. 가짜 후보를 만들지 않으므로 mock 후보 테스트는 없다.
+ * 알고리즘 정상계는 RouteSearchServiceWireTest가 담당한다.
+ */
+@ExtendWith(MockitoExtension.class)
+class RouteSearchServiceTest {
+
+    @Mock
+    private StationRepository stationRepository;
+
+    @Mock
+    private RouteGraphRegistry graphRegistry;
+
+    private RouteSearchService routeSearchService;
+
+    @BeforeEach
+    void setUp() {
+        Station origin = mockStation("0222", "한티");
+        Station dest = mockStation("0221", "역삼");
+        lenient().when(stationRepository.findById("0222")).thenReturn(Optional.of(origin));
+        lenient().when(stationRepository.findById("0221")).thenReturn(Optional.of(dest));
+        lenient().when(stationRepository.findById("9999")).thenReturn(Optional.empty());
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                new Edge("0222", "0221", "2", 300, 0, TravelMode.SUBWAY)));
+        routeSearchService = new RouteSearchService(
+                stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
+                RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository());
+    }
+
+    @Test
+    @DisplayName("출발지와 도착지가 같으면 SAME_ORIGIN_DEST")
+    void 출발지와_도착지가_같으면_SAME_ORIGIN_DEST() {
+        DomainException exception = assertThrows(DomainException.class,
+                () -> routeSearchService.search("0222", "0222", null, null, null));
+
+        assertEquals(ErrorType.SAME_ORIGIN_DEST, exception.getErrorType());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 역이면 STATION_NOT_FOUND")
+    void 존재하지_않는_역이면_STATION_NOT_FOUND() {
+        DomainException exception = assertThrows(DomainException.class,
+                () -> routeSearchService.search("9999", "0221", null, null, null));
+
+        assertEquals(ErrorType.STATION_NOT_FOUND, exception.getErrorType());
+    }
+
+    @Test
+    @DisplayName("그래프 미적재 시 503 ROUTE_DATA_NOT_READY다(경로 없음과 구분, FE-175 항목9)")
+    void 미적재시_503() {
+        RouteSearchService unloaded = new RouteSearchService(
+                stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null),
+                RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
+                RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository());
+
+        DomainException exception = assertThrows(DomainException.class,
+                () -> unloaded.search("0222", "0221", null, null, null));
+
+        assertEquals(ErrorType.ROUTE_DATA_NOT_READY, exception.getErrorType());
+    }
+
+    private Station mockStation(String id, String name) {
+        return com.ssafy.s15p21a104.domain.route.RouteTestFixtures.mockStation(id, name);
+    }
+}
