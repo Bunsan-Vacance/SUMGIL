@@ -12,6 +12,9 @@
   상수를 못 구한 셀만 이 상태로 남는다
 - `no_calibration` — 그 밖의 배율표 결측(결번 역, 대응 못 한 2호선 지선 셀)
 - `no_data` — 그 날짜의 예측 표가 아직 생성되지 않음(배치 미실행)
+
+`pred_clipped`(197): 그 슬롯의 승차·하차 예측 중 하나라도 음수라 0으로 클립됐는지. 인원은 항상
+0 이상(물리 제약)이라 표에는 클립된 값만 실리고, 이 필드는 그 사실을 감사용으로 노출한다.
 """
 
 from __future__ import annotations
@@ -31,6 +34,9 @@ class SlotCongestion(BaseModel):
         description="등급 0..N (임계치는 meta.grade_thresholds). 결측이면 null"
     )
     data_status: str
+    pred_clipped: bool = Field(
+        description="승차·하차 예측 중 하나라도 음수라 0으로 클립됐는지(197)"
+    )
 
 
 class StationCongestionResponse(BaseModel):
@@ -53,6 +59,9 @@ class LineStationSnapshot(BaseModel):
     congestion_pct: float | None
     grade: int | None
     data_status: str
+    pred_clipped: bool = Field(
+        description="승차·하차 예측 중 하나라도 음수라 0으로 클립됐는지(197)"
+    )
 
 
 class LineCongestionResponse(BaseModel):

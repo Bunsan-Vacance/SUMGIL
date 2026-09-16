@@ -94,6 +94,7 @@ OUTPUT_COLS = [
     "data_status",
     "boarding_pred",
     "alighting_pred",
+    "pred_clipped",
     "boarding_lookup",
     "alighting_lookup",
     "actual_boarding",
@@ -225,30 +226,46 @@ def to_congestion_table(
     전후 비교용이다(`validation/CROWD/congestion-criteria-check/diagnose.py`).
     """
     board = predicted.copy()
+    was_negative = pd.Series(False, index=board.index)
     for t in TARGETS:
-        board[t] = np.clip(board[f"{t}_pred"].to_numpy(dtype=float), 0.0, None)
+        raw_pred = board[f"{t}_pred"].to_numpy(dtype=float)
+        board[t] = np.clip(
+            raw_pred, 0.0, None
+        )  # recursive_congestion 입력(승하차) — 이 컬럼명을 쓴다
+        was_negative |= raw_pred < 0
+    # 인원 ≥ 0은 물리 제약이고 등급 계산은 이미 이 클립 값을 쓴다 — 클립은 "값을 채우는 것"이 아니다.
+    # 채우지 않는 것은 congestion_pct·grade의 NaN이고 그건 그대로 둔다(원칙 8). 출력 *_pred도 같은
+    # board[t] 값을 그대로 쓴다(per_row) — 클립을 두 번 계산하지 않는다.
+    board["pred_clipped"] = was_negative.to_numpy()
     raw = recursive_congestion(board, segments, capacity)
     day_type = predicted[["date", "station_no", "day_type"]].drop_duplicates(["date", "station_no"])
     raw = raw.merge(day_type, on=["date", "station_no"], how="left")
     cal = apply_calibration(raw, calibration, holiday_fallback)
     cal["grade"] = grade(cal["congestion_pct_calibrated"], thresholds)
 
-    per_row = predicted.rename(
-        columns={"boarding": "actual_boarding", "alighting": "actual_alighting"}
-    )[
-        [
-            "date",
-            "station_no",
-            "time_slot",
-            "station_name",
-            "boarding_pred",
-            "alighting_pred",
-            "boarding_lookup",
-            "alighting_lookup",
-            "actual_boarding",
-            "actual_alighting",
+    per_row = (
+        board[
+            [
+                "date",
+                "station_no",
+                "time_slot",
+                "station_name",
+                "boarding",
+                "alighting",
+                "boarding_lookup",
+                "alighting_lookup",
+                "pred_clipped",
+            ]
         ]
-    ]
+        .rename(columns={"boarding": "boarding_pred", "alighting": "alighting_pred"})
+        .merge(
+            predicted.rename(
+                columns={"boarding": "actual_boarding", "alighting": "actual_alighting"}
+            )[["date", "station_no", "time_slot", "actual_boarding", "actual_alighting"]],
+            on=["date", "station_no", "time_slot"],
+            how="left",
+        )
+    )
     out = cal.merge(per_row, on=["date", "station_no", "time_slot"], how="left")
     out = out.rename(columns={"congestion_pct_calibrated": "congestion_pct"})
     missing = out["congestion_pct"].isna().to_numpy()
@@ -316,6 +333,7 @@ def run(
                 "grade_thresholds": thresholds,
                 "rows": len(table),
                 "status_counts": table["data_status"].value_counts().to_dict(),
+                "clipped_rows": int(table["pred_clipped"].sum()),
                 "holiday_calendar_until": (
                     str(holiday_coverage_end(holidays).date())
                     if holiday_coverage_end(holidays) is not None

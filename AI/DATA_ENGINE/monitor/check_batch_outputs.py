@@ -17,8 +17,11 @@ from DATA_ENGINE.collect.common import KST
 AI_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BIKE_OUTPUT = Path("data/BIKE/interim/realtime_stock_5min")
 DEFAULT_WEATHER_OUTPUT = Path("data/EXTERNAL/weather/interim/nowcast_features")
+DEFAULT_CROWD_OUTPUT = Path("data/CROWD/serving")
 DEFAULT_BIKE_MIN_ROWS = 100_000
 DEFAULT_WEATHER_MIN_ROWS = 100
+# CROWD 서빙 표는 1일치 21,606행(273역 × 20슬롯 × 방향 × 30분 2슬롯)이다.
+DEFAULT_CROWD_MIN_ROWS = 20_000
 
 BIKE_REQUIRED_COLUMNS = [
     "station_id",
@@ -56,6 +59,16 @@ WEATHER_REQUIRED_COLUMNS = [
 WEATHER_FEATURE_COLUMNS = ["t1h", "rn1", "reh", "wsd", "pty"]
 WEATHER_SOURCES = {"observed", "forecast"}
 
+# 197: CROWD 서빙 표는 `dt=`/`part.parquet` 파티션이 아니라 날짜별 단일 parquet
+# (`predictions_YYYY-MM-DD.parquet`)이다. `boarding_pred`·`alighting_pred`·`pred_clipped`는
+# BIKE·weather 산출물에는 없는 컬럼이라 이 점검은 CROWD 전용이다(check_crowd_output에서만 쓴다).
+CROWD_REQUIRED_COLUMNS = [
+    "station_no",
+    "boarding_pred",
+    "alighting_pred",
+    "pred_clipped",
+]
+
 
 @dataclass(frozen=True)
 class BatchOutputCheck:
@@ -81,6 +94,11 @@ def default_date() -> str:
 
 def output_path(output_root: Path, dt: str) -> Path:
     return output_root / f"dt={dt}" / "part.parquet"
+
+
+def crowd_output_path(output_root: Path, dt: str) -> Path:
+    """CROWD 서빙 표는 파티션 폴더가 아니라 날짜별 단일 parquet(`batch_predict.py` 참고)."""
+    return output_root / f"predictions_{dt}.parquet"
 
 
 def missing_columns(df: pd.DataFrame, required_columns: Iterable[str]) -> list[str]:
@@ -265,6 +283,45 @@ def check_weather_output(check: BatchOutputCheck) -> BatchOutputResult:
     return ok(check.name, check.path, f"batch output: rows={rows} path={check.path}", rows)
 
 
+def check_crowd_output(check: BatchOutputCheck) -> BatchOutputResult:
+    """CROWD 서빙 표 전용 — 197: 음수 인원(`boarding_pred`/`alighting_pred`) 0건을 단정한다.
+
+    등급 계산은 이미 클립된 값을 쓰므로 여기서 음수가 나오면 `to_congestion_table`의 클립이
+    출력까지 전파되지 않은 것이다(`SERVING_CONTRACT.md` 5.1 참고). BIKE·weather 산출물은 이
+    컬럼 자체가 없어 `check_bike_output`/`check_weather_output`과는 별도 함수로 둔다.
+    """
+    df, error = read_output(check.name, check.path)
+    if error is not None:
+        return error
+    assert df is not None
+
+    common_error = check_common(check, df, CROWD_REQUIRED_COLUMNS)
+    if common_error is not None:
+        return common_error
+
+    rows = len(df)
+    if (pd.to_numeric(df["boarding_pred"], errors="coerce") < 0).any():
+        return fail(
+            check.name, check.path, "negative_boarding_pred", "boarding_pred negative found", rows
+        )
+    if (pd.to_numeric(df["alighting_pred"], errors="coerce") < 0).any():
+        return fail(
+            check.name,
+            check.path,
+            "negative_alighting_pred",
+            "alighting_pred negative found",
+            rows,
+        )
+
+    clipped_rows = int(df["pred_clipped"].sum())
+    return ok(
+        check.name,
+        check.path,
+        f"batch output: rows={rows} clipped_rows={clipped_rows} path={check.path}",
+        rows,
+    )
+
+
 def check_batch_outputs(checks: Iterable[BatchOutputCheck]) -> list[BatchOutputResult]:
     results = []
     for check in checks:
@@ -272,6 +329,8 @@ def check_batch_outputs(checks: Iterable[BatchOutputCheck]) -> list[BatchOutputR
             results.append(check_bike_output(check))
         elif check.name == "weather":
             results.append(check_weather_output(check))
+        elif check.name == "crowd":
+            results.append(check_crowd_output(check))
         else:
             raise ValueError(f"unknown batch output check: {check.name}")
     return results
@@ -282,6 +341,7 @@ def build_checks(
     dt: str,
     bike_min_rows: int,
     weather_min_rows: int,
+    crowd_min_rows: int = DEFAULT_CROWD_MIN_ROWS,
 ) -> list[BatchOutputCheck]:
     return [
         BatchOutputCheck(
@@ -293,6 +353,13 @@ def build_checks(
             name="weather",
             path=output_path(ai_root / DEFAULT_WEATHER_OUTPUT, dt),
             min_rows=weather_min_rows,
+        ),
+        # 197: 음수 인원이 다시 새면 여기서 잡는다. 경로 규칙이 dt= 파티션이 아니라
+        # 날짜별 단일 parquet이라 crowd_output_path를 따로 쓴다.
+        BatchOutputCheck(
+            name="crowd",
+            path=crowd_output_path(ai_root / DEFAULT_CROWD_OUTPUT, dt),
+            min_rows=crowd_min_rows,
         ),
     ]
 
@@ -318,6 +385,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_WEATHER_MIN_ROWS,
         help="Minimum rows for weather batch output.",
     )
+    parser.add_argument(
+        "--crowd-min-rows",
+        type=int,
+        default=DEFAULT_CROWD_MIN_ROWS,
+        help="Minimum rows for CROWD serving table.",
+    )
     return parser.parse_args(argv)
 
 
@@ -328,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         dt=args.date,
         bike_min_rows=args.bike_min_rows,
         weather_min_rows=args.weather_min_rows,
+        crowd_min_rows=args.crowd_min_rows,
     )
     results = check_batch_outputs(checks)
     for result in results:

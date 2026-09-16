@@ -20,9 +20,9 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 
 | # | 내용 | BE 조치 |
 | --- | --- | --- |
-| 1 | **`boarding_pred`·`alighting_pred`에 음수가 나온다.** 2026-09-13 표에서 **3,744행 / 21,606행 = 17.3%**, 최솟값 **−457.9명**. 그중 3,194행은 `data_status`가 **`ok`**라서 상태값으로는 감지되지 않는다 | 인원 필드를 그대로 노출하지 말 것. 수정 배포 전까지 `max(0, x)`로 감싸거나 **노출 보류**. 아래 5절 참고 |
+| 1 | **(수정됨, 197)** `boarding_pred`·`alighting_pred`는 이제 항상 0 이상이다 — 등급 계산이 쓰는 클립 값과 같은 값이 출력에 실린다. 클립된 셀(과거 3,744행/17.3%, 최솟값 −457.9명이었던 원인)은 새 컬럼 `pred_clipped`(bool)로 식별한다 | 인원 필드를 그대로 노출해도 된다. 정확도를 다르게 표시하고 싶으면 `pred_clipped=true`인 셀만 구분 표시. 아래 5.1절 참고 |
 | 2 | **`boarding_pred`는 1시간 값이고, 30분 행 2개에 같은 값이 중복된다.** 승하차 예측은 1시간 단위이고 30분 분해는 혼잡도(`congestion_pct`)에만 적용된다 | **절대 합산하지 말 것.** `06:00`과 `06:30` 행의 `boarding_pred`를 더하면 2배가 된다 |
-| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. 1번 음수 비율이 높은 이유이기도 하다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
+| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. `clipped_rows`가 3,744(17.3%)로 큰 이유다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
 
 ---
 
@@ -43,8 +43,9 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `congestion_pct` | float64 | **보정 혼잡도(%)**, 정원 100% 기준 | **있음** — 배율표 결측 |
 | `grade` | float64 | 등급 `0.0`/`1.0`/`2.0`. parquet에서는 **float**이고(NaN을 담기 위해) **API는 int로 변환해 내려준다** | **있음** |
 | `data_status` | str | 셀 상태, 2절 | 없음 |
-| `boarding_pred` | float64 | 승차 예측(명), **1시간 값** | 있음 |
-| `alighting_pred` | float64 | 하차 예측(명), **1시간 값** | 있음 |
+| `boarding_pred` | float64 | 승차 예측(명), **1시간 값**. 0 미만은 0으로 클립됨(197) | 있음 |
+| `alighting_pred` | float64 | 하차 예측(명), **1시간 값**. 0 미만은 0으로 클립됨(197) | 있음 |
+| `pred_clipped` | bool | 그 슬롯의 승차·하차 예측 중 하나라도 음수라 0으로 클립됐는지(197) | 없음 |
 | `boarding_lookup` | float64 | 기준선(요일유형×역×시간대 평균) 승차 | 있음 |
 | `alighting_lookup` | float64 | 기준선 하차 | 있음 |
 | `actual_boarding` | float64 | 실측 승차 — **과거 날짜만** 채워짐 | 있음 |
@@ -68,6 +69,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "data_status": "ok",
   "boarding_pred": 676.4768745769,
   "alighting_pred": 2258.5182661606,
+  "pred_clipped": false,
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
   "actual_boarding": null,
@@ -87,6 +89,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "data_status": "ok",
   "boarding_pred": 676.4768745769,
   "alighting_pred": 2258.5182661606,
+  "pred_clipped": false,
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
   "actual_boarding": null,
@@ -113,7 +116,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `no_lookup` | 기준선 자체가 없음(학습 구간에 없는 요일유형×역×시간대) | 없음 | "데이터 부족" |
 | `no_data` | **API 전용** — 그 날짜 표가 아직 없음(배치 미실행) | — | 404로 내려감 |
 
-2026-09-13 실측 분포: `ok` 20,163 / `no_calibration` 1,443.
+2026-09-13 실측 분포(197 재생성판): `ok` 20,892 / `no_calibration` 585 / `segment_truncated` 129 → **결측 714행 = 3.3%**. 199의 절단면 경계 유입 반영으로 이전 판(1,443행 = 6.7%)보다 절반 이하로 줄었다.
 
 ### 등급 임계값
 
@@ -148,7 +151,8 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
 | `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
 | `rows` | `21606` | 표 행 수 |
-| `status_counts` | `{"ok": 20163, "no_calibration": 1443}` | 상태별 행 수 |
+| `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
+| `clipped_rows` | `3744` | `pred_clipped=true`인 행 수(197) |
 | `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
 | `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
 | `generated_at` | `"2026-09-13T03:41:17+09:00"` | 생성 시각(KST) |
@@ -170,7 +174,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "predictor": "lightgbm",
   "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340",
   "generated_at": "2026-09-13T03:41:17+09:00",
-  "status_counts": {"ok": 20163, "no_calibration": 1443},
+  "status_counts": {"ok": 20892, "no_calibration": 585, "segment_truncated": 129},
   "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}]
 }
 ```
@@ -193,8 +197,8 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340",
   "lag1d_available": false,
   "slots": [
-    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.9, "grade": 0, "data_status": "ok"},
-    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 13.3, "grade": 0, "data_status": "ok"}
+    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.9, "grade": 0, "data_status": "ok", "pred_clipped": false},
+    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 13.3, "grade": 0, "data_status": "ok", "pred_clipped": false}
   ]
 }
 ```
@@ -217,7 +221,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "line": "2호선",
   "time_slot_30min": "08:30",
   "stations": [
-    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 71.2, "grade": 1, "data_status": "ok"}
+    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 71.2, "grade": 1, "data_status": "ok", "pred_clipped": false}
   ]
 }
 ```
@@ -233,15 +237,14 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 ---
 
-## 5. 알려진 결함 — 수정 예정
+## 5. 알려진 결함
 
-### 5.1 인원 예측 음수 유출 (조치 필요)
+### 5.1 인원 예측 음수 유출 (해결됨, S15P21A104-197)
 
-- **현상**: `boarding_pred`·`alighting_pred`가 음수로 내려간다. 2026-09-13 표에서 **17.3%(3,744행)**, 최솟값 **−457.9명**. 그중 **3,194행은 `data_status="ok"`**라 상태값으로 감지 불가.
-- **원인**: 배치가 재귀식 입력에는 0 클립을 적용하지만(`batch_predict.py:229`), 출력 표의 `*_pred` 컬럼은 **클립 전 원본을 그대로 싣는다**. 그래서 같은 행에서 `boarding_pred < 0`인데 `congestion_pct`는 0을 넣고 계산한 값이라 **표 내부가 불일치**한다.
-- **왜 지금 많은가**: 현재 `lag1d_available: false`(전날 실측 없음)인 이력 결손 상태라 잔차 예측이 크게 흔들린다. 이력이 완비되면 비율이 크게 내려간다(2025 평가 전체에서는 0.47%).
-- **수정 방향**: 출력 `*_pred`를 등급이 쓴 클립 값과 일치시키고, 클립된 행을 `pred_clipped`(bool) 컬럼으로 노출. 별도 티켓으로 처리.
-- **그때까지 BE**: 인원 필드를 노출하려면 `max(0, x)`로 감싸거나 노출을 보류한다. **`congestion_pct`·`grade`는 영향 없다** — 이미 클립된 값으로 계산됐다.
+- **발견 당시 현상**: `boarding_pred`·`alighting_pred`가 음수로 내려갔다. 2026-09-13 표에서 **17.3%(3,744행)**, 최솟값 **−457.9명**. 그중 **3,194행은 `data_status="ok"`**라 상태값으로 감지 불가했다. 당시 메타는 `lag1d_available: false`(전날 실측 없음)인 이력 결손 상태였다 — 잔차 예측이 크게 흔들려 음수 비율이 높았던 배경이다(이력이 완비되면 2025 평가 전체 기준 0.47%로 낮다).
+- **원인**: 배치가 재귀식 입력에는 0 클립을 적용하면서(`to_congestion_table`) 출력 표의 `*_pred` 컬럼은 **클립 전 원본을 그대로 실었다**. 같은 행에서 `boarding_pred < 0`인데 `congestion_pct`는 0을 넣고 계산한 값이라 표 내부가 불일치했다.
+- **수정**: `to_congestion_table`이 재귀식 입력용으로 만든 클립 값을 출력 `boarding_pred`·`alighting_pred`에도 그대로 재사용한다(클립을 두 번 계산하지 않음). 클립이 일어난 행은 새 컬럼 `pred_clipped`(bool)로 노출한다 — 인원 ≥ 0은 물리 제약이라 클립 자체는 원칙 8("값을 채우지 않는다")과 무관하고, `congestion_pct`·`grade`의 NaN처럼 여전히 채우지 않는 것은 배율표·기준선 결측뿐이다.
+- **BE 영향**: 인원 필드를 그대로 노출해도 된다(더 이상 `max(0, x)` 방어 불필요). `pred_clipped=true`인 셀은 원한다면 "예측 보정됨" 등으로 구분 표시할 수 있다. `congestion_pct`·`grade`는 수정 전후로 값이 바뀌지 않는다 — 이미 클립된 값으로 계산돼 있었다.
 
 ### 5.2 구 모델로 만들어진 잔존 파일
 
