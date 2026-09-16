@@ -10,6 +10,7 @@ resources:
   - redis.yaml
   - kafka.yaml
   - registry.yaml
+  - certificate.yaml
 secretGenerator:
   - name: data-secret
     envs:

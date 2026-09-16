@@ -26,14 +26,22 @@ if [ ! -f "${DATA_K8S}/.env.secret" ]; then
   exit 1
 fi
 
-echo "--- 클러스터 스코프 + 데이터 계층 적용 (네임스페이스·ingress-nginx·PG·Redis·Kafka·Registry) ---"
+echo "--- 클러스터 스코프 + 데이터 계층 적용 (네임스페이스·ingress-nginx·cert-manager·PG·Redis·Kafka·Registry) ---"
 kubectl apply -k "${INFRA_K8S}" --server-side
+
+echo "--- cert-manager 기동 대기 ---"
+kubectl rollout status deployment/cert-manager -n cert-manager --timeout=240s
+kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=240s
+kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=240s
 
 echo "--- 데이터 rollout 대기 (postgres·redis·kafka·registry) ---"
 kubectl rollout status statefulset/postgres -n "${REGISTRY_NAMESPACE}" --timeout=240s
 kubectl rollout status statefulset/redis -n "${REGISTRY_NAMESPACE}" --timeout=180s
 kubectl rollout status statefulset/kafka -n "${REGISTRY_NAMESPACE}" --timeout=300s
 kubectl rollout status deployment/registry -n "${REGISTRY_NAMESPACE}" --timeout=180s
+
+echo "--- TLS 인증서 발급 대기 (cert-manager · HTTP-01) ---"
+kubectl wait --for=condition=Ready certificate/sumgil-tls -n "${REGISTRY_NAMESPACE}" --timeout=300s
 
 image_ready() {
   curl -sf "${REGISTRY_ENDPOINT}/v2/$1/tags/list" 2>/dev/null | grep -q latest
