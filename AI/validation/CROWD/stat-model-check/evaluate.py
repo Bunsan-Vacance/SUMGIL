@@ -22,12 +22,24 @@ RMSE·MAE를 정확히 다시 계산할 수 있다는 그 스크립트의 항등
 - **D** — 92 표본(`sim-eval/compare_families.pick_sample(test, 50, 30, seed=0)`과 같은 행) 위
   점추정 RMSE·MAE(구간 없음).
 
-등급 일치율(표본이 아니라 셀 단위 배율표 필요)은 로컬에 배율표가 없어 건너뛴다 — RESULTS 미해결에
-남긴다.
+- **E** — 등급 일치율(`--grades`): 계열별 승하차 판을 30분 보정 혼잡도·등급(50/100)으로 바꿔 실측
+  등급과 맞는 비율. 변환 층(재귀식 → 배율표)은 `dl-resid-check/evaluate_dl.grade_agreement`를 그대로
+  import해 쓴다. 배율표(`crowd_congestion_calibration.parquet`)가 없으면 건너뛴다.
+
+## 발산 예측 처리(`--divergence`)
+
+SARIMA는 결측 구간에서 개루프로 전파되며 드물게 물리적으로 불가능한 값을 낸다(적합 자체는 성공이라
+실패 집계에 안 잡힌다). 기준은 **2024 학습 구간 실측 최댓값**에서만 정한다(평가 구간을 보지 않는다).
+
+- `clip`(기본, 주 표): 예측을 `[0, 학습 최댓값]`으로 자르고 **채점에 포함**한다.
+- `drop`(민감도): 상한 초과 행을 NaN으로 되돌려 공통 행에서 뺀다. 그 모형의 최악 오차가 평가에서
+  사라지므로 그 모형에 유리하다 — 맥 실행의 옛 방식이고, `clip`과의 차이가 곧 발산 처리의 효과다.
+- `raw`: 아무 처리도 하지 않는다(MODEL_REGISTRY 수치와 맞춰 볼 때).
 
 실행(폴더명에 하이픈이 있어 파일 경로로 돈다. `predict_all.py`로 예측을 먼저 만들어야 한다):
     cd AI
-    python validation/CROWD/stat-model-check/evaluate.py --out RESULTS_tables.md
+    python validation/CROWD/stat-model-check/evaluate.py --out RESULTS_tables.md --grades
+    python validation/CROWD/stat-model-check/evaluate.py --divergence drop --out RESULTS_drop.md
 """
 
 from __future__ import annotations
@@ -47,9 +59,18 @@ for _p in (str(AI_ROOT), str(_HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from app.CROWD.pipeline.dataset import CROWD_INTERIM, load_panel, time_split  # noqa: E402
-from app.CROWD.pipeline.dl.dataset import load_derived_slim  # noqa: E402
-from app.CROWD.pipeline.lookup import TARGETS  # noqa: E402
+import stat_models
+
+from app.CROWD.pipeline.dataset import (
+    CROWD_INTERIM,
+    CROWD_PROCESSED,
+    load_panel,
+    resolved_segments,
+    time_split,
+)
+from app.CROWD.pipeline.dl.dataset import load_derived_slim
+from app.CROWD.pipeline.lookup import TARGETS
+from app.CROWD.pipeline.topology import load_capacity
 
 
 def _load_sibling(rel_path: str, name: str):
@@ -83,16 +104,19 @@ CANDIDATE_SERIES = [
 DERIVED_COLS = ["date", "station_no", "line", "time_slot", "day_type", *TARGETS]
 
 
-# 실측 최댓값(승 26,951 / 하 20,476, 2024~2025 패널)의 약 3.7배. SARIMA(특히 `enforce_stationarity=False`로
-# 둔 근단위근 계열)가 결측 구간에서 개루프로 전파되며 드물게(<0.15%행) 발산한다(계획에 없는 사후 점검 —
-# RESULTS에 명시). 적합 자체는 성공(`ok=True`)했지만 물리적으로 불가능한 값이라 그 행만 NaN으로 되돌린다
-# (원칙 8 — 채우지 않고 결측으로 남긴다. 여기서는 "있던 값을 결측 처리"하는 예외적 조치라 개수를 센다).
-DIVERGENCE_BOUND = 1.0e5
+CALIBRATION_NAME = "crowd_congestion_calibration.parquet"
+# 제약을 끈 변형(`predict_all.py --no-enforce-stationarity`)의 산출 이름. 역 일부만 돌린 판일 수 있어
+# 주 표의 공통 행에 넣지 않는다 — 넣으면 모든 계열이 그 역들로 잘린다.
+NOENF_SUFFIXES = ("_noenf", "_noenf_sample")
 
 
 # ── 로딩 ──
-def load_predictions(names: list[str]) -> dict[str, pd.DataFrame]:
-    preds = {}
+def load_predictions(
+    names: list[str], bounds: dict[str, tuple[float, float]], mode: str = "clip"
+) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
+    """계열별 예측을 읽고 발산 처리(`mode`)를 적용한다. 처리에 걸린 행 수를 표로 함께 돌려준다."""
+    preds: dict[str, pd.DataFrame] = {}
+    rows: list[dict] = []
     for name in names:
         path = OUT_DIR / f"stat_preds_{name}.parquet"
         if not path.exists():
@@ -101,16 +125,30 @@ def load_predictions(names: list[str]) -> dict[str, pd.DataFrame]:
         frame = pd.read_parquet(path)
         for t in TARGETS:
             col = f"{t}_pred"
-            bad = frame[col].abs() > DIVERGENCE_BOUND
-            if bad.any():
+            low, high = bounds[t]
+            values, counts = stat_models.apply_bounds(
+                frame[col].to_numpy(dtype="float64"), low, high, mode
+            )
+            frame[col] = values
+            rows.append(
+                {
+                    "series": name,
+                    "target": t,
+                    "mode": mode,
+                    "하한": round(low, 1),
+                    "상한(2024 실측 최댓값)": round(high, 1),
+                    "하한미만_행": counts["n_low"],
+                    "상한초과_행": counts["n_high"],
+                }
+            )
+            if counts["n_high"]:
                 print(
-                    f"[발산] {name}.{col}: {int(bad.sum()):,}행이 {DIVERGENCE_BOUND:.0e}을 넘어 "
-                    "NaN으로 되돌림",
+                    f"[발산] {name}.{col}: {counts['n_high']:,}행이 상한({high:,.0f})을 넘는다 "
+                    f"→ {mode}",
                     flush=True,
                 )
-                frame.loc[bad, col] = np.nan
         preds[name] = frame
-    return preds
+    return preds, pd.DataFrame(rows)
 
 
 def build_common_frame(
@@ -370,6 +408,83 @@ def table_d(
     return pd.DataFrame(rows)
 
 
+# ── 표 E: 등급 일치율 ──
+def table_e(common: pd.DataFrame, series_names: list[str]) -> pd.DataFrame | None:
+    """계열별 승하차 판 → 30분 보정 혼잡도 → 등급(50/100) 일치율.
+
+    변환 층은 144·198이 쓴 `dl-resid-check/evaluate_dl.grade_agreement`를 그대로 import한다 —
+    같은 함수를 써야 그 티켓들의 등급 수치(lookup 95.37 · lightgbm 96.62)와 같은 축에서 읽힌다.
+    배율표가 없으면 `None`(RESULTS 미해결에 남긴다).
+    """
+    calibration_path = CROWD_PROCESSED / CALIBRATION_NAME
+    if not calibration_path.exists():
+        print(f"[안내] 배율표가 없다({calibration_path.name}) — 등급 일치율 건너뜀.", flush=True)
+        return None
+    evaluate_dl = _load_sibling(
+        "validation/CROWD/dl-resid-check/evaluate_dl.py", "crowd_stat_model_check_evaluate_dl"
+    )
+    segments, _ = resolved_segments(common)
+    capacity = load_capacity()
+    calibration = pd.read_parquet(calibration_path)
+    boards = {
+        name: {t: common[f"{name}__{t}"].to_numpy(dtype="float64") for t in TARGETS}
+        for name in ["lookup", *series_names]
+    }
+    return evaluate_dl.grade_agreement(common, boards, segments, capacity, calibration)
+
+
+# ── enforce_stationarity 변형 비교(표본 50역) ──
+def enf_report(
+    test: pd.DataFrame, bounds: dict[str, tuple[float, float]], mode: str
+) -> pd.DataFrame | None:
+    """`_noenf` 산출이 있으면 같은 역·날짜에서 기본(제약 켬)과 발산·오차를 비교한다.
+
+    제약을 끈 판은 역 일부만 돌렸을 수 있어 주 표의 공통 행에는 넣지 않는다 — 여기서만 따로 본다.
+    """
+    rows: list[dict] = []
+    for base in ("sarima_raw", "sarimax_resid"):
+        noenf_path = next(
+            (
+                path
+                for suffix in NOENF_SUFFIXES
+                if (path := OUT_DIR / f"stat_preds_{base}{suffix}.parquet").exists()
+            ),
+            None,
+        )
+        base_path = OUT_DIR / f"stat_preds_{base}.parquet"
+        if noenf_path is None or not base_path.exists():
+            continue
+        noenf = pd.read_parquet(noenf_path)
+        stations = set(noenf["station_no"].unique())
+        base_frame = pd.read_parquet(base_path)
+        base_frame = base_frame[base_frame["station_no"].isin(stations)]
+        truth = test[test["station_no"].isin(stations)][[*KEY, *TARGETS]]
+        for label, frame in (
+            (base, base_frame),
+            (noenf_path.stem.removeprefix("stat_preds_"), noenf),
+        ):
+            m = truth.merge(frame, on=KEY, how="inner")
+            for t in TARGETS:
+                low, high = bounds[t]
+                values, counts = stat_models.apply_bounds(
+                    m[f"{t}_pred"].to_numpy(dtype="float64"), low, high, mode
+                )
+                err = values - m[t].to_numpy(dtype="float64")
+                ok = np.isfinite(err)
+                rows.append(
+                    {
+                        "variant": label,
+                        "target": t,
+                        "n_stations": len(stations),
+                        "n_rows": int(ok.sum()),
+                        "발산행(상한초과)": counts["n_high"],
+                        "RMSE": round(float(np.sqrt(np.mean(err[ok] ** 2))), 2),
+                        "MAE": round(float(np.mean(np.abs(err[ok]))), 2),
+                    }
+                )
+    return pd.DataFrame(rows) if rows else None
+
+
 def to_markdown(frame: pd.DataFrame) -> str:
     cols = [str(c) for c in frame.columns]
     lines = ["| " + " | ".join(cols) + " |", "| " + " | ".join("---" for _ in cols) + " |"]
@@ -381,9 +496,17 @@ def to_markdown(frame: pd.DataFrame) -> str:
 def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     t0 = time.time()
     derived = load_derived_slim(columns=DERIVED_COLS)
+    train = derived[derived["date"] < SPLIT_DATE]
     test = derived[derived["date"] >= SPLIT_DATE].reset_index(drop=True)
+    # 발산 경계는 **학습 구간 실측**에서만 잡는다 — 평가 구간 값을 보고 정하면 그 자체가 누수다.
+    bounds = stat_models.divergence_bounds(train, TARGETS)
+    print(
+        "[발산 경계] "
+        + " · ".join(f"{t} [{lo:,.0f}, {hi:,.0f}]" for t, (lo, hi) in bounds.items()),
+        flush=True,
+    )
     names = ["lookup", *[s for s in CANDIDATE_SERIES]]
-    frames = load_predictions(names)
+    frames, treatment = load_predictions(names, bounds, args.divergence)
     available = [s for s in CANDIDATE_SERIES if s in frames]
     if "lookup" not in frames:
         raise SystemExit("lookup 예측이 없다 — predict_all.py --series lookup을 먼저 실행할 것.")
@@ -404,7 +527,15 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
         "B_lightgbm_쌍차이": b,
         "C_재현율": c,
         "D_92표본_점추정": d,
+        "F_발산처리_적용행": treatment,
     }
+    if args.grades:
+        e = table_e(common, available)
+        if e is not None:
+            tables["E_등급_일치율"] = e
+    enf = enf_report(test, bounds, args.divergence)
+    if enf is not None:
+        tables["G_제약해제_변형_비교"] = enf
     for title, tbl in tables.items():
         print(f"\n### {title}\n{tbl.round(3).to_string(index=False)}")
 
@@ -412,9 +543,11 @@ def run(args: argparse.Namespace) -> dict[str, pd.DataFrame]:
     for title, tbl in tables.items():
         tbl.to_parquet(OUT_DIR / f"eval_table_{title}.parquet", index=False)
     if args.out:
-        chunks = [
+        head = (
+            f"발산 처리: `{args.divergence}` · 부트스트랩 {args.n_boot}회(seed {args.seed})\n\n"
             f"공통 행 비율: {common_ratio * 100:.2f}%\n\n계열별 자기 유효행: {own_coverage}\n"
-        ]
+        )
+        chunks = [head]
         for title, tbl in tables.items():
             chunks.append(f"### {title}\n\n{to_markdown(tbl.round(3))}\n")
         Path(args.out).write_text("\n".join(chunks), encoding="utf-8")
@@ -430,6 +563,17 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--n-boot", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None)
+    ap.add_argument(
+        "--divergence",
+        default="clip",
+        choices=["clip", "drop", "raw"],
+        help="발산 예측 처리(기본 clip: 학습 구간 최댓값으로 자르고 채점에 포함)",
+    )
+    ap.add_argument(
+        "--grades",
+        action="store_true",
+        help="등급 일치율(표 E)까지 낸다 — 계열당 2~3분, 배율표 필요",
+    )
     args = ap.parse_args(argv)
     run(args)
 

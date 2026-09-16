@@ -35,12 +35,20 @@
     python validation/CROWD/stat-model-check/predict_all.py --series lookup snaive_d7 ols_pooled ols_series
     python validation/CROWD/stat-model-check/predict_all.py --series lightgbm
     python validation/CROWD/stat-model-check/predict_all.py --series sarima_raw sarimax_resid
+    # 제약을 끈 변형(발산 사례 재현) — 산출은 `*_noenf*`. 역 지정도 된다.
+    python validation/CROWD/stat-model-check/predict_all.py --series sarima_raw sarimax_resid \
+        --no-enforce-stationarity --stations 2810
+
+청크 캐시는 **입력 조건 메타**(패널 mtime·행 수·값 지문 + order·trend·enforce·구간·역 목록)를 옆에
+남긴다. 조건이 하나라도 다르면 그 청크를 다시 계산한다 — 패널이 바뀌었는데 옛 예측을 재사용하는
+사고(맥 실행에서 실제로 겪었다)를 막는다.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import math
 import sys
 import time
@@ -55,13 +63,19 @@ for _p in (str(AI_ROOT), str(_HERE)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import stat_models  # noqa: E402 — 이 폴더의 순수 함수(하이픈 폴더라 패키지 임포트 대신 경로로 연다)
+import stat_models
 
-from app.CROWD.pipeline.dataset import CROWD_INTERIM, load_panel, time_split  # noqa: E402
-from app.CROWD.pipeline.dl.dataset import load_derived_slim  # noqa: E402
-from app.CROWD.pipeline.features import FEATURE_SETS, RESID_COLS  # noqa: E402
-from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline  # noqa: E402
-from app.CROWD.pipeline.predictor import build_predictor, latest_artifact  # noqa: E402
+from app.CROWD.pipeline.dataset import (
+    CROWD_INTERIM,
+    CROWD_PROCESSED,
+    PANEL_NAME,
+    load_panel,
+    time_split,
+)
+from app.CROWD.pipeline.dl.dataset import load_derived_slim
+from app.CROWD.pipeline.features import FEATURE_SETS, RESID_COLS
+from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
+from app.CROWD.pipeline.predictor import build_predictor, latest_artifact
 
 
 def _load_sibling(rel_path: str, name: str):
@@ -77,7 +91,10 @@ compare_families = _load_sibling(
 )
 
 DEPLOY_SET = "festival_selflag_d1sd_d7_resid"
-LAG_COLS = [c for c in FEATURE_SETS[DEPLOY_SET] if c.startswith("lag")]
+# 배포 세트 피처를 **하나도 빠뜨리지 않고** 읽는다. `build_matrix`는 프레임에 없는 컬럼을 조용히
+# NaN으로 채우므로(서빙에서 실시간 열이 아직 없을 때를 위한 설계), 여기서 열을 빠뜨리면 LightGBM이
+# 그 피처를 결측으로 받은 채 예측한다 — 비교 대상만 몰래 약해진다. 실제로 이벤트 5열이 빠져 있었다.
+DEPLOY_FEATURE_COLS = [c for c in FEATURE_SETS[DEPLOY_SET] if c not in ("station_no", "time_slot")]
 DERIVED_COLS = [
     "date",
     "station_no",
@@ -86,7 +103,7 @@ DERIVED_COLS = [
     "day_type",
     *TARGETS,
     *RESID_COLS,
-    *LAG_COLS,
+    *[c for c in DEPLOY_FEATURE_COLS if c not in RESID_COLS],
 ]
 KEY = ["date", "station_no", "time_slot"]
 SPLIT_DATE = pd.Timestamp("2025-01-01")
@@ -95,7 +112,11 @@ FULL_DATES = pd.date_range("2024-01-01", "2025-12-31", freq="D")
 OUT_DIR = CROWD_INTERIM / "validation" / "stat_model_check"
 CHUNK_DIR = OUT_DIR / "chunks"
 MODELS_DIR = AI_ROOT / "models" / "CROWD"
+PANEL_PATH = CROWD_PROCESSED / PANEL_NAME
 
+# 정상성·가역성 제약은 **켠 쪽이 기본**이다. 끄고 돌리면 늦게 개통한 역(패널 앞부분이 통째로 결측)에서
+# 근단위근 계열이 개루프로 전파돼 예측이 발산한다 — 암사역사공원(2810)에서 예측 최댓값이 1e25~1e143까지
+# 튀었고, 제약을 켜자 0건이 됐다(RESULTS 1절). 끈 쪽은 `--no-enforce-stationarity`(`_noenf`)로만 돌린다.
 SARIMA_SPECS: dict[str, dict] = {
     # lookup 도움 없는 "순수 ARIMA" — H2
     "sarima_raw": {
@@ -103,6 +124,8 @@ SARIMA_SPECS: dict[str, dict] = {
         "order": (1, 0, 1),
         "seasonal_order": (0, 1, 1, 7),
         "trend": None,
+        "enforce_stationarity": True,
+        "enforce_invertibility": True,
     },
     # lookup 잔차 위의 선형 시계열 모형 — H4(OLS-AR과 비교)
     "sarimax_resid": {
@@ -110,6 +133,8 @@ SARIMA_SPECS: dict[str, dict] = {
         "order": (1, 0, 0),
         "seasonal_order": (1, 0, 0, 7),
         "trend": "c",
+        "enforce_stationarity": True,
+        "enforce_invertibility": True,
     },
 }
 ALL_SERIES = [
@@ -232,7 +257,7 @@ def predict_ols_series(
 
 # ── SARIMA(H2·H4) ──
 def _station_order(all_stations: np.ndarray, sample_stations: np.ndarray) -> list[int]:
-    sample_set = set(int(s) for s in sample_stations)
+    sample_set = {int(s) for s in sample_stations}
     rest = [int(s) for s in all_stations if int(s) not in sample_set]
     return [int(s) for s in sample_stations] + rest
 
@@ -246,11 +271,28 @@ def run_sarima_variant(
     chunk_stations: int = 10,
     n_jobs: int = -1,
     budget_minutes: float = 90.0,
+    max_stations: int | None = None,
+    stations: list[int] | None = None,
+    tag: str = "",
 ) -> tuple[pd.DataFrame, dict]:
     wide = stat_models.build_wide_series(source_frame, spec["value_cols"], FULL_DATES)
     ordered = _station_order(all_stations, sample_stations)
+    if stations:
+        # 지정한 역만 — 발산이 난 역을 변형 사양으로 다시 돌려 볼 때(계획 §3의 재발 방지책 비교).
+        want = [int(x) for x in stations]
+        ordered = [st for st in ordered if st in set(want)]
+    if max_stations is not None:
+        ordered = ordered[:max_stations]
     chunks = [ordered[i : i + chunk_stations] for i in range(0, len(ordered), chunk_stations)]
-    n_sample_chunks = math.ceil(len(sample_stations) / chunk_stations)
+    n_sample_chunks = math.ceil(min(len(sample_stations), len(ordered)) / chunk_stations)
+    source_sig = stat_models.source_signature(
+        source_frame,
+        spec["value_cols"],
+        extra={
+            "panel_file": PANEL_PATH.name,
+            "panel_mtime": PANEL_PATH.stat().st_mtime if PANEL_PATH.exists() else None,
+        },
+    )
 
     CHUNK_DIR.mkdir(parents=True, exist_ok=True)
     results: list[pd.DataFrame] = []
@@ -262,13 +304,30 @@ def run_sarima_variant(
         "projected_full_minutes": None,
         "stopped_after_sample": False,
         "n_chunks_done": 0,
+        "n_chunks_recomputed": 0,
+        "enforce_stationarity": bool(spec.get("enforce_stationarity", False)),
     }
     for i, station_group in enumerate(chunks):
-        chunk_path = CHUNK_DIR / f"{name}_chunk_{i:04d}.parquet"
-        if chunk_path.exists():
+        chunk_path = CHUNK_DIR / f"{name}{tag}_chunk_{i:04d}.parquet"
+        meta_path = chunk_path.with_suffix(".meta.json")
+        want = stat_models.chunk_signature(source_sig, spec, SPLIT_DATE, SPLIT_DATE, station_group)
+        have = None
+        if meta_path.exists():
+            try:
+                have = json.loads(meta_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                have = None
+        if chunk_path.exists() and stat_models.chunk_cache_valid(have, want):
             results.append(pd.read_parquet(chunk_path))
-            print(f"[{name}] 청크 {i + 1}/{len(chunks)} 캐시 재사용", flush=True)
+            print(f"[{name}{tag}] 청크 {i + 1}/{len(chunks)} 캐시 재사용", flush=True)
         else:
+            if chunk_path.exists():
+                # 패널·모형 사양이 달라졌는데 옛 예측을 재사용하면 낡은 수치로 표가 나온다.
+                print(
+                    f"[{name}{tag}] 청크 {i + 1}/{len(chunks)} 입력 조건이 달라졌다 — 다시 계산",
+                    flush=True,
+                )
+                meta["n_chunks_recomputed"] += 1
             keys = [c for c in wide.columns if c[1] in set(station_group)]
             res = stat_models.run_sarima_batch(
                 wide,
@@ -279,12 +338,15 @@ def run_sarima_variant(
                 SPLIT_DATE,
                 spec.get("trend"),
                 n_jobs=n_jobs,
+                enforce_stationarity=bool(spec.get("enforce_stationarity", False)),
+                enforce_invertibility=bool(spec.get("enforce_invertibility", False)),
             )
             chunk_path.parent.mkdir(parents=True, exist_ok=True)
             res.to_parquet(chunk_path, index=False)
+            meta_path.write_text(json.dumps(want, ensure_ascii=False, indent=1), encoding="utf-8")
             results.append(res)
             print(
-                f"[{name}] 청크 {i + 1}/{len(chunks)}({len(station_group)}역) "
+                f"[{name}{tag}] 청크 {i + 1}/{len(chunks)}({len(station_group)}역) "
                 f"누적 {time.time() - t0:.0f}s",
                 flush=True,
             )
@@ -295,13 +357,13 @@ def run_sarima_variant(
             projected_total_sec = elapsed / (i + 1) * len(chunks)
             meta["projected_full_minutes"] = round(projected_total_sec / 60.0, 1)
             print(
-                f"[{name}] 표본({sum(len(g) for g in chunks[: i + 1])}역) {elapsed:.0f}s → "
+                f"[{name}{tag}] 표본({sum(len(g) for g in chunks[: i + 1])}역) {elapsed:.0f}s → "
                 f"전체({len(ordered)}역) 추정 {projected_total_sec / 60:.1f}분",
                 flush=True,
             )
             if projected_total_sec > budget_minutes * 60:
                 print(
-                    f"[{name}] 90분 규칙: 추정 {projected_total_sec / 60:.1f}분 > "
+                    f"[{name}{tag}] 90분 규칙: 추정 {projected_total_sec / 60:.1f}분 > "
                     f"{budget_minutes:.0f}분 — 표본 결과까지만 내고 멈춘다.",
                     flush=True,
                 )
@@ -350,6 +412,13 @@ def predict_lightgbm(test: pd.DataFrame, artifact: Path | None) -> tuple[pd.Data
         raise SystemExit(
             f"아티팩트 세트가 배포 세트와 다르다: {predictor.feature_set} != {DEPLOY_SET}."
         )
+    # `build_matrix`는 없는 컬럼을 NaN으로 채우므로 여기서 막지 않으면 비교 대상만 조용히 약해진다.
+    missing = stat_models.missing_feature_columns(test.columns, FEATURE_SETS[predictor.feature_set])
+    if missing:
+        raise SystemExit(
+            f"평가 프레임에 배포 세트 피처가 없다: {missing}. "
+            "DERIVED_COLS에 그 컬럼을 넣어 파생 캐시에서 읽어올 것."
+        )
     pred = predictor._inner.predict_derived(test)
     out = test[KEY].merge(pred[[*KEY, *[f"{t}_pred" for t in TARGETS]]], on=KEY, how="left")
     return out, predictor.version
@@ -396,8 +465,14 @@ def run(args: argparse.Namespace) -> None:
     if sarima_names:
         sample_stations, _ = compare_families.pick_sample(data["test_raw"], 50, 30, seed=0)
         all_stations = np.sort(data["test_raw"]["station_no"].unique())
+        # `--no-enforce-stationarity`는 제약을 끈 **별도 변형**이다 — 이름·청크·산출 파일에 `_noenf`를
+        # 붙여 기본(제약 켬)의 캐시·결과를 덮어쓰지 않는다.
+        tag = "_noenf" if args.no_enforce_stationarity else ""
         for name in sarima_names:
-            spec = SARIMA_SPECS[name]
+            spec = {**SARIMA_SPECS[name]}
+            if args.no_enforce_stationarity:
+                spec["enforce_stationarity"] = False
+                spec["enforce_invertibility"] = False
             source = (
                 data["derived"] if set(spec["value_cols"]) <= set(RESID_COLS) else data["panel"]
             )
@@ -410,14 +485,20 @@ def run(args: argparse.Namespace) -> None:
                 chunk_stations=args.chunk_stations,
                 n_jobs=args.n_jobs,
                 budget_minutes=args.budget_minutes,
+                max_stations=args.max_stations,
+                stations=args.stations,
+                tag=tag,
             )
             if long_out.empty:
-                print(f"[{name}] 결과 없음 — 건너뜀", flush=True)
+                print(f"[{name}{tag}] 결과 없음 — 건너뜀", flush=True)
                 continue
             target_map = dict(zip(spec["value_cols"], TARGETS))
             lookup_arg = lookup_keyed_test if spec["value_cols"] == list(RESID_COLS) else None
             wide, diag = sarima_long_to_wide(long_out, target_map, lookup_arg)
-            suffix = "_sample" if meta["stopped_after_sample"] else ""
+            partial = (
+                meta["stopped_after_sample"] or args.max_stations is not None or bool(args.stations)
+            )
+            suffix = f"{tag}_sample" if partial else tag
             _save(f"{name}{suffix}", wide)
             n_series = diag[["station_no", "time_slot", "target"]].drop_duplicates()
             series_ok = diag.groupby(["station_no", "time_slot", "target"])["ok"].first()
@@ -426,12 +507,14 @@ def run(args: argparse.Namespace) -> None:
             diag_path = OUT_DIR / f"stat_preds_{name}{suffix}_diag.parquet"
             diag.to_parquet(diag_path, index=False)
             print(
-                f"[{name}] 시리즈 {len(n_series):,}개 · 실패 {n_fail:,}개"
+                f"[{name}{suffix}] 시리즈 {len(n_series):,}개 · 실패 {n_fail:,}개"
                 f"({n_fail / max(len(n_series), 1) * 100:.2f}%) · 수렴경고 {n_warn:,}건 · 메타 {meta}",
                 flush=True,
             )
             if n_fail / max(len(n_series), 1) > 0.01:
-                print(f"[경고] {name} 실패율이 1%를 넘는다 — RESULTS에 명시할 것.", flush=True)
+                print(
+                    f"[경고] {name}{suffix} 실패율이 1%를 넘는다 — RESULTS에 명시할 것.", flush=True
+                )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -443,6 +526,24 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--chunk-stations", type=int, default=10)
     ap.add_argument("--n-jobs", type=int, default=-1)
     ap.add_argument("--budget-minutes", type=float, default=90.0, help="계획 §2의 90분 규칙")
+    ap.add_argument(
+        "--no-enforce-stationarity",
+        action="store_true",
+        help="SARIMAX 정상성·가역성 제약을 끈 변형(_noenf) — 발산 사례 재현용(기본은 제약 켬)",
+    )
+    ap.add_argument(
+        "--max-stations",
+        type=int,
+        default=None,
+        help="처리할 역 수 상한(표본 50역만 재볼 때). 생략 시 전체 273역",
+    )
+    ap.add_argument(
+        "--stations",
+        type=int,
+        nargs="+",
+        default=None,
+        help="지정한 역만 처리한다(발산 역 재현·변형 비교용). 산출 이름에 _sample이 붙는다",
+    )
     args = ap.parse_args(argv)
     run(args)
 
