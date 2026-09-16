@@ -97,6 +97,46 @@ CALIBRATION_NAME = "crowd_congestion_calibration.parquet"
 HISTORY_DAYS = 7
 EVENT_NUMERIC_COLS = ["game_attendance", "game_attendance_missing", "festival_min_duration_days"]
 
+# 아래 세 상수는 `SERVING_CONTRACT.md`(출력 계약)와 짝을 이룬다. 하나를 고치면 문서도 같이 고쳐야
+# 하고, 어긋나면 `test/CROWD/test_crowd_serving_contract.py`가 막는다 — 문서를 사람 기억이 아니라
+# 테스트로 붙들어 두려는 장치다(197 C부).
+
+# 표에 실리는 `data_status` 값. 우선순위는 `to_congestion_table` 참고.
+DATA_STATUS_VALUES = (
+    "ok",
+    "calibration_fallback",
+    "segment_truncated",
+    "no_calibration",
+    "no_lookup",
+)
+# 표에는 없고 API에서만 나타나는 상태(그 날짜 표가 아직 없음 -> 404).
+API_ONLY_DATA_STATUS = ("no_data",)
+
+# `.meta.json`에 실리는 키와 그 순서. `predict_day`가 만드는 앞쪽 13개 + `run`이 덧붙이는 8개.
+META_KEYS = (
+    "target_date",
+    "in_panel",
+    "history_window_days",
+    "history_days_present",
+    "history_dates",
+    "lag1d_available",
+    "lag7d_available",
+    "availability",
+    "routing_rule",
+    "predictor",
+    "predictor_version",
+    "predictor_override",
+    "predictor_fallback",
+    "recent_dates_available",
+    "grade_thresholds",
+    "rows",
+    "status_counts",
+    "lookup_substituted_rows",
+    "holiday_calendar_until",
+    "topology_gaps",
+    "generated_at",
+)
+
 OUTPUT_COLS = [
     "date",
     "station_no",
@@ -368,7 +408,29 @@ def to_congestion_table(
     status = np.where((status == "ok") & missing & boundary, "segment_truncated", status)
     status = np.where((status == "ok") & missing, "no_calibration", status)
     out["data_status"] = status
+    unknown = sorted(set(status.tolist()) - set(DATA_STATUS_VALUES))
+    if unknown:
+        raise RuntimeError(
+            f"문서화되지 않은 data_status: {unknown} — DATA_STATUS_VALUES와 "
+            "SERVING_CONTRACT.md 2절을 같이 고쳐라"
+        )
     return out.reindex(columns=OUTPUT_COLS)
+
+
+def validated_meta(meta: dict) -> dict:
+    """`.meta.json`에 쓸 메타를 명세 키(`META_KEYS`)에 맞춰 검증·정렬한다.
+
+    키를 추가·삭제하면서 `META_KEYS`와 `SERVING_CONTRACT.md` 3절을 안 고치면 **배치가 여기서 멈춘다.**
+    조용히 빠뜨리거나 문서에 없는 키가 BE에 흘러가는 것보다 낫다(197 C부).
+    """
+    missing = [k for k in META_KEYS if k not in meta]
+    extra = [k for k in meta if k not in META_KEYS]
+    if missing or extra:
+        raise RuntimeError(
+            f"메타 키가 명세와 어긋난다 — 누락 {missing} / 미문서화 {extra}. "
+            "META_KEYS와 SERVING_CONTRACT.md 3절을 같이 고쳐라"
+        )
+    return {k: meta[k] for k in META_KEYS}
 
 
 def run(
@@ -439,7 +501,8 @@ def run(
             }
         )
         path.with_suffix(".meta.json").write_text(
-            json.dumps(meta, ensure_ascii=False, indent=1, default=str), encoding="utf-8"
+            json.dumps(validated_meta(meta), ensure_ascii=False, indent=1, default=str),
+            encoding="utf-8",
         )
         print(
             f"[배치] {d:%Y-%m-%d} → {path.name} ({len(table):,}행, {meta['predictor_version']}, "

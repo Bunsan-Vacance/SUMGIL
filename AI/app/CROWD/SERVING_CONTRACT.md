@@ -1,11 +1,15 @@
 # CROWD 혼잡도 — 서빙 산출물·API 명세 (BE 전달용)
 
-작성 2026-09-16 · 기준 커밋 `8890cec`(develop-AI) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13.parquet`
+작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(20:35 생성)
 
 > **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
 > `batch_predict.OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 · 등급 임계값
 > (`crowd_grade_thresholds`) · 예측기 계열 추가·교체 · 배율표 판 교체 · API 경로·파라미터.
 > 모델 성능·피처 세트는 이 문서가 아니라 `pipeline/MODEL_REGISTRY.md`에 적는다.
+>
+> **이 문서는 테스트가 강제한다**(197 C부). `test/CROWD/test_crowd_serving_contract.py`가 1절 컬럼 표·
+> 2절 상태 표·3절 메타 표·4절 경로·파라미터·응답 예시를 각각 `OUTPUT_COLS`·`DATA_STATUS_VALUES`·
+> `META_KEYS`·OpenAPI·`schemas.py`와 대조한다. 코드만 고치면 CI가 막힌다.
 
 AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 날짜별 예측 표를 만들고, API는 그 표만 읽는다.
 
@@ -22,7 +26,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | --- | --- | --- |
 | 1 | **(수정됨, 197)** `boarding_pred`·`alighting_pred`는 이제 항상 0 이상이다 — 등급 계산이 쓰는 대체 값과 같은 값이 출력에 실린다. 음수가 났던 셀(과거 3,744행/17.3%, 최솟값 −457.9명이었던 원인)은 lookup 값으로 대체되고(둘 다 없으면 0), 그 사실은 새 컬럼 `pred_source`(str: `model`/`lookup_negative`)로 식별한다 | 인원 필드를 그대로 노출해도 된다. 정확도를 다르게 표시하고 싶으면 `pred_source="lookup_negative"`인 셀만 구분 표시. 아래 5.1절 참고 |
 | 2 | **`boarding_pred`는 1시간 값이고, 30분 행 2개에 같은 값이 중복된다.** 승하차 예측은 1시간 단위이고 30분 분해는 혼잡도(`congestion_pct`)에만 적용된다 | **절대 합산하지 말 것.** `06:00`과 `06:30` 행의 `boarding_pred`를 더하면 2배가 된다 |
-| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. `lookup_substituted_rows`가 3,744(17.3%)로 큰 이유다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
+| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. 옛 LightGBM 판에서 `lookup_substituted_rows`가 3,744(17.3%)까지 갔던 이유다 — B부 라우팅이 이 상태를 GRU로 넘기면서 **228행(1.06%)**으로 줄었다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
 
 ---
 
@@ -64,11 +68,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:00",
   "time_slot": "06-07",
-  "congestion_pct": 8.9055909495,
+  "congestion_pct": 9.8106944835,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 676.4768745769,
-  "alighting_pred": 2258.5182661606,
+  "boarding_pred": 591.8334049458,
+  "alighting_pred": 2282.2476847746,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -84,11 +88,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:30",
   "time_slot": "06-07",
-  "congestion_pct": 13.2788722193,
+  "congestion_pct": 13.9426219287,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 676.4768745769,
-  "alighting_pred": 2258.5182661606,
+  "boarding_pred": 591.8334049458,
+  "alighting_pred": 2282.2476847746,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -99,7 +103,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 ]
 ```
 
-두 행의 `boarding_pred`가 **같다**(676.47). 0절 2번이 말하는 지점이다. `congestion_pct`는 8.9 → 13.3으로 30분마다 다르다.
+두 행의 `boarding_pred`가 **같다**(591.83). 0절 2번이 말하는 지점이다. `congestion_pct`는 9.8 → 13.9로 30분마다 다르다.
 
 ---
 
@@ -140,25 +144,25 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | --- | --- | --- |
 | `target_date` | `"2026-09-13"` | 대상 날짜 |
 | `in_panel` | `false` | 그 날짜가 학습 패널에 있는지(과거 재현 여부). `false`면 실운영 예측 |
-| `history_window_days` | `7` | 이력 창 길이. **현재 산출 파일에는 없다**(구 버전이 만든 파일). 다음 배치부터 들어가므로 `.get()`으로 읽을 것 |
+| `history_window_days` | `14` | 이력 창 길이(DL 예측기는 14일을 요구한다 — `Predictor.required_history_days`) |
 | `history_days_present` | `6` | 실제로 확보된 이력 일수 |
 | `history_dates` | `["2026-09-06", …]` | 확보된 이력 날짜 |
 | **`lag1d_available`** | **`false`** | **전날 실측 유무. `false`면 정확도 저하** |
 | `lag7d_available` | `true` | 1주 전 실측 유무 |
 | `availability` | `"d7_only"` | (197) 가용성 판정 — `full`/`d1_only`/`d7_only`/`no_lag`. `routing.availability()`가 `lag1d_available`·`lag7d_available`로 정한다 |
 | `routing_rule` | `{"pred": "dl", "avail": "d7_only", "line": null, "day_type": null, "group": null}` | (197) 그 kind를 고른 라우팅 규칙(`routing.describe_policy`). `predictor_override=true`면 `null` |
-| `predictor` | `"lightgbm"` | 쓰인 예측기 종류 |
-| `predictor_version` | `"lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340"` | 아티팩트까지 포함한 버전 |
+| `predictor` | `"dl"` | 쓰인 예측기 종류. **라우팅 결과라 날짜마다 다를 수 있다**(197 B부) |
+| `predictor_version` | `"dl:dl_gru_s14_noev_s42_20260914-1358"` | 아티팩트까지 포함한 버전 |
 | `predictor_override` | `false` | (197) `--predictor` CLI로 kind를 명시해 라우팅을 건너뛰었는지 |
 | `predictor_fallback` | `null` | **(197부터 항상 `null`)** 옛 "이력 전무 시 lookup 강제 대체" 의미는 없어졌다 — 필드는 BE 계약 유지를 위해 키만 남는다 |
 | `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
 | `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
 | `rows` | `21606` | 표 행 수 |
 | `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
-| `lookup_substituted_rows` | `3744` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
+| `lookup_substituted_rows` | `228` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
 | `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
 | `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
-| `generated_at` | `"2026-09-13T03:41:17+09:00"` | 생성 시각(KST) |
+| `generated_at` | `"2026-09-16T20:35:52+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
 
 ---
 
@@ -174,10 +178,10 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 {
   "available_dates": ["2026-09-13", "2026-09-14"],
   "grade_thresholds": [50.0, 100.0],
-  "predictor": "lightgbm",
-  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340",
-  "generated_at": "2026-09-13T03:41:17+09:00",
-  "status_counts": {"ok": 20892, "no_calibration": 585, "segment_truncated": 129},
+  "predictor": "dl",
+  "predictor_version": "dl:dl_gru_s14_noev_s42_20260914-1358",
+  "generated_at": "2026-09-16T20:35:52+09:00",
+  "status_counts": {"ok": 20902, "no_calibration": 585, "segment_truncated": 119},
   "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}]
 }
 ```
@@ -197,7 +201,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "station_name": "서울역",
   "line": "1호선",
   "train_capacity": 1600,
-  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_20260913-0340",
+  "predictor_version": "dl:dl_gru_s14_noev_s42_20260914-1358",
   "lag1d_available": false,
   "slots": [
     {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.9, "grade": 0, "data_status": "ok", "pred_source": "model"},
@@ -250,11 +254,15 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 - **수정 2단계(B부, 197 B-2) — 음수 셀은 0 클립이 아니라 lookup 대체**: 145 `family-check/RESULTS.md` 7절에서 **모델이 음수를 낸 셀은 lookup이 더 정확하다**는 게 드러났다 — 0 클립 후 RMSE 대비 lookup RMSE가 `no_lag` **90.46 → 69.85**, `d7_only` **53.86 → 27.18**로 낮다. 그래서 음수 셀은 그 타깃의 `{target}_lookup` 값으로 대체하고, lookup도 없거나(NaN) 음수면 그때만 0을 최종 하한으로 쓴다. `pred_clipped`(bool)는 **`pred_source`**(str: `model`/`lookup_negative`)로 교체됐다 — 대체가 일어났는지뿐 아니라 무엇으로 대체됐는지(모델 그대로인지)까지 구분한다.
 - **BE 영향**: 인원 필드를 그대로 노출해도 된다(더 이상 `max(0, x)` 방어 불필요). `pred_source="lookup_negative"`인 셀은 원한다면 "예측 보정됨" 등으로 구분 표시할 수 있다. `congestion_pct`·`grade`는 A부 수정 전후로 값이 바뀌지 않았지만(이미 클립된 값으로 계산돼 있었다), **B부(lookup 대체)는 그 셀들의 `congestion_pct`·`grade`를 다시 바꾼다** — 0이 아니라 lookup 값으로 재귀식을 계산하기 때문이다.
 
-### 5.2 구 모델로 만들어진 잔존 파일
+### 5.2 구 모델로 만들어진 잔존 파일 (해소됨, 2026-09-16 재생성)
 
-`predictions_2026-09-14.parquet`은 `generated_at 2026-09-13T03:33`로, 현재 배포 아티팩트(`..._20260913-0340`, 03:40 학습)보다 **먼저** 생성돼 구 모델(`festival_selflag_d1d7_resid_20260911-1533`)을 쓴다. 배치를 다시 돌리면 갱신된다. 모델 선택 로직 자체는 정상이다.
+`predictions_2026-09-14.parquet`이 한때 구 모델(`festival_selflag_d1d7_resid_20260911-1533`)로 만들어진 채 남아 있었다. 197 B부 재생성으로 두 날짜 모두 현재 라우팅 결과(`dl:dl_gru_s14_noev_s42_20260914-1358`)로 갱신됐다.
 
-→ **BE는 `meta.predictor_version`을 로깅해 두는 게 좋다.** 표마다 모델이 다를 수 있다.
+→ **BE는 `meta.predictor_version`을 로깅해 두는 게 좋다.** 표마다 모델이 다를 수 있고, 이제는 **가용성에 따라 실제로 달라진다**(197 B부).
+
+### 5.3 아티팩트 이름 정렬 함정 (조치됨)
+
+`latest_artifact`는 이름 정렬로 최신을 고르는데, DL 변형 18개 중 이름이 가장 큰 `dl_lstm_s14_noev_s44`가 뽑혔다 — 채택된 모델은 `dl_gru_s14_noev_s42`다. 배포 아티팩트를 설정값(`crowd_dl_artifact`)으로 고정해 막았다. **DL 아티팩트를 새로 학습해 교체할 때는 이 설정값을 같이 고쳐야 한다.**
 
 ---
 
