@@ -18,10 +18,18 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param weather 기상청 초단기 실황·예보 (API허브) 설정
  */
 @ConfigurationProperties("collect")
-public record CollectProperties(boolean dryRun, boolean runOnce, Kafka kafka, Topics topics, Http http, Budget budget,
-                                Source subway, Source bike, Weather weather) {
+public record CollectProperties(boolean dryRun, boolean runOnce, String publisher, Kafka kafka, Topics topics,
+                                Http http, Budget budget, Source subway, Source bike, Weather weather) {
+
+    /** 기본 경로 — 회차를 Kafka 토픽에 넣는다. AI 컨슈머도 여기서 받는다 */
+    public static final String PUBLISHER_KAFKA = "kafka";
+    /** 보험 경로 — Kafka 를 건너뛰고 수집기가 Redis 에 바로 반영한다 (S15P21A104-171). AI 는 아무것도 못 받는다 */
+    public static final String PUBLISHER_REDIS = "redis";
 
     public CollectProperties {
+        if (publisher == null || publisher.isBlank()) {
+            publisher = PUBLISHER_KAFKA;
+        }
         if (kafka == null) {
             kafka = new Kafka(null, null);
         }

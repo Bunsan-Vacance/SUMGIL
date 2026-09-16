@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class CollectTopicsTest {
 
     static CollectProperties props() {
-        return new CollectProperties(false, false, null, null, null, null,
+        return new CollectProperties(false, false, null, null, null, null, null,
                 new CollectProperties.Source(true, "subway.arrival", Duration.ofSeconds(60), "07:30-13:00", 1_610_612_736L, "k"),
                 new CollectProperties.Source(true, "bike.stock", Duration.ofSeconds(120), "07:00-18:00", 1_073_741_824L, "k"),
                 new CollectProperties.Weather(true, "weather.nowcast", Duration.ofHours(1), "00:00-24:00", 67_108_864L, "k", 60, 127));

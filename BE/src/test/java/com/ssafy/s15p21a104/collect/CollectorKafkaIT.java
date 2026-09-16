@@ -50,7 +50,7 @@ class CollectorKafkaIT {
     private static final String BOOTSTRAP = System.getenv("KAFKA_BOOTSTRAP_SERVERS");
 
     private final CollectConfig config = new CollectConfig();
-    private final CollectProperties props = new CollectProperties(false, false,
+    private final CollectProperties props = new CollectProperties(false, false, CollectProperties.PUBLISHER_KAFKA,
             new CollectProperties.Kafka(BOOTSTRAP, TIMEOUT), null, null, null,
             CollectTopicsTest.props().subway(), CollectTopicsTest.props().bike(), CollectTopicsTest.props().weather());
 
