@@ -29,16 +29,19 @@ from DATA_ENGINE.collect.common import AI_ROOT, KST
 DATASET_ROOT_ENV_KEYS = {
     "bike": "GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID",
     "weather": "GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_FOLDER_ID",
+    "subway": "GOOGLE_DRIVE_SUBWAY_ARCHIVE_ROOT_FOLDER_ID",
 }
 
 DATASET_ARCHIVE_PREFIXES = {
     "bike": "BIKE/",
     "weather": "EXTERNAL/weather/",
+    "subway": "SUBWAY/",
 }
 
 DATASET_ROOT_LEVEL_ENV_KEYS = {
     "bike": "GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_LEVEL",
     "weather": "GOOGLE_DRIVE_WEATHER_ARCHIVE_ROOT_LEVEL",
+    "subway": "GOOGLE_DRIVE_SUBWAY_ARCHIVE_ROOT_LEVEL",
 }
 
 DATASET_ROOT_LEVEL_PREFIXES = {
@@ -51,6 +54,11 @@ DATASET_ROOT_LEVEL_PREFIXES = {
         "domain": "EXTERNAL/weather/",
         "raw": "EXTERNAL/weather/raw/",
         "nowcast": "EXTERNAL/weather/raw/nowcast/",
+    },
+    "subway": {
+        "domain": "SUBWAY/",
+        "raw": "SUBWAY/raw/",
+        "arrival": "SUBWAY/raw/arrival/",
     },
 }
 
@@ -243,7 +251,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Upload completed DATA_ENGINE raw snapshot partitions to Google Drive.",
     )
     parser.add_argument("--ai-root", type=Path, default=AI_ROOT)
-    parser.add_argument("--dataset", choices=["all", "bike", "weather"], default="all")
+    parser.add_argument("--dataset", choices=["all", "bike", "weather", "subway"], default="all")
     parser.add_argument("--older-than-hours", type=float, default=1)
     parser.add_argument("--max-partitions", type=int, default=24)
     parser.add_argument("--manifest-path", type=Path, default=DEFAULT_MANIFEST_PATH)

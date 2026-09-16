@@ -134,6 +134,30 @@ def test_drive_destination_supports_bike_realtime_root_level(tmp_path, monkeypat
     assert archive_path == "dt=2026-09-13/hh=04"
 
 
+def test_drive_destination_supports_subway_arrival_root_level(tmp_path, monkeypatch):
+    base_path = tmp_path / "data/SUBWAY/raw/arrival"
+    write_snapshot(base_path / "dt=2026-09-13/hh=04/snapshot_1.parquet", size=7)
+    target = __import__(
+        "DATA_ENGINE.archive.targets",
+        fromlist=["discover_archive_targets"],
+    ).discover_archive_targets(
+        [ArchiveDataset("subway", base_path, Path("SUBWAY/raw/arrival"))],
+        older_than_hours=0,
+        current_slot=("2026-09-13", "05"),
+    )[
+        0
+    ]
+    monkeypatch.setenv("GOOGLE_DRIVE_SUBWAY_ARCHIVE_ROOT_LEVEL", "arrival")
+
+    root_id, archive_path = drive_destination_for_target(
+        target,
+        {"default": "data-root", "subway": "subway-arrival-root"},
+    )
+
+    assert root_id == "subway-arrival-root"
+    assert archive_path == "dt=2026-09-13/hh=04"
+
+
 def test_drive_destination_falls_back_to_default_root(tmp_path):
     base_path = tmp_path / "data/BIKE/raw/realtime"
     write_snapshot(base_path / "dt=2026-09-13/hh=04/snapshot_1.parquet", size=7)
@@ -396,3 +420,27 @@ def test_main_passes_bike_dataset_root_folder_id(tmp_path, monkeypatch, capsys):
     output = capsys.readouterr().out
     assert result == 0
     assert "archive=raw/realtime/dt=2026-09-13/hh=04" in output
+
+
+def test_main_passes_subway_dataset_root_folder_id(tmp_path, monkeypatch, capsys):
+    base_path = tmp_path / "data/SUBWAY/raw/arrival"
+    write_snapshot(base_path / "dt=2026-09-13/hh=04/snapshot_1.parquet")
+
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID", "data-root")
+    monkeypatch.setenv("GOOGLE_DRIVE_SUBWAY_ARCHIVE_ROOT_FOLDER_ID", "subway-root")
+
+    result = main(
+        [
+            "--ai-root",
+            str(tmp_path),
+            "--dataset",
+            "subway",
+            "--older-than-hours",
+            "0",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "DRY_RUN subway" in output
+    assert "archive=raw/arrival/dt=2026-09-13/hh=04" in output

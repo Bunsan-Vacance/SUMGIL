@@ -21,6 +21,7 @@ AI_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RETENTION_HOURS = 48
 DEFAULT_BIKE_BASE = Path("data/BIKE/raw/realtime")
 DEFAULT_WEATHER_BASE = Path("data/EXTERNAL/weather/raw/nowcast")
+DEFAULT_SUBWAY_BASE = Path("data/SUBWAY/raw/arrival")
 SNAPSHOT_PATTERN = "dt=*/hh=*/snapshot_*.parquet"
 
 
@@ -146,6 +147,7 @@ def build_retention_targets(ai_root: Path) -> list[RetentionTarget]:
     return [
         RetentionTarget("bike", ai_root / DEFAULT_BIKE_BASE),
         RetentionTarget("weather", ai_root / DEFAULT_WEATHER_BASE),
+        RetentionTarget("subway", ai_root / DEFAULT_SUBWAY_BASE),
     ]
 
 
