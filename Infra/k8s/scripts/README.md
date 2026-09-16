@@ -39,6 +39,9 @@
 - `sync-to-nodes.sh` — `NODES`(기본 `a104 a104a`), `REMOTE_DIR`(기본 `sumgil`).
 - `init-vpn.sh` — `TS_AUTHKEY`(필수, 시크릿), `TS_HOSTNAME`(node1/node2), `TAILSCALE_VERSION`(기본 1.102.2).
 - `init-k3s-worker.sh` — `K3S_URL`(node1 VPN:6443), `K3S_TOKEN`(필수, 시크릿).
+- `render-secrets.sh` — GitLab protected 변수 → `*-secret.env` 렌더 (210③).
+  필요 변수: `DB_PASSWORD`·`SEOUL_SUBWAY_KEY`·`SEOUL_API_KEY`·`SEOUL_BIKE_KEY`·`KMA_API_KEY`
+  (미정의·빈값·렌더 잔재 시 실패). 결과물은 노드로 scp 후 `apply.sh`. 디버그 출력 금지.
 
 ## 인자
 

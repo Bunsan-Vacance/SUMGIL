@@ -14,12 +14,33 @@ kustomize-validate:
         - ".gitlab/ci/*.yml"
   before_script:
     - apk add --no-cache kubectl
-    # secretGenerator가 env 파일을 요구한다. 키 이름은 각 *.env.example과 동일하게 맞춘다.
-    - printf 'DB_PASSWORD=dummy\n' > Infra/k8s/prod/data-secret.env
-    - printf 'SEOUL_SUBWAY_KEY=dummy\nSEOUL_API_KEY=dummy\nSEOUL_BIKE_KEY=dummy\nKMA_API_KEY=dummy\n' > BE/k8s/prod/be-secret.env
+    # secretGenerator가 env 파일을 요구한다. 키 목록은 템플릿에서 뽑아 더미로 채운다
+    # (하드코딩 금지 — 템플릿이 바뀌면 검증도 자동 추종).
+    - grep -v '^#' Infra/k8s/prod/data-secret.env.template | sed 's/=.*/=dummy/' > Infra/k8s/prod/data-secret.env
+    - grep -v '^#' BE/k8s/prod/be-secret.env.template | sed 's/=.*/=dummy/' > BE/k8s/prod/be-secret.env
   script:
     - kubectl kustomize Infra/k8s > /dev/null
     - kubectl kustomize BE/k8s/prod > /dev/null
     - kubectl kustomize FE/k8s/prod > /dev/null
   after_script:
     - rm -f Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env
+
+# 템플릿↔예시 키 대조. 키 추가 시 양쪽을 함께 갱신해야 한다.
+secrets-drift-check:
+  stage: lint
+  image: alpine:3.20
+  tags:
+    - CI
+  rules:
+    - changes:
+        - "BE/k8s/prod/be-secret.env.*"
+        - "Infra/k8s/prod/data-secret.env.*"
+        - "Infra/k8s/scripts/render-secrets.sh"
+        - ".gitlab/ci/manifests.yml"
+  script:
+    - |
+      for base in BE/k8s/prod/be-secret Infra/k8s/prod/data-secret; do
+        grep -v '^#' "$base.env.template" | cut -d= -f1 | sort > /tmp/t.keys
+        grep -v '^#' "$base.env.example" | cut -d= -f1 | sort > /tmp/e.keys
+        diff /tmp/t.keys /tmp/e.keys || (echo "키 불일치: $base (template vs example)"; exit 1)
+      done
