@@ -1,0 +1,27 @@
+# 실시간 컨슈머 프로파일 (S15P21A104-171). API 서버를 띄우지 않고 Kafka → Redis 반영만 한다.
+# 실행: SPRING_PROFILES_ACTIVE=local,consume ./gradlew bootRun
+#       SPRING_PROFILES_ACTIVE=local,consume ./gradlew bootRun --args='--consume.dry-run=true'   # 브로커 없이 배선만
+# DB·Redis 접속은 다른 프로파일과 같이 DB_URL 등 환경변수로 받는다 (컨텍스트를 공유하므로 필요하다).
+# 값의 근거는 BE/docs/infra/consumer.md.
+spring:
+  main:
+    web-application-type: none
+  jpa:
+    show-sql: false
+
+consume:
+  dry-run: false          # true 면 Kafka 빈을 만들지 않는다 (소비하지 않음)
+  # weather.nowcast 는 뺀다 — AI 가 Kafka 에서 직접 읽는지 확답을 못 받았고, 우리가 Redis 에 넣어도 읽는 쪽이 없다
+  topics:
+    - subway.arrival
+    - bike.stock
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}   # 파드에서는 kafka:9092
+    group-id: ${CONSUME_GROUP_ID:be-redis}      # AI Spark 의 ai-spark 와 반드시 달라야 한다 (kafka.md 5절)
+    auto-offset-reset: latest                   # earliest 면 첫 기동에 보관 48시간치(약 290만 건)를 재생한다
+    max-poll-records: 500                       # 지하철 회차(약 3,000건)는 여러 배치로 잘린다 — 반영기가 그것을 전제로 쓰여 있다
+    poll-timeout: 3s
+  subway:
+    # 상태 키(subway:arrival:status)의 outside_window 판정용. 수집기와 같은 값이어야 한다 —
+    # prod 에서는 수집기와 같은 ConfigMap(be-collector-config)을 물려 한 곳에서 관리한다.
+    window: ${COLLECT_SUBWAY_WINDOW:07:30-13:00}

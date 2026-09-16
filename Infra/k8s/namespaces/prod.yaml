@@ -1,0 +1,6 @@
+# 공유 네임스페이스 (S15P21A104-126). 클러스터 스코프라 Infra가 소유한다.
+# BE·FE는 이 네임스페이스를 참조만 한다 (kustomization의 namespace: prod).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod

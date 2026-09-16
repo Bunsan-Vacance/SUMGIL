@@ -1,0 +1,102 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import HomePage from './HomePage'
+
+const origin = {
+  id: 'origin',
+  name: '강남역',
+  address: '서울 강남구 강남대로',
+  kind: '지하철역',
+}
+
+afterEach(cleanup)
+
+describe('홈 길찾기 패널', () => {
+  it('검색 버튼을 열고 길찾기 패널을 열고 닫는다', () => {
+    const openBrowse = vi.fn()
+    const toggleRoutePanel = vi.fn()
+    const closeRoutePanel = vi.fn()
+    const { rerender } = render(
+      <HomePage
+        origin={origin}
+        destination={null}
+        openSearch={vi.fn()}
+        openBrowse={openBrowse}
+        routePanelOpen={false}
+        toggleRoutePanel={toggleRoutePanel}
+        closeRoutePanel={closeRoutePanel}
+        findRoutes={vi.fn()}
+        swapPlaces={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '장소, 역, 주소 검색' }))
+    expect(openBrowse).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: /길찾기/ }))
+    expect(toggleRoutePanel).toHaveBeenCalledOnce()
+    expect(document.getElementById('home-route-panel')?.getAttribute('hidden')).toBe('')
+
+    rerender(
+      <HomePage
+        origin={origin}
+        destination={null}
+        openSearch={vi.fn()}
+        openBrowse={openBrowse}
+        routePanelOpen
+        toggleRoutePanel={toggleRoutePanel}
+        closeRoutePanel={closeRoutePanel}
+        findRoutes={vi.fn()}
+        swapPlaces={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '홈으로 돌아가기' }))
+    expect(closeRoutePanel).toHaveBeenCalledOnce()
+  })
+
+  it('패널 안의 출발지·도착지 입력은 기존 검색 흐름을 호출한다', () => {
+    const openSearch = vi.fn()
+    render(
+      <HomePage
+        origin={origin}
+        destination={null}
+        openSearch={openSearch}
+        openBrowse={vi.fn()}
+        routePanelOpen
+        toggleRoutePanel={vi.fn()}
+        closeRoutePanel={vi.fn()}
+        findRoutes={vi.fn()}
+        swapPlaces={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /출발.*강남역/ }))
+    fireEvent.click(screen.getByRole('button', { name: /도착.*도착지를 검색하세요/ }))
+    expect(openSearch).toHaveBeenNthCalledWith(1, 'origin')
+    expect(openSearch).toHaveBeenNthCalledWith(2, 'destination')
+  })
+
+  it('도착지가 없으면 같은 입력 상자의 교환 버튼을 비활성화한다', () => {
+    const swapPlaces = vi.fn()
+    render(
+      <HomePage
+        origin={origin}
+        destination={null}
+        openSearch={vi.fn()}
+        openBrowse={vi.fn()}
+        routePanelOpen
+        toggleRoutePanel={vi.fn()}
+        closeRoutePanel={vi.fn()}
+        findRoutes={vi.fn()}
+        swapPlaces={swapPlaces}
+      />,
+    )
+
+    const swap = screen.getByRole('button', { name: '출발지와 도착지 교환' })
+    expect(swap.getAttribute('disabled')).toBe('')
+    fireEvent.click(swap)
+    expect(swapPlaces).not.toHaveBeenCalled()
+  })
+})
