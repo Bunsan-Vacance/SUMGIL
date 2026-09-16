@@ -30,8 +30,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>대응표에 없는 역은 쓰지 않고 센다 — 아무 역에나 쓰면 틀린 역의 도착 정보가 된다. 2026-09-16 기준
  * 안 붙는 것은 GTX-A 9역과 1호선 지제뿐이다 ({@code docs/infra/consumer.md} 1절).
  *
- * <p>도착예정시각({@code eta_at})은 v1 에서 추정하지 않는다 — API 의 {@code barvlDt} 가 0 으로 오는 경우가
- * 60.4%(2026-09-15 실측 2,872행)라 그대로는 만들 수 없고, 구간 합산 알고리즘이 따로 필요하다. 후속 티켓.
+ * <p>도착예정시각({@code eta_at})은 {@link ArrivalEta} 가 산출한다 (S15P21A104-224). 원천이 잔여시간을 주거나
+ * 열차가 그 역에 있으면 채우고, 위치만 아는 경우(실측 46.9%)는 비워 둔다 — 읽는 쪽이 {@code arvl_msg2} 문구를 쓴다.
+ * {@code [N]번째 전역} 의 구간 합산은 {@code edge_time} 조회가 필요해 범위 밖이다.
  */
 @Slf4j
 public final class SubwayArrivalApplier implements EventApplier {
@@ -80,18 +81,25 @@ public final class SubwayArrivalApplier implements EventApplier {
 
         int written = 0;
         int skipped = 0;
+        // 가드가 버린 건수. 원천 이상치가 늘어나는 것을 눈에 보이게 하려는 관측용이다 (S15P21A104-224).
+        int[] guardHits = {0};
         for (Map.Entry<String, List<CollectEvent>> entry : byStation.entrySet()) {
-            ApplyResult one = applyStation(entry.getKey(), stationNames.get(entry.getKey()), entry.getValue(), writtenAt);
+            ApplyResult one = applyStation(entry.getKey(), stationNames.get(entry.getKey()), entry.getValue(),
+                    writtenAt, guardHits);
             written += one.written();
             skipped += one.skipped();
         }
 
         writeStatus(latestRun, writtenAt);
+        if (guardHits[0] > 0) {
+            log.warn("도착예정시각 가드가 {}건을 버렸다 — 원천 시각이 현재 -{}분 ~ +{}분을 벗어났다",
+                    guardHits[0], ArrivalEta.MAX_BEHIND.toMinutes(), ArrivalEta.MAX_AHEAD.toMinutes());
+        }
         return new ApplyResult(written, skipped, unmapped);
     }
 
     private ApplyResult applyStation(String stationId, String stationName, List<CollectEvent> events,
-                                     OffsetDateTime writtenAt) {
+                                     OffsetDateTime writtenAt, int[] guardHits) {
         OffsetDateTime run = null;
         for (CollectEvent event : events) {
             run = later(run, event.pollRunAt());
@@ -120,7 +128,7 @@ public final class SubwayArrivalApplier implements EventApplier {
                 skipped++;
                 continue;
             }
-            Map<String, Object> train = toTrain(event);
+            Map<String, Object> train = toTrain(event, writtenAt, guardHits);
             if (!seen.add(String.valueOf(train.get("train_no")))) {
                 skipped++;
                 continue;
@@ -162,7 +170,7 @@ public final class SubwayArrivalApplier implements EventApplier {
     }
 
     /** API 행 하나 → 열차 한 대. 코드·문구는 원본 그대로 넘기고 해석은 읽는 쪽에 맡긴다 (kafka.md 5절과 같은 원칙). */
-    private static Map<String, Object> toTrain(CollectEvent event) {
+    private static Map<String, Object> toTrain(CollectEvent event, OffsetDateTime writtenAt, int[] guardHits) {
         Map<String, Object> row = event.payload();
         Map<String, Object> train = new LinkedHashMap<>();
         train.put("line_id", text(row.get("subwayId")));
@@ -177,8 +185,15 @@ public final class SubwayArrivalApplier implements EventApplier {
         train.put("arvl_msg3", text(row.get("arvlMsg3")));
         train.put("last_car_at", text(row.get("lstcarAt")));
         train.put("recptn_dt", Times.format(event.sourceGeneratedAt()));
-        train.put("eta_at", null);
-        train.put("eta_source", "none");
+
+        // 역명은 원천 표기끼리 비교한다 — 우리 정본 이름은 부역명 괄호를 벗긴 것이라 arvlMsg3 와 다를 수 있다.
+        ArrivalEta eta = ArrivalEta.of(event.sourceGeneratedAt(), number(row.get("barvlDt")),
+                text(row.get("arvlMsg3")), text(row.get("statnNm")), writtenAt);
+        if (eta.guarded()) {
+            guardHits[0]++;
+        }
+        train.put("eta_at", Times.format(eta.etaAt()));
+        train.put("eta_source", eta.source().wire());
         return train;
     }
 
