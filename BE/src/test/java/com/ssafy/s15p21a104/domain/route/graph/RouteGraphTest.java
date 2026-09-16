@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.domain.route.graph;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
@@ -123,5 +124,38 @@ class RouteGraphTest {
 
         assertEquals(1, graph.withExtraEdges(List.of()).edgeCount());
         assertEquals(1, graph.withExtraEdges(null).edgeCount());
+    }
+
+    /**
+     * S15P21A104-155(k6 부하테스트로 발견한 성능 문제) 회귀 가드: 안 건드리는 노드의 엣지
+     * 리스트가 새로 복사되지 않고 원본과 같은 참조를 공유하는지 확인한다. 이게 깨지면
+     * withExtraEdges가 다시 전체 그래프를 깊은 복사하는 예전 방식으로 되돌아간 것이다.
+     */
+    @Test
+    @DisplayName("건드리지 않는 노드의 엣지 리스트는 원본과 같은 참조를 공유한다(깊은 복사 없음)")
+    void withExtraEdges_안건드리는_노드는_참조공유() {
+        RouteGraph graph = graphOf(
+                new Edge("A", "B", "L1", 100, 0, TravelMode.SUBWAY),
+                new Edge("C", "D", "L2", 50, 0, TravelMode.SUBWAY));
+
+        RouteGraph extended = graph.withExtraEdges(
+                List.of(new Edge("PLACE", "A", "WALK", 30, 0, TravelMode.WALK)));
+
+        // C는 추가 엣지와 무관한 노드 — 리스트를 다시 만들지 않고 원본 리스트 객체를 그대로 재사용해야 한다.
+        assertSame(graph.outgoingEdges("C"), extended.outgoingEdges("C"));
+    }
+
+    @Test
+    @DisplayName("건드리는 노드는 기존 엣지를 유지한 채 새 엣지가 뒤에 더해진다")
+    void withExtraEdges_건드리는_노드는_기존엣지_유지() {
+        RouteGraph graph = graphOf(new Edge("A", "B", "L1", 100, 0, TravelMode.SUBWAY));
+
+        RouteGraph extended = graph.withExtraEdges(
+                List.of(new Edge("A", "PLACE", "WALK", 30, 0, TravelMode.WALK)));
+
+        List<Edge> aEdges = extended.outgoingEdges("A");
+        assertEquals(2, aEdges.size());
+        assertEquals("B", aEdges.get(0).toNode());
+        assertEquals("PLACE", aEdges.get(1).toNode());
     }
 }

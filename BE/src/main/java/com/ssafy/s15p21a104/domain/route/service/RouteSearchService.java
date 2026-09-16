@@ -17,6 +17,7 @@ import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.finder.CandidateModeSets;
 import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.finder.ShortestPathFinder;
@@ -60,22 +61,6 @@ public class RouteSearchService {
     /** 응답에 담을 후보 수 상한(S15P21A104-185). */
     private static final int MAX_CANDIDATES = 10;
 
-    /**
-     * 허용 수단 조합별 대체 후보 탐색에 쓰는 "핵심 수단" 집합들. WALK는 접근·연결용이라 모든 조합에
-     * 항상 포함한다({@link #withWalk}). 최단경로 알고리즘({@link ShortestPathFinder})은 그대로 두고,
-     * 이 조합 수만큼 하위 그래프({@link RouteGraph#filterByModes})를 만들어 반복 탐색한다 —
-     * 반드시 "최단"일 필요는 없는, 수단이 다른 대안 경로를 얻는 게 목적이다.
-     */
-    private static final List<Set<TravelMode>> CANDIDATE_CORE_MODE_SETS = List.of(
-            Set.of(TravelMode.SUBWAY, TravelMode.BUS, TravelMode.BIKE),
-            Set.of(TravelMode.SUBWAY),
-            Set.of(TravelMode.BUS),
-            Set.of(TravelMode.BIKE),
-            Set.of(TravelMode.SUBWAY, TravelMode.BUS),
-            Set.of(TravelMode.SUBWAY, TravelMode.BIKE),
-            Set.of(TravelMode.BUS, TravelMode.BIKE)
-    );
-
     private final StationRepository stationRepository;
     private final RouteGraphRegistry graphRegistry;
     private final TransferRule transferRule;
@@ -108,8 +93,10 @@ public class RouteSearchService {
         findStation(destStationId);
         // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
         DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
+        // 수단 조합별 하위 그래프는 그래프 로드 시점에 미리 계산해둔 캐시를 그대로 쓴다
+        // (S15P21A104-155) — 요청마다 22만 엣지짜리 그래프를 7번씩 다시 필터링하지 않는다.
         List<RouteSearchResponse> candidates = algorithmCandidates(
-                graph, originStationId, destStationId, graphRegistry.stationInfos());
+                graphRegistry.candidateSubgraphs(), originStationId, destStationId, graphRegistry.stationInfos());
         // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
         // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
         // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
@@ -184,22 +171,25 @@ public class RouteSearchService {
     /**
      * 허용 수단 조합별로 반복 탐색해 여러 경로 후보를 모은다(S15P21A104-185).
      *
-     * <p>같은 최단경로 알고리즘을 조합 수만큼 서로 다른 하위 그래프에 적용할 뿐,
-     * 알고리즘 자체는 그대로다. 조합마다 나온 후보 중 leg 구성이 같은 것은 중복 제거하고,
-     * 소요시간이 가장 짧은 것부터 정렬해 최대 {@value #MAX_CANDIDATES}개까지만 담는다.
-     * routeType 배정({@link RouteType#SHORTEST}/{@link RouteType#ALTERNATIVE})은 여기서
-     * 하지 않는다 — {@code modes} 필터가 아직 안 걸린 시점이라 "가장 빠른 것"이 필터 후에도
-     * 그대로 유지된다는 보장이 없다({@link #relabelByRank} 참고).
+     * <p>같은 최단경로 알고리즘을 하위 그래프 개수만큼 반복 적용할 뿐, 알고리즘 자체는
+     * 그대로다. 하위 그래프는 {@link CandidateModeSets#CORE_MODE_SETS} 조합별로 미리
+     * 필터링해둔 것을 받는다 — 역 검색은 {@link RouteGraphRegistry#candidateSubgraphs()}의
+     * 캐시를 그대로 넘기고, 좌표 검색은 그 캐시에 접근 임시 엣지만 얹은 걸 넘긴다
+     * (S15P21A104-155, 요청마다 22만 엣지짜리 그래프를 7번 다시 필터링하던 병목 제거).
+     * 조합마다 나온 후보 중 leg 구성이 같은 것은 중복 제거하고, 소요시간이 가장 짧은
+     * 것부터 정렬해 최대 {@value #MAX_CANDIDATES}개까지만 담는다. routeType 배정
+     * ({@link RouteType#SHORTEST}/{@link RouteType#ALTERNATIVE})은 여기서 하지 않는다 —
+     * {@code modes} 필터가 아직 안 걸린 시점이라 "가장 빠른 것"이 필터 후에도 그대로
+     * 유지된다는 보장이 없다({@link #relabelByRank} 참고).
      */
     private List<RouteSearchResponse> algorithmCandidates(
-            RouteGraph graph, String originStationId, String destStationId,
+            List<RouteGraph> candidateSubgraphs, String originStationId, String destStationId,
             Map<String, RouteMapper.StationInfo> stationInfos) {
         // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(graphRegistry.transferTimes());
 
         Map<String, RouteSearchResponse> byLegSignature = new LinkedHashMap<>();
-        for (Set<TravelMode> coreModes : CANDIDATE_CORE_MODE_SETS) {
-            RouteGraph subgraph = graph.filterByModes(withWalk(coreModes));
+        for (RouteGraph subgraph : candidateSubgraphs) {
             searchOne(subgraph, rule, originStationId, destStationId, stationInfos)
                     .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
         }
@@ -271,13 +261,6 @@ public class RouteSearchService {
             }
             throw exception;
         }
-    }
-
-    /** WALK는 접근·연결용이라 모든 수단 조합에 항상 포함한다. */
-    private Set<TravelMode> withWalk(Set<TravelMode> coreModes) {
-        Set<TravelMode> modes = new HashSet<>(coreModes);
-        modes.add(TravelMode.WALK);
-        return modes;
     }
 
     /** leg의 (수단·출발·도착·노선) 순서로 만든 서명. 같으면 사실상 같은 경로로 보고 중복 제거한다. */
@@ -554,7 +537,12 @@ public class RouteSearchService {
 
         List<Edge> accessEdges = new ArrayList<>(originAccessEdges);
         accessEdges.addAll(destAccessEdges);
-        RouteGraph augmentedGraph = graph.withExtraEdges(accessEdges);
+        // 캐시된 조합별 하위 그래프(RouteGraphRegistry.candidateSubgraphs()) 각각에 접근
+        // 임시 엣지만 얹는다 — 22만 엣지짜리 원본을 7번 다시 필터링하지 않는다(S15P21A104-155).
+        // withExtraEdges 자체도 얕은 복사라 안 건드리는 노드는 복사하지 않는다.
+        List<RouteGraph> augmentedSubgraphs = graphRegistry.candidateSubgraphs().stream()
+                .map(subgraph -> subgraph.withExtraEdges(accessEdges))
+                .toList();
 
         Map<String, RouteMapper.StationInfo> stationInfos = new HashMap<>(baseInfos);
         stationInfos.put(PLACE_ORIGIN_ID, new RouteMapper.StationInfo(
@@ -565,7 +553,7 @@ public class RouteSearchService {
         DepartureSlot departureSlot = DepartureSlot.of(
                 request.departureTime() != null ? request.departureTime() : LocalDateTime.now());
         List<RouteSearchResponse> candidates = algorithmCandidates(
-                augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, stationInfos);
+                augmentedSubgraphs, PLACE_ORIGIN_ID, PLACE_DEST_ID, stationInfos);
         List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, request.modes()));
         if (request.priority() == RoutePriority.COMFORT) {
             ranked = applyComfortPriority(ranked, departureSlot);

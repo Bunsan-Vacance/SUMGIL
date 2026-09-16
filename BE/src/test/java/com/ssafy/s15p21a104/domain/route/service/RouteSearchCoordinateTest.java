@@ -62,6 +62,8 @@ class RouteSearchCoordinateTest {
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "B", "L1", 100),
                 subway("B", "C", "L1", 100)));
+        lenient().when(graphRegistry.candidateSubgraphs())
+                .thenAnswer(invocation -> RouteTestFixtures.candidateSubgraphsOf(graphRegistry.graph()));
 
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180),

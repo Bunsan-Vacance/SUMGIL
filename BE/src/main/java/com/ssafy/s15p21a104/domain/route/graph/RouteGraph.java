@@ -183,20 +183,47 @@ public final class RouteGraph {
         if (extraEdges == null || extraEdges.isEmpty()) {
             return this;
         }
+        // 얕은 복사: 맵의 항목(포인터)만 새로 담는다 — 정점 수만큼(O(V))이지 간선 수만큼(O(E))이
+        // 아니다. 값(간선 리스트·노선 집합)은 이미 불변이라 안 건드리는 노드는 원본을 그대로
+        // 공유해도 안전하고, 실제로 바뀌는 소수의 노드(대개 접근 임시 노드 몇 개)만 아래에서
+        // appended/added로 새 리스트·집합을 만들어 교체한다.
+        //
+        // 예전 구현은 여기서 전체 간선을 깊은 복사하고(안 건드리는 노드까지 포함) RouteGraph.of()가
+        // 그걸 또 한 번 깊은 복사해, 좌표 검색 요청마다 22만 간선을 두 번씩 복사했다 — k6
+        // 부하테스트로 드러난 지연의 원인이었다(docs/perf/2026-09-16-coordinate-search-k6.md).
         Set<String> newNodes = new LinkedHashSet<>(nodes);
-        Map<String, List<Edge>> newAdjacency = new LinkedHashMap<>();
-        adjacency.forEach((node, edges) -> newAdjacency.put(node, new ArrayList<>(edges)));
-        Map<String, Set<String>> newLines = new LinkedHashMap<>();
-        stationLines.forEach((node, lines) -> newLines.put(node, new LinkedHashSet<>(lines)));
+        Map<String, List<Edge>> newAdjacency = new LinkedHashMap<>(adjacency);
+        Map<String, Set<String>> newLines = new LinkedHashMap<>(stationLines);
 
         for (Edge edge : extraEdges) {
             newNodes.add(edge.fromNode());
             newNodes.add(edge.toNode());
-            newAdjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
-            newLines.computeIfAbsent(edge.fromNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
-            newLines.computeIfAbsent(edge.toNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
+            newAdjacency.put(edge.fromNode(), appended(newAdjacency.get(edge.fromNode()), edge));
+            newLines.put(edge.fromNode(), added(newLines.get(edge.fromNode()), edge.routeId()));
+            newLines.put(edge.toNode(), added(newLines.get(edge.toNode()), edge.routeId()));
         }
-        return RouteGraph.of(newNodes, newAdjacency, newLines);
+
+        return new RouteGraph(
+                Collections.unmodifiableSet(newNodes),
+                Collections.unmodifiableMap(newAdjacency),
+                Collections.unmodifiableMap(newLines));
+    }
+
+    /** 기존 리스트(있으면) 끝에 엣지 하나를 붙인 새 불변 리스트. 다른 노드의 리스트는 건드리지 않는다. */
+    private static List<Edge> appended(List<Edge> existing, Edge extra) {
+        List<Edge> merged = existing == null ? new ArrayList<>(1) : new ArrayList<>(existing);
+        merged.add(extra);
+        return Collections.unmodifiableList(merged);
+    }
+
+    /** 기존 집합(있으면)에 노선 ID 하나를 더한 새 불변 집합. 이미 있으면 원본을 그대로 재사용한다. */
+    private static Set<String> added(Set<String> existing, String routeId) {
+        if (existing != null && existing.contains(routeId)) {
+            return existing;
+        }
+        Set<String> merged = existing == null ? new LinkedHashSet<>() : new LinkedHashSet<>(existing);
+        merged.add(routeId);
+        return Collections.unmodifiableSet(merged);
     }
 
     /**
