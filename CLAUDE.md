@@ -12,9 +12,9 @@ JIRA 프로젝트 키는 `S15P21A104`, 원격은 GitLab(`lab.ssafy.com/s15-bigda
 
 ```
 AI/       분석 파이프라인 · 모델 (Python, PyTorch, PySpark)
-BE/       API 서버 (Java 21, Spring Boot 3.x, Gradle)
+BE/       API 서버 (Java 21, Spring Boot 4.x, Gradle)
 FE/       웹 클라이언트 (React, TypeScript, TailwindCSS, Vite)
-Infra/    배포 구성 (Docker, Nginx, AWS EC2)
+Infra/    배포 구성 (EC2, k3s, Kustomize)
 Docs/
   Convention/      팀 규칙
   Service Design/  기획 · 데이터 검토 문서
@@ -24,9 +24,11 @@ Docs/
 
 ## 현재 상태
 
-- **FE / BE는 프로젝트가 초기화되지 않았다.** 폴더와 README만 있으며, 스캐폴딩 도구(`npm create vite`, Spring Initializr)가 구조를 만들 예정이라 하위 폴더를 미리 만들지 않았다. 충돌을 피하려는 의도이므로 임의로 채우지 않는다.
+- **BE는 초기화·구현 진행 중** — Java 21 · Spring Boot 4.1.1 · Gradle Wrapper. `domain/`(station·bike·bus·congestion·route)·`global/`·`load/` 구조, Flyway 마이그레이션, `GET /api/stations/search`·`GET /api/routes/search`·`GET /api/bike-stations/nearby`가 있다.
+- **FE는 아직 초기화되지 않았다.** 폴더와 README만 있으며, 스캐폴딩 도구(`npm create vite`)가 구조를 만든다. 충돌을 피하려 하위 폴더를 미리 만들지 않는다. (1차 배포용 `FE/docker/placeholder/`는 예외)
+- **1차 인프라는 EC2 2대 k3s에 배포 완료 (2026-09-11).** 자세한 구성은 [Infra/README.md](./Infra/README.md).
 - **개발 환경에 Python이 설치돼 있지 않다.** AI 파트 작업 전 확인이 필요하다.
-- 설치 확인된 도구: Node 24.19, npm 11.17, JDK 21, Docker 29.6. Gradle은 Wrapper를 쓴다.
+- 설치 확인된 도구: Node 24.19, npm 11.17, JDK 21, Docker 29.6, kubectl/Kustomize. Gradle은 Wrapper를 쓴다.
 
 ## 커밋·브랜치 규칙
 
