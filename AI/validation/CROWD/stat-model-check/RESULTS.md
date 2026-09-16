@@ -2,6 +2,8 @@
 
 S15P21A104-145의 **통계 모형** 파트만(LLM·DL은 범위 밖). 브랜치 `feat/CROWD-stat-model-check`.
 스크립트 `stat_models.py`(순수 로직) · `predict_all.py`(계열별 예측) · `evaluate.py`(표·CI).
+결과 노트북 `stat_model_check.ipynb`(그림 7장, 출력 포함) — `_build_notebook.py`가 셀을 조립해 실행까지
+하고 저장한다(수치를 다시 계산하지 않고 `eval_table_*`·`stat_preds_*`만 읽는다).
 
 수치는 **학습 PC(Windows·SUMGIL)에서 88번 요일유형 수정판 패널로 재실행한 결과**다. 맥에서 낸 잠정
 수치(요일유형 2종 패널 + 이벤트 열 누락 + 발산 행 제외)는 전부 폐기했다 — 무엇이 틀렸고 얼마나
@@ -266,6 +268,9 @@ cd AI
 ruff check .      # All checks passed!
 black --check .   # 233 files unchanged
 pytest -q         # 522 passed (SUMGIL 환경은 torch가 있어 스킵 없음), 35s
+
+# 결과 노트북 재생성(출력 포함, 약 40초) — 표 E가 필요하므로 --grades 판이 있어야 한다
+python validation/CROWD/stat-model-check/_build_notebook.py
 ```
 
 `test/CROWD/test_crowd_stat_models.py`에 이번 보완분 테스트를 추가했다 — 청크 지문이 값 변화까지
@@ -282,7 +287,6 @@ pytest -q         # 522 passed (SUMGIL 환경은 torch가 있어 스킵 없음),
   표본이 18일뿐이라 CI가 넓은 탓인지 분리하지 못했다(공휴일 CI 하한 −12%p까지 벌어진다).
 - **92 표본과 전체 축의 순위 역전**(5절)을 더 파지 않았다. `snaive_d7`까지 표본에서 앞서는 것을 보면
   표본 추출 자체가 변동이 큰 역·날짜에 쏠려 있다 — 92·145의 표본 정의를 다시 볼 여지가 있다.
-- **노트북 산출물은 만들지 않았다**(계획 §7) — 추후 `_build_notebook.py` 방식으로 이 폴더에 추가한다.
 - **호선·요일유형 슬라이스에는 DM을 내지 않았다** — 142 RESULTS 7절과 같은 이유(정규 근사가 소표본에서
   부정확)로 슬라이스 판정은 부트스트랩 CI만 근거로 했다(DM은 전체 축 참고용).
 - **역 2810(늦은 개통) 같은 짧은 시리즈의 근본 처리**는 제약을 켜는 것으로 갈음했다. 시리즈를 관측
