@@ -1,0 +1,48 @@
+# 배포 (S15P21A104-210 ②). main 전용, 자동 실행.
+# main push → (be-image·fe-image) → deploy-prod 순서로만 돈다.
+# 전제 3개 (⬜ 미확인 시 이 job이 실패한다 — 그때는 노드 수동 apply.sh로 전환):
+#   1. 러너에 kubeconfig (a104 호스트 직통 가정).
+#   2. GitLab 변수 5건: DB_PASSWORD·SEOUL_SUBWAY_KEY·SEOUL_API_KEY·SEOUL_BIKE_KEY·KMA_API_KEY (protected+masked).
+#   3. 러너 호스트 docker의 insecure-registry 등록.
+# 롤백: 이전 SHA로 kustomize edit 후 파이프라인 재실행 (별도 정책은 백로그 2026-09-16-deploy-strategy).
+deploy-prod:
+  stage: deploy
+  image: alpine:3.20
+  tags:
+    - CI
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - "BE/**/*"
+        - "FE/**/*"
+        - "Infra/**/*"
+        - "AI/k8s/**/*"
+        - ".gitlab-ci.yml"
+        - ".gitlab/ci/*.yml"
+  environment:
+    name: prod
+  resource_group: prod
+  needs:
+    - job: be-image
+      optional: true
+    - job: fe-image
+      optional: true
+    - job: manifests-validate
+  before_script:
+    - apk add --no-cache kubectl
+    # Secret 실파일 렌더 (render-secrets.sh와 동일 규칙 — example 키 × 변수 값).
+    # 수정 시 스크립트와 함께 고친다. 디버그 출력(set -x) 금지.
+    - grep -v '^#' Infra/k8s/prod/data-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do eval "v=\$$k"; test -n "$v" || { echo "$k 없음"; exit 1; }; echo "$k=$v"; done > Infra/k8s/prod/data-secret.env
+    - grep -v '^#' BE/k8s/prod/be-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do eval "v=\$$k"; test -n "$v" || { echo "$k 없음"; exit 1; }; echo "$k=$v"; done > BE/k8s/prod/be-secret.env
+    - chmod 600 Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env
+  script:
+    # build job이 남긴 SHA가 있으면 그걸, 없으면 latest로 이미지 지정.
+    - TAG_BE="${IMAGE_TAG:-latest}"
+    - kubectl apply -k Infra/k8s --server-side
+    - kubectl rollout status deployment/cert-manager -n cert-manager --timeout=240s
+    - kubectl wait --for=condition=Ready certificate/sumgil-tls -n prod --timeout=300s
+    - kubectl apply -k BE/k8s/prod --server-side
+    - kubectl apply -k FE/k8s/prod --server-side
+    - kubectl rollout status deployment/be deployment/fe -n prod --timeout=300s
+  after_script:
+    - rm -f Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env
