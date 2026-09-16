@@ -25,7 +25,8 @@
 ```
 Infra/
 ├─ k8s/
-│  ├─ kustomization.yaml      클러스터 스코프 루트
+ │  ├─ kustomization.yaml      클러스터 스코프 루트
+ │  ├─ NETWORK.md               클러스터 내부 DNS·포트 인벤토리 (단일 정본)
 │  ├─ namespaces/             앱 네임스페이스 (prod) — 클러스터 스코프라 Infra 소유
 │  ├─ ingress-nginx/          ingress 컨트롤러 매니페스트 (vendored)
 │  ├─ prod/                   데이터 계층(PG·Redis·Kafka)·플랫폼 서비스(Registry) — Infra 소유
