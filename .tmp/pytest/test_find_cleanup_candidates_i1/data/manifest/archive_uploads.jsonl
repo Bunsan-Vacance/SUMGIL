@@ -1,0 +1,1 @@
+{"archive_backend": "drive", "archive_path": "bike/raw/realtime/dt=2026-09-11/hh=03", "dataset": "bike", "dt": "2026-09-11", "error": null, "file_count": 1, "hh": "03", "local_path": "data/bike/raw/realtime/dt=2026-09-11/hh=03", "status": "success", "total_bytes": 4, "uploaded_at": "2026-09-13T04:05:00+09:00"}
