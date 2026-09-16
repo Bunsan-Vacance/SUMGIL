@@ -81,10 +81,25 @@ WEATHER_FEATURE_COLS = ["is_rain", "temp"]
 FEATURE_COLS_V4_WEATHER = [*FEATURE_COLS, *WEATHER_FEATURE_COLS]
 MODEL_FEATURE_COLS_V4_WEATHER = [*FEATURE_COLS_V4_WEATHER, "station_code"]
 
+# ── v4_distance: + 역 정적 거리(지하철·버스 도보거리) (성능 고도화, S15P21A104-160) ──
+# 검증 결과(2026-09-17, v4-distance_20260917-0830 vs v3-holiday-tuned_20260913-1558, 같은
+# train/valid/test 분할, validation/BYC/anchor-horizon-feature-check/RESULTS.md) v3 대비
+# RMSE·R²는 근소하게 개선되지만 MAE는 근소하게 악화 — 지표마다 방향이 다르고 크기도
+# 작아 노이즈 수준으로 판단, **기각**. Phase 3(510개 역, OSRM)에서 나온 "효과 없음"
+# 결론이 전체 역(2,583개)·하버사인 거리로도 재현됐다.
+# 시간축이 없는 역 단위 정적 피처라 station_code처럼 od_station_id로 조인만 하면 된다.
+# Phase 3(validation/BYC/phase3-station-static)에서 OSRM으로 510개 역만 커버했던 걸
+# 전체 역(~2,583개)으로 확장해야 해서, 로컬에 OSRM 서버가 없는 대신 하버사인(직선거리)으로
+# 대체했다(validation/BYC/anchor-horizon-feature-check/src/build_full_station_distance.py).
+DISTANCE_FEATURE_COLS = ["dist_subway_m", "dist_bus_m"]
+FEATURE_COLS_V4_DISTANCE = [*FEATURE_COLS, *DISTANCE_FEATURE_COLS]
+MODEL_FEATURE_COLS_V4_DISTANCE = [*FEATURE_COLS_V4_DISTANCE, "station_code"]
+
 FEATURE_SETS = {
     "v3": MODEL_FEATURE_COLS,
     "v4_kbo_lag": MODEL_FEATURE_COLS_V4,
     "v4_weather": MODEL_FEATURE_COLS_V4_WEATHER,
+    "v4_distance": MODEL_FEATURE_COLS_V4_DISTANCE,
 }
 
 TARGET_COL = "target_net_flow"
@@ -151,6 +166,15 @@ def attach_anchor_time_slot(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["time_slot"] = df["hour"] * 2 + (df["minute"] >= 30).astype("int8")
     return df
+
+
+def attach_distance(df: pd.DataFrame, distance: pd.DataFrame) -> pd.DataFrame:
+    """역 정적 거리 피처(`DISTANCE_FEATURE_COLS`)를 `od_station_id` 기준으로 붙인다.
+
+    시간축이 없는 station 단위 정적 피처라 단순 left join이면 된다. `distance`에
+    없는 역(좌표 매칭 실패 등)은 NaN으로 남고, `make_xy()`의 `fillna(0)`이 처리한다.
+    """
+    return df.merge(distance, on="od_station_id", how="left")
 
 
 class HistoricalProfileBuilder:

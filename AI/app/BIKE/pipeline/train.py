@@ -31,6 +31,10 @@ v4(KBO·D-1/D-7 lag 추가, S15P21A104-160) 스모크:
 v4_weather(날씨 추가, S15P21A104-160) 스모크:
     python -m app.BIKE.pipeline.train --train-months 202401 202402 --valid-months 202412 \
         --test-months 202507 --tag smoke-v4-weather --feature-set v4_weather
+
+v4_distance(역 거리 추가, S15P21A104-160) 스모크:
+    python -m app.BIKE.pipeline.train --train-months 202401 202402 --valid-months 202412 \
+        --test-months 202507 --tag smoke-v4-distance --feature-set v4_distance
 """
 
 from __future__ import annotations
@@ -61,6 +65,7 @@ from app.BIKE.pipeline.features import (
     HistoricalProfileBuilder,
     apply_station_code,
     attach_anchor_time_slot,
+    attach_distance,
     build_station_dtype,
     make_xy,
 )
@@ -68,6 +73,14 @@ from app.BIKE.pipeline.lag_features import attach_lag, build_lag_lookup
 from app.BIKE.pipeline.lookup import StockProfileBaseline
 
 AI_ROOT = Path(__file__).resolve().parents[3]
+STATION_DISTANCE_PATH = (
+    AI_ROOT
+    / "data"
+    / "EXTERNAL"
+    / "station"
+    / "processed"
+    / "station_distance_features_full_haversine.csv"
+)
 MODELS_DIR = AI_ROOT / "models" / "BIKE"
 
 BASE_READ_COLS = ["od_station_id", "date", *BASE_FEATURE_COLS, TARGET_COL]
@@ -150,11 +163,12 @@ def _attach_v4_features(
     jamsil_stations: set | None,
     lag_lookup: pd.DataFrame | None,
     weather: pd.DataFrame | None,
+    distance: pd.DataFrame | None,
 ) -> pd.DataFrame:
     """feature_set에 맞는 v4 계열 피처만 붙인다. v3는 그대로 통과.
 
-    KBO_LAG와 weather는 서로 독립적으로 검증한다(S15P21A104-160) — 한 번에 묶으면 어느
-    쪽이 원인인지 구분이 안 된다(KBO_LAG 세트가 그 실수였다, features.py 주석 참고).
+    v4 계열끼리는 서로 독립적으로 검증한다(S15P21A104-160) — 한 번에 묶으면 어느 피처가
+    원인인지 구분이 안 된다(KBO_LAG 세트가 그 실수였다, features.py 주석 참고).
     """
     if feature_set == "v4_kbo_lag":
         df = attach_kbo(df, jamsil_dates, jamsil_stations, date_col="date")
@@ -163,6 +177,8 @@ def _attach_v4_features(
         df = attach_lag(df, lag_lookup, 7, "lag7d_stock")
     elif feature_set == "v4_weather":
         df = attach_weather(df, weather, date_col="date", hour_col="hour")
+    elif feature_set == "v4_distance":
+        df = attach_distance(df, distance)
     return df
 
 
@@ -190,8 +206,8 @@ def run(
     avg_baseline = StockProfileBaseline().fit_streaming(train_paths, holidays)
     print(f"[avg] station×dow_type×time_slot {len(avg_baseline.table_):,}행")
 
-    # ── v4 전용 재료(KBO 일정, jamsil 인근역, D-1/D-7 lag lookup, 날씨) — v3면 전부 None ──
-    jamsil_dates = jamsil_stations = lag_lookup = weather = None
+    # ── v4 전용 재료(KBO 일정, jamsil 인근역, D-1/D-7 lag lookup, 날씨, 역 거리) — v3면 전부 None ──
+    jamsil_dates = jamsil_stations = lag_lookup = weather = distance = None
     if feature_set == "v4_kbo_lag":
         jamsil_dates = load_jamsil_game_dates()
         coords = pd.read_parquet(
@@ -211,6 +227,12 @@ def run(
         print("[v4_weather] ASOS 로딩...")
         weather = load_weather()
         print(f"[v4_weather] 날씨 {len(weather):,}행")
+    elif feature_set == "v4_distance":
+        print("[v4_distance] 역 거리 로딩...")
+        distance = pd.read_csv(STATION_DISTANCE_PATH)[
+            ["od_station_id", "dist_subway_m", "dist_bus_m"]
+        ]
+        print(f"[v4_distance] 역 거리 {len(distance):,}행")
 
     # ── LightGBM: target_net_flow (historical profile + 공휴일 feature [+ v4 피처]) ──
     station_ids = (
@@ -221,7 +243,7 @@ def run(
     train_df = load_paths(train_paths, TRAIN_READ_COLS, TARGET_COL, sample_frac, random_state)
     train_df = _attach_holiday_flag(train_df, holidays)
     train_df = _attach_v4_features(
-        train_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather
+        train_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather, distance
     )
     profile = HistoricalProfileBuilder().fit(train_df)
     train_df = profile.transform(train_df)
@@ -230,7 +252,7 @@ def run(
     valid_df = load_paths(valid_paths, BASE_READ_COLS, TARGET_COL)
     valid_df = _attach_holiday_flag(valid_df, holidays)
     valid_df = _attach_v4_features(
-        valid_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather
+        valid_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather, distance
     )
     valid_df = profile.transform(valid_df)
     apply_station_code(valid_df, station_dtype, "valid")
@@ -245,7 +267,7 @@ def run(
         test_df = load_paths([p], BASE_READ_COLS, TARGET_COL)
         test_df = _attach_holiday_flag(test_df, holidays)
         test_df = _attach_v4_features(
-            test_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather
+            test_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather, distance
         )
         test_df = profile.transform(test_df)
         apply_station_code(test_df, station_dtype, f"test:{p.stem}")
