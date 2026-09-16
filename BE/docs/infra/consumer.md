@@ -470,3 +470,50 @@ conflicts with "kubectl-set" using apps/v1:
 
 `--force-conflicts` 는 쓰지 않았다 — 그 수동 패치의 이유를 모르는 상태에서 덮어쓰면 `be` 가 재시작되고
 누군가의 의도를 되돌리게 된다. **플랫폼 담당이 정리할 문제로 넘긴다.**
+
+---
+
+## 10. 도착예정시각 배포 (2026-09-16 · S15P21A104-224)
+
+`be-consumer-6f66f5f48b-rt6b6` · 롤아웃 성공.
+
+**배포 방법이 171 때와 다르다.** 이번 변경은 k8s 매니페스트를 건드리지 않고 Java 코드만 바뀌었다.
+그런데 Deployment 가 `image: sumgil-be:latest` 를 쓰므로 이미지를 새로 빌드해도 **spec 문자열이 그대로라
+`kubectl apply` 로는 롤아웃이 일어나지 않는다.** 파드가 옛 코드로 계속 돈다.
+
+```bash
+# 1. 동기화
+NODES=a104 bash Infra/k8s/scripts/sync-to-nodes.sh
+# 2. 이미지 재빌드 (15~20분)
+ssh a104 'cd ~/sumgil && nohup bash Infra/k8s/scripts/build-push.sh be > /tmp/build-be.log 2>&1 & echo started'
+# 3. 이것이 실제 배포다
+ssh a104 'sudo kubectl rollout restart deployment/be-consumer -n prod'
+ssh a104 'sudo kubectl rollout status deployment/be-consumer -n prod --timeout=180s'
+```
+
+`apply.sh` 는 돌리지 않았다 — 매니페스트가 안 바뀌었고, 돌리면 `be` server-side apply 충돌(9절)에 걸려
+그 뒤 `fe` 적용까지 막힌다. `be-collector` 도 같은 `latest` 를 쓰지만 재시작하지 않았다(수집기 코드는 안 바뀌었고
+재시작하면 수집이 잠깐 끊긴다).
+
+되돌리려면 `kubectl rollout undo deployment/be-consumer -n prod` 한 줄이다.
+
+### 검증 결과 (강남역 15:23:11 회차)
+
+| 노선 | 열차 | `barvl_sec` | `arvl_msg3` | `eta_at` | `eta_source` |
+| --- | --- | --- | --- | --- | --- |
+| 1002 | 3279 | 80 | 교대 | 15:24:03 | `barvl` |
+| 1002 | 3276 | 60 | 역삼 | 15:23:43 | `barvl` |
+| 1002 | 2278 | 240 | 삼성 | 15:26:27 | `barvl` |
+| 1002 | 2281 | 270 | 방배 | 15:27:13 | `barvl` |
+| 1077 | 9 · 12 · 20 | 0 | 논현·청계산입구·판교 | null | `none` |
+
+**7대 중 4대에 도착시각이 붙었다.** 계산도 맞는다 — 회차 15:23:11 에 80초 남은 열차가 15:24:03 이다.
+신분당선(1077) 3대는 `barvl_sec=0` 이고 `arvl_msg3` 가 강남이 아니라 규칙대로 `none` 이다.
+실측에서 신분당선이 `barvlDt` 를 100% 주지 않는다고 나온 것과 일치한다.
+
+배치 로그도 정상이었다 — `배치 500건 — 반영 500 · 건너뜀 0 · 미매핑 0 · 실패 0`, produce median 42ms.
+
+### 가드가 실제로 걸린다
+
+배포 직후 `도착예정시각 가드가 N건을 버렸다` WARN 이 **12회** 찍혔다. 8호선 같은 이상치가 실제로 걸러지고 있다는 뜻이다.
+로그로 남긴 것이 제 역할을 했다 — 건수가 늘어나면 범위(−5분 ~ +30분) 조정을 검토한다.
