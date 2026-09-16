@@ -104,7 +104,63 @@ class SubwayArrivalApplierTest {
         assertEquals("역삼", train.get("arvl_msg3"));
         assertEquals("0", train.get("last_car_at"));
         assertEquals("2026-09-16T10:30:52+09:00", train.get("recptn_dt"));
-        assertNull(train.get("eta_at"), "v1 은 도착예정시각을 추정하지 않는다");
+    }
+
+    @Test
+    @DisplayName("원천이 잔여시간을 주면 도착예정시각을 채운다 (S15P21A104-224)")
+    void 도착예정시각_잔여시간() {
+        // 픽스처는 barvlDt=120, recptnDt=10:30:52 → 10:32:52. 고정 시계 10:31:02 기준 가드 안쪽이다.
+        applier.apply(List.of(event("1002000222", "2234", "2026-09-16T10:31:00+09:00", "2026-09-16T10:30:52+09:00")));
+
+        Map<String, Object> train = trains("222").get(0);
+        assertEquals("2026-09-16T10:32:52+09:00", train.get("eta_at"));
+        assertEquals("barvl", train.get("eta_source"));
+    }
+
+    @Test
+    @DisplayName("열차가 그 역에 있으면 지금으로 채운다 — arvl_msg3 가 원천 역명과 같을 때")
+    void 도착예정시각_그_역에_있음() {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("subwayId", "1002");
+        row.put("statnId", "1002000222");
+        row.put("statnNm", "강남");
+        row.put("btrainNo", "2250");
+        row.put("barvlDt", "0");
+        row.put("arvlCd", "1");
+        row.put("arvlMsg3", "강남");
+        OffsetDateTime run = OffsetDateTime.parse("2026-09-16T10:31:00+09:00");
+        OffsetDateTime generated = OffsetDateTime.parse("2026-09-16T10:30:52+09:00");
+        CollectEvent here = new CollectEvent("id-here", "subway.arrival", "1002000222", generated,
+                run.plusSeconds(1), run, row);
+
+        applier.apply(List.of(here));
+
+        Map<String, Object> train = trains("222").get(0);
+        assertEquals("2026-09-16T10:30:52+09:00", train.get("eta_at"));
+        assertEquals("arrived", train.get("eta_source"));
+    }
+
+    @Test
+    @DisplayName("몇 정거장 전이면 비워 둔다 — 읽는 쪽은 arvl_msg2 문구를 쓴다")
+    void 도착예정시각_산출_불가() {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("subwayId", "1002");
+        row.put("statnId", "1002000222");
+        row.put("statnNm", "강남");
+        row.put("btrainNo", "2260");
+        row.put("barvlDt", "0");
+        row.put("arvlCd", "99");
+        row.put("arvlMsg2", "[3]번째 전역 (서초)");
+        row.put("arvlMsg3", "서초");
+        OffsetDateTime run = OffsetDateTime.parse("2026-09-16T10:31:00+09:00");
+        OffsetDateTime generated = OffsetDateTime.parse("2026-09-16T10:30:52+09:00");
+        CollectEvent far = new CollectEvent("id-far", "subway.arrival", "1002000222", generated,
+                run.plusSeconds(1), run, row);
+
+        applier.apply(List.of(far));
+
+        Map<String, Object> train = trains("222").get(0);
+        assertNull(train.get("eta_at"));
         assertEquals("none", train.get("eta_source"));
     }
 
