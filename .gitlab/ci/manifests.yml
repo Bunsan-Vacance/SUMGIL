@@ -10,6 +10,7 @@ kustomize-validate:
         - "Infra/**/*"
         - "BE/k8s/**/*"
         - "FE/k8s/**/*"
+        - "AI/k8s/**/*"
         - ".gitlab-ci.yml"
         - ".gitlab/ci/*.yml"
   before_script:
@@ -18,9 +19,11 @@ kustomize-validate:
     # (하드코딩 금지 — example이 바뀌면 검증도 자동 추종).
     - grep -v '^#' Infra/k8s/prod/data-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do echo "$k=dummy"; done > Infra/k8s/prod/data-secret.env
     - grep -v '^#' BE/k8s/prod/be-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do echo "$k=dummy"; done > BE/k8s/prod/be-secret.env
+    - grep -v '^#' AI/k8s/prod/ai-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do echo "$k=dummy"; done > AI/k8s/prod/ai-secret.env
   script:
     - kubectl kustomize Infra/k8s > /dev/null
     - kubectl kustomize BE/k8s/prod > /dev/null
     - kubectl kustomize FE/k8s/prod > /dev/null
+    - kubectl kustomize AI/k8s/prod > /dev/null
   after_script:
-    - rm -f Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env
+    - rm -f Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env AI/k8s/prod/ai-secret.env
