@@ -3,9 +3,9 @@
 # 전제: 레지스트리 Deployment 기동(apply.sh), 노드 insecure 등록(setup-insecure-registry.sh).
 #
 # 사용법:
-#   bash scripts/build-push.sh            # BE·FE 둘 다, 태그는 체크아웃 SHA
-#   bash scripts/build-push.sh be         # BE만
-#   TAG=latest bash scripts/build-push.sh # 구 latest 흐름 (호환용)
+#   bash scripts/deploy/build-push.sh            # BE·FE 둘 다, 태그는 체크아웃 SHA
+#   bash scripts/deploy/build-push.sh be         # BE만
+#   TAG=latest bash scripts/deploy/build-push.sh # 구 latest 흐름 (호환용)
 #
 # 태그: TAG 미지정 시 체크아웃 short SHA. :latest도 함께 push해 기존 apply.sh 게이트와 호환한다.
 # 신규 배포는 SHA를 쓴다 — `kustomize edit set image` 후 apply. 롤백은 이전 SHA로 같은 절차 반복.
@@ -18,10 +18,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=env.sh
-source "${SCRIPT_DIR}/env.sh"
+# shellcheck source=../env.sh
+source "${SCRIPT_DIR}/../env.sh"
 
-REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 TARGET="${1:-all}"
 TAG="${TAG:-$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo latest)}"
 

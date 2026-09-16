@@ -7,7 +7,7 @@
 #
 # 사용 (값이 있는 셸에서 — 로컬 또는 GitLab manual job):
 #   export DB_PASSWORD=... SEOUL_SUBWAY_KEY=... SEOUL_API_KEY=... SEOUL_BIKE_KEY=... KMA_API_KEY=...
-#   bash Infra/k8s/scripts/render-secrets.sh
+#   bash Infra/k8s/scripts/deploy/render-secrets.sh
 #
 # 결과: BE/k8s/prod/be-secret.env + Infra/k8s/prod/data-secret.env (권한 600).
 # 전달: 노드로 scp 후 apply.sh (sync-to-nodes.sh는 이 파일을 tar에서 제외한다).
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 
 # $1=키목록 파일(*.env.example) $2=출력. example 키마다 환경변수가 비어있지 않아야 한다.
 render() {

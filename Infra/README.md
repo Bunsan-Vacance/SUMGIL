@@ -29,17 +29,20 @@ Infra/
 │  ├─ namespaces/             앱 네임스페이스 (prod) — 클러스터 스코프라 Infra 소유
 │  ├─ ingress-nginx/          ingress 컨트롤러 매니페스트 (vendored)
 │  ├─ prod/                   데이터 계층(PG·Redis·Kafka)·플랫폼 서비스(Registry) — Infra 소유
-│  └─ scripts/                부트스트랩·동기화·이미지 스크립트
-│     ├─ init-vpn.sh          VPN join (순서 0)
-│     ├─ init-k3s.sh          control-plane 설치 (disable traefik, flannel-iface ens5)
-│     ├─ init-k3s-worker.sh   worker join
-│     ├─ setup-ingress.sh     ingress-nginx 설치 (traefik 비활성)
-│     ├─ setup-node.sh        ufw 22/80/443 + 내부 VXLAN · docker insecure (양쪽)
-│     ├─ setup-insecure-registry.sh  노드 containerd 레지스트리 등록
-│     ├─ apply.sh             매니페스트 적용·rollout (2단계 멱등)
-│     ├─ build-push.sh        BE·FE 이미지 빌드·push
-│     ├─ env.sh               레지스트리 주소 단일 소스
-│     └─ sync-to-nodes.sh     로컬 → 노드 동기화 (dev PC에서)
+ │  └─ scripts/                부트스트랩·동기화·이미지 스크립트
+ │     ├─ env.sh               레지스트리 주소 단일 소스 (공용)
+ │     ├─ setup/               최초 1회 (클러스터 생성·노드 준비)
+ │     │  ├─ init-vpn.sh          VPN join (순서 0)
+ │     │  ├─ init-k3s.sh          control-plane 설치 (disable traefik, flannel-iface ens5)
+ │     │  ├─ init-k3s-worker.sh   worker join
+ │     │  ├─ setup-node.sh        ufw 22/80/443 + 내부 VXLAN · docker insecure (양쪽)
+ │     │  ├─ setup-ingress.sh     ingress-nginx 설치 (traefik 비활성)
+ │     │  └─ setup-insecure-registry.sh  노드 containerd 레지스트리 등록
+ │     └─ deploy/              반복 (배포 루프)
+ │        ├─ sync-to-nodes.sh     로컬 → 노드 동기화 (dev PC에서)
+ │        ├─ render-secrets.sh    GitLab 변수 → *-secret.env 렌더
+ │        ├─ build-push.sh        BE·FE 이미지 빌드·push
+ │        └─ apply.sh             매니페스트 적용·rollout (2단계 멱등)
 ├─ docker/
 │  └─ docker-compose.yml      로컬 개발 (postgres · redis · kafka)
 └─ nginx/
@@ -55,20 +58,20 @@ Infra/
 
 ```bash
 # 개발 PC: 소스·산출물을 노드로 동기화
-bash Infra/k8s/scripts/sync-to-nodes.sh
+bash Infra/k8s/scripts/deploy/sync-to-nodes.sh
 
 # 각 노드: 사전 설정 (ufw 22/80/443 + 내부 VXLAN, docker insecure)
-sudo bash ~/sumgil/Infra/k8s/scripts/setup-node.sh
+sudo bash ~/sumgil/Infra/k8s/scripts/setup/setup-node.sh
 
 # node1: cluster / node2: worker  (VPN join 선행)
-sudo bash ~/sumgil/Infra/k8s/scripts/init-k3s.sh
-sudo K3S_URL=https://<node1-VPN-IP>:6443 K3S_TOKEN=<token> bash ~/sumgil/Infra/k8s/scripts/init-k3s-worker.sh
-sudo bash ~/sumgil/Infra/k8s/scripts/setup-ingress.sh   # ingress-nginx
+sudo bash ~/sumgil/Infra/k8s/scripts/setup/init-k3s.sh
+sudo K3S_URL=https://<node1-VPN-IP>:6443 K3S_TOKEN=<token> bash ~/sumgil/Infra/k8s/scripts/setup/init-k3s-worker.sh
+sudo bash ~/sumgil/Infra/k8s/scripts/setup/setup-ingress.sh   # ingress-nginx
 
 # 배포 (registry·DB 먼저 → 이미지 push → 앱 rollout)
-bash ~/sumgil/Infra/k8s/scripts/apply.sh
-bash ~/sumgil/Infra/k8s/scripts/build-push.sh
-bash ~/sumgil/Infra/k8s/scripts/apply.sh
+bash ~/sumgil/Infra/k8s/scripts/deploy/apply.sh
+bash ~/sumgil/Infra/k8s/scripts/deploy/build-push.sh
+bash ~/sumgil/Infra/k8s/scripts/deploy/apply.sh
 ```
 
 ## 로컬 기동 (개발용)

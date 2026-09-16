@@ -3,7 +3,7 @@
 # 인바운드 포트 오픈 불필요. outbound TCP 443 + UDP면 동작한다.
 #
 # 사용법 (root 또는 sudo):
-#   sudo TS_AUTHKEY=tskey-... TS_HOSTNAME=node1 bash scripts/init-vpn.sh
+#   sudo TS_AUTHKEY=tskey-... TS_HOSTNAME=node1 bash scripts/setup/init-vpn.sh
 #
 # 환경변수:
 #   TS_AUTHKEY         필수. 관리 콘솔 발급 (reusable + pre-approved 권장). 값은 별도 채널.

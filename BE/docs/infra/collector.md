@@ -172,7 +172,7 @@ Secret 이 `data-secret` 하나뿐이었다.
 
 ```bash
 # 1. 로컬 — 매니페스트 커밋 후 control-plane 으로 동기화 (워커는 레지스트리에서 이미지를 받아 소스가 필요 없다)
-NODES=a104 bash Infra/k8s/scripts/sync-to-nodes.sh
+NODES=a104 bash Infra/k8s/scripts/deploy/sync-to-nodes.sh
 
 # 2. 로컬 — 시크릿은 sync 대상에서 제외되므로 따로 올린다 (sync-to-nodes.sh 가 tar 에서 뺀다)
 scp <로컬 be-secret.env> a104:~/sumgil/BE/k8s/prod/be-secret.env
@@ -181,11 +181,11 @@ scp <로컬 be-secret.env> a104:~/sumgil/BE/k8s/prod/be-secret.env
 ssh a104 'cd ~/sumgil && sudo kubectl kustomize BE/k8s/prod | grep -c "^kind:"'
 
 # 4. 노드 — 이미지 빌드·push. Gradle 멀티스테이지라 오래 걸린다. 백그라운드로 띄운다
-ssh a104 'cd ~/sumgil && nohup bash Infra/k8s/scripts/build-push.sh be > /tmp/build-be.log 2>&1 & echo started'
+ssh a104 'cd ~/sumgil && nohup bash Infra/k8s/scripts/deploy/build-push.sh be > /tmp/build-be.log 2>&1 & echo started'
 ssh a104 'tail -5 /tmp/build-be.log'   # "✓ sumgil-be pushed" 면 완료
 
 # 5. 노드 — 적용. apply.sh 가 kubectl apply -k 로 폴더 전체를 적용하므로 be-collector 도 함께 만들어진다
-ssh a104 'cd ~/sumgil && bash Infra/k8s/scripts/apply.sh'
+ssh a104 'cd ~/sumgil && bash Infra/k8s/scripts/deploy/apply.sh'
 ssh a104 'sudo kubectl rollout status deployment/be-collector -n prod --timeout=180s'
 ```
 

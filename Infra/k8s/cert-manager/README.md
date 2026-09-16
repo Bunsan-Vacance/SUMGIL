@@ -10,7 +10,7 @@
 #    # (기본값은 prod. staging 확인은 최초 1회만.)
 #
 # 2. prod 적용 (apply.sh가 순서대로 한다: namespaces → ingress-nginx → cert-manager → prod → BE/FE):
-#    bash Infra/k8s/scripts/apply.sh
+#    bash Infra/k8s/scripts/deploy/apply.sh
 #
 # 3. 확인:
 #    kubectl get certificate -n prod            # Ready True

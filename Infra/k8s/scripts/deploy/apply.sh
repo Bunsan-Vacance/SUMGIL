@@ -5,17 +5,17 @@
 #       비민감 앱 설정은 BE/k8s/prod/be-config.env(커밋됨).
 #
 # 사용법:
-#   bash scripts/apply.sh
+#   bash scripts/deploy/apply.sh
 #
 # 재실행: setup-insecure-registry.sh + build-push.sh 후 다시 실행하면 be·fe rollout까지 대기한다.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=env.sh
-source "${SCRIPT_DIR}/env.sh"
+# shellcheck source=../env.sh
+source "${SCRIPT_DIR}/../env.sh"
 
-REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 INFRA_K8S="${REPO_ROOT}/Infra/k8s"
 DATA_K8S="${INFRA_K8S}/prod"
 BE_K8S="${REPO_ROOT}/BE/k8s/prod"
@@ -57,6 +57,6 @@ if image_ready sumgil-be && image_ready sumgil-fe; then
   echo "적용 완료. 확인: kubectl get all -n ${REGISTRY_NAMESPACE}"
 else
   echo "이미지 미등록. 다음을 실행한 뒤 apply.sh를 재실행하라:"
-  echo "  sudo bash ${SCRIPT_DIR}/setup-insecure-registry.sh   # 양쪽 노드"
+  echo "  sudo bash ${SCRIPT_DIR}/../setup/setup-insecure-registry.sh   # 양쪽 노드"
   echo "  bash ${SCRIPT_DIR}/build-push.sh"
 fi
