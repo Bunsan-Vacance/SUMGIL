@@ -1,6 +1,6 @@
-# 매니페스트 검증 (Kustomize) — 테스트 스테이지 무관하게 항상 실행 가능.
+# 매니페스트 검증 (Kustomize) — manifests-validate.
 # 매니페스트 변경의 1차 방어선. 더미 Secret으로 렌더만 확인하고 값은 커밋하지 않는다.
-kustomize-validate:
+manifests-validate:
   stage: test
   image: alpine:3.20
   tags:
