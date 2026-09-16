@@ -104,8 +104,8 @@ ingress-nginx가 80 포트를 받아 경로로 갈라 보낸다. **Ingress는 �
 
 ## 작업 규칙
 
-- **`.env`, `.env.secret`, `*.pem`, `*.key`는 절대 커밋하지 않는다.** `.gitignore`에 등록돼 있으나 `git add -f`로 우회하지 않도록 주의한다.
-- **비민감 앱 설정은 `config.env`(커밋), 데이터 비밀은 `Infra/k8s/prod/.env.secret`(gitignore).** kustomize가 ConfigMap(`be-config`)·Secret(`data-secret`, 데이터 계층 소유)으로 만든다. 앱 고유 비밀은 생기면 `BE/k8s/prod/.env.secret` → `be-secret`.
+- **`*-secret.env`, `*.pem`, `*.key`는 절대 커밋하지 않는다.** `.gitignore`에 등록돼 있으나 `git add -f`로 우회하지 않도록 주의한다.
+- **비민감 앱 설정은 `be-*.env`(커밋), 데이터 비밀은 `Infra/k8s/prod/data-secret.env`(gitignore).** kustomize가 ConfigMap(`be-config`)·Secret(`data-secret`, 데이터 계층 소유)으로 만든다. 앱 고유 비밀은 `BE/k8s/prod/be-secret.env` → `be-secret`.
 - **레지스트리는 클러스터 내장을 쓴다.** 이미지 주소는 `k8s/scripts/env.sh`가 단일 소스다.
 - **EC2에서 데이터 포트를 외부로 공개하지 않는다.** 클러스터 안에서는 ClusterIP로만 노출한다.
 - EC2 키페어·DB 접속 정보·VPN 인증키는 팀 내 별도 채널로 공유한다.

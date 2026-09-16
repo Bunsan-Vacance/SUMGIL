@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 매니페스트 적용 (S15P21A104-124/126/127). EC2(노드1)에서 실행. 멱등(재실행 안전).
 # 순서: Infra(네임스페이스·ingress-nginx·데이터 계층 PG·Redis·Kafka·Registry) → BE → FE.
-# 전제: 데이터 자격증명은 Infra/k8s/prod/.env.secret(.env.example 복사 후 DB_PASSWORD 기입).
-#       비민감 앱 설정은 BE/k8s/prod/config.env(커밋됨).
+# 전제: 데이터 자격증명은 Infra/k8s/prod/data-secret.env(data-secret.env.example 복사 후 DB_PASSWORD 기입).
+#       비민감 앱 설정은 BE/k8s/prod/be-config.env(커밋됨).
 #
 # 사용법:
 #   bash scripts/apply.sh
@@ -21,8 +21,8 @@ DATA_K8S="${INFRA_K8S}/prod"
 BE_K8S="${REPO_ROOT}/BE/k8s/prod"
 FE_K8S="${REPO_ROOT}/FE/k8s/prod"
 
-if [ ! -f "${DATA_K8S}/.env.secret" ]; then
-  echo "Infra/k8s/prod/.env.secret 없음. .env.example을 복사해 DB_PASSWORD를 기입하라." >&2
+if [ ! -f "${DATA_K8S}/data-secret.env" ]; then
+  echo "Infra/k8s/prod/data-secret.env 없음. data-secret.env.example을 복사해 DB_PASSWORD를 기입하라." >&2
   exit 1
 fi
 

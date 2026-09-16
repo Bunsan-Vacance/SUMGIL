@@ -159,7 +159,7 @@ BE 이미지를 그대로 쓰고 프로파일만 바꾼다. `BE/k8s/**` 는 `Inf
 
 | 항목 | 값 |
 | --- | --- |
-| 매니페스트 | `BE/k8s/prod/be-collector.yaml` · `collector.env` · `.env.example` · `kustomization.yaml` |
+| 매니페스트 | `BE/k8s/prod/be-collector.yaml` · `be-config.env` · `be-secret.env.example` · `kustomization.yaml` |
 | 이미지 | `sumgil-be:latest` (같은 이미지 — 수집기 코드가 같은 jar 안에 있다) |
 | 환경 | `SPRING_PROFILES_ACTIVE=prod,collect` · `KAFKA_BOOTSTRAP_SERVERS=kafka:9092` · `be-config`(DB·Redis 포인터) · `data-secret`(DB_PASSWORD) · **`be-secret`**(`SEOUL_SUBWAY_KEY`·`SEOUL_API_KEY`·`SEOUL_BIKE_KEY`·`KMA_API_KEY`) · `COLLECT_*_WINDOW` |
 | replicas | **1** · `strategy: Recreate` — 파티션 1이고, 파드가 겹쳐 돌면 호출 예산을 두 배로 쓴다 |
@@ -175,7 +175,7 @@ Secret 이 `data-secret` 하나뿐이었다.
 NODES=a104 bash Infra/k8s/scripts/sync-to-nodes.sh
 
 # 2. 로컬 — 시크릿은 sync 대상에서 제외되므로 따로 올린다 (sync-to-nodes.sh 가 tar 에서 뺀다)
-scp <로컬 .env.secret> a104:~/sumgil/BE/k8s/prod/.env.secret
+scp <로컬 be-secret.env> a104:~/sumgil/BE/k8s/prod/be-secret.env
 
 # 3. 노드 — 렌더링 확인 (20분 빌드 전에 파일 문제를 먼저 잡는다). 리소스 7개 + be-secret-<해시>
 ssh a104 'cd ~/sumgil && sudo kubectl kustomize BE/k8s/prod | grep -c "^kind:"'
@@ -248,7 +248,7 @@ Kafka ClusterIP 는 `10.43.134.226` 으로 이전과 같아 AI 쪽 `/etc/hosts` 
   이미 만들었다.
 - **로컬과 prod 가 같은 서울시 키를 쓴다.** 하루 1,000회 예산을 나눠 쓰므로 prod 수집기가 뜨면 로컬 수집기는
   중단한다. AI 파트도 EC2 에서 D−1 승하차를 수집하므로(S15P21A104-201) 같은 키인지 확인이 필요하다.
-- **지하철 운영 창이 `10:00-15:30` 이다.** 발표가 그 밖이면 `collector.env` 의 `COLLECT_SUBWAY_WINDOW` 를
+- **지하철 운영 창이 `10:00-15:30` 이다.** 발표가 그 밖이면 `be-config.env` 의 `COLLECT_SUBWAY_WINDOW` 를
   옮기고 다시 apply 한다. 폭(5시간 30분)은 유지해야 예산 안에 든다.
 
 ## 9. 밟은 함정

@@ -54,14 +54,15 @@
 
 | 구분 | 파일 | 주입 | 키 |
 |---|---|---|---|
-| 비민감(앱) | `BE/k8s/prod/config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
-| 비밀(데이터) | 데이터 계층 소유 `Infra/k8s/prod/.env.secret` (gitignore) | Secret `data-secret` | `DB_PASSWORD` |
-| 비밀(앱) | `BE/k8s/prod/.env.secret` (gitignore) | Secret `be-secret` | 앱 고유 비밀 (수집기·BE 공용) |
+| 비민감(앱) | `BE/k8s/prod/be-config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
+| 비밀(데이터) | 데이터 계층 소유 `Infra/k8s/prod/data-secret.env` (gitignore) | Secret `data-secret` | `DB_PASSWORD` |
+| 비밀(앱) | `BE/k8s/prod/be-secret.env` (gitignore) | Secret `be-secret` | 앱 고유 비밀 (수집기·BE 공용) |
 
-- 파일명 규칙: 커밋 대상은 `<용도>.env` (`config.env`·`collector.env`),
-  비밀은 디렉토리당 `.env.secret` 1개 (gitignore `.env.*` 적용). 빈 템플릿은 `.env.example`.
+- 파일명 규칙(210): `<용도>.env` (커밋: `be-config.env` — 수집기·컨슈머 키 포함 단일 파일),
+  비밀은 `<용도>-secret.env` (`be-secret.env`·`data-secret.env`, gitignore `*-secret.env` 적용).
+  빈 템플릿은 `<용도>.env.example` (`be-secret.env.example`·`data-secret.env.example`).
 - `DB_PASSWORD`는 **데이터 계층이 소유**한다(`data-secret`). Postgres와 앱이 각자 이 Secret을 소비한다 — 앱이 데이터에 의존하는 방향을 지킨다.
-- 앱은 데이터 접속 포인터(`DB_URL`·`REDIS_HOST`)를 자기 `config.env`에서 유지한다.
+- 앱은 데이터 접속 포인터(`DB_URL`·`REDIS_HOST`)를 자기 `be-config.env`에서 유지한다.
 
 - FE는 배포 런타임 환경변수가 없다 (`VITE_*`는 빌드 타임).
 - 배포용과 로컬용(`BE/.env`)은 별개다.

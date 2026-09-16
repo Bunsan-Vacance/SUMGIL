@@ -14,12 +14,12 @@ kustomize-validate:
         - ".gitlab/ci/*.yml"
   before_script:
     - apk add --no-cache kubectl
-    # secretGenerator가 env 파일을 요구한다. 키 이름은 각 .env.example과 동일하게 맞춘다.
-    - printf 'DB_PASSWORD=dummy\n' > Infra/k8s/prod/.env.secret
-    - printf 'SEOUL_SUBWAY_KEY=dummy\nSEOUL_API_KEY=dummy\nSEOUL_BIKE_KEY=dummy\nKMA_API_KEY=dummy\n' > BE/k8s/prod/.env.secret
+    # secretGenerator가 env 파일을 요구한다. 키 이름은 각 *.env.example과 동일하게 맞춘다.
+    - printf 'DB_PASSWORD=dummy\n' > Infra/k8s/prod/data-secret.env
+    - printf 'SEOUL_SUBWAY_KEY=dummy\nSEOUL_API_KEY=dummy\nSEOUL_BIKE_KEY=dummy\nKMA_API_KEY=dummy\n' > BE/k8s/prod/be-secret.env
   script:
     - kubectl kustomize Infra/k8s > /dev/null
     - kubectl kustomize BE/k8s/prod > /dev/null
     - kubectl kustomize FE/k8s/prod > /dev/null
   after_script:
-    - rm -f Infra/k8s/prod/.env.secret BE/k8s/prod/.env.secret
+    - rm -f Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env

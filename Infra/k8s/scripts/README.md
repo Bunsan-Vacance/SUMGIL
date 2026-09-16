@@ -43,12 +43,12 @@
 ## 인자
 
 - `init-k3s.sh`·`init-k3s-worker.sh` — `--node-ip`=VPN, `--flannel-iface ens5`, `--disable traefik`.
-- `apply.sh` — `Infra/k8s`(네임스페이스·데이터 계층) → BE → FE 순서(데이터 rollout 후 앱). 이미지가 없으면 안내 후 종료. 전제: `Infra/k8s/prod/.env.secret` + `BE/k8s/prod/.env.secret`.
+- `apply.sh` — `Infra/k8s`(네임스페이스·데이터 계층) → BE → FE 순서(데이터 rollout 후 앱). 이미지가 없으면 안내 후 종료. 전제: `Infra/k8s/prod/data-secret.env` + `BE/k8s/prod/be-secret.env`.
 - `build-push.sh` — `bash build-push.sh`(둘 다) / `be` / `fe`. 태그는 체크아웃 SHA(재정의 `TAG=`)이며 `:latest`도 함께 push. 신규 배포는 `kustomize edit set image`로 SHA를 지정 후 apply.
-- `sync-to-nodes.sh` — `BE/.env`·`BE/k8s/prod/.env.secret`·`Infra/k8s/prod/.env.secret` 제외, `config.env` 포함.
+- `sync-to-nodes.sh` — `BE/.env`·`BE/k8s/prod/be-secret.env`·`Infra/k8s/prod/data-secret.env` 제외, `be-*.env` 포함.
 
 ## 규칙
 
-- 시크릿은 노드로 보내지 않는다 (`.env.secret` 제외).
+- 시크릿은 노드로 보내지 않는다 (`*-secret.env` 제외).
 - 노드 스크립트는 root/sudo, `apply.sh`·`build-push.sh`는 일반 유저(docker 그룹).
 - 네트워크 인자(flannel-iface·disable traefik) 변경은 k3s 재시작이 필요하다 (config.yaml).
