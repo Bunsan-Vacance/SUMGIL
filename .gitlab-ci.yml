@@ -1,24 +1,29 @@
 stages:
   - lint
   - test
+  - build
+  - deploy
 
-# 파트별 CI 정의. 루트는 공통(workflow·guard·AI)만 두고 BE/FE/매니페스트는 분리한다.
+# 파트별 CI 정의. 루트는 공통(workflow·guard·AI)만 두고 파트별 정의는 분리한다.
+# 네이밍: 파트-동작 (be-test·be-image·fe-test·fe-image·manifests-validate·deploy-prod·ai-*).
 include:
   - local: .gitlab/ci/be.yml
   - local: .gitlab/ci/fe.yml
   - local: .gitlab/ci/manifests.yml
+  - local: .gitlab/ci/deploy.yml
 
-# MR + main push에서만 파이프라인을 만든다. 브랜치 push는 MR 파이프라인과
-# 중복 검증이 되므로 만들지 않는다 (MR 머지가 main push 파이프라인 1회로 이어진다).
-# main push 허용은 SHA 배포(210-②)의 전제다.
+# MR·main·개발브랜치에서 파이프라인을 만든다.
+# 개발 push는 lint/test 검증만 — build·deploy는 각 job의 main 한정 rules가 막는다.
+# main push 허용은 SHA 배포의 전제다.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH =~ /^(develop-.*|feat\/.*)$/'
     - when: never
 
-# AI·BE 검사 대상이 없는 MR도 빈 파이프라인으로 실패하지 않게 한다.
-# 각 검사의 changes 목록을 공유해 AI 문서만 바뀐 경우에도 guard가 실행되게 한다.
+# 검사 대상이 없는 파이프라인도 빈 파이프라인으로 실패하지 않게 한다.
+# 각 검사의 changes 목록을 공유해 문서만 바뀐 경우에도 guard가 실행되게 한다.
 mr-guard:
   stage: lint
   image: alpine:3.20
@@ -36,9 +41,19 @@ mr-guard:
     - changes: &be_trigger_paths
         - "BE/**/*"
       when: never
+    - changes: &fe_trigger_paths
+        - "FE/**/*"
+      when: never
+    - changes: &manifests_trigger_paths
+        - "Infra/**/*"
+        - "BE/k8s/**/*"
+        - "FE/k8s/**/*"
+        - "AI/k8s/**/*"
+        - ".gitlab/ci/*.yml"
+      when: never
     - when: on_success
   script:
-    - echo "AI/BE 검사 대상 변경이 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
+    - echo "검사 대상 변경이 없는 파이프라인입니다. 검증 대상이 없어 통과 처리합니다."
 
 .ai_job:
   image: python:3.11-slim
