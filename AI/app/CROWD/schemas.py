@@ -80,3 +80,9 @@ class CrowdMetaResponse(BaseModel):
     generated_at: str | None
     status_counts: dict[str, int] | None
     topology_gaps: list[dict] | None
+    events_coverage_end: str | None = Field(
+        description="이벤트 표(경기·축제)가 덮는 최대 date(ISO). 오래된 meta에는 키가 없어 null(200)"
+    )
+    events_available: bool | None = Field(
+        description="가장 최근 배치 대상 날짜가 이벤트 커버리지 안에 있었는지. 오래된 meta는 null(200)"
+    )
