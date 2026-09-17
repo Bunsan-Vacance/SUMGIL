@@ -1,5 +1,18 @@
 export type Mode = 'walk' | 'subway' | 'bus' | 'bike'
 export type Priority = 'fast' | 'calm'
+export type RouteSource = 'MOCK' | 'ALGORITHM'
+export type TransitionType = 'BOARDING' | 'ALIGHTING' | 'TRANSFER' | 'BIKE_RENTAL' | 'BIKE_RETURN'
+
+export type CongestionGrade = 'LOW' | 'MEDIUM' | 'HIGH'
+export type CongestionDataStatus = 'AVAILABLE' | 'LINE1_TRUNCATED' | 'NO_CALIBRATION' | 'NO_LOOKUP'
+export type CongestionPredictionBasis = 'RECENT_7D' | 'PARTIAL' | 'WEEKDAY_AVERAGE'
+
+export interface CongestionPrediction {
+  congestionPercent: number | null
+  congestionGrade: CongestionGrade | null
+  dataStatus: CongestionDataStatus
+  predictionBasis: CongestionPredictionBasis | null
+}
 export interface Place {
   id: string
   name: string
@@ -11,6 +24,7 @@ export interface Place {
   placeUrl?: string
   dockCount?: number
   distanceMeters?: number
+  rentalId?: string
 }
 export type GeometryLineString = [number, number][]
 export interface RouteGeometry {
@@ -22,6 +36,7 @@ export interface RouteEndpoint {
   name?: string
   lat?: number
   lng?: number
+  rentalId?: string
 }
 export interface Leg {
   distanceMeters?: number
@@ -30,6 +45,7 @@ export interface Leg {
   note: string
   minutes: number
   transfer?: boolean
+  transitionType?: TransitionType
   routeId?: string
   from?: RouteEndpoint
   to?: RouteEndpoint
@@ -43,7 +59,8 @@ export interface Route {
   minutes: number
   walk?: number
   transfers: number
-  congestionPercent?: number
+  congestionPrediction?: CongestionPrediction
+  source?: RouteSource
   modes: Mode[]
   line?: string
   legs: Leg[]

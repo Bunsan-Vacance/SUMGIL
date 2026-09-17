@@ -581,6 +581,9 @@ describe('일반 지도 장소 마커', () => {
         (overlay) => (overlay.options as { zIndex?: number }).zIndex === 10,
       ),
     ).toBe(true)
+    mocks.stock.mockReset()
+    fireEvent.click(contents[0])
+    expect(mocks.stock).not.toHaveBeenCalled()
 
     rendered.rerender(
       <KakaoMap origin={origin} destination={null} route={null} onMessage={vi.fn()} />,

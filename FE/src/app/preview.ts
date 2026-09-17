@@ -11,5 +11,6 @@ export const previewTrip: TripState = {
   priority: 'fast',
   status: 'idle',
   error: '',
+  errorCode: null,
 }
 export const previewProposal = bikeProposal

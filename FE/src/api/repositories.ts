@@ -1,6 +1,8 @@
 import { mockRouteRepository, routeSearchMockRepository } from './mock/repositories'
+import { bikePredictionMockRepository } from './mock/bikePrediction'
 import { RepositoryError } from './errors'
 import { mapBackendRoute } from './routeMapper'
+import { createBackendBikePredictionRepository } from './bikePrediction'
 import {
   loadKakaoMaps,
   type KakaoMaps,
@@ -24,6 +26,8 @@ export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/+
 export const isBackendConfigured = Boolean(apiBaseUrl)
 export const isRouteSearchMockEnabled =
   import.meta.env.VITE_ROUTE_SEARCH_MOCK?.trim().toLowerCase() === 'true'
+export const isBikePredictionMockEnabled =
+  import.meta.env.VITE_BIKE_PREDICTION_MOCK?.trim().toLowerCase() === 'true'
 
 function validCoordinate(value: string | number, min: number, max: number) {
   if (typeof value === 'string' && !value.trim()) return null
@@ -159,6 +163,9 @@ export function createKakaoPlaceRepository(loadMaps: MapsLoader = loadKakaoMaps)
 function apiErrorCode(status: number, error: unknown) {
   const value = isRecord(error) ? text(error.code) : text(error)
   if (value === 'ROUTE_DATA_NOT_READY') return 'route-data-not-ready' as const
+  if (value === 'ACCESS_CANDIDATE_NOT_FOUND') return 'access-candidate-not-found' as const
+  if (value === 'OUT_OF_SERVICE_AREA') return 'out-of-service-area' as const
+  if (value === 'SERVICE_ENDED') return 'service-ended' as const
   if (value === 'SAME_ORIGIN_DEST') return 'same-origin-destination' as const
   if (value === 'STATION_NOT_FOUND') return 'station-not-found' as const
   if (value === 'ACCESS_CANDIDATE_NOT_READY') return 'coordinate-not-ready' as const
@@ -232,17 +239,23 @@ export async function requestApi<T>(
     const message =
       code === 'route-data-not-ready'
         ? '경로 데이터를 준비하고 있어요. 잠시 후 다시 시도해 주세요.'
-        : code === 'same-origin-destination'
-          ? '출발지와 도착지는 다른 장소를 선택해 주세요.'
-          : code === 'station-not-found'
-            ? '역 정보를 찾지 못했어요.'
-            : code === 'coordinate-not-ready'
-              ? '좌표 기반 경로는 아직 준비 중이에요.'
-              : code === 'invalid-coordinate'
-                ? '출발지와 도착지 좌표를 확인해 주세요.'
-                : response.status === 404
+        : code === 'access-candidate-not-found'
+          ? '출발지나 도착지 주변에 연결되는 경로가 없어요.'
+          : code === 'out-of-service-area'
+            ? '서비스 지역 밖이라 경로를 찾지 못했어요.'
+            : code === 'service-ended'
+              ? '선택한 출발 시간에는 이용할 수 없어요.'
+              : code === 'same-origin-destination'
+                ? '출발지와 도착지는 다른 장소를 선택해 주세요.'
+                : code === 'station-not-found'
                   ? '역 정보를 찾지 못했어요.'
-                  : '서버에서 요청을 처리하지 못했어요.'
+                  : code === 'coordinate-not-ready'
+                    ? '좌표 기반 경로는 아직 준비 중이에요.'
+                    : code === 'invalid-coordinate'
+                      ? '출발지와 도착지 좌표를 확인해 주세요.'
+                      : response.status === 404
+                        ? '역 정보를 찾지 못했어요.'
+                        : '서버에서 요청을 처리하지 못했어요.'
     throw new RepositoryError(code, message, response.status)
   }
   return body.data as T
@@ -477,5 +490,10 @@ export const bikeStockRepository = apiBaseUrl
   ? createBackendBikeStationRepository(apiBaseUrl)
   : null
 export const bikeStationRepository = bikeStockRepository
+export const bikePredictionRepository = isBikePredictionMockEnabled
+  ? bikePredictionMockRepository
+  : apiBaseUrl
+    ? createBackendBikePredictionRepository(apiBaseUrl)
+    : null
 export const stationRepository = apiBaseUrl ? createBackendStationRepository(apiBaseUrl) : null
 export const placeRepository = createKakaoPlaceRepository()

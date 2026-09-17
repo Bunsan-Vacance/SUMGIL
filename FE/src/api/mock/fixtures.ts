@@ -1,4 +1,13 @@
 import type { Place, Leg, Route } from '../../features/route/types'
+
+const departedAt = '2026-09-17T09:00:00+09:00'
+const prediction = (congestionPercent: number, congestionGrade: 'LOW' | 'MEDIUM' | 'HIGH') => ({
+  congestionPercent,
+  congestionGrade,
+  dataStatus: 'AVAILABLE' as const,
+  predictionBasis: 'RECENT_7D' as const,
+})
+
 export const places: Place[] = [
   { id: 'origin', name: '멀티캠퍼스 역삼', address: '서울 강남구 테헤란로 212', kind: '장소' },
   { id: 'dogok', name: '도곡역', address: '서울 강남구 남부순환로 지하 2814', kind: '역' },
@@ -35,46 +44,54 @@ const railLegs = (quiet: boolean): Leg[] => [
 export const routes: Route[] = [
   {
     id: 'fast',
+    source: 'MOCK',
     label: '가장 빠른 길',
     minutes: 15,
     walk: 420,
     transfers: 1,
-    congestionPercent: 68,
+    congestionPrediction: prediction(68, 'MEDIUM'),
     modes: ['walk', 'subway'],
     line: '2호선 → 수인분당선',
     legs: railLegs(false),
+    departedAt,
   },
   {
     id: 'calm',
+    source: 'MOCK',
     label: '덜 붐비는 길',
     minutes: 19,
     walk: 520,
     transfers: 1,
-    congestionPercent: 42,
+    congestionPrediction: prediction(42, 'LOW'),
     modes: ['walk', 'subway'],
     line: '2호선 → 수인분당선',
     legs: railLegs(true),
+    departedAt,
   },
   {
     id: 'rail',
+    source: 'MOCK',
     label: '지하철 경로',
     minutes: 16,
     walk: 500,
     transfers: 1,
-    congestionPercent: 56,
+    congestionPrediction: prediction(56, 'MEDIUM'),
     modes: ['walk', 'subway'],
     line: '2호선 → 수인분당선',
     legs: railLegs(false).map((leg, i) => (i === 0 ? { ...leg, minutes: 5 } : leg)),
+    departedAt,
   },
   {
     id: 'bus',
+    source: 'MOCK',
     label: '버스 경로',
     minutes: 21,
     walk: 560,
     transfers: 0,
-    congestionPercent: 64,
+    congestionPrediction: prediction(64, 'MEDIUM'),
     modes: ['walk', 'bus'],
     line: '버스 · 도곡역 방면',
+    departedAt,
     legs: [
       { mode: 'walk', title: '테헤란로 정류장까지 걸어요', note: '약 300m', minutes: 5 },
       { mode: 'bus', title: '도곡역 방면 버스 탑승', note: '정류장 5곳 이동', minutes: 12 },
@@ -84,13 +101,15 @@ export const routes: Route[] = [
 ]
 export const bikeProposal: Route = {
   id: 'bike-proposal',
+  source: 'MOCK',
   label: '따릉이 경로',
   minutes: 11,
   walk: 220,
   transfers: 1,
-  congestionPercent: 35,
+  congestionPrediction: prediction(35, 'LOW'),
   modes: ['walk', 'bike', 'subway'],
   line: '따릉이 → 수인분당선',
+  departedAt,
   legs: [
     {
       mode: 'walk',

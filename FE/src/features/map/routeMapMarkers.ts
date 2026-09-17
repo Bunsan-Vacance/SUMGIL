@@ -1,6 +1,7 @@
 import type { KakaoMapInstance, KakaoMaps, MapOverlay } from '../../lib/kakao/sdk'
 import type { GeometryLineString, Leg, Place, Route, RouteEndpoint } from '../route/types'
 import { lineColor } from '../route/lineColor'
+import { isTransitLeg, isTransferLeg } from '../route/transitions'
 
 export type RouteEndpointRole = '승차' | '환승' | '하차'
 export type BikeEndpointRole = '대여' | '반납'
@@ -26,7 +27,7 @@ export interface RouteLineEntry {
 }
 
 export function routeLineStyle(leg: Leg) {
-  if (leg.transfer) return ROUTE_LINE_STYLES.transfer
+  if (isTransferLeg(leg)) return ROUTE_LINE_STYLES.transfer
   const color = lineColor(leg)
   if (color) return { strokeColor: color, strokeStyle: 'solid' as const }
   return ROUTE_LINE_STYLES[leg.mode]
@@ -174,17 +175,24 @@ export function getRouteEndpointCandidates(route: Route): RouteEndpointCandidate
     }
     candidates.set(key, { endpoint, roles: new Set(), bikeRoles: new Set([role]) })
   }
-  const transitLegs = route.legs.filter(
-    (leg) => (leg.mode === 'subway' || leg.mode === 'bus') && !leg.transfer,
-  )
-  add('승차', transitLegs[0]?.from)
-  add('하차', transitLegs.at(-1)?.to)
-  route.legs
-    .filter((leg) => leg.transfer)
-    .forEach((leg) => {
+  const transitLegs = route.legs.filter(isTransitLeg)
+  const hasBoarding = route.legs.some((leg) => leg.transitionType === 'BOARDING')
+  const hasAlighting = route.legs.some((leg) => leg.transitionType === 'ALIGHTING')
+  if (!hasBoarding) add('승차', transitLegs[0]?.from)
+  if (!hasAlighting) add('하차', transitLegs.at(-1)?.to)
+  route.legs.forEach((leg) => {
+    if (leg.transitionType === 'BOARDING') add('승차', leg.from)
+    if (leg.transitionType === 'ALIGHTING') add('하차', leg.to)
+    if (leg.transitionType === 'TRANSFER') {
       add('환승', leg.from)
       add('환승', leg.to)
-    })
+    } else if (leg.transfer && leg.transitionType === undefined) {
+      add('환승', leg.from)
+      add('환승', leg.to)
+    }
+    if (leg.transitionType === 'BIKE_RENTAL') addBike('대여', leg.from)
+    if (leg.transitionType === 'BIKE_RETURN') addBike('반납', leg.to)
+  })
   transitLegs.slice(1).forEach((leg, index) => {
     const previous = transitLegs[index]
     if (previous.routeId !== leg.routeId || previous.mode !== leg.mode) {
@@ -223,6 +231,7 @@ export function routeEndpointPlace(candidate: RouteEndpointCandidate): Place {
       kind: '따릉이 대여소',
       lat: candidate.endpoint.lat,
       lng: candidate.endpoint.lng,
+      ...(candidate.endpoint.rentalId ? { rentalId: candidate.endpoint.rentalId } : {}),
     }
   }
   const firstRole = candidate.roles[0] || '환승'

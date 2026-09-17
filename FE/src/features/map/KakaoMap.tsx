@@ -9,8 +9,8 @@ import { useKakaoMap } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
 
 function bikeRentalId(place: Place) {
+  if (place.rentalId) return place.rentalId
   if (place.id.startsWith('bike-station:')) return place.id.slice('bike-station:'.length)
-  if (place.id.startsWith('route-endpoint:id:')) return place.id.slice('route-endpoint:id:'.length)
   return undefined
 }
 

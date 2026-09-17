@@ -7,7 +7,10 @@ import type { ComponentProps } from 'react'
 import type { Mode } from '../features/route/types'
 import ResultsPage from './ResultsPage'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 function props(overrides: Partial<ComponentProps<typeof ResultsPage>> = {}) {
   return {
@@ -29,6 +32,8 @@ function props(overrides: Partial<ComponentProps<typeof ResultsPage>> = {}) {
     startGuide: vi.fn(),
     canSwap: true,
     swapPlaces: vi.fn(),
+    onResetModes: vi.fn(),
+    onSearchWalk: vi.fn(),
     ...overrides,
   }
 }
@@ -79,6 +84,24 @@ describe('경로 결과 상태', () => {
     expect(setSelectedId).toHaveBeenCalledWith('station-route')
     expect(go).toHaveBeenCalledWith('detail')
   })
+  it('검색 결과 경로 요약에서는 도보 행을 숨기고 이동수단 행만 표시한다', () => {
+    const route = {
+      ...routes[0],
+      legs: [
+        { mode: 'walk' as const, title: '출발지 → 역', note: '도보', minutes: 2 },
+        { mode: 'subway' as const, title: '역 → 환승역', note: '2호선', minutes: 5 },
+        { mode: 'walk' as const, title: '환승 이동', note: '도보', minutes: 1 },
+        { mode: 'bus' as const, title: '정류장 → 도착', note: '420', minutes: 7 },
+        { mode: 'walk' as const, title: '도착 이동', note: '도보', minutes: 2 },
+      ],
+    }
+    render(<ResultsPage {...props({ visible: [route] })} />)
+
+    const stops = screen.getByText('역').closest('.route-stops')
+    expect(stops?.querySelectorAll('.walk')).toHaveLength(0)
+    expect(stops?.querySelectorAll('.route-stop > .leg-icon.subway')).toHaveLength(1)
+    expect(stops?.querySelectorAll('.route-stop > .leg-icon.bus')).toHaveLength(1)
+  })
   it('조회 실패는 빈 검색 결과와 구분해 표시하고 재시도할 수 있다', () => {
     const retry = vi.fn()
     render(<ResultsPage {...props({ status: 'error', error: '', retry })} />)
@@ -89,6 +112,47 @@ describe('경로 결과 상태', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
     expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it('검색 예외 코드는 원인에 맞는 복구 액션으로 연결된다', () => {
+    const onBackToInput = vi.fn()
+    const openFilter = vi.fn()
+    const { rerender } = render(
+      <ResultsPage
+        {...props({
+          status: 'error',
+          errorCode: 'access-candidate-not-found',
+          onBackToInput,
+          openFilter,
+        })}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '출발·도착지 수정' }))
+    fireEvent.click(screen.getByRole('button', { name: '이동수단 변경' }))
+    expect(onBackToInput).toHaveBeenCalledOnce()
+    expect(openFilter).toHaveBeenCalledOnce()
+
+    rerender(
+      <ResultsPage
+        {...props({
+          status: 'error',
+          errorCode: 'service-ended',
+          openFilter,
+        })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '출발 시간 변경' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '이동수단 변경' })).toBeTruthy()
+  })
+
+  it('빈 결과에서 전체 수단과 도보 재검색을 제공한다', () => {
+    const onResetModes = vi.fn()
+    const onSearchWalk = vi.fn()
+    render(<ResultsPage {...props({ onResetModes, onSearchWalk })} />)
+    fireEvent.click(screen.getByRole('button', { name: '전체 수단으로 다시 검색' }))
+    fireEvent.click(screen.getByRole('button', { name: '도보만 다시 검색' }))
+    expect(onResetModes).toHaveBeenCalledOnce()
+    expect(onSearchWalk).toHaveBeenCalledOnce()
   })
 
   it('성공했지만 결과가 없으면 조건 변경으로 필터를 연다', () => {
@@ -124,16 +188,20 @@ describe('경로 결과 상태', () => {
     expect(onBackToInput).toHaveBeenCalledOnce()
   })
 
-  it('경로 카드에 혼잡도를 퍼센트로 표시한다', () => {
+  it('경로 카드에 혼잡도 예상 퍼센트·등급·근거를 표시한다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
 
-    expect(screen.getByText(/혼잡도 68%/)).toBeTruthy()
-    expect(screen.getByText(/혼잡도 42%/)).toBeTruthy()
-    expect(screen.getByText('4분 더 걸림 · 혼잡도 26%p 낮음')).toBeTruthy()
+    expect(screen.getByText(/혼잡도 예상 68% · 보통/)).toBeTruthy()
+    expect(screen.getByText(/혼잡도 예상 42% · 여유/)).toBeTruthy()
+    expect(screen.getAllByText('최근 7일 데이터 기반')).toHaveLength(2)
     expect(screen.queryByText(/혼잡 \d+구간/)).toBeNull()
   })
 
   it('혼잡도를 비교할 수 있으면 정렬 메뉴에서 덜 붐비는 순을 선택한다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     const setPriority = vi.fn()
     render(<ResultsPage {...props({ visible: routes.slice(0, 2), setPriority })} />)
 
@@ -143,19 +211,22 @@ describe('경로 결과 상태', () => {
     expect(setPriority).toHaveBeenCalledWith('calm')
   })
 
-  it('혼잡도 없는 결과는 준비중 상태와 고정 출발 시각을 표시하지 않는다', () => {
+  it('혼잡도 없는 결과는 예측 정보 없음을 표시하고 정렬을 숨긴다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     const liveRoutes = routes
       .slice(0, 1)
-      .map(({ congestionPercent: _congestionPercent, ...route }) => route)
+      .map(({ congestionPrediction: _congestionPrediction, ...route }) => route)
     render(<ResultsPage {...props({ visible: liveRoutes, isLiveApi: true })} />)
 
-    expect(screen.queryByText(/혼잡도 준비중입니다/)).toBeNull()
-    expect(screen.queryByText(/09:41 출발 기준/)).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /경로 정렬:/ }))
-    expect(screen.getByRole('menuitemradio', { name: '덜 붐비는 순' })).toBeTruthy()
+    expect(screen.getByText('예측 정보 없음')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /예측 정보 없음/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /경로 정렬:/ })).toBeNull()
   })
 
   it('정렬 메뉴는 화살표 클릭과 키보드 이동을 지원하고 Esc 또는 바깥 클릭으로 닫힌다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
     const trigger = screen.getByRole('button', { name: '경로 정렬: 빠른 순' })
     fireEvent.click(trigger.querySelector('svg')!)
