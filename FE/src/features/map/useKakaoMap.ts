@@ -450,6 +450,7 @@ export function useKakaoMap(
               address: candidate.bikeRoles!.map((role) => `따릉이 ${role}`).join(' · '),
               lat: candidate.endpoint.lat,
               lng: candidate.endpoint.lng,
+              ...(candidate.endpoint.rentalId ? { rentalId: candidate.endpoint.rentalId } : {}),
             },
             false,
             () => placeRef.current?.(routeEndpointPlace(candidate)),

@@ -3,6 +3,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RouteRepository } from '../api/contracts'
+import type { GuidanceRepository, ReplanProposal } from '../api/guidance'
 import { places, routes } from '../api/mock/fixtures'
 import { useRoutePlanner } from './useRoutePlanner'
 
@@ -13,8 +14,8 @@ afterEach(cleanup)
 describe('경로와 안내 화면의 수명', () => {
   beforeEach(() => history.replaceState(null, '', '#home'))
 
-  const renderLoadedPlanner = async () => {
-    const rendered = renderHook(() => useRoutePlanner(repository))
+  const renderLoadedPlanner = async (guidanceApi?: GuidanceRepository) => {
+    const rendered = renderHook(() => useRoutePlanner(repository, guidanceApi))
     act(() => rendered.result.current.findRoutes(places[1]))
     await waitFor(() => expect(rendered.result.current.trip.status).toBe('success'))
     return rendered
@@ -232,5 +233,52 @@ describe('경로와 안내 화면의 수명', () => {
       departedAt: expect.any(String),
     })
     expect(result.current.guidance).toMatchObject({ route: routes[0], step: 1 })
+  })
+
+  it('재탐색 모달을 닫은 뒤 늦게 온 후보는 반영하지 않는다', async () => {
+    let resolveReplan!: (proposals: ReplanProposal[]) => void
+    const guidanceApi: GuidanceRepository = {
+      arrivals: async () => [],
+      replan: () => new Promise((resolve) => (resolveReplan = resolve)),
+    }
+    const { result } = await renderLoadedPlanner(guidanceApi)
+    act(() => result.current.startGuide())
+    act(() => result.current.openReplan())
+    act(() => result.current.requestReplan())
+    expect(result.current.replan.status).toBe('loading')
+
+    act(() => result.current.closeGuidanceDialog())
+    await act(async () => {
+      resolveReplan([
+        {
+          route: routes[1],
+          reason: '늦은 응답',
+          source: 'MOCK',
+        },
+      ])
+      await Promise.resolve()
+    })
+    expect(result.current.replan).toMatchObject({ status: 'idle', proposals: [] })
+  })
+
+  it('재탐색 조건은 안내 시작 시점 스냅샷을 사용한다', async () => {
+    const replan = vi.fn(async () => [])
+    const guidanceApi: GuidanceRepository = {
+      arrivals: async () => [],
+      replan,
+    }
+    const { result } = await renderLoadedPlanner(guidanceApi)
+    const modesAtStart = [...result.current.trip.enabled]
+    act(() => result.current.startGuide())
+    act(() => result.current.trip.setPriority('calm'))
+    act(() => result.current.openReplan())
+    act(() => result.current.requestReplan())
+    await waitFor(() => expect(result.current.replan.status).toBe('empty'))
+    expect(replan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conditions: expect.objectContaining({ modes: modesAtStart, priority: 'fast' }),
+      }),
+      expect.any(AbortSignal),
+    )
   })
 })
