@@ -4,7 +4,6 @@ import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
 import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
-import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
 import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
@@ -12,11 +11,8 @@ import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
-import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
-import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
-import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
-import com.ssafy.s15p21a104.domain.route.finder.KShortestPathFinder;
+import com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
@@ -43,10 +39,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -92,19 +86,32 @@ public class RouteSearchService {
         findStation(destStationId);
         // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
         DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
-        // 213 T2: 원본 그래프 1회 + K-path로 후보를 뽑는다. 7조합 반복 탐색 대체.
-        List<RouteSearchResponse> candidates = algorithmCandidates(
-                graph, originStationId, destStationId, graphRegistry.stationInfos());
+        // 213 T4: 탐색→매핑 조립은 RouteCandidateFinder, geometry는 RouteGeometryEnhancer,
+        // 쾌적 재정렬은 RouteScoreRanker에 위임. 서비스는 조립만 한다.
+        List<RouteSearchResponse> candidates = candidateFinder().findCandidates(
+                graph, originStationId, destStationId, MAX_CANDIDATES);
+        List<RouteSearchResponse> withGeometry = withGeometryAll(candidates);
         // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
         // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
         // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
         // 후보 수가 줄어든 다음(필터+재라벨링 이후)에 배치로 붙인다(FE-175 항목8).
-        List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, modes));
+        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(
+                RouteCandidateFinder.filterByModes(withGeometry, modes));
         // priority=COMFORT가 아니면 순서·라벨을 전혀 건드리지 않는다(S15P21A104-157 AC2, 회귀 없음).
         if (priority == RoutePriority.COMFORT) {
             ranked = applyComfort(ranked, departureSlot);
         }
         return withRouteNames(ranked);
+    }
+
+    /** 탐색→매핑 조립기. 레지스트리 값을 주입해 만든다. */
+    private RouteCandidateFinder candidateFinder() {
+        return new RouteCandidateFinder(
+                transferRule,
+                graphRegistry.transferTimes(),
+                graphRegistry.rentalIds(),
+                graphRegistry.stationInfos(),
+                graphRegistry::bikeStock);
     }
 
     /**
@@ -123,37 +130,6 @@ public class RouteSearchService {
     }
 
     /**
-     * 원본 그래프 1회에 K-path로 여러 경로 후보를 모은다(S15P21A104-213 T2).
-     *
-     * <p>7개 하위 그래프 반복 탐색을 대체한다. 서로 다른 leg 서명의 후보를 최대
-     * {@value #MAX_CANDIDATES}개까지 소요시간 오름차순으로 담는다. routeType 배정은
-     * 여기서 하지 않는다 — {@code modes} 필터가 아직 안 걸린 시점이라 "가장 빠른 것"이
-     * 필터 후에도 그대로 유지된다는 보장이 없다({@link #relabelByRank} 참고).
-     */
-    private List<RouteSearchResponse> algorithmCandidates(
-            RouteGraph graph, String originStationId, String destStationId,
-            Map<String, RouteMapper.StationInfo> stationInfos) {
-        // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
-        TransferRule rule = transferRule.withTable(graphRegistry.transferTimes());
-
-        List<FoundPath> paths =
-                new KShortestPathFinder(rule).findK(graph, originStationId, destStationId, MAX_CANDIDATES);
-
-        Map<String, RouteSearchResponse> byLegSignature = new LinkedHashMap<>();
-        for (FoundPath found : paths) {
-            searchOne(found, rule, stationInfos)
-                    .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
-        }
-
-        List<RouteSearchResponse> ranked = byLegSignature.values().stream()
-                .sorted(Comparator.comparingDouble(RouteSearchResponse::totalMinutes))
-                .limit(MAX_CANDIDATES)
-                .toList();
-        // geometry는 후보 확정 후 병렬 후처리로 붙인다(213 T3).
-        return withGeometryAll(ranked);
-    }
-
-    /**
      * 후보 목록에 geometry를 붙인다(213 T3). {@link RouteGeometryEnhancer}가 후보별
      * 병렬 후처리 + 순서 보장 + 실패 격리를 맡는다. 서비스는 레지스트리 조회 함수만 넘긴다.
      */
@@ -167,73 +143,6 @@ public class RouteSearchService {
                         fromId, toId, fromLat, fromLng, toLat, toLng))
                 .enhanceAll(candidates);
     }
-
-    /**
-     * 소요시간순으로 이미 정렬된 후보 목록의 첫 번째를 {@link RouteType#SHORTEST}로,
-     * 나머지를 {@link RouteType#ALTERNATIVE}로 다시 매긴다. {@code modes} 필터 "다음"에
-     * 호출해야 한다 — 필터로 원래 최단 후보가 빠져도 남은 것 중 첫 번째가 SHORTEST가 된다.
-     *
-     * <p>geometry·거리는 {@link #algorithmCandidates}에서 이미 붙어 있으므로 여기서 다시
-     * 계산하지 않는다 — 다시 부르면 카카오 도보 API를 후보마다 한 번 더 호출하게 된다.
-     */
-    private List<RouteSearchResponse> relabelByRank(List<RouteSearchResponse> candidates) {
-        List<RouteSearchResponse> ranked = new ArrayList<>();
-        for (int i = 0; i < candidates.size(); i++) {
-            RouteSearchResponse candidate = candidates.get(i);
-            RouteType routeType = i == 0 ? RouteType.SHORTEST : RouteType.ALTERNATIVE;
-            ranked.add(new RouteSearchResponse(
-                    routeType, candidate.totalMinutes(), candidate.legs(), candidate.source(),
-                    candidate.totalDistanceMeters(), candidate.transferCount()));
-        }
-        return ranked;
-    }
-
-    /** 탐색 결과 1개를 응답 후보로 바꾼다. 경로 없음·재고 게이트 탈락이면 빈 값. */
-    private Optional<RouteSearchResponse> searchOne(
-            FoundPath found, TransferRule rule,
-            Map<String, RouteMapper.StationInfo> stationInfos) {
-        List<RouteMapper.EngineSegment> segments = found.edges().stream()
-                    .map(edge -> new RouteMapper.EngineSegment(
-                            edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec(),
-                            edge.mode()))
-                    .toList();
-            // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다.
-            // 접근 경계(WALK ↔ 주행)는 환승이 아니라 비용을 가산하지 않는다(213 T1).
-            List<Long> transferSecs = new ArrayList<>();
-            String currentLine = null;
-            TravelMode currentMode = null;
-            for (Edge edge : found.edges()) {
-                if (currentLine != null && !currentLine.equals(edge.routeId())
-                        && !TransferRule.isAccessBoundary(currentMode, edge.mode())) {
-                    transferSecs.add(rule.costWithStation(
-                            0, edge.fromNode(), currentLine, edge.routeId()));
-                }
-                currentLine = edge.routeId();
-                currentMode = edge.mode();
-            }
-            // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤(algorithmCandidates)
-            // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.
-            Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
-                    new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
-                    stationInfos, RouteType.SHORTEST, RouteSource.ALGORITHM,
-                    transferSecs, graphRegistry.rentalIds());
-            return response.filter(r -> BikeStockGate.passesEdges(
-                    found.edges().stream().map(Edge::fromNode).toList(),
-                    found.edges().stream().map(Edge::mode).toList(),
-                    graphRegistry.bikeStock()));
-    }
-
-    /** leg의 (수단·출발·도착·노선) 순서로 만든 서명. 같으면 사실상 같은 경로로 보고 중복 제거한다. */
-    private String legSignature(RouteSearchResponse response) {
-        StringBuilder signature = new StringBuilder();
-        for (RouteLegResponse leg : response.legs()) {
-            signature.append(leg.mode()).append(':')
-                    .append(leg.fromNodeId()).append("->").append(leg.toNodeId()).append(':')
-                    .append(leg.routeId()).append('|');
-        }
-        return signature.toString();
-    }
-
 
     /**
      * 사람이 읽는 노선 이름을 배치로 붙인다(FE-175 항목8). SUBWAY는 {@code line.name},
@@ -354,9 +263,17 @@ public class RouteSearchService {
 
         DepartureSlot departureSlot = DepartureSlot.of(
                 request.departureTime() != null ? request.departureTime() : LocalDateTime.now());
-        List<RouteSearchResponse> candidates = algorithmCandidates(
-                augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, stationInfos);
-        List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, request.modes()));
+        RouteCandidateFinder coordFinder = new RouteCandidateFinder(
+                transferRule,
+                graphRegistry.transferTimes(),
+                graphRegistry.rentalIds(),
+                stationInfos,
+                graphRegistry::bikeStock);
+        List<RouteSearchResponse> candidates = coordFinder.findCandidates(
+                augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES);
+        List<RouteSearchResponse> withGeometry = withGeometryAll(candidates);
+        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(
+                RouteCandidateFinder.filterByModes(withGeometry, request.modes()));
         if (request.priority() == RoutePriority.COMFORT) {
             ranked = applyComfort(ranked, departureSlot);
         }
@@ -417,19 +334,5 @@ public class RouteSearchService {
     private Station findStation(String stationId) {
         return stationRepository.findById(stationId)
                 .orElseThrow(() -> new DomainException(ErrorType.STATION_NOT_FOUND));
-    }
-
-    private List<RouteSearchResponse> filterByModes(List<RouteSearchResponse> candidates, List<TravelMode> modes) {
-        if (modes == null || modes.isEmpty()) {
-            return candidates;
-        }
-        return candidates.stream()
-                .filter(candidate -> candidate.legs().stream()
-                        .allMatch(leg -> isAlwaysAllowed(leg.mode()) || modes.contains(leg.mode())))
-                .toList();
-    }
-
-    private boolean isAlwaysAllowed(TravelMode mode) {
-        return mode == TravelMode.WALK || mode == TravelMode.TRANSFER;
     }
 }
