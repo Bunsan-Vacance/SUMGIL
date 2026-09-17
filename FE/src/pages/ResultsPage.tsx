@@ -5,8 +5,9 @@ import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
-import { clockTime, roundMinutes } from '../features/route/selectors'
-import { isBackendConfigured } from '../api/repositories'
+import { clockTime, congestionPredictionFor } from '../features/route/selectors'
+import { busRouteOptions, groupRoutes } from '../features/route/routeGrouping'
+import type { RepositoryErrorCode } from '../api/errors'
 
 interface Props {
   origin: Place
@@ -17,6 +18,7 @@ interface Props {
   status: TripState['status']
   retry: () => void
   error: string
+  errorCode?: RepositoryErrorCode | null
   enabled: Mode[]
   priority: Priority
   setPriority: (value: Priority) => void
@@ -30,6 +32,8 @@ interface Props {
   isLiveApi?: boolean
   departureTime?: string
   onDepartureTimeChange?: (time: string) => void
+  onResetModes?: () => void
+  onSearchWalk?: () => void
 }
 
 export default function ResultsPage({
@@ -40,6 +44,7 @@ export default function ResultsPage({
   status,
   retry,
   error,
+  errorCode,
   enabled,
   priority,
   setPriority,
@@ -52,6 +57,8 @@ export default function ResultsPage({
   isLiveApi,
   departureTime,
   onDepartureTimeChange,
+  onResetModes,
+  onSearchWalk,
 }: Props) {
   const [choosingTime, setChoosingTime] = useState(false)
   const [choosingSort, setChoosingSort] = useState(false)
@@ -69,16 +76,19 @@ export default function ResultsPage({
     document.addEventListener('pointerdown', dismiss)
     return () => document.removeEventListener('pointerdown', dismiss)
   }, [choosingSort])
-  const liveApi = isLiveApi ?? isBackendConfigured
+  const liveApi = isLiveApi ?? false
+  const routeGroups = groupRoutes(visible)
   const canSortByCongestion =
-    liveApi ||
-    (visible.length > 1 && visible.every((route) => route.routeType !== undefined)) ||
-    (visible.length > 1 && visible.every((route) => route.congestionPercent !== undefined))
+    visible.length > 1 && visible.some((route) => congestionPredictionFor(route))
   const departure = departureTime || clockTime(visible[0]?.departedAt)
-  const fastestRoute = visible.reduce<Route | undefined>(
-    (fastest, route) => (!fastest || route.minutes < fastest.minutes ? route : fastest),
-    undefined,
-  )
+  const errorTitle =
+    errorCode === 'access-candidate-not-found'
+      ? '출발지나 도착지 주변에 연결되는 경로가 없어요.'
+      : errorCode === 'out-of-service-area'
+        ? '서비스 지역 밖이라 경로를 찾지 못했어요.'
+        : errorCode === 'service-ended'
+          ? '선택한 출발 시간에는 이용할 수 없어요.'
+          : error || '경로를 불러오지 못했어요.'
 
   return (
     <section className="results-screen" aria-label="경로 검색 결과">
@@ -236,37 +246,78 @@ export default function ResultsPage({
           </div>
         ) : status === 'error' ? (
           <div className="empty results-state" role="alert">
-            <h2>{error || '경로를 불러오지 못했어요.'}</h2>
-            <button className="primary" onClick={retry}>
-              다시 시도
-            </button>
+            <h2>{errorTitle}</h2>
+            {errorCode === 'access-candidate-not-found' && (
+              <p>출발지·도착지 주변에 연결되는 경로가 있는지 확인해 보세요.</p>
+            )}
+            {errorCode === 'out-of-service-area' && (
+              <p>출발지와 도착지를 서비스 지역 안에서 선택해 주세요.</p>
+            )}
+            {errorCode === 'service-ended' && (
+              <p>출발 시간을 바꾸거나 다른 이동수단을 선택해 보세요.</p>
+            )}
+            <div className="results-recovery-actions">
+              {errorCode === 'out-of-service-area' ? (
+                <button className="primary" onClick={onBackToInput}>
+                  출발·도착지 수정
+                </button>
+              ) : errorCode === 'access-candidate-not-found' ? (
+                <>
+                  <button className="primary" onClick={onBackToInput}>
+                    출발·도착지 수정
+                  </button>
+                  <button className="secondary" onClick={openFilter}>
+                    이동수단 변경
+                  </button>
+                </>
+              ) : errorCode === 'service-ended' ? (
+                <>
+                  <button className="primary" onClick={() => setChoosingTime(true)}>
+                    출발 시간 변경
+                  </button>
+                  <button className="secondary" onClick={openFilter}>
+                    이동수단 변경
+                  </button>
+                </>
+              ) : (
+                <button className="primary" onClick={retry}>
+                  다시 시도
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <>
             {!liveApi && <p className="results-sample">시안 · 예시 데이터</p>}
             <div className="route-list">
-              {visible.map((route) => (
-                <RouteCard
-                  key={route.id}
-                  route={route}
-                  comparison={
-                    fastestRoute?.congestionPercent !== undefined &&
-                    route.congestionPercent !== undefined &&
-                    route.minutes > fastestRoute.minutes &&
-                    route.congestionPercent < fastestRoute.congestionPercent
-                      ? `${roundMinutes(route.minutes - fastestRoute.minutes)}분 더 걸림 · 혼잡도 ${Math.round(fastestRoute.congestionPercent - route.congestionPercent)}%p 낮음`
-                      : undefined
-                  }
-                  onDetail={() => {
-                    setSelectedId(route.id)
-                    go('detail')
-                  }}
-                />
-              ))}
+              {routeGroups.map(({ representative: route, variants }) => {
+                const busVariantCount = busRouteOptions(variants).length
+                return (
+                  <RouteCard
+                    key={route.id}
+                    route={route}
+                    busVariantCount={busVariantCount > 1 ? busVariantCount : undefined}
+                    onDetail={() => {
+                      setSelectedId(route.id)
+                      go('detail')
+                    }}
+                  />
+                )
+              })}
             </div>
             {!visible.length && (
               <div className="empty">
                 <h3>해당 수단으로는 경로가 없어요</h3>
+                {onResetModes && (
+                  <button className="primary" onClick={onResetModes}>
+                    전체 수단으로 다시 검색
+                  </button>
+                )}
+                {onSearchWalk && (
+                  <button className="secondary" onClick={onSearchWalk}>
+                    도보만 다시 검색
+                  </button>
+                )}
                 <button className="secondary" onClick={openFilter}>
                   조건 변경
                 </button>
