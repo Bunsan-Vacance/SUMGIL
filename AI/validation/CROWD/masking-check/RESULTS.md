@@ -260,3 +260,20 @@ pytest -q test/CROWD/            # 222 passed (1차 219 + GRU 창 인자화 3)
 
 산출물: `masking_check.ipynb`(w2024, `stack_d1` 포함 재생성) · `masking_check_w2023.ipynb` · 표 원본 `…/masking_check/{w2024,w2023}/` ·
 표 W `…/w2023/masking_check_W_창간_쌍차이.parquet`.
+
+## 16. 결정과 반영 (2026-09-17)
+
+사용자 결정: **(나) 혼합 유지, 표 수정** — `full`·`d7_only`·`no_lag` → 마스킹 LightGBM(`stack`), `d1_only` → GRU. **배포 학습 창 2024 단독 유지.**
+`(다)` 비중 변형은 5b절로 기각.
+
+| 반영 | 내용 |
+| --- | --- |
+| 아티팩트 승격 | `_experiments/masking/w2024_masked-stack` → `models/CROWD/festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113`(복사, 바이트 동일). `crowd_lgbm_artifact` 설정으로 이름 고정 — `latest_artifact` 이름 정렬에 운을 맡기지 않는다(DL과 같은 방식) |
+| `routing.POLICY` | `d7_only`·`no_lag` → `lightgbm`, `d1_only` → `dl`. 197 당시 표는 docstring에 이력으로 남김 |
+| 계약 | `SERVING_CONTRACT.md` 3·4절 예시(`predictor_version`·`routing_rule`·`history_window_days`), 6절 변경 행(값 드리프트 포함), **5.4 신규 — 강동 행 중복(유일 키 아님)** |
+| 값 드리프트(09-13/14, `d7_only`) | `congestion_pct` 평균 \|Δ\| 0.62 / 0.86%p, 등급 변화 셀 3.85 / 4.36%, `data_status` 100% 동일, 음수 대체 228 → 120 / 0 → 16 |
+| 통지 | `.claude/handoff/TO_BE-crowd-routing-change-02.md`(BE), Jira 145 코멘트 |
+
+**부수 발견 — 계약 결함 5.4.** 서빙 표의 `(station_no, direction, time_slot_30min)`이 유일하지 않다. 강동(5호선 본선 종점 = 하남선 첫 역)이 링크 2개로
+하루 234행 중복되고 두 행의 값이 다르다(0% vs 168.8%). 드리프트를 키 병합으로 잰 첫 계산이 "최대 차 255%p"로 나와 잡혔다(행 정렬로 다시 잼).
+해결(링크 식별 컬럼 추가 vs 한 행으로 접기)은 BE 회신 뒤 별도 티켓.
