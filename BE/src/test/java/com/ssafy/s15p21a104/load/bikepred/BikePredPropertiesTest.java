@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
  */
 class BikePredPropertiesTest {
 
-    private static final String DIR = "AI/data/BIKE/serving";
+    private static final Path DIR = Path.of("../AI/data/BIKE/serving");
 
     @Test
     @DisplayName("csv 원천은 설정한 경로로 파일 원천을 만든다")
@@ -28,7 +28,7 @@ class BikePredPropertiesTest {
         BikeStockPredSource source = props.toSource();
 
         assertInstanceOf(CsvBikeStockPredSource.class, source);
-        assertEquals(Path.of(DIR), props.path());
+        assertEquals(DIR, props.path());
     }
 
     @Test
@@ -47,8 +47,11 @@ class BikePredPropertiesTest {
     @Test
     @DisplayName("경로를 비우면 기본 경로를 쓴다 — 받아 둔 산출물 폴더")
     void defaultsToServingDirectory() {
-        assertEquals(Path.of(BikePredProperties.DEFAULT_CSV_PATH), new BikePredProperties("csv", null).path());
-        assertEquals(Path.of(BikePredProperties.DEFAULT_CSV_PATH), new BikePredProperties("csv", " ").path());
+        Path expected = Path.of(BikePredProperties.DEFAULT_CSV_PATH);
+
+        assertEquals(expected, new BikePredProperties("csv", null).path());
+        // yml 의 csv-path 를 값 없이 두면 빈 경로로 바인딩된다
+        assertEquals(expected, new BikePredProperties("csv", Path.of("")).path());
     }
 
     @Test
