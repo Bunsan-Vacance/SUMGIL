@@ -260,6 +260,9 @@ public final class RouteTestFixtures {
         });
         RouteGraphRegistry registry = mock(RouteGraphRegistry.class);
         lenient().when(registry.graph()).thenReturn(graph);
+        lenient().when(registry.graphFor(
+                        org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(graph);
         lenient().when(registry.rentalIds()).thenReturn(rentalIds == null ? Set.of() : rentalIds);
         lenient().when(registry.bikeStock()).thenReturn(Map.of());
         lenient().when(registry.transferTimes()).thenReturn(Map.of());
