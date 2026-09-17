@@ -64,6 +64,8 @@ RESID_COLS = [f"{t}_resid" for t in TARGETS]
 EVENT_COLS = ["game_count", "festival_count"]
 FESTIVAL_SHAPE_COLS = ["festival_short_count", "festival_long_count", "festival_min_duration_days"]
 CATEGORICAL_COLS = ["station_no", "time_slot"]
+# 227 실험용 기상 관측(ASOS) 5열 — 패널에 이미 있는 원본 컬럼이라 파생 단계를 타지 않는다.
+WEATHER_COLS = ["temp_c", "precip_mm", "wind_ms", "humidity_pct", "snow_cm"]
 _FESTIVAL_SET = EVENT_COLS + CATEGORICAL_COLS + FESTIVAL_SHAPE_COLS
 
 SELF_LAG_D1_COLS = day_lag_names(RESID_COLS, (1,))
@@ -106,6 +108,10 @@ FEATURE_SETS: dict[str, list[str]] = {
         + NEIGHBOR_LAG_D7_COLS
     ),
 }
+# 227 실험용 — 배포 기본값 아님. 관측 기상(ASOS)으로 상한을 재는 세트이며 서빙엔 예보 피드가 없다.
+FEATURE_SETS["festival_selflag_d1sd_d7_resid_weather"] = (
+    FEATURE_SETS["festival_selflag_d1sd_d7_resid"] + WEATHER_COLS
+)
 
 
 def needs_derived_columns(cols: Sequence[str]) -> bool:
