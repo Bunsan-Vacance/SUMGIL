@@ -1026,3 +1026,32 @@ describe('백엔드 repository', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
 })
+
+describe('경로 검색 mock 선택', () => {
+  it('API base를 유지한 채 route search mock만 선택한다', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://be.test')
+    vi.stubEnv('VITE_ROUTE_SEARCH_MOCK', 'true')
+    vi.resetModules()
+
+    try {
+      const { isBackendConfigured, isRouteSearchMockEnabled, routeRepository } =
+        await import('./repositories')
+      expect(isBackendConfigured).toBe(true)
+      expect(isRouteSearchMockEnabled).toBe(true)
+      const result = await routeRepository.search(
+        {
+          origin: { id: '222', name: '강남', address: '서울', kind: '역', stationId: '222' },
+          destination: { id: '221', name: '역삼', address: '서울', kind: '역', stationId: '221' },
+          modes: ['walk', 'subway'],
+          priority: 'fast',
+          departedAt: '2026-09-15T08:30:00.000Z',
+        },
+        new AbortController().signal,
+      )
+      expect(result[0]).toMatchObject({ routeType: 'SHORTEST', minutes: 5 })
+    } finally {
+      vi.unstubAllEnvs()
+      vi.resetModules()
+    }
+  })
+})

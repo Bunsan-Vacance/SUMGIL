@@ -20,6 +20,8 @@ npm run dev
 
 실제 경로·대여소 API를 사용하려면 `.env.local`의 `VITE_API_BASE_URL`을 백엔드 주소로 설정한다. 현재 개발 서버 주소는 `http://70.12.246.138:8080`이며 값을 바꾼 뒤 개발 서버를 다시 시작한다.
 
+경로 검색 계약을 로컬에서 확인할 때는 `VITE_API_BASE_URL`을 유지하고 `VITE_ROUTE_SEARCH_MOCK=true`를 추가한다. 경로 검색만 `ApiResult` envelope와 `source: MOCK` fixture를 사용하며 역·장소·대여소 API 연결은 유지한다. 운영 환경에서는 이 값을 `true`로 설정하지 않는다.
+
 카카오 개발자 콘솔에서 해당 JavaScript 키의 SDK 도메인으로 `http://127.0.0.1:5173`, `http://localhost:5173`을 등록한다. 키를 입력한 후 개발 서버를 다시 시작한다. [공식 설정 가이드](https://apis.map.kakao.com/web/guide/) 참고.
 
 실제 지도의 이동·확대·축소, 출발/도착 장소 검색을 통한 마커 표시, 현재 위치 버튼을 연결했다. 현재 위치 버튼을 눌렀을 때만 브라우저 위치 권한을 요청한다. 지도 영역은 바텀시트 높이에 맞게 변경하여 지도 출처 표시가 시트에 가려지지 않도록 한다.
