@@ -102,11 +102,16 @@ public final class RouteCandidateFinder {
 
     /** 탐색 결과 1개를 응답 후보로 바꾼다. 재고 게이트 탈락이면 빈 값. */
     private Optional<RouteSearchResponse> toCandidate(FoundPath found, TransferRule rule) {
-        List<RouteMapper.EngineSegment> segments = found.edges().stream()
-                .map(edge -> new RouteMapper.EngineSegment(
-                        edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec(),
-                        edge.mode()))
-                .toList();
+        List<Edge> edges = found.edges();
+        List<RouteMapper.EngineSegment> segments = new java.util.ArrayList<>();
+        for (int i = 0; i < edges.size(); i++) {
+            Edge edge = edges.get(i);
+            // 첫 승차 대기(waitSec)는 첫 leg에 포함시켜 totalMinutes-leg 합을 맞춘다(190 AC3).
+            long seconds = edge.travelSec() + (i == 0 ? edge.waitSec() : 0);
+            segments.add(new RouteMapper.EngineSegment(
+                    edge.fromNode(), edge.toNode(), edge.routeId(), seconds,
+                    edge.mode()));
+        }
         // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다.
         // 접근 경계(WALK ↔ 주행)는 환승이 아니라 비용을 가산하지 않는다(213 T1).
         List<Long> transferSecs = new ArrayList<>();

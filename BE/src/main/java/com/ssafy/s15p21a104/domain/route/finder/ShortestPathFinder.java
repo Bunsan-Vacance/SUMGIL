@@ -58,9 +58,11 @@ public final class ShortestPathFinder {
         PriorityQueue<State> queue = new PriorityQueue<>(Comparator.comparingLong(State::cost));
 
         // 출발 직후 첫 엣지는 환승 아님(현재 노선 없음).
+        // 첫 승차 대기(waitSec)를 1회 부과한다(S15P21A104-190) — 탑승 전 대기다.
         for (Edge edge : graph.outgoingEdges(originStationId)) {
             long cost = transferRule.costWithStation(
-                    edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode());
+                    edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode())
+                    + edge.waitSec();
             if (cost < costOf(dist, edge.toNode(), edge.routeId())) {
                 setCost(dist, edge.toNode(), edge.routeId(), cost);
                 prev.computeIfAbsent(edge.toNode(), key -> new HashMap<>())
