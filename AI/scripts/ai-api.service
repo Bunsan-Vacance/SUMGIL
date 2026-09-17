@@ -14,10 +14,12 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# --host는 이 서버의 Tailscale IP로 고정 — 0.0.0.0이 아니라서 퍼블릭/VPC 대역으로는
+# 안 열리고 Tailscale 사설망(BE가 붙는 경로)으로만 접근 가능하다.
 Type=simple
 WorkingDirectory=<REPO_ROOT>/AI
 EnvironmentFile=<REPO_ROOT>/AI/.env
-ExecStart=<VENV_PATH>/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=<VENV_PATH>/bin/uvicorn app.main:app --host 100.64.193.109 --port 8000
 Restart=always
 RestartSec=10
 StandardOutput=append:<REPO_ROOT>/AI/logs/ai-api.log

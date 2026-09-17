@@ -81,14 +81,25 @@ tail -f ~/Soomgil-INFRA-ai-data-monitoring/AI/logs/ai-api.log   # 로그
 올린 뒤에는 **`restart`만 하면 되고, venv 활성화나 `nohup`을 수동으로 할 필요 없다** —
 `ExecStart`가 venv의 절대경로 `uvicorn`을 직접 부른다.
 
-현재 `127.0.0.1:8000`에만 바인딩돼 있다(외부·BE 접근 불가, 서버 안에서 `curl`로만 확인 가능).
-BE가 이 API를 직접 호출해야 하면 `--host 0.0.0.0` 전환 + 방화벽(ufw)·보안그룹 포트 개방이
-별도로 필요하다 — 아직 안 돼 있음.
+**Tailscale IP(`100.64.193.109`)로 바인딩돼 있다** — 퍼블릭 IP·VPC 대역으로는 안 열리고,
+같은 Tailscale 네트워크(tailnet)에 있는 노드만 접근 가능하다. BE 서버(EC2 기본,
+`j15a104.p.ssafy.io` = Tailscale `100.103.156.53`)에서 실제로 호출해 교차 검증했다
+(2026-09-17, `ubuntu@ip-172-26-14-16`에서 curl → 정상 응답).
+
+**BE가 호출할 주소**
+```
+http://100.64.193.109:8000
+예: GET http://100.64.193.109:8000/bike/stations/{rental_id}/eta-stock?eta_minutes={0~30}
+```
+
+k3s 파드 안에서 도는 BE 앱이 호스트의 Tailscale IP로 나갈 수 있는지는 호스트 레벨
+curl로만 확인했다 — 파드 네트워크 정책에 따라 다를 수 있어, 연동 중 문제가 있으면
+BE 팀원이 `kubectl exec`로 파드 안에서 같은 curl을 한 번 더 확인해보는 게 좋다.
 
 ### 동작 확인
 
 ```bash
-curl -s "http://127.0.0.1:8000/bike/stations/ST-10/eta-stock?eta_minutes=15" | python3 -m json.tool
+curl -s "http://100.64.193.109:8000/bike/stations/ST-10/eta-stock?eta_minutes=15" | python3 -m json.tool
 ```
 
 `"source": "lightgbm"`이 나오면 배치표가 아니라 실시간 모델 추론이 정상 동작 중인 것.
