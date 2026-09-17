@@ -82,8 +82,6 @@ class RouteSearchComfortPriorityTest {
                 subway("A", "C", "L1", 900),
                 bike("A", "R1", 120),
                 bike("R1", "C", 120)));
-        lenient().when(graphRegistry.candidateSubgraphs())
-                .thenAnswer(invocation -> RouteTestFixtures.candidateSubgraphsOf(graphRegistry.graph()));
 
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180),

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -94,5 +95,28 @@ class TransferRuleTest {
 
         assertEquals(100, rule.costWithStation(100, "시청", "1001", "1001"));
         assertEquals(100, rule.costWithStation(100, null, null, "1002"));
+    }
+
+    @Test
+    @DisplayName("213-T1: WALK ↔ 주행 경계는 접근이라 환승이 아니다")
+    void t213_접근경계_환승아님() {
+        assertTrue(TransferRule.isAccessBoundary(TravelMode.WALK, TravelMode.BIKE));
+        assertTrue(TransferRule.isAccessBoundary(TravelMode.BIKE, TravelMode.WALK));
+        assertTrue(TransferRule.isAccessBoundary(TravelMode.WALK, TravelMode.SUBWAY));
+        assertTrue(TransferRule.isAccessBoundary(TravelMode.BUS, TravelMode.WALK));
+        assertFalse(TransferRule.isAccessBoundary(TravelMode.SUBWAY, TravelMode.BIKE));
+        assertFalse(TransferRule.isAccessBoundary(TravelMode.SUBWAY, TravelMode.SUBWAY));
+        assertFalse(TransferRule.isAccessBoundary(null, TravelMode.BIKE));
+    }
+
+    @Test
+    @DisplayName("213-T1: 접근 경계는 환승 비용을 가산하지 않는다")
+    void t213_접근경계_가산없음() {
+        TransferRule rule = new TransferRule(180);
+
+        assertEquals(100, rule.costWithStation(
+                100, "R1", "WALK", "BIKE", TravelMode.WALK, TravelMode.BIKE));
+        assertEquals(280, rule.costWithStation(
+                100, "B", "L1", "L2", TravelMode.SUBWAY, TravelMode.SUBWAY));
     }
 }

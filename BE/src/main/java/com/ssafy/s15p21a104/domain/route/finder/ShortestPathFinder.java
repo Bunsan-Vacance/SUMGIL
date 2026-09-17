@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.domain.route.finder;
 
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
@@ -59,12 +60,12 @@ public final class ShortestPathFinder {
         // 출발 직후 첫 엣지는 환승 아님(현재 노선 없음).
         for (Edge edge : graph.outgoingEdges(originStationId)) {
             long cost = transferRule.costWithStation(
-                    edge.travelSec(), originStationId, null, edge.routeId());
+                    edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode());
             if (cost < costOf(dist, edge.toNode(), edge.routeId())) {
                 setCost(dist, edge.toNode(), edge.routeId(), cost);
                 prev.computeIfAbsent(edge.toNode(), key -> new HashMap<>())
-                        .put(edge.routeId(), new Previous(originStationId, null, edge));
-                queue.add(new State(cost, edge.toNode(), edge.routeId()));
+                        .put(edge.routeId(), new Previous(originStationId, null, null, edge));
+                queue.add(new State(cost, edge.toNode(), edge.routeId(), edge.mode()));
             }
         }
 
@@ -77,14 +78,17 @@ public final class ShortestPathFinder {
                 return buildPath(prev, originStationId, current);
             }
             for (Edge edge : graph.outgoingEdges(current.node())) {
-                // 환승은 현재 서 있는 역에서 일어난다. 실측 없으면 상수로 폴백한다.
+                // 환승은 현재 서 있는 역에서 일어난다. 접근 경계(WALK ↔ 주행)는
+                // 환승이 아니라 가산 없이 통과한다(213 T1). 실측 없으면 상수로 폴백한다.
                 long nextCost = current.cost() + transferRule.costWithStation(
-                        edge.travelSec(), current.node(), current.line(), edge.routeId());
+                        edge.travelSec(), current.node(), current.line(), edge.routeId(),
+                        current.arrivalMode(), edge.mode());
                 if (nextCost < costOf(dist, edge.toNode(), edge.routeId())) {
                     setCost(dist, edge.toNode(), edge.routeId(), nextCost);
                     prev.computeIfAbsent(edge.toNode(), key -> new HashMap<>())
-                            .put(edge.routeId(), new Previous(current.node(), current.line(), edge));
-                    queue.add(new State(nextCost, edge.toNode(), edge.routeId()));
+                            .put(edge.routeId(), new Previous(current.node(), current.line(),
+                                    current.arrivalMode(), edge));
+                    queue.add(new State(nextCost, edge.toNode(), edge.routeId(), edge.mode()));
                 }
             }
         }
@@ -118,7 +122,10 @@ public final class ShortestPathFinder {
 
         int transfers = 0;
         for (int i = 1; i < edges.size(); i++) {
-            if (!edges.get(i).routeId().equals(edges.get(i - 1).routeId())) {
+            // 접근 경계(WALK ↔ 주행)는 환승 카운트에서 뺀다(213 T1) — 비용·leg와 일치시킨다.
+            if (!edges.get(i).routeId().equals(edges.get(i - 1).routeId())
+                    && !TransferRule.isAccessBoundary(
+                            edges.get(i - 1).mode(), edges.get(i).mode())) {
                 transfers++;
             }
         }
@@ -143,9 +150,9 @@ public final class ShortestPathFinder {
         dist.computeIfAbsent(node, key -> new HashMap<>()).put(line, cost);
     }
 
-    private record State(long cost, String node, String line) {
+    private record State(long cost, String node, String line, TravelMode arrivalMode) {
     }
 
-    private record Previous(String fromNode, String fromLine, Edge edge) {
+    private record Previous(String fromNode, String fromLine, TravelMode fromMode, Edge edge) {
     }
 }

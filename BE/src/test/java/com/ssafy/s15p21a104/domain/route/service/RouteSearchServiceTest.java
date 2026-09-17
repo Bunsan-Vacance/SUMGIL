@@ -58,8 +58,6 @@ class RouteSearchServiceTest {
         lenient().when(stationRepository.findById("9999")).thenReturn(Optional.empty());
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 new Edge("0222", "0221", "2", 300, 0, TravelMode.SUBWAY)));
-        lenient().when(graphRegistry.candidateSubgraphs())
-                .thenAnswer(invocation -> RouteTestFixtures.candidateSubgraphsOf(graphRegistry.graph()));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
                 RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
