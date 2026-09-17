@@ -5,7 +5,15 @@ import { roundMinutes } from '../route/selectors'
 
 export type GuidanceDialog = 'exit' | 'train' | 'replan'
 export type GuidanceRequestStatus =
-  'idle' | 'loading' | 'success' | 'empty' | 'error' | 'unsupported'
+  | 'idle'
+  | 'loading'
+  | 'success'
+  | 'empty'
+  | 'no-info'
+  | 'outside-window'
+  | 'stale'
+  | 'error'
+  | 'unsupported'
 
 interface Props {
   dialog: GuidanceDialog
@@ -86,6 +94,17 @@ export default function GuidanceDialogs({
         {arrivalStatus === 'empty' && (
           <p className="dialog-state" role="alert">
             확인할 수 있는 도착 정보가 없어요.
+          </p>
+        )}
+        {arrivalStatus === 'no-info' && (
+          <p className="dialog-state">현재 확인되는 열차가 없어요.</p>
+        )}
+        {arrivalStatus === 'outside-window' && (
+          <p className="dialog-state">현재는 지하철 운행 시간이 아니에요.</p>
+        )}
+        {arrivalStatus === 'stale' && (
+          <p className="dialog-state" role="alert">
+            실시간 도착 정보가 지연되고 있어요.
           </p>
         )}
         {canChoose && (

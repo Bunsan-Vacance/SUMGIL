@@ -110,7 +110,7 @@ export default function GuidePage({
           </div>
         </div>
         <div className="guidance-secondary-actions">
-          {(currentLeg.mode === 'subway' || currentLeg.mode === 'bus') && (
+          {currentLeg.mode === 'subway' && (
             <button className="secondary" onClick={onTrain}>
               탑승 확인
             </button>
