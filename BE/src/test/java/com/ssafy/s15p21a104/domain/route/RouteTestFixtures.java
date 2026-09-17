@@ -8,7 +8,6 @@ import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
-import com.ssafy.s15p21a104.domain.route.finder.CandidateModeSets;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
@@ -71,23 +70,6 @@ public final class RouteTestFixtures {
             lines.computeIfAbsent(edge.toNode(), key -> new HashSet<>()).add(edge.routeId());
         }
         return RouteGraph.of(nodes, adjacency, lines);
-    }
-
-    /**
-     * {@link RouteGraphRegistry#candidateSubgraphs()}가 실제로 만드는 것과 같은 방식으로
-     * 조합별 하위 그래프 목록을 계산한다(S15P21A104-155). {@code graphRegistry.candidateSubgraphs()}를
-     * 이걸로 스텁해야 {@code RouteSearchService}가 실제 후보를 찾는다 — 스텁 안 하면 Mockito
-     * 기본값(빈 목록)이 나가 탐색 결과가 항상 비어버린다.
-     *
-     * @param graph 원본 그래프
-     * @return 조합별 하위 그래프 목록
-     */
-    public static List<RouteGraph> candidateSubgraphsOf(RouteGraph graph) {
-        List<RouteGraph> subgraphs = new ArrayList<>();
-        for (Set<TravelMode> coreModes : CandidateModeSets.CORE_MODE_SETS) {
-            subgraphs.add(graph.filterByModes(CandidateModeSets.withWalk(coreModes)));
-        }
-        return subgraphs;
     }
 
     // 엣지 단축 생성자
@@ -278,7 +260,6 @@ public final class RouteTestFixtures {
         });
         RouteGraphRegistry registry = mock(RouteGraphRegistry.class);
         lenient().when(registry.graph()).thenReturn(graph);
-        lenient().when(registry.candidateSubgraphs()).thenReturn(candidateSubgraphsOf(graph));
         lenient().when(registry.rentalIds()).thenReturn(rentalIds == null ? Set.of() : rentalIds);
         lenient().when(registry.bikeStock()).thenReturn(Map.of());
         lenient().when(registry.transferTimes()).thenReturn(Map.of());

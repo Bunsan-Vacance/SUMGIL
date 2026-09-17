@@ -74,8 +74,6 @@ class RouteSearchBikeGeometryContinuityTest {
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 bike("B", "R1", 120),
                 bike("R1", "C", 120)));
-        lenient().when(graphRegistry.candidateSubgraphs())
-                .thenAnswer(invocation -> RouteTestFixtures.candidateSubgraphsOf(graphRegistry.graph()));
 
         // B→C 전체 구간 1회 조회 결과: 중간점이 R1 좌표와 정확히 일치하는 연속 좌표열.
         MultiLineStringResponse wholeRun = MultiLineStringResponse.of(List.of(List.of(

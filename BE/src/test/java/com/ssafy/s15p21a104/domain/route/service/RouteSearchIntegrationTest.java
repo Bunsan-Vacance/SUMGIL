@@ -83,8 +83,6 @@ class RouteSearchIntegrationTest {
                 subway("B", "C", "L1", 100)));
         // 개별 테스트가 graphRegistry.graph()를 다른 그래프로 재스텁해도 그때그때 다시 계산되도록
         // thenAnswer로 지연 평가한다(S15P21A104-155, 13개 테스트가 각자 다른 그래프를 씀).
-        lenient().when(graphRegistry.candidateSubgraphs())
-                .thenAnswer(invocation -> RouteTestFixtures.candidateSubgraphsOf(graphRegistry.graph()));
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180),
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
