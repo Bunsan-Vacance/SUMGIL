@@ -100,8 +100,14 @@ def test_policy_covers_all_four_availability_levels():
         assert kind in ("lightgbm", "dl")
 
 
-def test_policy_matches_145_family_check_decision():
+def test_policy_matches_145_masking_check_decision():
+    """145 후속 `masking-check/RESULTS.md` 14절 — 결정 "(나) 혼합 유지, 표 수정".
+
+    마스킹 학습 LightGBM이 `d7_only`·`no_lag`의 배포 LightGBM 붕괴를 없애 GRU보다 나아졌다
+    (`d7_only` +12.0/+13.8%p, `no_lag` RMSE 동등). `d1_only`만 GRU가 +5.6~+9.0%p 우위라 그대로다
+    (197 당시는 결손·전무 셋 모두 GRU였다).
+    """
     assert select(POLICY, avail="full") == "lightgbm"
     assert select(POLICY, avail="d1_only") == "dl"
-    assert select(POLICY, avail="d7_only") == "dl"
-    assert select(POLICY, avail="no_lag") == "dl"
+    assert select(POLICY, avail="d7_only") == "lightgbm"
+    assert select(POLICY, avail="no_lag") == "lightgbm"
