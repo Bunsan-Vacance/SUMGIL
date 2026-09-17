@@ -131,14 +131,57 @@ def resolved_segments(panel: pd.DataFrame, topology_path: Path = DEFAULT_TOPOLOG
     return resolve_segments(load_topology(topology_path), set(panel["station_no"].unique()))
 
 
-def _cache_meta(panel: pd.DataFrame, lookup: DayTypeLookupBaseline, panel_path: Path) -> dict:
+def _cache_meta(
+    panel: pd.DataFrame,
+    lookup: DayTypeLookupBaseline,
+    panel_path: Path,
+    lookup_weights: str = "none",
+    events_path: Path | None = None,
+) -> dict:
+    """캐시 재사용 판단에 쓰는 입력 조건 지문. `_cache_compatible`이 옛 메타와 비교한다.
+
+    `lookup_weights`(227)는 lookup이 연도 가중으로 fit됐는지 — 가중 lookup의 파생(시차
+    잔차)은 평탄 lookup 파생과 다르므로 같은 패널이라도 다른 캐시로 취급해야 한다.
+    `events_path`는 이벤트 표 지문(파일명·mtime) — 이벤트 표만 바뀌어도 파생(잔차)이
+    달라지는데 패널 자체는 그대로라 이 정보가 없으면 옛 캐시가 조용히 재사용된다.
+    """
+    events_path = Path(events_path) if events_path is not None else None
     return {
         "panel_file": Path(panel_path).name,
         "panel_mtime": Path(panel_path).stat().st_mtime if Path(panel_path).exists() else None,
         "panel_rows": len(panel),
         "lookup_keys": list(lookup.keys),
         "derived_version": DERIVED_VERSION,
+        "lookup_weights": lookup_weights,
+        "events_file": events_path.name if events_path is not None else None,
+        "events_mtime": (
+            events_path.stat().st_mtime
+            if events_path is not None and events_path.exists()
+            else None
+        ),
     }
+
+
+def _cache_compatible(have: dict, want: dict) -> bool:
+    """캐시 메타(`have`, `columns` 키는 호출부에서 이미 뺀 것)가 `want`와 같은 입력 조건인지.
+
+    옛 메타 호환 처리를 여기 모은다 — 행 수·컬럼 검사는 호출부(`load_or_build_derived`)의 몫이다.
+    - `split_date`: 옛 validation 캐시 meta에만 있던 키라 무시한다.
+    - `lookup_weights`: 옛 캐시(가중 개념 이전)는 평탄 lookup으로 본다.
+    - `events_file`/`events_mtime`: 옛 캐시엔 이벤트 표 지문이 없었다. `want`가 이벤트 표를
+      명시하지 않은 호출(`events_file=None`, 기본 이벤트 표를 쓴다는 뜻)이면 이 두 키는
+      비교에서 뺀다 — "옛 캐시 + 기본 이벤트 표" 조합을 호환으로 유지하기 위해서다. `want`가
+      이벤트 표를 명시했을 때만 실제로 비교해, 이벤트 표가 바뀐 실행에서 재빌드를 유도한다.
+    """
+    have = dict(have)
+    have.pop("split_date", None)
+    have.setdefault("lookup_weights", "none")
+    have.setdefault("events_file", None)
+    have.setdefault("events_mtime", None)
+    if want.get("events_file") is None:
+        have["events_file"] = None
+        have["events_mtime"] = None
+    return have == want
 
 
 def load_or_build_derived(
@@ -148,16 +191,21 @@ def load_or_build_derived(
     panel_path: Path = CROWD_PROCESSED / PANEL_NAME,
     topology_path: Path = DEFAULT_TOPOLOGY_PATH,
     force: bool = False,
+    lookup_weights: str = "none",
+    events_path: Path | None = None,
 ) -> pd.DataFrame:
-    """캐시가 유효하면 읽고, 아니면 `add_derived_columns`로 만들어 저장한 뒤 돌려준다."""
+    """캐시가 유효하면 읽고, 아니면 `add_derived_columns`로 만들어 저장한 뒤 돌려준다.
+
+    `lookup_weights`·`events_path`는 `_cache_meta`로 그대로 넘어가 캐시 지문에 들어간다
+    (227 연도 표본 가중, 이벤트 표 변경 감지).
+    """
     cache_path = Path(cache_path)
     meta_path = cache_path.with_suffix(".meta.json")
-    want = _cache_meta(panel, lookup, panel_path)
+    want = _cache_meta(panel, lookup, panel_path, lookup_weights, events_path)
     if not force and cache_path.exists() and meta_path.exists():
         have = json.loads(meta_path.read_text(encoding="utf-8"))
         have_cols = have.pop("columns", None)
-        have.pop("split_date", None)  # 옛 validation 캐시 meta 호환
-        if have == want:
+        if _cache_compatible(have, want):
             out = pd.read_parquet(cache_path)
             if len(out) == len(panel) and have_cols == list(out.columns):
                 print(f"[파생 캐시] 재사용: {cache_path.name}", flush=True)
