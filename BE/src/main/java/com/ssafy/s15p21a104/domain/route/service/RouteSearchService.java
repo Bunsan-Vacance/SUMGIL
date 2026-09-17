@@ -145,75 +145,31 @@ public class RouteSearchService {
     }
 
     /**
-     * 사람이 읽는 노선 이름을 배치로 붙인다(FE-175 항목8). SUBWAY는 {@code line.name},
-     * BUS는 {@code bus_route.name} — 그 외 수단은 의미 있는 노선명이 없어 null로 둔다.
+     * 사람이 읽는 노선 이름을 배치로 붙인다(213 T4). {@link RouteNameResolver}에
+     * 위임하고 서비스는 DB 조회 함수만 넘긴다.
      */
     private List<RouteSearchResponse> withRouteNames(List<RouteSearchResponse> responses) {
-        Set<String> subwayLineIds = new HashSet<>();
-        Set<String> busRouteIds = new HashSet<>();
-        for (RouteSearchResponse response : responses) {
-            for (RouteLegResponse leg : response.legs()) {
-                if (leg.routeId() == null) {
-                    continue;
-                }
-                if (leg.mode() == TravelMode.SUBWAY) {
-                    subwayLineIds.add(leg.routeId());
-                } else if (leg.mode() == TravelMode.BUS) {
-                    busRouteIds.add(leg.routeId());
-                }
-            }
-        }
-        Map<String, String> lineNames = new HashMap<>();
-        for (Line line : routeLineRepository.findAllById(subwayLineIds)) {
-            lineNames.put(line.getLineId(), line.getName());
-        }
-        Map<String, String> busNames = new HashMap<>();
-        for (BusRoute busRoute : busRouteRepository.findAllById(busRouteIds)) {
-            busNames.put(busRoute.getRouteId(), busRoute.getName());
-        }
-
-        List<RouteSearchResponse> named = new ArrayList<>();
-        for (RouteSearchResponse response : responses) {
-            List<RouteLegResponse> legs = response.legs().stream()
-                    .map(leg -> withRouteName(leg, lineNames, busNames))
-                    .toList();
-            named.add(new RouteSearchResponse(
-                    response.routeType(), response.totalMinutes(), legs, response.source(),
-                    response.totalDistanceMeters(), response.transferCount()));
-        }
-        return named;
-    }
-
-    private RouteLegResponse withRouteName(
-            RouteLegResponse leg, Map<String, String> lineNames, Map<String, String> busNames) {
-        String routeName = switch (leg.mode()) {
-            case SUBWAY -> lineNames.get(leg.routeId());
-            case BUS -> busNames.get(leg.routeId());
-            default -> null;
-        };
-        if (routeName == null) {
-            return leg;
-        }
-        return new RouteLegResponse(
-                leg.mode(),
-                leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
-                leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), leg.minutes(),
-                leg.geometry(), leg.geometryStatus(),
-                leg.distanceMeters(), routeName
-        );
+        return new RouteNameResolver(
+                ids -> {
+                    Map<String, String> names = new HashMap<>();
+                    for (Line line : routeLineRepository.findAllById(ids)) {
+                        names.put(line.getLineId(), line.getName());
+                    }
+                    return names;
+                },
+                ids -> {
+                    Map<String, String> names = new HashMap<>();
+                    for (BusRoute busRoute : busRouteRepository.findAllById(ids)) {
+                        names.put(busRoute.getRouteId(), busRoute.getName());
+                    }
+                    return names;
+                }).withRouteNames(responses);
     }
 
     /** 좌표 검색 전용 임시 노드 ID(S15P21A104-187). 요청 하나 안에서만 쓰고 그래프에 남기지 않는다. */
     private static final String PLACE_ORIGIN_ID = "PLACE-ORIGIN";
 
     private static final String PLACE_DEST_ID = "PLACE-DEST";
-
-    /** 좌표→역·정류장·대여소 접근 간선 연결 반경(m). {@link com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder}와 같은 값. */
-    private static final double ACCESS_RADIUS_M = 500.0;
-
-    /** 접근 후보 상한(가까운 순). 무제한 탐색을 막아 탐색량을 억제한다(S15P21A104-187 완료기준). */
-    private static final int MAX_ACCESS_CANDIDATES = 5;
 
     /**
      * 좌표 기반 통합 길찾기 진입점(S15P21A104-185/187).
@@ -243,8 +199,10 @@ public class RouteSearchService {
         }
 
         Map<String, RouteMapper.StationInfo> baseInfos = graphRegistry.stationInfos();
-        List<Edge> originAccessEdges = accessEdges(PLACE_ORIGIN_ID, origin, baseInfos, graph, true);
-        List<Edge> destAccessEdges = accessEdges(PLACE_DEST_ID, destination, baseInfos, graph, false);
+        List<Edge> originAccessEdges = CoordinateAccessEdges.accessEdges(
+                PLACE_ORIGIN_ID, origin.lat(), origin.lng(), baseInfos, graph, true);
+        List<Edge> destAccessEdges = CoordinateAccessEdges.accessEdges(
+                PLACE_DEST_ID, destination.lat(), destination.lng(), baseInfos, graph, false);
         if (originAccessEdges.isEmpty() || destAccessEdges.isEmpty()) {
             throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_FOUND);
         }
@@ -278,47 +236,6 @@ public class RouteSearchService {
             ranked = applyComfort(ranked, departureSlot);
         }
         return withRouteNames(ranked);
-    }
-
-    /**
-     * 좌표 주변 보행 접근 가능한 역·정류장·대여소를 반경 {@value #ACCESS_RADIUS_M}m 안에서
-     * 가까운 순으로 최대 {@value #MAX_ACCESS_CANDIDATES}개 찾아 임시 WALK 엣지로 만든다.
-     * 실제 그래프에 연결돼 있지 않은 정점(좌표만 있고 고립된 경우)은 후보에서 뺀다 — 접근은
-     * 됐는데 그 다음이 막힌 후보를 만들지 않기 위함이다.
-     *
-     * @param placeNodeId 이 좌표를 나타낼 임시 노드 ID
-     * @param place 좌표
-     * @param stationInfos 역·정류장·대여소 좌표 전체(그래프 레지스트리 원본)
-     * @param graph 실제 연결 여부 확인용 그래프(임시 엣지 추가 전)
-     * @param outgoing true면 좌표→후보 방향(출발지), false면 후보→좌표 방향(도착지)
-     * @return 임시 WALK 엣지 목록. 반경 안 후보가 없으면 빈 목록
-     */
-    private List<Edge> accessEdges(
-            String placeNodeId, RoutePlaceRequest place,
-            Map<String, RouteMapper.StationInfo> stationInfos, RouteGraph graph, boolean outgoing) {
-        record Candidate(String nodeId, double distanceM) {
-        }
-        List<Candidate> candidates = new ArrayList<>();
-        for (RouteMapper.StationInfo info : stationInfos.values()) {
-            if (info.lat() == null || info.lng() == null || !graph.containsNode(info.stationId())) {
-                continue;
-            }
-            double distanceM = GeoDistance.haversineMeters(place.lat(), place.lng(), info.lat(), info.lng());
-            if (distanceM > ACCESS_RADIUS_M) {
-                continue;
-            }
-            candidates.add(new Candidate(info.stationId(), distanceM));
-        }
-        candidates.sort(Comparator.comparingDouble(Candidate::distanceM));
-
-        List<Edge> edges = new ArrayList<>();
-        for (Candidate candidate : candidates.subList(0, Math.min(MAX_ACCESS_CANDIDATES, candidates.size()))) {
-            int sec = (int) Math.round(candidate.distanceM() / WalkEdgeBuilder.METERS_PER_SEC);
-            edges.add(outgoing
-                    ? new Edge(placeNodeId, candidate.nodeId(), WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK)
-                    : new Edge(candidate.nodeId(), placeNodeId, WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK));
-        }
-        return edges;
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {
