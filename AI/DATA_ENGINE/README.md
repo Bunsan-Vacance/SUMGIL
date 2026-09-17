@@ -131,6 +131,42 @@ python -m DATA_ENGINE.collect.subway_ridership_daily                  # dry-run:
 python -m DATA_ENGINE.collect.subway_ridership_daily --days 7 --yes
 ```
 
+### BIKE avg 서빙 배치 (S15P21A104-225)
+
+`bike-avg-batch.timer`는 매일 03:00(Asia/Seoul)에 `bike-avg-batch.service`를 실행한다.
+서비스는 `AI/.env`의 `BIKE_AVG_ARTIFACT`에 지정한
+`models/BIKE/<검증된-폴더>/stock_profile_avg.parquet`을 읽어
+`data/BIKE/serving/bike_stock_pred_<생성시각>.parquet`, `.csv`, `.meta.json`을 만든다.
+`time_slot` 숫자가 뜻하는 시각은 [`AI/README.md`](../README.md)의
+"BIKE avg 배치 표의 시간 구간"을 참고한다.
+
+서버의 저장소에서 다음 순서로 설정·확인한다. 경로와 폴더 이름은 서버에 실제로 있는 것을 쓴다.
+
+```bash
+cd <REPO_ROOT>/AI
+find models/BIKE -mindepth 2 -maxdepth 2 -name stock_profile_avg.parquet -print
+nano .env
+
+bash DATA_ENGINE/scripts/install_data_engine_services.sh
+sudo systemctl start bike-avg-batch.service
+sudo systemctl status bike-avg-batch.service --no-pager
+sudo journalctl -u bike-avg-batch.service -n 50 --no-pager
+ls -lt data/BIKE/serving/bike_stock_pred_*.meta.json | head
+
+sudo systemctl enable --now bike-avg-batch.timer
+sudo systemctl list-timers --no-pager bike-avg-batch.timer
+systemd-analyze calendar '*-*-* 03:00:00 Asia/Seoul'
+```
+
+`nano .env`에서 `BIKE_AVG_ARTIFACT=models/BIKE/실제폴더명`을 추가한다.
+`find` 결과의 `stock_profile_avg.parquet`이 들어 있는 폴더를 선택하고,
+실험용 `smoke` 폴더 대신 검증된 전체 데이터 아티팩트를 지정한다.
+수동 실행에서 로그에 `[BIKE avg batch] OK`가 나오고 최신 meta의 `artifact`, `rows`,
+`generated_at`이 기대한 값인지 확인한 뒤 타이머를 활성화한다.
+타이머가 예약돼 있어도 입력 avg 파일이 그대로면 새 출력의 통계 값은 그대로다.
+통계 자체를 갱신하려면 새 데이터로 `stock_profile_avg.parquet`을 다시 생성하고
+`BIKE_AVG_ARTIFACT`를 검증된 새 폴더로 변경해야 한다.
+
 ## 데이터 수집 모니터링
 
 systemd 서비스가 `active`여도 API 오류, 저장 실패, 일부 시간대 누락이 생길 수 있으므로

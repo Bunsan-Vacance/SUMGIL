@@ -30,7 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from app.BIKE.pipeline.predictor import Predictor, build_predictor, latest_artifact
@@ -65,7 +65,7 @@ def run(
     predictor = resolve_predictor(predictor_kind or settings.bike_predictor, artifact_dir)
     table = predictor.predict_all(target_date)
 
-    stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S")
     path = out_dir / f"bike_stock_pred_{stamp}.parquet"
     table.to_parquet(path, index=False)
     table.to_csv(path.with_suffix(".csv"), index=False)
@@ -80,7 +80,7 @@ def run(
         "target_date": str(target_date) if target_date else None,
         "rows": len(table),
         "stations": int(table["rental_id"].nunique()),
-        "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+        "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
     }
     path.with_suffix(".meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=1, default=str), encoding="utf-8"
