@@ -6,6 +6,7 @@ import com.ssafy.s15p21a104.load.bus.BusRouteParser;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopParser;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
+import com.ssafy.s15p21a104.load.bikepred.BikeStockPredSource;
 import com.ssafy.s15p21a104.load.crowd.CongestionParser;
 import com.ssafy.s15p21a104.load.crowd.CrowdStationCodes;
 import com.ssafy.s15p21a104.load.csv.CsvTable;
@@ -116,7 +117,8 @@ public class StaticLoadRunner implements ApplicationRunner {
                 case "bike" -> loadBike();
                 case "railgeometry" -> loadRailGeometry();
                 case "congestion" -> loadCongestion();
-                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion)", source);
+                case "bikepred" -> loadBikeStockPred();
+                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred)", source);
             }
         }
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
@@ -328,6 +330,37 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         timed("congestion", () -> writer.upsertCongestion(parsed.rows()));
         log.info("혼잡도 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 따릉이 재고 예측. AI 배치 산출물(대여소 × 요일 3 × 슬롯 48)을 그대로 옮긴다 — 값을 계산하지 않는다.
+     * <p>
+     * 원천은 {@code load.bikepred.source} 로 고르고 지금은 CSV 파일뿐이다. 경로가 폴더면 그 안의 최신 산출물을 쓰므로
+     * 배치가 매일 새 파일을 만들어도 명령이 그대로다.
+     * <p>
+     * <b>마스터에 없는 대여소도 함께 적재한다.</b> 예측 표가 대여소 마스터보다 최근이라 신설 대여소가 정상적으로 섞인다 —
+     * 건너뛰면 그 대여소의 예측이 통째로 사라지므로, 경고로 남기고 넣는다. 대여소 마스터 갱신은 별건이다.
+     */
+    private void loadBikeStockPred() throws IOException {
+        long started = System.nanoTime();
+
+        BikeStockPredSource.Loaded loaded = props.bikepred().toSource().read();
+        logWarnings("재고 예측 파싱", loaded.warnings());
+        var st = loaded.stats();
+        log.info("재고 예측: 원천 {} 행 · 대여소 {} · 건너뜀 {} · 적재 대상 {} 행 · 출처 등급 {} ({})",
+                st.sourceRows(), st.stations(), st.skipped(), loaded.rows().size(), st.predictionSources(),
+                loaded.origin());
+
+        // dry-run 은 DB 를 읽지 않으므로 마스터 대조를 건너뛴다 (검증기가 빈 집합을 그렇게 다룬다).
+        Set<String> knownRentalIds = props.dryRun() ? Set.of() : writer.existingRentalIds();
+        ValidationReport report = MasterValidator.validateBikeStockPred(loaded.rows(), knownRentalIds);
+        logWarnings("검증", report.warnings());
+        if (!abortIfErrors("재고 예측", report) || dryRun("재고 예측", started)) {
+            return;
+        }
+
+        timed("bike_stock_pred", () -> writer.upsertBikeStockPred(loaded.rows()));
+        log.info("재고 예측 적재 완료 ({} ms)", elapsedMs(started));
     }
 
     /**

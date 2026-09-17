@@ -54,6 +54,9 @@ export REDIS_HOST=localhost REDIS_PORT=6379   # 로더는 안 쓰지만 컨텍�
 ssh -i "$PEM" "$NODE" 'sudo kubectl exec -n prod sts/postgres -- \
   psql -U sumgil -d sumgil -tAc "select version, success, description from flyway_schema_history order by installed_rank"'
 # 2026-09-14 확인: 1|t|init · 2|t|widen source columns · 3|t|rail geometry (로컬과 동일)
+# 2026-09-17 기준 로컬은 5까지다: + 4|t|congestion level comment · 5|t|bike stock pred prediction source
+# prod 가 4·5 보다 낮으면 bike_stock_pred 적재가 "prediction_source 열 없음" 으로 실패한다.
+# 마이그레이션은 be·be-consumer 기동이 돌리므로, V5 가 든 이미지를 올려 rollout restart 한 뒤에 적재한다 (S15P21A104-172).
 
 # (2) 현재 행 수
 ssh -i "$PEM" "$NODE" 'sudo kubectl exec -n prod sts/postgres -- \
