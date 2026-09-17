@@ -101,7 +101,7 @@ fig.suptitle("마스킹 학습이 결손·전무 시나리오에서 lookup 위�
 fig.tight_layout()
 _ = figstyle.save(fig, f"masking_scenarios_{WINDOW}")"""
 
-_FIG2_CODE = """DIFF_R = [col for col in tot_b.columns if col.startswith("point_diff_RMSE_%p")][0]
+_FIG2_CODE = """DIFF_R = next(col for col in tot_b.columns if col.startswith("point_diff_RMSE_%p"))
 
 fig, ax = plt.subplots(figsize=(10, 4.5))
 for i, name in enumerate(MASKED):
@@ -129,7 +129,7 @@ print(tot_b[tot_b["target"] == "boarding"].set_index(["series", "scenario"])[
 _FIG3_CODE = """if tot_b2 is None:
     print("표 B2 없음 — compare.py가 아직 안 돌았다")
 else:
-    diff_r2 = [col for col in tot_b2.columns if col.startswith("point_diff_RMSE_%p")][0]
+    diff_r2 = next(col for col in tot_b2.columns if col.startswith("point_diff_RMSE_%p"))
     gru_label = diff_r2.split("계열-")[-1].rstrip(")")
     fig, ax = plt.subplots(figsize=(10, 4.5))
     for i, name in enumerate(MASKED):
