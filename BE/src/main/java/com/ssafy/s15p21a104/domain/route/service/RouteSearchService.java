@@ -64,6 +64,12 @@ public class RouteSearchService {
     private final BusRouteRepository busRouteRepository;
     private final CongestionRepository congestionRepository;
 
+    /** 6경로 응답 상한: 속도 3 + 혼잡 3(S15P21A104-214, 배포 문서 순서표). */
+    private static final int SPEED_ROUTES = 3;
+
+    /** 6경로 응답 상한: 속도 3 + 혼잡 3(S15P21A104-214, 배포 문서 순서표). */
+    private static final int CALM_ROUTES = 3;
+
     public List<RouteSearchResponse> search(
             String originStationId,
             String destStationId,
@@ -86,22 +92,22 @@ public class RouteSearchService {
         findStation(destStationId);
         // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
         DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
-        // 213 T4: 탐색→매핑 조립은 RouteCandidateFinder, geometry는 RouteGeometryEnhancer,
-        // 쾌적 재정렬은 RouteScoreRanker에 위임. 서비스는 조립만 한다.
-        List<RouteSearchResponse> candidates = candidateFinder().findCandidates(
-                graph, originStationId, destStationId, MAX_CANDIDATES);
-        List<RouteSearchResponse> withGeometry = withGeometryAll(candidates);
-        // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
-        // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
-        // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
-        // 후보 수가 줄어든 다음(필터+재라벨링 이후)에 배치로 붙인다(FE-175 항목8).
-        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(
-                RouteCandidateFinder.filterByModes(withGeometry, modes));
-        // priority=COMFORT가 아니면 순서·라벨을 전혀 건드리지 않는다(S15P21A104-157 AC2, 회귀 없음).
-        if (priority == RoutePriority.COMFORT) {
-            ranked = applyComfort(ranked, departureSlot);
-        }
-        return withRouteNames(ranked);
+        // 214: 속도 3 + 혼잡 3 (배포 문서 순서표). modes 필터는 라벨 전에 걸고,
+        // 속도 3은 시간순 상위, 혼잡 3은 혼잡순 상위(중복 가능)로 뽑는다.
+        List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
+                candidateFinder().findCandidates(
+                        graph, originStationId, destStationId, MAX_CANDIDATES),
+                modes);
+        List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
+                .limit(SPEED_ROUTES)
+                .toList();
+        List<RouteSearchResponse> calm = scoreRanker().topCalm(
+                RouteCandidateFinder.relabelByRank(filtered),
+                departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
+        List<RouteSearchResponse> six = new java.util.ArrayList<>(speed);
+        six.addAll(calm);
+        // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
+        return withRouteNames(withGeometryAll(six));
     }
 
     /** 탐색→매핑 조립기. 레지스트리 값을 주입해 만든다. */
@@ -114,19 +120,14 @@ public class RouteSearchService {
                 graphRegistry::bikeStock);
     }
 
-    /**
-     * 쾌적 우선 재정렬(213 T4). {@link RouteScoreRanker}에 위임하고 서비스는
-     * 혼잡도 조회 함수만 넘긴다.
-     */
-    private List<RouteSearchResponse> applyComfort(
-            List<RouteSearchResponse> candidates, DepartureSlot departureSlot) {
+    /** 쾌적 순위기. 혼잡도 조회 함수를 주입해 만든다. */
+    private RouteScoreRanker scoreRanker() {
         return new RouteScoreRanker(
                 (targetType, targetId, dowType, timeSlot) -> congestionRepository
                         .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
                                 CongestionTarget.LINE, targetId, dowType, timeSlot)
                         .map(c -> c.getLevel().doubleValue())
-                        .orElse(null))
-                .applyComfort(candidates, departureSlot.dowType(), departureSlot.timeSlot());
+                        .orElse(null));
     }
 
     /**
@@ -227,15 +228,20 @@ public class RouteSearchService {
                 graphRegistry.rentalIds(),
                 stationInfos,
                 graphRegistry::bikeStock);
-        List<RouteSearchResponse> candidates = coordFinder.findCandidates(
-                augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES);
-        List<RouteSearchResponse> withGeometry = withGeometryAll(candidates);
-        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(
-                RouteCandidateFinder.filterByModes(withGeometry, request.modes()));
-        if (request.priority() == RoutePriority.COMFORT) {
-            ranked = applyComfort(ranked, departureSlot);
-        }
-        return withRouteNames(ranked);
+        // 214: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
+        List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
+                coordFinder.findCandidates(
+                        augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES),
+                request.modes());
+        List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
+                .limit(SPEED_ROUTES)
+                .toList();
+        List<RouteSearchResponse> calm = scoreRanker().topCalm(
+                RouteCandidateFinder.relabelByRank(filtered),
+                departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
+        List<RouteSearchResponse> six = new java.util.ArrayList<>(speed);
+        six.addAll(calm);
+        return withRouteNames(withGeometryAll(six));
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {

@@ -67,7 +67,8 @@ public final class KShortestPathFinder {
             if (accepted.size() >= k) {
                 break;
             }
-            for (FoundPath spur : spurCandidates(graph, best, seen, originStationId, destStationId)) {
+            for (FoundPath spur : spurCandidates(
+                    graph, best, accepted, seen, originStationId, destStationId)) {
                 candidates.add(spur);
             }
         }
@@ -75,11 +76,12 @@ public final class KShortestPathFinder {
     }
 
     /**
-     * Yen's 분기: 경로의 각 정점을 spur 노드로 삼아, 이미 확정된 경로와 겹치는
-     * 엣지를 금지한 그래프에서 spur 경로를 찾고 앞부분과 이어붙인다.
+     * Yen's 분기: 경로의 각 정점을 spur 노드로 삼아, 지금까지 확정된 모든 경로와
+     * 겹치는 엣지를 금지한 그래프에서 spur 경로를 찾고 앞부분과 이어붙인다.
      */
     private List<FoundPath> spurCandidates(RouteGraph graph, FoundPath base,
-                                           Set<String> seen, String origin, String dest) {
+                                           List<FoundPath> accepted, Set<String> seen,
+                                           String origin, String dest) {
         List<FoundPath> result = new ArrayList<>();
         List<Edge> baseEdges = base.edges();
         List<String> baseStations = base.stations();
@@ -87,11 +89,16 @@ public final class KShortestPathFinder {
             String spurNode = baseStations.get(i);
             List<Edge> rootEdges = new ArrayList<>(baseEdges.subList(0, i));
             Set<EdgeKey> banned = new LinkedHashSet<>();
-            for (FoundPath accepted : spurBases(base, i)) {
-                banned.add(new EdgeKey(
-                        accepted.edges().get(i).fromNode(),
-                        accepted.edges().get(i).toNode(),
-                        accepted.edges().get(i).routeId()));
+            // root 구간이 같은 확정 경로들의 i번째 엣지를 전부 금지한다.
+            for (FoundPath other : accepted) {
+                if (other.edges().size() <= i) {
+                    continue;
+                }
+                boolean sameRoot = rootPrefix(other.edges(), rootEdges);
+                if (sameRoot) {
+                    Edge bannedEdge = other.edges().get(i);
+                    banned.add(new EdgeKey(bannedEdge.fromNode(), bannedEdge.toNode(), bannedEdge.routeId()));
+                }
             }
             RouteGraph restricted = restrictedGraph(graph, banned,
                     rootStations(rootEdges, origin), spurNode);
@@ -109,12 +116,20 @@ public final class KShortestPathFinder {
         return result;
     }
 
-    /** spur 분기의 기준이 되는 확정 경로들: 현재 base 자체만 쓴다. */
-    private List<FoundPath> spurBases(FoundPath base, int index) {
-        if (index >= base.edges().size()) {
-            return List.of();
+    /** root 구간이 확정 경로의 앞부분과 같은지 비교한다 (엣지 단위). */
+    private static boolean rootPrefix(List<Edge> edges, List<Edge> rootEdges) {
+        if (edges.size() < rootEdges.size()) {
+            return false;
         }
-        return List.of(base);
+        for (int i = 0; i < rootEdges.size(); i++) {
+            Edge a = edges.get(i);
+            Edge b = rootEdges.get(i);
+            if (!a.fromNode().equals(b.fromNode()) || !a.toNode().equals(b.toNode())
+                    || !a.routeId().equals(b.routeId())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** root 구간 정점 집합(출발역 포함, spur 노드 제외) — 루프 방지용 금지 집합. */
