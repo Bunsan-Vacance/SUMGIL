@@ -11,18 +11,17 @@ import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchReques
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
-import com.ssafy.s15p21a104.domain.route.dto.response.MultiLineStringResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
-import com.ssafy.s15p21a104.domain.route.finder.CandidateModeSets;
 import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
 import com.ssafy.s15p21a104.domain.route.finder.KShortestPathFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
-import com.ssafy.s15p21a104.domain.route.finder.ShortestPathFinder;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
+import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
+import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
@@ -191,11 +190,27 @@ public class RouteSearchService {
                     .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
         }
 
-        return byLegSignature.values().stream()
+        List<RouteSearchResponse> ranked = byLegSignature.values().stream()
                 .sorted(Comparator.comparingDouble(RouteSearchResponse::totalMinutes))
                 .limit(MAX_CANDIDATES)
-                .map(this::withGeometry)
                 .toList();
+        // geometry는 후보 확정 후 병렬 후처리로 붙인다(213 T3).
+        return withGeometryAll(ranked);
+    }
+
+    /**
+     * 후보 목록에 geometry를 붙인다(213 T3). {@link RouteGeometryEnhancer}가 후보별
+     * 병렬 후처리 + 순서 보장 + 실패 격리를 맡는다. 서비스는 레지스트리 조회 함수만 넘긴다.
+     */
+    private List<RouteSearchResponse> withGeometryAll(List<RouteSearchResponse> candidates) {
+        return new RouteGeometryEnhancer(
+                (routeId, fromLat, fromLng, toLat, toLng) -> railGeometryRegistry.geometryForLeg(
+                        routeId, fromLat, fromLng, toLat, toLng),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> walkGeometryRegistry.geometryFor(
+                        fromId, toId, fromLat, fromLng, toLat, toLng),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> bikeGeometryRegistry.geometryFor(
+                        fromId, toId, fromLat, fromLng, toLat, toLng))
+                .enhanceAll(candidates);
     }
 
     /**
@@ -264,161 +279,6 @@ public class RouteSearchService {
         return signature.toString();
     }
 
-    /**
-     * KTDB 실선로 geometry를 구간(leg)마다 붙인다. RouteMapper는 DB에 의존하지 않으므로
-     * (순수 함수 유지) geometry 부착은 여기서 후처리로 한다 — 미승인 필드, README 참고.
-     */
-    private RouteSearchResponse withGeometry(RouteSearchResponse response) {
-        List<RouteLegResponse> legs = withGeometry(response.legs());
-        return new RouteSearchResponse(
-                response.routeType(), response.totalMinutes(), legs, response.source(),
-                totalDistanceOf(legs), response.transferCount());
-    }
-
-    /**
-     * leg 목록 전체에 geometry를 붙인다. 연속된 BIKE leg(사이에 WALK·TRANSFER 없이 대여소
-     * 경계로만 나뉜 구간, {@link RouteMapper} rentalSplit 참고)는 하나의 실제 이동으로 묶어
-     * {@link #withBikeRunGeometry}로 처리한다 — leg마다 독립 호출하면 같은 대여소인데도
-     * 카카오 자전거 API의 도로 스냅 진입·이탈점이 달라져 경계가 끊겨 보인다(S15P21A104-153).
-     */
-    private List<RouteLegResponse> withGeometry(List<RouteLegResponse> legs) {
-        List<RouteLegResponse> result = new ArrayList<>();
-        int i = 0;
-        while (i < legs.size()) {
-            if (legs.get(i).mode() != TravelMode.BIKE) {
-                result.add(withGeometry(legs.get(i)));
-                i++;
-                continue;
-            }
-            int end = i;
-            while (end + 1 < legs.size() && legs.get(end + 1).mode() == TravelMode.BIKE) {
-                end++;
-            }
-            result.addAll(withBikeRunGeometry(legs.subList(i, end + 1)));
-            i = end + 1;
-        }
-        return result;
-    }
-
-    private RouteLegResponse withGeometry(RouteLegResponse leg) {
-        if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
-            return leg;
-        }
-        Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
-                ? walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
-                        leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
-                : railGeometryRegistry.geometryForLeg(
-                        leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
-        if (geometry.isEmpty()) {
-            return leg;
-        }
-        return withGeometry(leg, geometry.get());
-    }
-
-    /**
-     * 연속 BIKE leg 묶음을 전체 구간(첫 leg 출발→마지막 leg 도착) 1회 조회로 처리한다
-     * (S15P21A104-153). 조회 결과 좌표열을 이어붙인 뒤, 각 leg의 실제 도착 좌표에 가장 가까운
-     * 지점을 경계로 잘라 나눈다 — 인접 leg가 같은 지점(좌표열의 같은 인덱스)을 공유하므로
-     * 끊김이 생기지 않는다. 좌표열이 실제 도착점과 너무 동떨어져 순서를 신뢰할 수 없으면
-     * (경계가 뒤로 가지 않으면) 원본을 그대로 두고 값을 지어내지 않는다.
-     */
-    private List<RouteLegResponse> withBikeRunGeometry(List<RouteLegResponse> run) {
-        RouteLegResponse first = run.get(0);
-        RouteLegResponse last = run.get(run.size() - 1);
-        if (first.fromLat() == null || first.fromLng() == null
-                || last.toLat() == null || last.toLng() == null) {
-            return run;
-        }
-        Optional<MultiLineStringResponse> geometry = bikeGeometryRegistry.geometryFor(
-                first.fromNodeId(), last.toNodeId(),
-                first.fromLat(), first.fromLng(), last.toLat(), last.toLng());
-        if (geometry.isEmpty()) {
-            return run;
-        }
-        List<List<Double>> points = flatten(geometry.get());
-        if (points.size() < run.size() + 1) {
-            return run;
-        }
-        List<RouteLegResponse> result = new ArrayList<>();
-        int cursor = 0;
-        for (int k = 0; k < run.size(); k++) {
-            RouteLegResponse leg = run.get(k);
-            int endIdx = k == run.size() - 1
-                    ? points.size() - 1
-                    : nearestIndex(points, cursor, leg.toLat(), leg.toLng());
-            if (endIdx <= cursor) {
-                return run;
-            }
-            MultiLineStringResponse legGeometry =
-                    MultiLineStringResponse.of(List.of(new ArrayList<>(points.subList(cursor, endIdx + 1))));
-            result.add(withGeometry(leg, legGeometry));
-            cursor = endIdx;
-        }
-        return result;
-    }
-
-    private RouteLegResponse withGeometry(RouteLegResponse leg, MultiLineStringResponse geometry) {
-        return new RouteLegResponse(
-                leg.mode(),
-                leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
-                leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), leg.minutes(),
-                geometry, "available",
-                distanceOf(geometry), leg.routeName()
-        );
-    }
-
-    /** MultiLineString의 모든 LineString 좌표를 순서대로 이어붙인다. */
-    private List<List<Double>> flatten(MultiLineStringResponse geometry) {
-        List<List<Double>> points = new ArrayList<>();
-        for (List<List<Double>> line : geometry.coordinates()) {
-            points.addAll(line);
-        }
-        return points;
-    }
-
-    /** {@code fromIdx} 이후 지점 중 목표 좌표에 가장 가까운 인덱스. 역행하지 않도록 이후 구간만 본다. */
-    private int nearestIndex(List<List<Double>> points, int fromIdx, double targetLat, double targetLng) {
-        int best = fromIdx;
-        double bestDist = Double.MAX_VALUE;
-        for (int idx = fromIdx; idx < points.size(); idx++) {
-            List<Double> point = points.get(idx);
-            double dist = GeoDistance.haversineMeters(point.get(1), point.get(0), targetLat, targetLng);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = idx;
-            }
-        }
-        return best;
-    }
-
-    /**
-     * geometry 좌표를 따라 실제 이동 거리를 더한다(FE-175 항목8). geometry가 없으면(직선거리로
-     * 대체하지 않고) 호출하지 않는다 — {@link #withGeometry(RouteLegResponse)}에서만 쓴다.
-     */
-    private double distanceOf(MultiLineStringResponse geometry) {
-        double total = 0;
-        for (List<List<Double>> line : geometry.coordinates()) {
-            for (int i = 0; i + 1 < line.size(); i++) {
-                List<Double> from = line.get(i);
-                List<Double> to = line.get(i + 1);
-                total += GeoDistance.haversineMeters(from.get(1), from.get(0), to.get(1), to.get(0));
-            }
-        }
-        return total;
-    }
-
-    /** legs 전부가 distanceMeters를 확보한 경우에만 합을 낸다. 하나라도 없으면 null(FE-175 항목8). */
-    private Double totalDistanceOf(List<RouteLegResponse> legs) {
-        double sum = 0;
-        for (RouteLegResponse leg : legs) {
-            if (leg.distanceMeters() == null) {
-                return null;
-            }
-            sum += leg.distanceMeters();
-        }
-        return sum;
-    }
 
     /**
      * 사람이 읽는 노선 이름을 배치로 붙인다(FE-175 항목8). SUBWAY는 {@code line.name},
