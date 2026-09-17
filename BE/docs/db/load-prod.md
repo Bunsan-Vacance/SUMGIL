@@ -54,9 +54,13 @@ export REDIS_HOST=localhost REDIS_PORT=6379   # 로더는 안 쓰지만 컨텍�
 ssh -i "$PEM" "$NODE" 'sudo kubectl exec -n prod sts/postgres -- \
   psql -U sumgil -d sumgil -tAc "select version, success, description from flyway_schema_history order by installed_rank"'
 # 2026-09-14 확인: 1|t|init · 2|t|widen source columns · 3|t|rail geometry (로컬과 동일)
-# 2026-09-17 기준 로컬은 5까지다: + 4|t|congestion level comment · 5|t|bike stock pred prediction source
-# prod 가 4·5 보다 낮으면 bike_stock_pred 적재가 "prediction_source 열 없음" 으로 실패한다.
-# 마이그레이션은 be·be-consumer 기동이 돌리므로, V5 가 든 이미지를 올려 rollout restart 한 뒤에 적재한다 (S15P21A104-172).
+# 2026-09-17 확인: 5까지 적용 완료 (+ 4|congestion level comment · 5|bike stock pred prediction source)
+#
+# 로더도 Flyway 를 돌린다 — FlywayConfig 에 프로파일 제한이 없어 load 프로파일로 띄워도 기동 때 마이그레이션이 적용된다.
+# 위 주석의 "로더는 스키마를 만들지 않는다" 는 코드와 다르다(2026-09-17 확인). 정책으로 읽어야 한다:
+# 로더로 prod 스키마를 올리지 않는다. prod DB 에 마이그레이션이 적용됐는데 돌고 있는 파드 이미지에
+# 그 파일이 없으면 다음 재시작 때 Flyway 검증이 실패해 앱이 뜨지 않기 때문이다.
+# 따라서 순서는 항상 "이미지 배포 → 적재" 다. 실제 배포 절차와 주의점은 docs/db/load-bikepred.md "선행 배포".
 
 # (2) 현재 행 수
 ssh -i "$PEM" "$NODE" 'sudo kubectl exec -n prod sts/postgres -- \
