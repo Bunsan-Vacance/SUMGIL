@@ -283,6 +283,11 @@ def run(
     avg_baseline.save(out_dir / "stock_profile_avg.parquet")
     profile.save(out_dir)
     model.booster_.save_model(str(out_dir / "model.txt"))
+    # station_code 복원용 — predictor.py의 LightGBMPredictor(날짜축 모델)와 같은 패턴.
+    # 서빙이 학습 때와 같은 station_id -> code 매핑을 재현하려면 이 목록이 반드시 필요하다.
+    (out_dir / "station_categories.json").write_text(
+        json.dumps(list(station_dtype.categories), ensure_ascii=False), encoding="utf-8"
+    )
     meta = {
         "tag": tag,
         "feature_set": feature_set,

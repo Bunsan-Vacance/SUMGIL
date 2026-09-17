@@ -56,6 +56,24 @@ class Settings(BaseSettings):
     # 행은 update_lag_lookup.py가 정리한다.
     bike_lag_lookup_retention_days: int = 10
 
+    # ── BIKE 실시간 예측 모델(anchor+horizon LightGBM, S15P21A104-160 Phase 5) ──
+    # train.py --feature-set v4_weather 로 만든 아티팩트. station_categories.json이
+    # 저장된 버전이어야 한다(2026-09-17 이전 아티팩트는 이 파일이 없어 못 씀).
+    bike_eta_model_dir: Path = AI_ROOT / "models" / "BIKE" / "v4-weather-final_20260917-0941"
+    # 역별 rack_count 룩업(학습 원본 대신 미리 뽑아둔 작은 파일) —
+    # validation/BYC/anchor-horizon-feature-check/src/build_station_master.py가 만듦.
+    bike_station_master_path: Path = (
+        AI_ROOT / "data" / "EXTERNAL" / "station" / "processed" / "station_master.parquet"
+    )
+    # 날씨 실시간 스냅샷(팀원이 별도로 구축 중) — weather.nowcast Kafka 토픽을
+    # bike.stock처럼 최신 스냅샷화한 결과. 없거나 오래되면 자동으로 temp=0/is_rain=False로
+    # 폴백하므로, 이 계약(경로·컬럼)만 맞으면 코드 변경 없이 연결된다.
+    bike_live_weather_path: Path = (
+        AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw" / "nowcast" / "latest_weather.parquet"
+    )
+    # 재고(5분)보다 날씨는 천천히 바뀌므로 여유 있게 잡은 보관 기준(초).
+    bike_live_weather_max_staleness_seconds: float = 900.0
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]

@@ -7,9 +7,10 @@
 ETL 패턴) — 이 둘은 로컬 검증·시연(-83)용 병행 계층이다.
 
 `/stations/{id}/eta-stock`은 다르다 — BE가 사용자 경로 조회 시점마다 실시간으로
-호출하는 API다(S15P21A104-159). 실시간 재고 + avg 표 델타로 도착 시점 재고를
-계산해서 즉시 반환한다. 이 호출이 실패(404 등)하면 BE는 자체 DB의 배치 통계로
-폴백한다 — 그래서 실패는 애매하게 감추지 않고 명확한 상태코드로 드러낸다.
+호출하는 API다(S15P21A104-159/-160). 실시간 재고 + anchor+horizon LightGBM(v4_weather)이
+직접 예측한 순증감으로 도착 시점 재고를 계산해서 즉시 반환한다 — 배치표는 이 경로에서
+전혀 안 읽는다. 이 호출이 실패(404/503)하면 BE는 자체 DB의 배치 통계로 폴백한다 —
+그래서 실패는 애매하게 감추지 않고 명확한 상태코드로 드러낸다.
 """
 
 from __future__ import annotations
@@ -55,5 +56,5 @@ def get_eta_stock(rental_id: str, eta_minutes: EtaMinutesQ) -> dict:
         return service.predict_eta_stock(rental_id, eta_minutes)
     except service.LiveStockMissing as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except service.AvgDataMissing as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except service.ModelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

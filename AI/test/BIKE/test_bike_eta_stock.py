@@ -1,103 +1,77 @@
-"""BIKE 실시간 ETA 재고 API - 합성 avg 표 + 합성 실시간 재고 파일로 검증한다.
+"""BIKE 실시간 ETA 재고 API 검증 — LightGBM(v4_weather) 서빙 연결(S15P21A104-160).
 
-`test_bike_api.py`와 같은 패턴(TestClient + service._store/get_store monkeypatch)을
-쓰되, 실시간 재고 스토어(service._live_store/get_live_stock_store)도 같은 방식으로
-바꿔치기한다. dow_type/time_slot은 실제 날짜(2026-09-14 월요일, 공휴일 아님)로
-고정해 테스트가 실행 시점에 흔들리지 않게 한다.
+실제 LightGBM 모델은 로드하지 않는다 — `service.get_eta_predictor`를 `predict_delta()`만
+구현한 가짜 객체로 monkeypatch한다(`test_bike_api.py`의 `_store`/`get_store` monkeypatch
+패턴과 동일 정신). 실시간 재고·날씨 스토어는 실제 로직(`LiveStockStore`/`LiveWeatherStore`)
+그대로 쓰고 파일 경로만 tmp_path로 바꿔치기한다.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
-import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 from app.BIKE import service
+from app.BIKE.pipeline.predictor_eta import ModelUnavailable, round_horizon
 from app.main import app
 
 client = TestClient(app)
 
-# service.py/calendar.py는 의도적으로 naive datetime을 쓴다(서버=KST 가정) - 여기서 tzinfo를
-# 붙이면 holiday_calendar.parquet(naive)과 비교가 깨진다.
-# NOW: 월요일, 공휴일 아님 -> dow_type 0, slot 28
-# SATURDAY_NIGHT: 토요일(공휴일) -> dow_type 1, slot 47 / SUNDAY_MORNING: 그 20분 뒤 -> dow_type 2, slot 0
-NOW = datetime(2026, 9, 14, 14, 0)  # noqa: DTZ001
-SATURDAY_NIGHT = datetime(2026, 9, 19, 23, 50)  # noqa: DTZ001
+# service.py/calendar.py는 의도적으로 naive datetime을 쓴다(서버=KST 가정).
+NOW = datetime(2026, 9, 14, 14, 0)  # noqa: DTZ001  # 월요일, 공휴일 아님 -> dow_type 0, slot 28
+SATURDAY_NIGHT = datetime(2026, 9, 19, 23, 50)  # noqa: DTZ001  # 토요일(공휴일) -> dow_type 1
 SUNDAY_MORNING = datetime(2026, 9, 20, 0, 10)  # noqa: DTZ001
 
 
-def _avg_table() -> pd.DataFrame:
-    rows = [
-        {
-            "rental_id": "ST-1",
-            "dow_type": 0,
-            "time_slot": 28,
-            "exp_bikes": 10.0,
-            "p_empty": 0.05,
-            "p_full": 0.10,
-            "source": "avg",
-        },
-        {
-            "rental_id": "ST-1",
-            "dow_type": 0,
-            "time_slot": 29,
-            "exp_bikes": 13.0,
-            "p_empty": 0.02,
-            "p_full": 0.20,
-            "source": "avg",
-        },
-        {
-            "rental_id": "ST-1",
-            "dow_type": 0,
-            "time_slot": 30,
-            "exp_bikes": np.nan,
-            "p_empty": None,
-            "p_full": None,
-            "source": "avg",
-        },
-        {
-            "rental_id": "ST-1",
-            "dow_type": 1,
-            "time_slot": 47,
-            "exp_bikes": 6.0,
-            "p_empty": 0.10,
-            "p_full": 0.05,
-            "source": "avg",
-        },
-        {
-            "rental_id": "ST-1",
-            "dow_type": 2,
-            "time_slot": 0,
-            "exp_bikes": 9.0,
-            "p_empty": 0.03,
-            "p_full": 0.08,
-            "source": "avg",
-        },
-    ]
-    return pd.DataFrame(rows)
+class FakeEtaPredictor:
+    """predict_delta()만 구현 — 실제 모델 대신 고정값을 돌려주며 호출 인자를 기록한다."""
+
+    def __init__(self, net_flow: float = 0.0, horizon_min_used: int = 5) -> None:
+        self.net_flow = net_flow
+        self.horizon_min_used = horizon_min_used
+        self.calls: list[dict] = []
+
+    def predict_delta(
+        self, rental_id, current_stock, eta_minutes, now, anchor_age_minutes, weather
+    ):
+        self.calls.append(
+            {
+                "rental_id": rental_id,
+                "current_stock": current_stock,
+                "eta_minutes": eta_minutes,
+                "now": now,
+                "anchor_age_minutes": anchor_age_minutes,
+                "weather": weather,
+            }
+        )
+        return {"net_flow": self.net_flow, "horizon_min_used": self.horizon_min_used}
 
 
-def _live_table(current_stock: int, updated_at: datetime) -> pd.DataFrame:
-    return pd.DataFrame(
-        [{"rental_id": "ST-1", "current_stock": current_stock, "updated_at": updated_at}]
-    )
+class RaisingEtaPredictor:
+    def predict_delta(self, *args, **kwargs):
+        raise ModelUnavailable("모델 아티팩트 로딩 실패(테스트)")
 
 
 @pytest.fixture
-def avg_dir(tmp_path, monkeypatch):
-    path = tmp_path / "bike_stock_pred_20260914.parquet"
-    _avg_table().to_parquet(path, index=False)
-    path.with_suffix(".meta.json").write_text(
-        json.dumps({"generated_at": "2026-09-14T00:00:00+09:00", "source": "avg"}),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(service, "_store", service.BikeStockStore(tmp_path))
-    monkeypatch.setattr(service, "get_store", lambda settings=None: service._store)
-    return tmp_path
+def fake_predictor(monkeypatch):
+    def _install(net_flow: float = 3.0, horizon_min_used: int = 30) -> FakeEtaPredictor:
+        predictor = FakeEtaPredictor(net_flow=net_flow, horizon_min_used=horizon_min_used)
+        monkeypatch.setattr(service, "_eta_predictor", predictor)
+        monkeypatch.setattr(service, "get_eta_predictor", lambda settings=None: predictor)
+        return predictor
+
+    return _install
+
+
+@pytest.fixture
+def raising_predictor(monkeypatch):
+    predictor = RaisingEtaPredictor()
+    monkeypatch.setattr(service, "_eta_predictor", predictor)
+    monkeypatch.setattr(service, "get_eta_predictor", lambda settings=None: predictor)
+    return predictor
 
 
 @pytest.fixture
@@ -106,7 +80,9 @@ def live_dir(tmp_path, monkeypatch):
         if updated_at is None:
             updated_at = NOW
         path = tmp_path / "latest_stock.parquet"
-        _live_table(current_stock, updated_at).to_parquet(path, index=False)
+        pd.DataFrame(
+            [{"rental_id": "ST-1", "current_stock": current_stock, "updated_at": updated_at}]
+        ).to_parquet(path, index=False)
         monkeypatch.setattr(service, "_live_store", service.LiveStockStore(path))
         monkeypatch.setattr(
             service, "get_live_stock_store", lambda settings=None: service._live_store
@@ -115,102 +91,177 @@ def live_dir(tmp_path, monkeypatch):
     return _write
 
 
-def test_happy_path_predicted_stock_and_probabilities(avg_dir, live_dir):
+@pytest.fixture
+def weather_dir(tmp_path, monkeypatch):
+    def _write(temp: float, is_rain: bool, updated_at: datetime | None = None) -> None:
+        if updated_at is None:
+            updated_at = NOW
+        path = tmp_path / "latest_weather.parquet"
+        pd.DataFrame([{"temp": temp, "is_rain": is_rain, "updated_at": updated_at}]).to_parquet(
+            path, index=False
+        )
+        monkeypatch.setattr(service, "_live_weather_store", service.LiveWeatherStore(path))
+        monkeypatch.setattr(
+            service, "get_live_weather_store", lambda settings=None: service._live_weather_store
+        )
+
+    return _write
+
+
+def test_round_horizon_snaps_to_nearest_trained_value():
+    assert round_horizon(0) == 5
+    assert round_horizon(3) == 5
+    assert round_horizon(17) == 15
+    assert round_horizon(23) == 30  # 15과 30 사이 정중앙(22.5)보다 위
+    assert round_horizon(30) == 30
+
+
+def test_happy_path_uses_predictor_net_flow(fake_predictor, live_dir):
+    fake_predictor(net_flow=3.0)
     live_dir(current_stock=5, updated_at=NOW)
-    result = service.predict_eta_stock("ST-1", eta_minutes=45, now=NOW)
+
+    result = service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
+
     assert result["current_stock"] == 5
-    assert result["predicted_stock"] == 8.0  # 5 + (13.0 - 10.0)
-    assert result["p_empty"] == 0.02
-    assert result["p_full"] == 0.20
+    assert result["predicted_stock"] == 8.0  # 5 + 3.0
+    assert result["p_empty"] is None
+    assert result["p_full"] is None
+    assert result["source"] == "lightgbm"
     assert result["arrival_dow_type"] == 0
-    assert result["arrival_time_slot"] == 29
+    assert result["arrival_time_slot"] == 28  # 14:00 + 15분 = 14:15 -> hour*2 + (minute>=30) = 28
 
 
-def test_predicted_stock_clips_at_zero_not_negative(tmp_path, monkeypatch, live_dir):
-    # 현재고 0에, 도착 슬롯 exp_bikes가 현재 슬롯보다 훨씬 낮은(큰 음수 delta) 표를
-    # 별도로 준비해서 clip(0)이 실제로 발동하는지 확인한다.
-    big_drop = _avg_table().copy()
-    big_drop.loc[big_drop["time_slot"] == 29, "exp_bikes"] = -50.0
-    path = tmp_path / "bike_stock_pred_20260914.parquet"
-    big_drop.to_parquet(path, index=False)
-    monkeypatch.setattr(service, "_store", service.BikeStockStore(tmp_path))
-    monkeypatch.setattr(service, "get_store", lambda settings=None: service._store)
+def test_predicted_stock_clips_at_zero_not_negative(fake_predictor, live_dir):
+    fake_predictor(net_flow=-100.0)
+    live_dir(current_stock=2, updated_at=NOW)
 
-    live_dir(current_stock=0, updated_at=NOW)
-    result = service.predict_eta_stock("ST-1", eta_minutes=45, now=NOW)
+    result = service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
+
     assert result["predicted_stock"] == 0.0
 
 
-def test_live_stock_missing_returns_404(avg_dir, tmp_path, monkeypatch):
+def test_predictor_receives_live_stock_and_weather(fake_predictor, live_dir, weather_dir):
+    predictor = fake_predictor(net_flow=1.0)
+    live_dir(current_stock=7, updated_at=NOW)
+    weather_dir(temp=-3.5, is_rain=True, updated_at=NOW)
+
+    service.predict_eta_stock("ST-1", eta_minutes=10, now=NOW)
+
+    assert len(predictor.calls) == 1
+    call = predictor.calls[0]
+    assert call["rental_id"] == "ST-1"
+    assert call["current_stock"] == 7
+    assert call["eta_minutes"] == 10
+    assert call["weather"] == {"temp": -3.5, "is_rain": True}
+
+
+def test_missing_weather_falls_back_to_none_not_error(
+    fake_predictor, live_dir, tmp_path, monkeypatch
+):
+    predictor = fake_predictor(net_flow=1.0)
+    live_dir(current_stock=5, updated_at=NOW)
+    # 실제 로컬/서버 환경 상태에 기대지 않도록, 확실히 존재하지 않는 경로로 명시 고정한다.
+    missing_weather_path = tmp_path / "does_not_exist_weather.parquet"
+    monkeypatch.setattr(
+        service, "_live_weather_store", service.LiveWeatherStore(missing_weather_path)
+    )
+    monkeypatch.setattr(
+        service, "get_live_weather_store", lambda settings=None: service._live_weather_store
+    )
+
+    result = service.predict_eta_stock("ST-1", eta_minutes=10, now=NOW)
+
+    assert result["predicted_stock"] == 6.0
+    assert predictor.calls[0]["weather"] is None
+
+
+def test_stale_weather_falls_back_to_none(fake_predictor, live_dir, weather_dir):
+    predictor = fake_predictor(net_flow=1.0)
+    live_dir(current_stock=5, updated_at=NOW)
+    old_time = datetime(2020, 1, 1, 0, 0)  # noqa: DTZ001
+    weather_dir(temp=10.0, is_rain=False, updated_at=old_time)
+
+    service.predict_eta_stock("ST-1", eta_minutes=10, now=NOW)
+
+    assert predictor.calls[0]["weather"] is None
+
+
+def test_live_stock_missing_raises(fake_predictor, tmp_path, monkeypatch):
+    fake_predictor(net_flow=1.0)
     missing_path = tmp_path / "does_not_exist.parquet"
     monkeypatch.setattr(service, "_live_store", service.LiveStockStore(missing_path))
     monkeypatch.setattr(service, "get_live_stock_store", lambda settings=None: service._live_store)
+
     with pytest.raises(service.LiveStockMissing):
-        service.predict_eta_stock("ST-1", eta_minutes=45, now=NOW)
+        service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
 
 
-def test_station_missing_from_live_file_returns_404(avg_dir, tmp_path, monkeypatch):
-    path = tmp_path / "latest_stock.parquet"
-    pd.DataFrame([{"rental_id": "ST-OTHER", "current_stock": 5, "updated_at": NOW}]).to_parquet(
-        path, index=False
-    )
-    monkeypatch.setattr(service, "_live_store", service.LiveStockStore(path))
-    monkeypatch.setattr(service, "get_live_stock_store", lambda settings=None: service._live_store)
-    with pytest.raises(service.LiveStockMissing):
-        service.predict_eta_stock("ST-1", eta_minutes=45, now=NOW)
-
-
-def test_stale_live_stock_returns_404(avg_dir, live_dir):
+def test_stale_live_stock_raises(fake_predictor, live_dir):
+    fake_predictor(net_flow=1.0)
     old_time = datetime(2020, 1, 1, 0, 0)  # noqa: DTZ001
     live_dir(current_stock=5, updated_at=old_time)
+
     with pytest.raises(service.LiveStockMissing):
-        service.predict_eta_stock("ST-1", eta_minutes=45, now=NOW)
+        service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
 
 
-def test_avg_table_missing_returns_404(tmp_path, monkeypatch, live_dir):
-    monkeypatch.setattr(service, "_store", service.BikeStockStore(tmp_path))
-    monkeypatch.setattr(service, "get_store", lambda settings=None: service._store)
+def test_model_unavailable_raises(raising_predictor, live_dir):
     live_dir(current_stock=5, updated_at=NOW)
-    with pytest.raises(service.AvgDataMissing):
-        service.predict_eta_stock("ST-1", eta_minutes=45, now=NOW)
+
+    with pytest.raises(ModelUnavailable):
+        service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
 
 
-def test_nan_exp_bikes_treated_as_missing(avg_dir, live_dir):
-    live_dir(current_stock=5, updated_at=NOW)
-    # time_slot 29(now+45min)는 정상, time_slot 30(now+90min)은 exp_bikes=NaN인 행이라
-    # AvgDataMissing이 나야 한다.
-    ok = service.predict_eta_stock("ST-1", eta_minutes=45, now=NOW)
-    assert ok["predicted_stock"] == 8.0
-    with pytest.raises(service.AvgDataMissing):
-        service.predict_eta_stock("ST-1", eta_minutes=90, now=NOW)
-
-
-def test_midnight_rollover_changes_dow_type(avg_dir, live_dir):
+def test_midnight_rollover_changes_dow_type(fake_predictor, live_dir):
+    fake_predictor(net_flow=2.0)
     live_dir(current_stock=4, updated_at=SATURDAY_NIGHT)
+
     result = service.predict_eta_stock("ST-1", eta_minutes=20, now=SATURDAY_NIGHT)
+
     assert result["arrival_dow_type"] == 2
     assert result["arrival_time_slot"] == 0
-    assert result["predicted_stock"] == 4 + (9.0 - 6.0)
+    assert result["predicted_stock"] == 6.0
 
 
-def test_http_happy_path_returns_200(avg_dir, live_dir, monkeypatch):
+def test_http_happy_path_returns_200(fake_predictor, live_dir, monkeypatch):
+    fake_predictor(net_flow=3.0)
     live_dir(current_stock=5, updated_at=NOW)
     monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda: pd.Timestamp(NOW)))
-    # NOW=14:00 + 30분 = 14:30 -> slot 29(경계값, le=30 허용치 안)
-    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 30})
+
+    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
+
     assert r.status_code == 200
-    assert r.json()["predicted_stock"] == 8.0
+    body = r.json()
+    assert body["predicted_stock"] == 8.0
+    assert body["source"] == "lightgbm"
+    assert body["p_empty"] is None
+    assert body["p_full"] is None
 
 
-def test_http_missing_live_stock_returns_404(avg_dir, tmp_path, monkeypatch):
+def test_http_missing_live_stock_returns_404(fake_predictor, tmp_path, monkeypatch):
+    fake_predictor(net_flow=1.0)
     missing_path = tmp_path / "does_not_exist.parquet"
     monkeypatch.setattr(service, "_live_store", service.LiveStockStore(missing_path))
     monkeypatch.setattr(service, "get_live_stock_store", lambda settings=None: service._live_store)
+
     r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
+
     assert r.status_code == 404
 
 
-def test_http_eta_minutes_out_of_range_returns_422(avg_dir, live_dir):
+def test_http_model_unavailable_returns_503(raising_predictor, live_dir, monkeypatch):
     live_dir(current_stock=5, updated_at=NOW)
+    monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda: pd.Timestamp(NOW)))
+
+    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
+
+    assert r.status_code == 503
+
+
+def test_http_eta_minutes_out_of_range_returns_422(fake_predictor, live_dir):
+    fake_predictor(net_flow=1.0)
+    live_dir(current_stock=5, updated_at=NOW)
+
     r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 999})
+
     assert r.status_code == 422
