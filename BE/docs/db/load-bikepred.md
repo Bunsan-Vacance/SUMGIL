@@ -64,6 +64,45 @@ SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun --args='--load.sources=bikep
 | `p_full` | 0.47690014903129657 | **0.477** |
 | `source` · `prediction_source` | avg · observed_avg | avg · observed_avg |
 
+## 2026-09-17 prod 적재 결과
+
+로컬과 같은 산출물(`bike_stock_pred_20260917-014432.csv`)을 SSH 터널로 넣었다. **로컬과 전부 일치한다.**
+
+| 항목 | 값 |
+| --- | --- |
+| 적재 전 | 0행 |
+| 적재 후 | **406,656행** · 대여소 **2,824** |
+| 출처 등급 | `observed_avg` 375,342 · `station_time_fallback` 31,266 · `station_global_fallback` 48 |
+| 마스터 미등록 | 96곳 경고 후 함께 적재 |
+| 표본 `ST-10` 평일 18시 | `10.9 / 0.069 / 0.477 / avg / observed_avg` — CSV 원본과 일치 |
+| 적재 시간 | 27.8초 (약 14,626 행/초). 파싱 포함 32.7초 |
+
+터널을 타서 로컬(약 32,986 행/초)보다 느리다. **둘 다 1회 측정치이고 조건이 다르므로 나란히 놓고 배수를 계산하지 않는다** (perf 규약 원칙 5).
+
+### 선행 배포 (이번 한 번만)
+
+V5 를 prod 에 넣기 위해 이미지를 새로 빌드하고 `be`·`be-consumer` 를 재시작했다. **다음 적재부터는 필요 없다** — 열이 이미 있으므로 터널·적재·정리 세 단계면 된다.
+
+```bash
+NODES=a104 bash Infra/k8s/scripts/sync-to-nodes.sh
+ssh -i "$PEM" "$NODE" 'cd ~/sumgil && nohup bash Infra/k8s/scripts/build-push.sh be > /tmp/build-be.log 2>&1 & echo started'
+ssh -i "$PEM" "$NODE" 'sudo kubectl rollout restart deployment/be-consumer -n prod'   # 마이그레이션은 먼저 뜨는 쪽이 돌린다
+ssh -i "$PEM" "$NODE" 'sudo kubectl rollout restart deployment/be -n prod'            # 이미지 정합성 — 아래 주의 참고
+```
+
+주의할 점 넷.
+
+- **`be`·`be-consumer`·`be-collector` 가 같은 `sumgil-be:latest` 를 쓴다.** 빌드는 한 번이고 재시작만 나눈다.
+- **`be` 도 반드시 새 이미지로 올린다.** DB 이력에 V5 가 있는데 파드 이미지에 `V5__*.sql` 이 없으면 다음 재시작 때 Flyway 검증이 실패해 앱이 뜨지 않는다. 한쪽만 올리고 두면 시한폭탄이 된다.
+- **`be-collector` 는 재시작하지 않았다.** 수집 시간 창이 열려 있어 회차가 끊긴다. 코드도 안 바뀌었고, 새 이미지에 V5 가 있으므로 나중에 재시작돼도 안전하다.
+- **`be-consumer` 재시작은 그때까지 쌓인 컨슈머 로그를 지운다.** perf 기록용 로그가 필요하면 재시작 전에 먼저 받는다 (`kubectl logs --since=24h`).
+
+빌드가 캐시로 몇 초 만에 끝날 수 있다. 그때는 jar 안을 직접 확인한다.
+
+```bash
+ssh -i "$PEM" "$NODE" 'C=$(sudo docker create <레지스트리>/sumgil-be:latest); sudo docker cp $C:/app/app.jar /tmp/v.jar; sudo docker rm $C; unzip -l /tmp/v.jar | grep db/migration/V; sudo rm /tmp/v.jar'
+```
+
 ## 값 규칙
 
 - **원천의 배정밀도를 DB 스케일로 줄인다.** `exp_bikes` 는 `NUMERIC(5,1)`, 확률 둘은 `NUMERIC(4,3)` 이라
@@ -133,9 +172,8 @@ node --test "BE/scripts/data/test/bikepred-fetch.test.mjs"       # 최신 선택
 
 ## 남은 일 (후속)
 
-- **prod 적재.** V5 가 prod 에 먼저 적용돼야 한다 — 마이그레이션은 `be`/`be-consumer` 기동이 돌리므로
-  V5 가 든 이미지를 올려 `rollout restart` 한 뒤에 적재한다. 절차는 `load-prod.md`.
 - **주기 갱신.** 배치가 매일 03:00 에 새 파일을 만들지만 받아서 적재하는 것은 아직 수동이다.
-  얼마나 자주 다시 적재할지는 정하지 않았다.
+  얼마나 자주 다시 적재할지는 정하지 않았다. 예측 표가 요일·시간대 평균이라 하루 이틀로 크게 변하지 않으므로
+  발표 전에 한 번 갱신하는 정도면 충분해 보인다 — 필요하면 `bikepred-fetch.mjs` + 적재 두 줄이다.
 - **대여소 마스터 갱신** (72 후속). 지금 96곳이 예측만 있고 마스터에 없다.
 - **AI 벌크 엔드포인트.** 표 전체를 주는 API 가 생기면 원천 구현을 하나 더 만든다. 지금은 대여소 단위뿐이다.
