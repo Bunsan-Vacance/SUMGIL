@@ -5,6 +5,7 @@ import com.ssafy.s15p21a104.collect.event.EventIdFactory;
 import com.ssafy.s15p21a104.collect.http.HttpFetcher;
 import com.ssafy.s15p21a104.collect.http.JdkHttpFetcher;
 import com.ssafy.s15p21a104.collect.http.RetryingHttpFetcher;
+import com.ssafy.s15p21a104.collect.publish.CompositeEventPublisher;
 import com.ssafy.s15p21a104.collect.publish.EventPublisher;
 import com.ssafy.s15p21a104.collect.publish.KafkaEventPublisher;
 import com.ssafy.s15p21a104.collect.publish.LoggingEventPublisher;
@@ -171,11 +172,19 @@ public class CollectConfig {
         return new KafkaAdmin.NewTopics(CollectTopics.define(props).toArray(NewTopic[]::new));
     }
 
+    /**
+     * 기본 경로. Kafka 로 보내는 김에 같은 회차를 Redis 에도 적재한다(BIKE-001 156) — 그래야 프론트 실시간 재고
+     * 조회 API 가 서울시 API 를 다시 부르지 않고 이 캐시만 읽으면 된다. Redis 적재는 실패해도 Kafka 전송을 막지
+     * 않는다({@link CompositeEventPublisher} 참고).
+     */
     @Bean
     @ConditionalOnExpression(KAFKA_ENABLED)
     EventPublisher kafkaEventPublisher(KafkaTemplate<String, String> collectKafkaTemplate, CollectEventJson collectEventJson,
-                                       CollectProperties props) {
-        return new KafkaEventPublisher(collectKafkaTemplate, collectEventJson, props.kafka().sendTimeout());
+                                       CollectProperties props, RedisTemplate<String, Object> redisTemplate,
+                                       Clock collectClock) {
+        EventPublisher kafka = new KafkaEventPublisher(collectKafkaTemplate, collectEventJson, props.kafka().sendTimeout());
+        EventPublisher redis = new RedisApplyingPublisher(redisAppliers(props, collectClock, redisTemplate));
+        return new CompositeEventPublisher(kafka, redis);
     }
 
     /**
@@ -186,13 +195,18 @@ public class CollectConfig {
     @ConditionalOnProperty(name = "collect.publisher", havingValue = CollectProperties.PUBLISHER_REDIS)
     EventPublisher redisApplyingPublisher(RedisTemplate<String, Object> redisTemplate, CollectProperties props,
                                           Clock collectClock) {
+        log.info("collect.publisher=redis — Kafka 를 건너뛰고 Redis 에 바로 반영한다. AI 컨슈머는 아무것도 받지 못한다");
+        return new RedisApplyingPublisher(redisAppliers(props, collectClock, redisTemplate));
+    }
+
+    /** 컨슈머·보험 경로·기본 경로(Kafka+Redis 동시 적재)가 전부 같은 반영기를 쓰도록 한 곳에 모은다. */
+    private static List<EventApplier> redisAppliers(CollectProperties props, Clock collectClock,
+                                                     RedisTemplate<String, Object> redisTemplate) {
         RedisWriter writer = new RedisTemplateWriter(redisTemplate);
-        List<EventApplier> appliers = List.of(
+        return List.of(
                 new BikeStockApplier(writer, collectClock),
                 new SubwayArrivalApplier(writer, StatnIdMap.fromClasspath(),
                         OperatingWindow.parse(props.subway().window()), collectClock));
-        log.info("collect.publisher=redis — Kafka 를 건너뛰고 Redis 에 바로 반영한다. AI 컨슈머는 아무것도 받지 못한다");
-        return new RedisApplyingPublisher(appliers);
     }
 
     @Bean
