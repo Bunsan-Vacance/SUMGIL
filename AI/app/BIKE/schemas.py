@@ -43,4 +43,4 @@ class EtaStockResponse(BaseModel):
     p_full: float | None = Field(description="도착 슬롯 만차 확률(0~1). avg 표 근사치")
     arrival_dow_type: int = Field(description="도착 시점 dow_type(0평일/1토/2일·공휴일)")
     arrival_time_slot: int = Field(description="도착 시점 30분 슬롯(0~47)")
-    source: str = Field(description="델타 계산에 쓴 예측기. 지금은 avg 고정")
+    source: str = Field(description="델타 계산에 쓴 예측기. 지금은 lightgbm 고정")
