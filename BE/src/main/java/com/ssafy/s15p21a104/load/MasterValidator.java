@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
+import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
@@ -29,6 +30,8 @@ public final class MasterValidator {
     static final int SOURCE_MAX = 16;
     /** V5 prediction_source 열 폭. 실제 값 중 가장 긴 것이 station_global_fallback 23자라 여유가 크지 않다. */
     static final int PREDICTION_SOURCE_MAX = 32;
+    /** 배차간격 상한. 하루(1,440분)를 넘으면 원천 단위가 초로 바뀐 것이다. */
+    static final int MAX_HEADWAY_MIN = 1440;
     /** 적재 대여소가 마스터에 없을 때 경고에 담는 예시 수. */
     private static final int EXAMPLE_LIMIT = 10;
 
@@ -151,6 +154,51 @@ public final class MasterValidator {
             warnings.add("대여소 마스터에 없는 대여소 " + unknownRentalIds.size()
                     + "곳의 예측을 함께 적재한다 (예측 표가 더 최근이다 — 마스터 갱신 필요): "
                     + head(unknownRentalIds.stream().toList()));
+        }
+        return new ValidationReport(errors, warnings);
+    }
+
+    /**
+     * 버스 배차간격 적재 전 검증.
+     * <p>
+     * <b>마스터에 없는 노선은 오류다.</b> {@link #validateBikeStockPred}와 반대인데, 적재 방식이 다르기 때문이다 —
+     * 재고 예측은 새 행을 INSERT 하므로 마스터에 없어도 넣을 수 있지만, 배차간격은 기존 {@code bus_route} 행을
+     * <b>UPDATE</b> 하므로 대상이 없으면 갱신될 것이 없다. 수집 CSV 가 이미 마스터 노선만 남기므로
+     * 여기서 걸리면 CSV 생성 단계가 잘못된 것이다.
+     *
+     * @param knownRouteIds 적재된 노선 ID. 비어 있으면 대조를 건너뛴다 — dry-run 은 DB 를 읽지 않는다
+     */
+    public static ValidationReport validateBusHeadway(List<BusHeadwayRow> rows, Set<String> knownRouteIds) {
+        List<String> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        int withHeadway = 0;
+
+        for (BusHeadwayRow r : rows) {
+            if (!seen.add(r.routeId())) {
+                errors.add("같은 노선이 두 번: " + r.routeId());
+                continue;
+            }
+            if (!knownRouteIds.isEmpty() && !knownRouteIds.contains(r.routeId())) {
+                errors.add("적재되지 않은 노선을 갱신 대상으로 사용: " + r.routeId());
+            }
+            Integer h = r.headwayMin();
+            if (h == null) {
+                continue;
+            }
+            if (h <= 0) {
+                // 0 은 "그 시각에 운행 중이 아니라 모른다" 는 뜻이라 파서가 null 로 바꿔야 한다.
+                errors.add("배차간격이 0 이하: " + r.routeId() + " (" + h + ") — 0 은 null 로 바꿔야 한다");
+            } else if (h > MAX_HEADWAY_MIN) {
+                errors.add("배차간격이 하루(" + MAX_HEADWAY_MIN + "분)를 넘음: " + r.routeId() + " (" + h
+                        + ") — 원천 단위가 초로 바뀌었을 수 있다");
+            } else {
+                withHeadway++;
+            }
+        }
+
+        if (!rows.isEmpty() && withHeadway == 0) {
+            warnings.add("배차간격이 있는 노선이 하나도 없다 (" + rows.size() + "행 전부 값 없음) — 수집이 실패했을 수 있다");
         }
         return new ValidationReport(errors, warnings);
     }

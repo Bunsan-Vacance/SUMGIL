@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
+import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
@@ -284,6 +285,40 @@ class UpsertWriterIT {
         writer.upsertBikeStations(List.of(new BikeStationRow(RENT, "IT 대여소", 37.5, 127.0, 10)));
 
         assertTrue(writer.existingRentalIds().contains(RENT));
+    }
+
+    @Test
+    @DisplayName("배차간격은 기존 bus_route 행만 갱신하고, 모르는 노선은 행을 만들지 않는다")
+    void busHeadwayUpdatesOnly() {
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "IT노선")));
+
+        int updated = writer.updateBusHeadway(List.of(
+                new BusHeadwayRow(ROUTE, 12),
+                new BusHeadwayRow("IT_UNKNOWN", 99)));
+
+        assertEquals(1, updated);
+        assertEquals(12, jdbc.queryForObject(
+                "SELECT headway_min FROM bus_route WHERE route_id = ?", Integer.class, ROUTE));
+        assertEquals(0, count("bus_route", "route_id = ?", "IT_UNKNOWN"));
+    }
+
+    @Test
+    @DisplayName("배차간격 NULL 도 저장된다 — 원천이 값을 주지 않은 노선이다")
+    void busHeadwayNullIsStored() {
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "IT노선")));
+        writer.updateBusHeadway(List.of(new BusHeadwayRow(ROUTE, 12)));
+
+        writer.updateBusHeadway(List.of(new BusHeadwayRow(ROUTE, null)));
+
+        assertNull(jdbc.queryForObject("SELECT headway_min FROM bus_route WHERE route_id = ?", Integer.class, ROUTE));
+    }
+
+    @Test
+    @DisplayName("existingRouteIds 는 적재된 노선을 돌려준다 — 배차간격 적재가 대조에 쓴다")
+    void existingRouteIdsReturnsLoadedRoutes() {
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "IT노선")));
+
+        assertTrue(writer.existingRouteIds().contains(ROUTE));
     }
 
     private static BikeStockPredRow pred(String rentalId, int dow, int slot,

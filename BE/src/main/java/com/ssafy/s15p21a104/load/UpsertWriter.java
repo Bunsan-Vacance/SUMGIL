@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
+import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
@@ -102,6 +103,10 @@ public class UpsertWriter {
                   source = EXCLUDED.source, prediction_source = EXCLUDED.prediction_source, updated_at = now()
             """;
 
+    private static final String UPDATE_BUS_HEADWAY = """
+            UPDATE bus_route SET headway_min = ?, updated_at = now() WHERE route_id = ?
+            """;
+
     private final JdbcTemplate jdbc;
 
     public UpsertWriter(JdbcTemplate jdbc) {
@@ -136,6 +141,34 @@ public class UpsertWriter {
             ps.setObject(8, r.predictionSource(), Types.VARCHAR);
         });
         return rows.size();
+    }
+
+    /**
+     * 배차간격 갱신. <b>INSERT 하지 않고 기존 행만 UPDATE 한다</b> — 도착정보 응답에는 우리 마스터(OA-1095 718 노선)에
+     * 없는 경기 노선이 섞여 오는데, upsert 로 넣으면 bus_route 마스터가 두 원천으로 갈라진다.
+     * 모르는 노선은 갱신 건수에 잡히지 않아 호출한 쪽이 차이를 알 수 있다.
+     *
+     * @return 실제로 갱신된 행 수 (마스터에 없는 노선은 0)
+     */
+    public int updateBusHeadway(List<BusHeadwayRow> rows) {
+        int[][] counts = jdbc.batchUpdate(UPDATE_BUS_HEADWAY, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setObject(1, r.headwayMin(), Types.INTEGER);
+            ps.setString(2, r.routeId());
+        });
+        int updated = 0;
+        for (int[] batch : counts) {
+            for (int n : batch) {
+                if (n > 0) {
+                    updated += n;
+                }
+            }
+        }
+        return updated;
+    }
+
+    /** 적재된 노선 ID. 배차간격 적재가 갱신 대상 존재 검증에 쓴다. */
+    public Set<String> existingRouteIds() {
+        return Set.copyOf(jdbc.queryForList("SELECT route_id FROM bus_route", String.class));
     }
 
     /** 적재된 대여소 ID. 재고 예측 적재가 마스터 대조(없는 대여소는 경고)에 쓴다. */
