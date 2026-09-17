@@ -382,6 +382,31 @@ describe('백엔드 repository', () => {
     })
   })
 
+  it.each([
+    [
+      'ACCESS_CANDIDATE_NOT_FOUND',
+      'access-candidate-not-found',
+      '출발지나 도착지 주변에 연결되는 경로가 없어요.',
+    ],
+    ['OUT_OF_SERVICE_AREA', 'out-of-service-area', '서비스 지역 밖이라 경로를 찾지 못했어요.'],
+    ['SERVICE_ENDED', 'service-ended', '선택한 출발 시간에는 이용할 수 없어요.'],
+  ] as const)('%s 오류를 복구 가능한 FE 코드로 보존한다', async (serverCode, code, message) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 422,
+        json: async () => ({ success: false, error: { code: serverCode } }),
+      })),
+    )
+    await expect(
+      createBackendRouteRepository('http://be.test').search(
+        { origin: station('역삼'), destination: station('강변') },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code, message })
+  })
+
   it('경로 응답을 화면 모델로 변환하고 geometry 선을 보존한다', async () => {
     const fetchMock = vi.fn(async () => ({
       status: 200,
@@ -597,8 +622,8 @@ describe('백엔드 repository', () => {
         new AbortController().signal,
       )
       expect(result.map((route) => route.routeType)).toEqual(['LOW_CONGESTION', 'SHORTEST'])
-      expect(result[0]).toMatchObject({ label: '덜 붐비는 경로', minutes: 30 })
-      expect(result[0].congestionPercent).toBeUndefined()
+      expect(result[0]).toMatchObject({ label: '다른 경로', minutes: 30 })
+      expect(result[0].congestionPrediction).toBeUndefined()
       if (kind === 'station') {
         expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('priority')).toBe('COMFORT')
       } else {

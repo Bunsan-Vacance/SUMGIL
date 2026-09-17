@@ -3,6 +3,7 @@ import { modeIcons } from './ModeIcon'
 import { roundMinutes } from './selectors'
 import { lineColor } from './lineColor'
 import { useRouteCongestion } from './useCongestion'
+import { transitionLabel } from './transitions'
 
 function formatDistance(distanceMeters?: number) {
   if (distanceMeters === undefined) return '거리 준비중입니다'
@@ -11,8 +12,8 @@ function formatDistance(distanceMeters?: number) {
 }
 
 function formatCongestion(level?: number) {
-  if (level === undefined) return '출발역 통계 혼잡도 준비중입니다'
-  return `출발역 통계 혼잡도 ${Number.isInteger(level) ? level : level.toFixed(1)}%`
+  if (level === undefined) return '출발역 통계: 예측 정보 없음'
+  return `출발역 통계 기준 예상 혼잡도 ${Number.isInteger(level) ? level : level.toFixed(1)}%`
 }
 
 export function compactLegs(legs: Leg[]) {
@@ -23,6 +24,8 @@ export function compactLegs(legs: Leg[]) {
         previous &&
         !previous.leg.transfer &&
         !leg.transfer &&
+        !previous.leg.transitionType &&
+        !leg.transitionType &&
         previous.leg.mode === leg.mode &&
         previous.leg.routeId === leg.routeId
       ) {
@@ -46,8 +49,17 @@ export function compactLegs(legs: Leg[]) {
     .map(({ leg }) => leg)
 }
 
-export default function LegList({ route, compact = false }: { route: Route; compact?: boolean }) {
-  const legs = compact ? compactLegs(route.legs) : route.legs
+export default function LegList({
+  route,
+  compact = false,
+  activeIndex,
+}: {
+  route: Route
+  compact?: boolean
+  /** Index in the original route.leg list, even when a compact list is rendered. */
+  activeIndex?: number
+}) {
+  const legs = compact && activeIndex === undefined ? compactLegs(route.legs) : route.legs
   const congestion = useRouteCongestion(legs, route.departedAt)
   return (
     <ol className="leg-list">
@@ -55,14 +67,22 @@ export default function LegList({ route, compact = false }: { route: Route; comp
         const Icon = modeIcons[leg.mode]
         const legCongestion = leg.mode === 'subway' ? congestion[index] : undefined
         return (
-          <li key={index}>
+          <li
+            key={index}
+            className={activeIndex === index ? 'is-active' : undefined}
+            aria-current={activeIndex === index ? 'step' : undefined}
+          >
             <span className={`leg-icon ${leg.mode}`} style={{ color: lineColor(leg) }}>
               <Icon size={18} />
             </span>
             <div>
-              <strong>{leg.title}</strong>
+              <strong>
+                {activeIndex === index && <span className="leg-current">현재 단계</span>}
+                {leg.title}
+              </strong>
               <p>
                 {leg.note} · {formatDistance(leg.distanceMeters)}
+                {transitionLabel(leg.transitionType) && ` · ${transitionLabel(leg.transitionType)}`}
                 {legCongestion && <> · {formatCongestion(legCongestion.level)}</>}
               </p>
             </div>

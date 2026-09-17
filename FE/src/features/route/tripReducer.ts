@@ -1,5 +1,6 @@
 import type { Mode, Place, Priority, Route } from './types'
 import { getRoutes } from './selectors'
+import type { RepositoryErrorCode } from '../../api/errors'
 
 export interface TripState {
   origin: Place
@@ -10,13 +11,14 @@ export interface TripState {
   selected: Route | null
   status: 'idle' | 'loading' | 'success' | 'error'
   error: string
+  errorCode: RepositoryErrorCode | null
 }
 export type TripAction =
   | { type: 'origin'; place: Place }
   | { type: 'search'; origin?: Place; destination: Place }
   | { type: 'swap' }
   | { type: 'loaded'; routes: Route[] }
-  | { type: 'failed'; error?: string }
+  | { type: 'failed'; error?: string; code?: RepositoryErrorCode }
   | { type: 'modes'; modes: Mode[] }
   | { type: 'priority'; priority: Priority }
   | { type: 'select'; id: string }
@@ -32,6 +34,7 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
         selected: null,
         status: 'idle',
         error: '',
+        errorCode: null,
       }
     case 'search':
       return {
@@ -42,6 +45,7 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
         selected: null,
         status: 'loading',
         error: '',
+        errorCode: null,
       }
     case 'swap':
       if (!state.destination) return state
@@ -53,6 +57,7 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
         selected: null,
         status: 'idle',
         error: '',
+        errorCode: null,
       }
     case 'loaded': {
       const available = getRoutes(action.routes, state.enabled, state.priority)
@@ -62,6 +67,7 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
         selected: available[0] || null,
         status: 'success',
         error: '',
+        errorCode: null,
       }
     }
     case 'failed':
@@ -71,6 +77,7 @@ export function tripReducer(state: TripState, action: TripAction): TripState {
         selected: null,
         status: 'error',
         error: action.error || '경로를 불러오지 못했어요.',
+        errorCode: action.code || null,
       }
     case 'modes': {
       if (!action.modes.length) return state

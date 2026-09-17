@@ -74,6 +74,7 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
         dispatch({
           type: 'failed',
           error: error instanceof RepositoryError ? error.message : undefined,
+          code: error instanceof RepositoryError ? error.code : undefined,
         })
       }
     }
@@ -95,6 +96,15 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
       void search(state.destination, state.origin, state.enabled, departureAt(time))
     }
     return true
+  }
+
+  const searchWithModes = (selected: Mode[]) => {
+    const nextModes = withWalk(selected)
+    if (sameModes(state.enabled, nextModes)) {
+      if (state.destination) void search(state.destination, state.origin, nextModes)
+      return
+    }
+    setModes(nextModes)
   }
 
   return {
@@ -122,6 +132,7 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
     },
     select: (id: string) => dispatch({ type: 'select', id }),
     acceptProposal: (route: Route) => dispatch({ type: 'proposal', route }),
-    resetModes: () => setModes(modes.map((mode) => mode.id)),
+    resetModes: () => searchWithModes(modes.map((mode) => mode.id)),
+    searchWalkOnly: () => searchWithModes(['walk']),
   }
 }

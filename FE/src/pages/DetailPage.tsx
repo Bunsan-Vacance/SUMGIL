@@ -1,17 +1,49 @@
 import { ArrowLeft, Navigation } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import LegList from '../features/route/LegList'
-import { routeArrival, roundMinutes } from '../features/route/selectors'
+import BikePrediction from '../features/route/BikePrediction'
+import {
+  congestionBasisText,
+  congestionGradeText,
+  congestionPredictionFor,
+  isCongestionPredictionDate,
+  routeArrival,
+  roundMinutes,
+} from '../features/route/selectors'
 import type { Place, Route } from '../features/route/types'
 import type { Navigate } from '../app/useNavigation'
+import { busRouteOptions, formatBusLabel, groupRoutes } from '../features/route/routeGrouping'
 interface Props {
   origin: Place
   destinationName: string
   selected: Route
+  alternatives: Route[]
+  setSelectedId: (id: string) => void
   go: Navigate
   startGuide: () => void
 }
-export default function DetailPage({ origin, destinationName, selected, go, startGuide }: Props) {
+export default function DetailPage({
+  origin,
+  destinationName,
+  selected,
+  alternatives,
+  setSelectedId,
+  go,
+  startGuide,
+}: Props) {
+  const selectedGroup = groupRoutes(alternatives).find((group) =>
+    group.variants.some((route) => route.id === selected.id),
+  )
+  const busOptions = selectedGroup ? busRouteOptions(selectedGroup.variants) : []
+  const predictionDate = isCongestionPredictionDate(selected.departedAt)
+  const prediction = congestionPredictionFor(selected)
+  const predictionLabel = prediction
+    ? `혼잡도 예상 ${prediction.congestionPercent}%${
+        congestionGradeText(prediction.congestionGrade)
+          ? ` · ${congestionGradeText(prediction.congestionGrade)}`
+          : ''
+      }`
+    : '혼잡도 예상 정보 없음'
   return (
     <>
       <button
@@ -39,8 +71,11 @@ export default function DetailPage({ origin, destinationName, selected, go, star
             <small>분</small>
           </h2>
           <span>{routeArrival(selected.minutes, selected.departedAt)} 도착 예상</span>
-          <b className={selected.id === 'calm' ? 'calm-text' : 'fast-text'}>{selected.label}</b>
+          <b className={prediction?.congestionGrade === 'LOW' ? 'calm-text' : 'fast-text'}>
+            {selected.label}
+          </b>
         </div>
+        {selected.source === 'MOCK' && <small className="detail-source">샘플 경로</small>}
         <div className="stats">
           {selected.totalDistanceMeters !== undefined && (
             <div>
@@ -58,13 +93,39 @@ export default function DetailPage({ origin, destinationName, selected, go, star
               <small>도보</small>
             </div>
           )}
-          {selected.congestionPercent !== undefined && (
+          {predictionDate && (
             <div>
-              <strong>{selected.congestionPercent}%</strong>
+              <strong>{prediction ? `${prediction.congestionPercent}%` : '정보 없음'}</strong>
               <small>혼잡도 예상</small>
             </div>
           )}
         </div>
+        <span className="route-comfort">
+          <strong>{prediction ? predictionLabel : '예측 정보 없음'}</strong>
+          {prediction && congestionBasisText(prediction.predictionBasis) && (
+            <small>{congestionBasisText(prediction.predictionBasis)}</small>
+          )}
+        </span>
+        <BikePrediction route={selected} />
+        {busOptions.length > 1 && (
+          <section className="bus-options" aria-label="버스 선택">
+            <h3>버스 선택</h3>
+            <div className="bus-options-list">
+              {busOptions.map(({ route, labels }) => (
+                <button
+                  type="button"
+                  key={route.id}
+                  className={route.id === selected.id ? 'is-selected' : undefined}
+                  aria-pressed={route.id === selected.id}
+                  onClick={() => setSelectedId(route.id)}
+                >
+                  <strong>{labels.map(formatBusLabel).join(' · ')}</strong>
+                  <span>{roundMinutes(route.minutes)}분</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         <section className="route-legs" aria-label="구간별 이동 안내">
           <h3>구간별 이동 안내</h3>
           <LegList route={selected} />
