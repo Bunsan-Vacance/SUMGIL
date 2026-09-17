@@ -258,7 +258,10 @@ describe('경로 검색 요청 수명', () => {
     await act(async () => {
       await result.current.search(places[1])
     })
-    expect(result.current.error).toBe('역 정보를 찾지 못했어요.')
+    expect(result.current).toMatchObject({
+      error: '역 정보를 찾지 못했어요.',
+      errorCode: 'station-not-found',
+    })
 
     await act(async () => {
       await result.current.search(places[1])

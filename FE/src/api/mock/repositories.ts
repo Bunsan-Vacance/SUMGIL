@@ -21,10 +21,13 @@ function delay(ms: number, signal: AbortSignal) {
   })
 }
 export const mockRouteRepository: RouteRepository = {
-  async search(_request, signal) {
+  async search(request, signal) {
     // Preview-only: arbitrary endpoints do not change the fixed sample route.
     await delay(450, signal)
-    return routes
+    return routes.map((route) => ({
+      ...route,
+      departedAt: request.departedAt || route.departedAt || new Date().toISOString(),
+    }))
   },
 }
 export const routeSearchMockRepository: RouteRepository = {

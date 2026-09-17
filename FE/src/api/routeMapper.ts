@@ -1,9 +1,15 @@
 import { RepositoryError } from './errors'
 import type {
+  CongestionDataStatus,
+  CongestionGrade,
+  CongestionPrediction,
+  CongestionPredictionBasis,
   GeometryLineString,
   Route,
   RouteEndpoint,
   RouteGeometry,
+  RouteSource,
+  TransitionType,
 } from '../features/route/types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -87,14 +93,16 @@ function mapEndpoint(
 ): RouteEndpoint | undefined {
   const id = text(rawLeg[`${prefix}NodeId`])
   const name = text(rawLeg[`${prefix}NodeName`])
+  const rentalId = text(rawLeg[`${prefix}RentalId`])
   const lat = endpointCoordinate(rawLeg[`${prefix}Lat`], -90, 90)
   const lng = endpointCoordinate(rawLeg[`${prefix}Lng`], -180, 180)
-  if (!id && !name && lat === undefined && lng === undefined) return undefined
+  if (!id && !name && lat === undefined && lng === undefined && !rentalId) return undefined
   return {
     ...(id ? { id } : {}),
     ...(name ? { name } : {}),
     ...(lat !== undefined ? { lat } : {}),
     ...(lng !== undefined ? { lng } : {}),
+    ...(rentalId ? { rentalId } : {}),
   }
 }
 
@@ -104,6 +112,67 @@ function optionalDistance(value: unknown) {
     throw new RepositoryError('invalid-response', '경로 거리 응답이 올바르지 않아요.')
   }
   return value
+}
+
+function mapTransitionType(value: unknown): TransitionType | undefined {
+  if (value === undefined || value === null) return undefined
+  if (
+    value !== 'BOARDING' &&
+    value !== 'ALIGHTING' &&
+    value !== 'TRANSFER' &&
+    value !== 'BIKE_RENTAL' &&
+    value !== 'BIKE_RETURN'
+  ) {
+    throw new RepositoryError('invalid-response', '구간 전환 유형 응답이 올바르지 않아요.')
+  }
+  return value
+}
+
+function mapCongestionPrediction(value: unknown): CongestionPrediction | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!isRecord(value)) {
+    throw new RepositoryError('invalid-response', '혼잡도 예측 응답이 올바르지 않아요.')
+  }
+  const percent = value.congestionPercent
+  if (percent !== null && !finite(percent, 0, Number.MAX_VALUE)) {
+    throw new RepositoryError('invalid-response', '혼잡도 예측 수치 응답이 올바르지 않아요.')
+  }
+  const grade = value.congestionGrade
+  if (grade !== null && grade !== 'LOW' && grade !== 'MEDIUM' && grade !== 'HIGH') {
+    throw new RepositoryError('invalid-response', '혼잡도 예측 등급 응답이 올바르지 않아요.')
+  }
+  const dataStatus = value.dataStatus
+  if (
+    dataStatus !== 'AVAILABLE' &&
+    dataStatus !== 'LINE1_TRUNCATED' &&
+    dataStatus !== 'NO_CALIBRATION' &&
+    dataStatus !== 'NO_LOOKUP'
+  ) {
+    throw new RepositoryError('invalid-response', '혼잡도 예측 상태 응답이 올바르지 않아요.')
+  }
+  const basis = value.predictionBasis
+  if (
+    basis !== null &&
+    basis !== 'RECENT_7D' &&
+    basis !== 'PARTIAL' &&
+    basis !== 'WEEKDAY_AVERAGE'
+  ) {
+    throw new RepositoryError('invalid-response', '혼잡도 예측 기준 응답이 올바르지 않아요.')
+  }
+  const hasPredictionValues = percent !== null && grade !== null && basis !== null
+  const hasAnyPredictionValue = percent !== null || grade !== null || basis !== null
+  if (
+    (dataStatus === 'AVAILABLE' && !hasPredictionValues) ||
+    (dataStatus !== 'AVAILABLE' && hasAnyPredictionValue)
+  ) {
+    throw new RepositoryError('invalid-response', '혼잡도 예측 값과 상태가 일치하지 않아요.')
+  }
+  return {
+    congestionPercent: percent as number | null,
+    congestionGrade: grade as CongestionGrade | null,
+    dataStatus: dataStatus as CongestionDataStatus,
+    predictionBasis: basis as CongestionPredictionBasis | null,
+  }
 }
 
 export function mapBackendRoute(value: unknown, index: number, departedAt: string): Route {
@@ -134,20 +203,43 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
     const fromName = text(rawLeg.fromNodeName) || text(rawLeg.fromNodeId) || '출발 지점'
     const toName = text(rawLeg.toNodeName) || text(rawLeg.toNodeId) || '도착 지점'
     const routeId = text(rawLeg.routeId)
+    const transitionType = mapTransitionType(rawLeg.transitionType)
+    if (transitionType && rawLeg.mode !== 'TRANSFER') {
+      throw new RepositoryError(
+        'invalid-response',
+        '구간 전환 유형은 TRANSFER 구간에만 사용할 수 있어요.',
+      )
+    }
     if (rawLeg.routeName != null && !text(rawLeg.routeName)) {
       throw new RepositoryError('invalid-response', '노선명 응답이 올바르지 않아요.')
     }
     const geometry = parseGeometry(rawLeg.geometry, rawLeg.geometryStatus)
-    const transfer = mappedMode.transfer === true
+    const transfer =
+      mappedMode.transfer === true &&
+      (transitionType === undefined || transitionType === 'TRANSFER')
     const from = mapEndpoint(rawLeg, 'from')
     const to = mapEndpoint(rawLeg, 'to')
+    const transition = transitionType
+    const transitionName =
+      transitionType === 'BOARDING'
+        ? '승차'
+        : transitionType === 'ALIGHTING'
+          ? '하차'
+          : transitionType === 'BIKE_RENTAL'
+            ? '자전거 대여'
+            : transitionType === 'BIKE_RETURN'
+              ? '자전거 반납'
+              : transfer
+                ? '환승'
+                : undefined
     return {
       mode: mappedMode.mode,
       transfer,
-      title: transfer ? `${fromName}에서 환승` : `${fromName} → ${toName}`,
-      note: text(rawLeg.routeName) || routeLineName(routeId) || (transfer ? '환승' : '이동 구간'),
+      title: transitionName ? `${fromName}에서 ${transitionName}` : `${fromName} → ${toName}`,
+      note: text(rawLeg.routeName) || routeLineName(routeId) || transitionName || '이동 구간',
       distanceMeters: optionalDistance(rawLeg.distanceMeters),
       minutes: rawLeg.minutes as number,
+      ...(transition ? { transitionType: transition } : {}),
       ...(geometry ? { geometry } : {}),
       ...(routeId ? { routeId } : {}),
       ...(from ? { from } : {}),
@@ -164,9 +256,14 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
         .filter((line): line is string => !!line),
     ),
   ]
-  const explicitTransfers = rawLegs.filter((leg) => isRecord(leg) && leg.mode === 'TRANSFER').length
+  const explicitTransfers = rawLegs.filter(
+    (leg) =>
+      isRecord(leg) &&
+      (leg.transitionType === 'TRANSFER' ||
+        (leg.transitionType == null && leg.mode === 'TRANSFER')),
+  ).length
   const transitRouteIds = rawLegs
-    .filter((leg) => isRecord(leg) && leg.mode !== 'TRANSFER')
+    .filter((leg) => isRecord(leg) && (leg.mode === 'SUBWAY' || leg.mode === 'BUS') && leg.routeId)
     .map((leg) => (isRecord(leg) ? text(leg.routeId) : undefined))
     .filter((routeId): routeId is string => !!routeId)
   const routeTransitions = transitRouteIds
@@ -180,7 +277,9 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
   }
   const transfers =
     (value.transferCount as number | undefined) ?? (explicitTransfers || routeTransitions)
-  const walkingLegs = legs.filter((leg) => leg.mode === 'walk' && !leg.transfer)
+  const walkingLegs = legs.filter(
+    (leg) => leg.mode === 'walk' && !leg.transfer && !leg.transitionType,
+  )
   const walk =
     walkingLegs.length && walkingLegs.every((leg) => leg.distanceMeters !== undefined)
       ? walkingLegs.reduce((sum, leg) => sum + leg.distanceMeters!, 0)
@@ -191,14 +290,17 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
       : routeType === 'ALTERNATIVE'
         ? '다른 경로'
         : routeType === 'LOW_CONGESTION'
-          ? '덜 붐비는 경로'
+          ? '다른 경로'
           : '따릉이 포함 경로'
+  const congestionPrediction = mapCongestionPrediction(value.congestionPrediction)
   return {
     routeType,
     id: `${routeType.toLowerCase()}-${index}`,
     label,
     minutes: value.totalMinutes as number,
     transfers,
+    source: value.source as RouteSource,
+    ...(congestionPrediction ? { congestionPrediction } : {}),
     totalDistanceMeters: optionalDistance(value.totalDistanceMeters),
     ...(walk !== undefined ? { walk: Math.round(walk) } : {}),
     modes: [...new Set(legs.filter((leg) => !leg.transfer).map((leg) => leg.mode))],

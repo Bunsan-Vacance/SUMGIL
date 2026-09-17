@@ -12,17 +12,21 @@ npm ci
 npm run dev
 ```
 
-브라우저에서 http://localhost:5173 을 연다. 현재 카카오 키에서 localhost 도메인의 지도 로딩을 확인했다. 127.0.0.1을 쓰려면 해당 도메인도 카카오 콘솔에 등록해야 한다. 배포용 빌드는 `npm run build`, 경로 데이터 검증은 `npm test`로 실행한다.
+기본 개발 서버는 http://localhost:5173 을 열며, 현재 원본 작업 트리의 실제 FE 검증은 http://localhost:5174 에서 수행한다. 기존 `local-stack/FE` 사본은 5173 실행용이다. 현재 카카오 키에서 localhost 도메인의 지도 로딩을 확인했다. 127.0.0.1을 쓰려면 해당 도메인도 카카오 콘솔에 등록해야 한다. 배포용 빌드는 `npm run build`, 경로 데이터 검증은 `npm test`로 실행한다.
 
 ## 카카오 지도 설정
 
 `.env.example`을 `.env.local`로 복사하고 `VITE_KAKAO_MAP_APP_KEY`에 카카오 앱의 **JavaScript 키**를 입력한다. REST API 키나 Admin 키는 사용하지 않는다. `.env.local`은 Git에서 제외된다.
 
-실제 경로·대여소 API를 사용하려면 `.env.local`의 `VITE_API_BASE_URL`을 백엔드 주소로 설정한다. 현재 개발 서버 주소는 `http://70.12.246.138:8080`이며 값을 바꾼 뒤 개발 서버를 다시 시작한다.
+실제 경로·대여소 API를 사용하려면 `.env.local`의 `VITE_API_BASE_URL`을 `http://localhost:8080`으로 설정한다. 값을 바꾼 뒤 개발 서버를 다시 시작한다.
 
 경로 검색 계약을 로컬에서 확인할 때는 `VITE_API_BASE_URL`을 유지하고 `VITE_ROUTE_SEARCH_MOCK=true`를 추가한다. 경로 검색만 `ApiResult` envelope와 `source: MOCK` fixture를 사용하며 역·장소·대여소 API 연결은 유지한다. 운영 환경에서는 이 값을 `true`로 설정하지 않는다.
 
-카카오 개발자 콘솔에서 해당 JavaScript 키의 SDK 도메인으로 `http://127.0.0.1:5173`, `http://localhost:5173`을 등록한다. 키를 입력한 후 개발 서버를 다시 시작한다. [공식 설정 가이드](https://apis.map.kakao.com/web/guide/) 참고.
+샘플 경로에는 `congestionPrediction`과 구간 전환 예시가 포함된다. 퍼센트 0과 100 초과를 보존하고, 예측값이 없으면 `예측 정보 없음`을 표시한다. 모든 값은 서울 기준 D+0~D+3 예상값이며 혼잡 사유 설명은 제공하지 않는다. 백엔드 전달 계약은 [FE-BE-통합-API-계약](../../../FE-BE-통합-API-계약.md)에서 확인한다.
+
+도착 시 따릉이 예측을 미리보기로 확인할 때는 `VITE_BIKE_PREDICTION_MOCK=true`를 추가한다. 이 flag가 없고 `VITE_API_BASE_URL`이 있으면 `/api/bike-stations/{rentalId}/prediction`을 실제 호출하며, 라이브 오류를 mock으로 대체하지 않는다. 최신 로컬 BE에는 이 endpoint가 아직 없다.
+
+카카오 개발자 콘솔에서 해당 JavaScript 키의 SDK 도메인으로 `http://127.0.0.1:5173`, `http://localhost:5173`, `http://127.0.0.1:5174`, `http://localhost:5174`를 등록한다. 키를 입력한 후 개발 서버를 다시 시작한다. [공식 설정 가이드](https://apis.map.kakao.com/web/guide/) 참고.
 
 실제 지도의 이동·확대·축소, 출발/도착 장소 검색을 통한 마커 표시, 현재 위치 버튼을 연결했다. 현재 위치 버튼을 눌렀을 때만 브라우저 위치 권한을 요청한다. 지도 영역은 바텀시트 높이에 맞게 변경하여 지도 출처 표시가 시트에 가려지지 않도록 한다.
 
