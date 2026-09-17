@@ -46,6 +46,7 @@ export function useKakaoMap(
   focusedPlace?: Place | null,
   highlightedPlace?: Place | null,
   route?: Route | null,
+  bikeStationsVisible = true,
 ) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<KakaoMapInstance | null>(null)
@@ -59,6 +60,7 @@ export function useKakaoMap(
   const focusedRef = useRef(focusedPlace)
   const highlightedRef = useRef(highlightedPlace)
   const routeActiveRef = useRef(Boolean(route))
+  const bikeStationsVisibleRef = useRef(bikeStationsVisible)
   const markersRef = useRef(new Map<string, KakaoMarker>())
   const selectedMarkerRef = useRef<KakaoMarker | null>(null)
   const normalMarkerImageRef = useRef<MapMarkerImage | null>(null)
@@ -76,6 +78,7 @@ export function useKakaoMap(
   focusedRef.current = focusedPlace
   highlightedRef.current = highlightedPlace
   routeActiveRef.current = Boolean(route)
+  bikeStationsVisibleRef.current = bikeStationsVisible
 
   useEffect(() => {
     stationMarkers.current.forEach((marker, id) =>
@@ -113,10 +116,17 @@ export function useKakaoMap(
     const wrapper = container.current!.parentElement!
     const shell = wrapper.parentElement!
     const homePanel = shell.querySelector<HTMLElement>('.home-panel')
+    const homeTopbar = shell.querySelector<HTMLElement>('.home-topbar')
     const browseToolbar = shell.querySelector<HTMLElement>('.browse-toolbar')
+    const guideTop = shell.querySelector<HTMLElement>('.guide-top')
     const bottomSheet = shell.querySelector<HTMLElement>('.bottom-sheet')
     const resize = () => {
-      const topOffset = homePanel?.offsetHeight || browseToolbar?.offsetHeight || 0
+      const topOffset =
+        homePanel?.offsetHeight ||
+        homeTopbar?.offsetHeight ||
+        browseToolbar?.offsetHeight ||
+        guideTop?.offsetHeight ||
+        0
       const bottomOffset = bottomSheet?.offsetHeight || 0
       wrapper.style.top = `${topOffset}px`
       wrapper.style.height = `${Math.max(1, shell.clientHeight - topOffset - bottomOffset)}px`
@@ -124,7 +134,9 @@ export function useKakaoMap(
     const observer = new ResizeObserver(resize)
     observer.observe(shell)
     if (homePanel) observer.observe(homePanel)
+    if (homeTopbar) observer.observe(homeTopbar)
     if (browseToolbar) observer.observe(browseToolbar)
+    if (guideTop) observer.observe(guideTop)
     if (bottomSheet) observer.observe(bottomSheet)
     resize()
     return () => observer.disconnect()
@@ -153,6 +165,13 @@ export function useKakaoMap(
         })
         map.current = instance
         const syncStationMarkers = () => {
+          if (!bikeStationsVisibleRef.current) {
+            stationMarkers.current.forEach((marker) => marker.destroy())
+            stationMarkers.current.clear()
+            stationClusterMarkers.current.forEach((marker) => marker.destroy())
+            stationClusterMarkers.current.clear()
+            return
+          }
           const routeBikeIds = new Set(
             routeBikeEndpointsRef.current
               .map((candidate) => candidate.endpoint.id?.trim())
@@ -420,23 +439,25 @@ export function useKakaoMap(
       validLineCount += 1
     })
     if (validLineCount) routeLinesRef.current = createRouteSvgOverlay(maps, instance, lineEntries)
-    routeBikeStationOverlaysRef.current = bikeCandidates.map((candidate) =>
-      createBikeStationOverlay(
-        maps,
-        instance,
-        {
-          id: `route-bike-endpoint:${candidate.endpoint.id || `${candidate.endpoint.lat}:${candidate.endpoint.lng}`}`,
-          name: candidate.endpoint.name?.trim() || '따릉이 대여소',
-          address: candidate.bikeRoles!.map((role) => `따릉이 ${role}`).join(' · '),
-          lat: candidate.endpoint.lat,
-          lng: candidate.endpoint.lng,
-        },
-        false,
-        () => placeRef.current?.(routeEndpointPlace(candidate)),
-        false,
-        10,
-      ),
-    )
+    routeBikeStationOverlaysRef.current = bikeStationsVisible
+      ? bikeCandidates.map((candidate) =>
+          createBikeStationOverlay(
+            maps,
+            instance,
+            {
+              id: `route-bike-endpoint:${candidate.endpoint.id || `${candidate.endpoint.lat}:${candidate.endpoint.lng}`}`,
+              name: candidate.endpoint.name?.trim() || '따릉이 대여소',
+              address: candidate.bikeRoles!.map((role) => `따릉이 ${role}`).join(' · '),
+              lat: candidate.endpoint.lat,
+              lng: candidate.endpoint.lng,
+            },
+            false,
+            () => placeRef.current?.(routeEndpointPlace(candidate)),
+            false,
+            10,
+          ),
+        )
+      : []
     routeEndpointOverlaysRef.current = endpointCandidates
       .filter((candidate) => !candidate.bikeRoles?.length)
       .map((candidate) =>
@@ -459,7 +480,7 @@ export function useKakaoMap(
       syncStationMarkersRef.current?.()
       routeBoundsRef.current = null
     }
-  }, [route, status])
+  }, [bikeStationsVisible, route, status])
 
   useEffect(() => {
     updateMarkerSelection()

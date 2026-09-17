@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, RotateCw } from 'lucide-react'
-import { bikeStationRepository, isBackendConfigured } from '../../api/repositories'
+import { bikeStationRepository } from '../../api/repositories'
 import {
   loadKakaoMaps,
   type KakaoMapClickEvent,
@@ -262,7 +262,6 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
       </header>
       <div className="map-picker-canvas">
         <div ref={canvas} className="kakao-map-canvas" aria-label="지도에서 장소 선택" />
-        {isBackendConfigured && <p className="map-nearby-hint">지도 중심 3km 이내 대여소</p>}
         {status !== 'ready' && (
           <div className="map-state" role="status">
             <p>{status === 'loading' ? '지도를 불러오고 있어요' : '지도를 불러오지 못했어요'}</p>

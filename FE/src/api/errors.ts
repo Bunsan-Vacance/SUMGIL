@@ -2,6 +2,7 @@ export type RepositoryErrorCode =
   | 'route-data-not-ready'
   | 'same-origin-destination'
   | 'station-not-found'
+  | 'bike-station-not-found'
   | 'coordinate-not-ready'
   | 'invalid-coordinate'
   | 'unsupported-place'
