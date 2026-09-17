@@ -433,6 +433,21 @@ def validated_meta(meta: dict) -> dict:
     return {k: meta[k] for k in META_KEYS}
 
 
+def _atomic_write(write_fn: Callable[[Path], None], path: Path) -> None:
+    """임시 파일에 `write_fn`으로 쓰고 `path`로 원자적 교체(`rename`)한다.
+
+    FastAPI가 서빙 디렉터리를 상시로 읽으므로(197 인프라 핸드오프), 덮어쓰기 중간의 반쯤 쓰인
+    파일을 볼 수 있으면 안 된다. 실패하면 임시 파일만 지우고 기존 `path`는 그대로 둔다.
+    """
+    tmp = path.with_name(f"{path.name}.tmp")
+    try:
+        write_fn(tmp)
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def run(
     target_dates: list[pd.Timestamp],
     predictor_kind: str | None = None,
@@ -483,7 +498,7 @@ def run(
         )
         table = to_congestion_table(predicted, segments, capacity, calibration, thresholds)
         path = out_dir / f"predictions_{d:%Y-%m-%d}.parquet"
-        table.to_parquet(path, index=False)
+        _atomic_write(lambda p, table=table: table.to_parquet(p, index=False), path)
         meta.update(
             {
                 "recent_dates_available": recent_dates,
@@ -500,9 +515,10 @@ def run(
                 "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
             }
         )
-        path.with_suffix(".meta.json").write_text(
-            json.dumps(validated_meta(meta), ensure_ascii=False, indent=1, default=str),
-            encoding="utf-8",
+        meta_text = json.dumps(validated_meta(meta), ensure_ascii=False, indent=1, default=str)
+        _atomic_write(
+            lambda p, meta_text=meta_text: p.write_text(meta_text, encoding="utf-8"),
+            path.with_suffix(".meta.json"),
         )
         print(
             f"[배치] {d:%Y-%m-%d} → {path.name} ({len(table):,}행, {meta['predictor_version']}, "

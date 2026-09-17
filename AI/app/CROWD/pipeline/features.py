@@ -145,10 +145,20 @@ def add_derived_columns(
 def build_matrix(frame: pd.DataFrame, feature_set: str) -> pd.DataFrame:
     """`feature_set`의 컬럼만 골라 돌려준다. 범주형은 category dtype으로 캐스팅한다.
 
-    프레임에 없는 컬럼은 NaN으로 채운다 — 서빙에서 실시간 컬럼이 아직 계산되지 않은 경우를
-    같은 코드로 다루기 위해서다(결측을 0으로 바꾸지는 않는다).
+    프레임에 없는 컬럼 중 `REALTIME_COLS`만 NaN으로 채운다 — 해당 세그먼트 창에 환승 이웃이
+    없어 `attach_neighbor_features`가 `nb_xfer_*` 등을 아예 만들지 않는 경우를 같은 코드로
+    다루기 위해서다(결측을 0으로 바꾸지는 않는다). 그 밖의 컬럼이 없으면 파생 단계가 깨졌다는
+    뜻이므로 조용히 NaN을 채우지 않고 바로 실패한다.
     """
     cols = FEATURE_SETS[feature_set]
+    missing = [c for c in cols if c not in frame.columns]
+    unexpected = [c for c in missing if c not in REALTIME_COLS]
+    if unexpected:
+        raise KeyError(
+            f"'{feature_set}' 세트에 필요한 컬럼이 프레임에 없다: {unexpected}. "
+            "REALTIME_COLS(features.py)에 없는 컬럼은 조용히 NaN으로 채우지 않는다 — "
+            "파생 단계(add_derived_columns)가 이 컬럼을 만들었는지 확인해라."
+        )
     X = frame.reindex(columns=cols).copy()
     for col in CATEGORICAL_COLS:
         if col in X.columns:
