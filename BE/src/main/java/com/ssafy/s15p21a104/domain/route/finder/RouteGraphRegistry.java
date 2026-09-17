@@ -47,7 +47,6 @@ public class RouteGraphRegistry {
     private final BikeStationRepository bikeStationRepository;
 
     private RouteGraph graph;
-    private List<RouteGraph> candidateSubgraphs = List.of();
     private Map<String, RouteMapper.StationInfo> stationInfos = Map.of();
     private Map<TransferRule.TransferKey, Integer> transferTimes = Map.of();
     private java.util.Set<String> rentalIds = java.util.Set.of();
@@ -115,15 +114,6 @@ public class RouteGraphRegistry {
             RouteGraphLoader.LoadResult result = RouteGraphLoader.load(
                     new RouteGraphRawData(rows, stationNames, lineNames), extraEdges);
             this.graph = result.graph();
-            // 수단 조합별 하위 그래프를 기동 시 1회만 미리 계산해둔다(S15P21A104-155) — 검색
-            // 요청마다 22만 엣지짜리 그래프를 7번씩 필터링하는 게 그래프가 커지면서(역 564→16,189개,
-            // 엣지 12,626→224,184개, k6 부하테스트로 확인) 무거운 반복 작업이 됐다. 조합 목록
-            // 자체는 요청과 무관하게 고정이라 로드 시점에 한 번만 만들어도 안전하다.
-            List<RouteGraph> subgraphs = new java.util.ArrayList<>();
-            for (java.util.Set<TravelMode> coreModes : CandidateModeSets.CORE_MODE_SETS) {
-                subgraphs.add(this.graph.filterByModes(CandidateModeSets.withWalk(coreModes)));
-            }
-            this.candidateSubgraphs = List.copyOf(subgraphs);
             this.stationInfos = Map.copyOf(infos);
             this.rentalIds = java.util.Set.copyOf(rentals.keySet());
             Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
@@ -148,15 +138,6 @@ public class RouteGraphRegistry {
      */
     public RouteGraph graph() {
         return graph;
-    }
-
-    /**
-     * @return {@link CandidateModeSets#CORE_MODE_SETS} 순서대로 미리 필터링해둔 하위 그래프
-     * 목록(S15P21A104-155). 요청마다 다시 필터링하지 않도록 기동 시 1회 계산해 캐싱한다.
-     * 미적재 시 빈 목록
-     */
-    public List<RouteGraph> candidateSubgraphs() {
-        return candidateSubgraphs;
     }
 
     /**

@@ -88,12 +88,12 @@ class RoutingTypeMatrixTest {
                 .search("A", "C", null, null, null);
 
         // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다.
+        // 213 T1: 접근 경계는 TRANSFER가 아니다.
         assertTrue(r.size() >= 1);
-        assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
-                TravelMode.TRANSFER, TravelMode.WALK), modes(r));
+        assertEquals(List.of(TravelMode.WALK, TravelMode.BIKE, TravelMode.WALK), modes(r));
         assertEquals("A", r.get(0).legs().get(0).fromNodeId());
         assertEquals("R1", r.get(0).legs().get(0).toNodeId());
-        assertEquals("R2", r.get(0).legs().get(2).toNodeId());
+        assertEquals("R2", r.get(0).legs().get(1).toNodeId());
     }
 
     @Test
@@ -107,11 +107,12 @@ class RoutingTypeMatrixTest {
                 .search("A", "C", null, null, null);
 
         // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다.
+        // 213 T1: 접근 경계는 TRANSFER가 아니다.
         assertTrue(r.size() >= 1);
-        assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
-                TravelMode.BIKE, TravelMode.TRANSFER, TravelMode.WALK), modes(r));
-        assertEquals("R2", r.get(0).legs().get(2).toNodeId());
-        assertEquals("R2", r.get(0).legs().get(3).fromNodeId());
+        assertEquals(List.of(TravelMode.WALK, TravelMode.BIKE,
+                TravelMode.BIKE, TravelMode.WALK), modes(r));
+        assertEquals("R2", r.get(0).legs().get(1).toNodeId());
+        assertEquals("R2", r.get(0).legs().get(2).fromNodeId());
     }
 
     private List<TravelMode> modes(List<RouteSearchResponse> responses) {
