@@ -43,7 +43,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -277,7 +277,7 @@ def run(
         del test_df
 
     # ── 아티팩트 저장 ──
-    stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M")
+    stamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M")
     out_dir = Path(out_root) / f"{tag}_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     avg_baseline.save(out_dir / "stock_profile_avg.parquet")
@@ -300,7 +300,7 @@ def run(
         "train_time_sec": train_time_sec,
         "lightgbm_eval": reports,
         "avg_profile_rows": len(avg_baseline.table_),
-        "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+        "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
     }
     (out_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=1, default=str), encoding="utf-8"

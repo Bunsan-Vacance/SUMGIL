@@ -1,0 +1,105 @@
+import type { Place, Leg, Route } from '../../features/route/types'
+export const places: Place[] = [
+  { id: 'origin', name: '멀티캠퍼스 역삼', address: '서울 강남구 테헤란로 212', kind: '장소' },
+  { id: 'dogok', name: '도곡역', address: '서울 강남구 남부순환로 지하 2814', kind: '역' },
+  { id: 'exit', name: '도곡역 1번 출구', address: '서울 강남구 도곡동', kind: '출구' },
+  { id: 'bike', name: '도곡역 대여소', address: '도곡역에서 150m', kind: '대여소' },
+]
+const railLegs = (quiet: boolean): Leg[] => [
+  {
+    mode: 'walk',
+    title: '역삼역까지 걸어요',
+    note: '2호선 개찰구 · 약 260m',
+    minutes: quiet ? 5 : 4,
+  },
+  {
+    mode: 'subway',
+    title: '2호선 잠실·성수 방면',
+    note: '역삼역 → 선릉역',
+    minutes: quiet ? 3 : 2,
+  },
+  {
+    mode: 'walk',
+    title: quiet ? '선릉역의 덜 붐비는 통로로 환승' : '선릉역에서 환승',
+    note: '수인분당선 수원 방면 승강장',
+    minutes: quiet ? 3 : 2,
+  },
+  {
+    mode: 'subway',
+    title: '수인분당선 수원 방면',
+    note: '선릉역 → 한티역 → 도곡역',
+    minutes: quiet ? 6 : 5,
+  },
+  { mode: 'walk', title: '도곡역 출구로 이동', note: '도착 지점까지 걸어요', minutes: 2 },
+]
+export const routes: Route[] = [
+  {
+    id: 'fast',
+    label: '가장 빠른 길',
+    minutes: 15,
+    walk: 420,
+    transfers: 1,
+    congestionPercent: 68,
+    modes: ['walk', 'subway'],
+    line: '2호선 → 수인분당선',
+    legs: railLegs(false),
+  },
+  {
+    id: 'calm',
+    label: '덜 붐비는 길',
+    minutes: 19,
+    walk: 520,
+    transfers: 1,
+    congestionPercent: 42,
+    modes: ['walk', 'subway'],
+    line: '2호선 → 수인분당선',
+    legs: railLegs(true),
+  },
+  {
+    id: 'rail',
+    label: '지하철 경로',
+    minutes: 16,
+    walk: 500,
+    transfers: 1,
+    congestionPercent: 56,
+    modes: ['walk', 'subway'],
+    line: '2호선 → 수인분당선',
+    legs: railLegs(false).map((leg, i) => (i === 0 ? { ...leg, minutes: 5 } : leg)),
+  },
+  {
+    id: 'bus',
+    label: '버스 경로',
+    minutes: 21,
+    walk: 560,
+    transfers: 0,
+    congestionPercent: 64,
+    modes: ['walk', 'bus'],
+    line: '버스 · 도곡역 방면',
+    legs: [
+      { mode: 'walk', title: '테헤란로 정류장까지 걸어요', note: '약 300m', minutes: 5 },
+      { mode: 'bus', title: '도곡역 방면 버스 탑승', note: '정류장 5곳 이동', minutes: 12 },
+      { mode: 'walk', title: '도곡역까지 걸어요', note: '약 260m', minutes: 4 },
+    ],
+  },
+]
+export const bikeProposal: Route = {
+  id: 'bike-proposal',
+  label: '따릉이 경로',
+  minutes: 11,
+  walk: 220,
+  transfers: 1,
+  congestionPercent: 35,
+  modes: ['walk', 'bike', 'subway'],
+  line: '따릉이 → 수인분당선',
+  legs: [
+    {
+      mode: 'walk',
+      title: '가까운 따릉이 대여소로 이동',
+      note: '멀티캠퍼스 역삼 인근 · 약 120m',
+      minutes: 2,
+    },
+    { mode: 'bike', title: '따릉이로 한티역까지', note: '한티역 대여소에서 반납', minutes: 5 },
+    { mode: 'subway', title: '수인분당선 수원 방면', note: '한티역 → 도곡역', minutes: 3 },
+    { mode: 'walk', title: '도곡역 출구로 이동', note: '약 100m', minutes: 1 },
+  ],
+}

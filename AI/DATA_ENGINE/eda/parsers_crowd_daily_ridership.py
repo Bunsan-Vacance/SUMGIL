@@ -13,6 +13,12 @@
 2023-11-01~2024-01-31 범위가 2023년 파일(23.1~23.12)·2024년 파일(24.1~24.12)에 이미 그대로
 들어있음을 직접 대조로 확인했다(2026-09-09). 그대로 합치면 그 3개월 구간만 행이 두 배가 된다.
 
+`서울교통공사_역별 일별 시간대별 승하차인원 정보_20231031.csv`(2022년 백필 때 같이 받은 2023년
+재수출본, 2023-01-01~10-31)도 같은 이유로 제외했다 — 기존 `(23.1~23.12)` 파일과 값까지 대조해
+완전 중복임을 확인했다(2026-09-16, 충무로 321역 2행만 기존 파일에 더 있다).
+`_20221231.csv`(2022-01-01~12-31)는 겹치는 다른 파일이 없어 그대로 쓴다 — 다만 이 파일만
+`역번호` 대신 `고유역번호(외부역코드)` 헤더를 써서 세 번째 컬럼 변형으로 추가했다.
+
 실행:
     cd AI
     python -m DATA_ENGINE.eda.parsers_crowd_daily_ridership
@@ -29,8 +35,11 @@ AI_ROOT = Path(__file__).resolve().parents[2]
 RAW_DIR = AI_ROOT / "data" / "CROWD" / "raw"
 INTERIM_DIR = AI_ROOT / "data" / "CROWD" / "interim"
 
-# 2023-11~2024-01 구간이 연간 파일 두 개에 완전 중복돼 있어 제외 — 모듈 docstring 참고.
-EXCLUDED_FILENAMES = {"서울교통공사_역별 일별 시간대별 승하차인원 정보_23.11_24.01.csv"}
+# 다른 연간 파일과 완전 중복이라 제외 — 모듈 docstring 참고.
+EXCLUDED_FILENAMES = {
+    "서울교통공사_역별 일별 시간대별 승하차인원 정보_23.11_24.01.csv",
+    "서울교통공사_역별 일별 시간대별 승하차인원 정보_20231031.csv",
+}
 
 # 연도별 파일마다 ID 컬럼 표기가 달라 후보를 순서대로 시도한다.
 _ID_RENAME_VARIANTS = [
@@ -47,6 +56,13 @@ _ID_RENAME_VARIANTS = [
         "역번호": "station_no",
         "역명": "station_name",
         "구분": "direction",
+    },
+    {
+        "수송일자": "date",
+        "호선": "line",
+        "고유역번호(외부역코드)": "station_no",
+        "역명": "station_name",
+        "승하차구분": "direction",
     },
 ]
 _DIRECTION_KO_TO_EN = {"승차": "boarding", "하차": "alighting"}
@@ -93,6 +109,16 @@ def load_daily_ridership_csv(path: str | Path) -> pd.DataFrame:
     df = df.rename(columns=rename)
     id_vars = list(rename.values())
     df = df.dropna(subset=id_vars, how="all")
+
+    # 2022년 파일만 `호선`을 "1호선"이 아니라 숫자 그대로 내려준다(2026-09-16 확인) — 그대로
+    # concat하면 다른 연도의 문자열과 섞여 parquet 쓰기가 dtype 에러로 죽는다.
+    line = df["line"].astype(str).str.strip()
+    df["line"] = line.where(line.str.endswith("호선"), line + "호선")
+
+    # 2022년 파일에 station_no가 빈 칸(" ")인 실측 행이 1건 있어(광명사거리, 2026-09-16 확인)
+    # 그 파일만 컬럼 전체가 object dtype이 된다 — 다른 연도(int64)와 concat 시 parquet 쓰기가
+    # 죽지 않도록 전 연도를 nullable Int64로 통일한다. 빈 칸은 NaN이 된다(그대로 둔다 — 원칙 8).
+    df["station_no"] = pd.to_numeric(df["station_no"], errors="coerce").astype("Int64")
 
     hour_col_map = {
         c: _normalize_hour_column(c) for c in df.columns if c not in id_vars and c != "연번"

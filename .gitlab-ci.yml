@@ -8,33 +8,30 @@ stages:
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - when: never
 
-# ai-lint/ai-test를 실제로 돌리는 변경 패턴. mr-guard와 .ai_job이 이 목록을 그대로
-# 공유해야 한다 — 두 곳의 패턴이 어긋나면(예: 한쪽만 넓혀 갱신) 어느 쪽도 안 도는
-# 사각지대가 다시 생긴다.
-.ai_trigger_paths: &ai_trigger_paths
-  - "AI/**/*.py"
-  - "AI/pyproject.toml"
-  - "AI/requirements.txt"
-  - "AI/requirements-dev.txt"
-  - "AI/requirements-ci.txt"
-
-# ai-lint/ai-test는 changes:로 걸러지므로, 위 패턴에 안 걸리는 MR(문서·기획, 혹은
-# AI/ 안이라도 .py·requirements가 아닌 변경 — README, 스크립트 등)은 잡이 하나도
-# 안 생긴다. GitLab은 잡 0개 파이프라인을 "No stages / jobs for this pipeline"로
-# 거부해 MR이 실패로 표시되므로, 그 경우에만 대신 실행돼 파이프라인을 비지 않게 한다.
-# 스킵 조건을 .ai_trigger_paths와 동일하게 맞춰서 "둘 다 안 도는" 사각지대를 없앤다.
+# AI·BE 검사 대상이 없는 MR도 빈 파이프라인으로 실패하지 않게 한다.
+# 각 검사의 changes 목록을 공유해 AI 문서만 바뀐 경우에도 guard가 실행되게 한다.
 mr-guard:
   stage: lint
   image: alpine:3.20
   tags:
     - CI
   rules:
-    - changes: *ai_trigger_paths
+    - changes: &ai_trigger_paths
+        - "AI/**/*.py"
+        - "AI/pyproject.toml"
+        - "AI/requirements.txt"
+        - "AI/requirements-dev.txt"
+        - "AI/requirements-ci.txt"
+        - ".gitlab-ci.yml"
+      when: never
+    - changes: &be_trigger_paths
+        - "BE/**/*"
       when: never
     - when: on_success
   script:
-    - echo "ai-lint/ai-test 대상 변경이 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
+    - echo "AI/BE 검사 대상 변경이 없는 MR입니다. 검증 대상이 없어 통과 처리합니다."
 
 .ai_job:
   image: python:3.11-slim
@@ -67,3 +64,63 @@ ai-test:
   stage: test
   script:
     - pytest -q
+
+# ---------- BE (Java 21 / Spring Boot 4.1.1 / Gradle) ----------
+# S15P11A108의 be-test job을 참고해 이 프로젝트 스택(DB_URL 단일 값 방식,
+# postgres:16/redis:7 — Infra/docker/docker-compose.yml과 동일 버전)에 맞춰 작성.
+be-test:
+  stage: test
+  image: eclipse-temurin:21-jdk-jammy
+  tags:
+    - CI
+  rules:
+    - changes: *be_trigger_paths
+  services:
+    # ⚠️ alias를 이미지 이름(postgres/redis)과 같게 두면 러너가 자동 생성하는 별칭과
+    #    충돌해 "alias is already in use"로 skip되고, 그 결과 호스트명이 해석되지 않아
+    #    DB 연결이 실패한다 (S15P11A108 be-test job에서 확인된 선례). 충돌 없는 이름을 쓴다.
+    - name: postgres:16
+      alias: db
+    - name: redis:7
+      alias: cache
+  variables:
+    # postgres 서비스 컨테이너가 읽는 값. 여기서 DB·계정이 만들어진다.
+    POSTGRES_DB: sumgil
+    POSTGRES_USER: sumgil
+    POSTGRES_PASSWORD: sumgil1234
+  cache:
+    key: "be-gradle-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - BE/.gradle/
+  before_script:
+    - cd BE
+    - chmod +x gradlew
+    # application.yml은 DB_URL/DB_USERNAME/DB_PASSWORD/REDIS_HOST/REDIS_PORT를
+    # 환경변수로 읽는다 (비밀번호를 yml에 직접 쓰지 않는 팀 규칙 — BE/README.md 9절).
+    # 값은 위 POSTGRES_*에서 파생시켜 서비스가 실제로 만든 DB·계정과 어긋나지 않게 한다.
+    - export DB_URL="jdbc:postgresql://db:5432/${POSTGRES_DB}"
+    - export DB_USERNAME="$POSTGRES_USER" DB_PASSWORD="$POSTGRES_PASSWORD"
+    - export REDIS_HOST=cache REDIS_PORT=6379
+    # 서비스 준비 확인. 여기서 끊으면 원인이 "DB/Redis 연결"임이 분명해진다.
+    # (없으면 Hibernate가 dialect 결정 실패로 죽어 원인 파악이 어렵다)
+    - 'timeout 30 bash -c "until (echo > /dev/tcp/db/5432) 2>/dev/null; do sleep 1; done" || { echo "TCP 연결 실패 - db:5432"; exit 1; }'
+    - 'timeout 30 bash -c "until (echo > /dev/tcp/cache/6379) 2>/dev/null; do sleep 1; done" || { echo "TCP 연결 실패 - cache:6379"; exit 1; }'
+  script:
+    - ./gradlew build --no-daemon --build-cache -Dgradle.user.home=.gradle
+
+fe-check:
+  image: node:24-slim
+  tags:
+    - CI
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "FE/**/*"
+        - ".gitlab-ci.yml"
+  before_script:
+    - cd FE
+    - npm ci
+  script:
+    - npm run format:check
+    - npm test
+    - npm run build

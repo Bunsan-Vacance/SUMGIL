@@ -45,6 +45,7 @@ from evaluate_final import to_markdown
 from app.core.config import get_settings
 from app.CROWD.pipeline.batch_predict import (
     CALIBRATION_NAME,
+    fixed_predictor_factory,
     predict_day,
     to_congestion_table,
 )
@@ -109,7 +110,15 @@ def status_tables(
     cause_rows: list[dict] = []
     for date in REFERENCE_DATES:
         day = pd.Timestamp(date)
-        predicted, _ = predict_day(lookup, panel, day, segments, holidays, events)
+        predicted, _ = predict_day(
+            fixed_predictor_factory(lookup),
+            panel,
+            day,
+            segments,
+            holidays,
+            events,
+            override_kind=lookup.kind,
+        )
         before = to_congestion_table(
             predicted, segments, capacity, calibration, thresholds, holiday_fallback=None
         )

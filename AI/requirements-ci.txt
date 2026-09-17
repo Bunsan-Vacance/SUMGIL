@@ -22,6 +22,7 @@ python-dotenv
 tenacity
 requests
 beautifulsoup4
+lxml
 pyyaml
 google-api-python-client
 google-auth
