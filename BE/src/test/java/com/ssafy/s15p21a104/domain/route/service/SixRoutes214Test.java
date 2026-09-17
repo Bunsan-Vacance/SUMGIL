@@ -84,6 +84,9 @@ class SixRoutes214Test {
                 bike("A", "R1", 250),
                 bike("R1", "C", 250),
                 bike("B", "R1", 100)));
+        lenient().when(graphRegistry.graphFor(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(invocation -> graphRegistry.graph());
         lenient().when(congestionRepository
                         .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
                                 any(), any(), any(), any()))

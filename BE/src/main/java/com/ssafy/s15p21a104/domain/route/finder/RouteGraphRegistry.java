@@ -50,6 +50,8 @@ public class RouteGraphRegistry {
     private Map<String, RouteMapper.StationInfo> stationInfos = Map.of();
     private Map<TransferRule.TransferKey, Integer> transferTimes = Map.of();
     private java.util.Set<String> rentalIds = java.util.Set.of();
+    private final java.util.concurrent.ConcurrentMap<String, RouteGraph> slotGraphs =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public RouteGraphRegistry(RouteEdgeTimeRepository edgeTimeRepository,
                               StationRepository stationRepository,
@@ -138,6 +140,71 @@ public class RouteGraphRegistry {
      */
     public RouteGraph graph() {
         return graph;
+    }
+
+    /**
+     * 요청 슬롯에 맞는 그래프를 돌려준다(S15P21A104-190).
+     *
+     * <p>슬롯별 SUBWAY 행으로 그래프를 조립해 캐시한다. 해당 슬롯 행이 DB에
+     * 없으면(빈 목록) default 그래프로 폴백한다 — 값을 지어내지 않는다.
+     * WALK·BIKE·BUS 연결은 default 로드 시 것과 같다(슬롯 의존 없음).
+     *
+     * @param dowType 요일 구분
+     * @param timeSlot 시간 슬롯
+     * @return 슬롯 그래프 또는 default 그래프. 미적재 시 null
+     */
+    public RouteGraph graphFor(int dowType, int timeSlot) {
+        if (graph == null) {
+            return null;
+        }
+        if (dowType == 0 && timeSlot == 0) {
+            return graph;
+        }
+        String key = dowType + ":" + timeSlot;
+        RouteGraph cached = slotGraphs.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        List<RouteEdgeRow> rows;
+        try {
+            rows = edgeTimeRepository.findSubwayEdgesBySlot(dowType, timeSlot);
+        } catch (RuntimeException e) {
+            log.warn("슬롯 그래프 조회 실패, default 폴백 ({}:{}): {}", dowType, timeSlot, e.getMessage());
+            return graph;
+        }
+        if (rows == null || rows.isEmpty()) {
+            return graph;
+        }
+        List<Edge> subwayEdges = new java.util.ArrayList<>();
+        for (RouteEdgeRow row : rows) {
+            subwayEdges.add(new Edge(row.fromNode(), row.toNode(), row.routeId(),
+                    row.travelSec(), row.waitSec(),
+                    com.ssafy.s15p21a104.domain.route.entity.TravelMode.SUBWAY));
+        }
+        // default 그래프에서 SUBWAY 엣지만 갈아끼운다 — 비-SUBWAY 연결은 그대로.
+        java.util.Set<String> nodes = new java.util.LinkedHashSet<>();
+        java.util.Map<String, List<Edge>> adjacency = new java.util.LinkedHashMap<>();
+        java.util.Map<String, java.util.Set<String>> stationLines = new java.util.LinkedHashMap<>();
+        for (Edge edge : subwayEdges) {
+            nodes.add(edge.fromNode());
+            nodes.add(edge.toNode());
+            adjacency.computeIfAbsent(edge.fromNode(), k -> new java.util.ArrayList<>()).add(edge);
+            stationLines.computeIfAbsent(edge.fromNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+            stationLines.computeIfAbsent(edge.toNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+        }
+        for (Edge edge : graph.edges()) {
+            if (edge.mode() == com.ssafy.s15p21a104.domain.route.entity.TravelMode.SUBWAY) {
+                continue;
+            }
+            nodes.add(edge.fromNode());
+            nodes.add(edge.toNode());
+            adjacency.computeIfAbsent(edge.fromNode(), k -> new java.util.ArrayList<>()).add(edge);
+            stationLines.computeIfAbsent(edge.fromNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+            stationLines.computeIfAbsent(edge.toNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+        }
+        RouteGraph slotGraph = RouteGraph.of(nodes, adjacency, stationLines);
+        slotGraphs.putIfAbsent(key, slotGraph);
+        return slotGraphs.getOrDefault(key, slotGraph);
     }
 
     /**

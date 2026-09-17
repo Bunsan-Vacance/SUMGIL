@@ -90,13 +90,17 @@ public class RouteSearchService {
 
         findStation(originStationId);
         findStation(destStationId);
-        // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
+        // 생략 시 현재 시각 기준. 슬롯은 탐색 그래프 선택에도 쓴다(190).
         DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
+        RouteGraph slotGraph = graphRegistry.graphFor(departureSlot.dowType(), departureSlot.timeSlot());
+        if (slotGraph == null) {
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
+        }
         // 214: 속도 3 + 혼잡 3 (배포 문서 순서표). modes 필터는 라벨 전에 걸고,
         // 속도 3은 시간순 상위, 혼잡 3은 혼잡순 상위(중복 가능)로 뽑는다.
         List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
                 candidateFinder().findCandidates(
-                        graph, originStationId, destStationId, MAX_CANDIDATES),
+                        slotGraph, originStationId, destStationId, MAX_CANDIDATES),
                 modes);
         List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
                 .limit(SPEED_ROUTES)
@@ -199,20 +203,27 @@ public class RouteSearchService {
             throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
 
+        DepartureSlot coordSlot = DepartureSlot.of(
+                request.departureTime() != null ? request.departureTime() : LocalDateTime.now());
+        RouteGraph slotGraph = graphRegistry.graphFor(coordSlot.dowType(), coordSlot.timeSlot());
+        if (slotGraph == null) {
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
+        }
+
         Map<String, RouteMapper.StationInfo> baseInfos = graphRegistry.stationInfos();
         List<Edge> originAccessEdges = CoordinateAccessEdges.accessEdges(
-                PLACE_ORIGIN_ID, origin.lat(), origin.lng(), baseInfos, graph, true);
+                PLACE_ORIGIN_ID, origin.lat(), origin.lng(), baseInfos, slotGraph, true);
         List<Edge> destAccessEdges = CoordinateAccessEdges.accessEdges(
-                PLACE_DEST_ID, destination.lat(), destination.lng(), baseInfos, graph, false);
+                PLACE_DEST_ID, destination.lat(), destination.lng(), baseInfos, slotGraph, false);
         if (originAccessEdges.isEmpty() || destAccessEdges.isEmpty()) {
             throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_FOUND);
         }
 
         List<Edge> accessEdges = new ArrayList<>(originAccessEdges);
         accessEdges.addAll(destAccessEdges);
-        // 원본 그래프에 접근 임시 엣지만 얹는다 (213 T2: 7조합 반복 대신 1회 탐색).
+        // 슬롯 그래프에 접근 임시 엣지만 얹는다 (190: 슬롯 반영 + 213 T2 1회 탐색).
         // withExtraEdges 자체도 얕은 복사라 안 건드리는 노드는 복사하지 않는다.
-        RouteGraph augmentedGraph = graph.withExtraEdges(accessEdges);
+        RouteGraph augmentedGraph = slotGraph.withExtraEdges(accessEdges);
 
         Map<String, RouteMapper.StationInfo> stationInfos = new HashMap<>(baseInfos);
         stationInfos.put(PLACE_ORIGIN_ID, new RouteMapper.StationInfo(
@@ -220,8 +231,7 @@ public class RouteSearchService {
         stationInfos.put(PLACE_DEST_ID, new RouteMapper.StationInfo(
                 PLACE_DEST_ID, destination.name(), destination.lat(), destination.lng()));
 
-        DepartureSlot departureSlot = DepartureSlot.of(
-                request.departureTime() != null ? request.departureTime() : LocalDateTime.now());
+        DepartureSlot departureSlot = coordSlot;
         RouteCandidateFinder coordFinder = new RouteCandidateFinder(
                 transferRule,
                 graphRegistry.transferTimes(),

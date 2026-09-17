@@ -184,10 +184,14 @@ public final class KShortestPathFinder {
                 return null;
             }
         }
-        // 소요 = root 구간 순수 소요 + spur 전체(내부 환승 포함)
+        // 소요 = root 구간 순수 소요 + 첫 승차 대기(190) + spur 전체(내부 환승 포함)
         // + root끝→spur시작 경계 환승(접근 경계 제외).
+        // root 비어 있으면 spur.totalSec에 첫 승차 대기가 이미 포함돼 있다.
         long totalSec = rootEdges.stream().mapToLong(e -> (long) e.travelSec()).sum()
                 + spur.totalSec();
+        if (!rootEdges.isEmpty()) {
+            totalSec += rootEdges.get(0).waitSec();
+        }
         if (!rootEdges.isEmpty() && !spur.edges().isEmpty()) {
             Edge last = rootEdges.get(rootEdges.size() - 1);
             Edge first = spur.edges().get(0);
