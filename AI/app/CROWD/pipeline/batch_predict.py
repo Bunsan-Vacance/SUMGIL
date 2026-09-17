@@ -20,15 +20,16 @@ API는 요청 시점에 모델을 돌리지 않고 이 표만 읽는다(`AI/CLAU
   `data/CROWD/interim/crowd_recent_ridership_long.parquet`을 이어 붙여 이력 창을 채운다(143). 내일은 `lag1d`
   (전날)가 비어 `lag7d`만으로 예측되는데 이 사실을 `lag1d_available`로 표시한다.
 
-## 가용성별 예측기 라우팅(197) — `routing.py`
+## 가용성별 예측기 라우팅(197, 145 후속 갱신) — `routing.py`
 
-이력 완비(`full`)/결손(`d1_only`·`d7_only`)/전무(`no_lag`)에 따라 쓰는 예측기가 다르다(145
-`family-check/RESULTS.md` 8절 판정). `predict_day`가 `routing.availability()` → `routing.select()`로
-그날의 kind를 정하고, `run()`이 필요한 예측기만 지연 로드해 같은 kind는 재사용한다. **`no_lag`도
-LightGBM 대신 lookup으로 조용히 넘어가던 옛 fallback은 없어졌다** — 지금은 `no_lag`도 라우팅이
-정한 예측기(GRU)를 쓰고, 그 사실이 meta의 `availability`·`routing_rule`에 남는다. `--predictor` CLI로
-kind를 명시하면 라우팅을 건너뛰고 그 kind 하나로 전 날짜를 예측한다(디버그·재현용) — 이때
-`routing_rule`은 `null`, `predictor_override`는 `true`다.
+이력 완비(`full`)/결손(`d1_only`·`d7_only`)/전무(`no_lag`)에 따라 쓰는 예측기가 다르다 — 145 후속
+`masking-check/RESULTS.md` 14절 판정으로 `full`·`d7_only`·`no_lag`는 마스킹 학습 LightGBM,
+`d1_only`만 GRU(dl)다(197 당시는 결손·전무 전부 GRU였다). `predict_day`가 `routing.availability()` →
+`routing.select()`로 그날의 kind를 정하고, `run()`이 필요한 예측기만 지연 로드해 같은 kind는
+재사용한다. **`no_lag`도 LightGBM 대신 lookup으로 조용히 넘어가던 옛 fallback은 없어졌다** — 지금은
+`no_lag`도 라우팅이 정한 예측기(마스킹 LightGBM)를 쓰고, 그 사실이 meta의 `availability`·
+`routing_rule`에 남는다. `--predictor` CLI로 kind를 명시하면 라우팅을 건너뛰고 그 kind 하나로 전
+날짜를 예측한다(디버그·재현용) — 이때 `routing_rule`은 `null`, `predictor_override`는 `true`다.
 
 ## 결측은 상태로 노출한다
 
@@ -190,18 +191,51 @@ def build_target_skeleton(
     return grid
 
 
+def _lightgbm_artifact(settings) -> Path | None:
+    """설정값 → LightGBM 배포 아티팩트 경로(145 후속). `resolve_predictor`의 `auto`·`lightgbm`
+    분기가 함께 쓴다.
+
+    `settings.crowd_lgbm_artifact`가 있으면 그 폴더명을 고정으로 쓴다(DL과 같은 방식, 197 B-3) —
+    없으면 `FileNotFoundError`, `model_kind`가 lightgbm이 아니면 `ValueError`로 막는다. 설정값이
+    `None`이면 이름 정렬 최신(`latest_artifact(kind="lightgbm")`, 없으면 `None`)으로 떨어진다.
+    """
+    if settings.crowd_lgbm_artifact is None:
+        return latest_artifact(settings.crowd_models_dir, kind="lightgbm")
+    art = Path(settings.crowd_models_dir) / settings.crowd_lgbm_artifact
+    if not art.exists():
+        raise FileNotFoundError(
+            "LightGBM 배포 아티팩트가 없다: settings.crowd_lgbm_artifact="
+            f"{settings.crowd_lgbm_artifact!r} 기대 경로={art} — 이름 정렬(latest_artifact)로 "
+            "고르지 않는다(145 후속). 학습을 먼저 돌리거나 설정값을 실제 폴더명에 맞춘다"
+        )
+    found_kind = artifact_kind(art)
+    if found_kind != "lightgbm":
+        raise ValueError(
+            f"settings.crowd_lgbm_artifact={settings.crowd_lgbm_artifact!r}({art})의 "
+            f"model_kind가 'lightgbm'이 아니라 {found_kind!r}다 — 설정값이 잘못된 폴더를 가리킨다"
+        )
+    return art
+
+
 def resolve_predictor(kind: str, panel_train: pd.DataFrame, settings) -> Predictor:
-    """설정값 → 예측기. `auto`는 최신 **lightgbm** 아티팩트가 있으면 그것, 없으면 lookup.
+    """설정값 → 예측기. `auto`는 고정된(또는 이름 정렬 최신) **lightgbm** 아티팩트가 있으면 그것,
+    없으면 lookup.
 
     `auto`가 `model_kind`를 보지 않고 폴더명 최신을 잡으면 144가 DL 아티팩트를 만든 순간 운영
-    기본값이 조용히 바뀐다 — `latest_artifact(kind=...)`로 계열을 고정한다. DL 채택 판정은 145다.
+    기본값이 조용히 바뀐다 — `latest_artifact(kind=...)`로 계열을 고정한다. DL 채택 판정은 145,
+    LightGBM 배포판을 이름으로 고정(마스킹 학습 아티팩트)한 것은 145 후속이다.
+
+    `lightgbm`도 `dl`처럼 `settings.crowd_lgbm_artifact`로 폴더명을 고정한다(145 후속, 아래
+    `_lightgbm_artifact`) — 마스킹 학습 아티팩트가 이름 정렬에서 우연히 최신으로 잡히는 것과
+    무관하게 명시로 고정해 운에 맡기지 않는다. 설정값이 `None`이면 예전처럼
+    `latest_artifact(kind="lightgbm")`(이름 정렬 최신)로 떨어진다.
 
     `dl`은 `latest_artifact`(이름 정렬)를 쓰지 않는다(197 B-3) — DL 변형이 18개라 이름 정렬 최신은
     채택 구성이 아니라 우연히 이름이 뒤에 오는 다른 변형(예: `dl_lstm_*`)을 고른다. 대신
     `settings.crowd_dl_artifact`로 폴더명을 고정한다.
     """
     if kind == "auto":
-        art = latest_artifact(settings.crowd_models_dir, kind="lightgbm")
+        art = _lightgbm_artifact(settings)
         if art:
             return build_predictor("lightgbm", artifact_dir=art)
         kind = "lookup"
@@ -221,7 +255,7 @@ def resolve_predictor(kind: str, panel_train: pd.DataFrame, settings) -> Predict
             )
         return build_predictor("dl", artifact_dir=art)
     if kind == "lightgbm":
-        art = latest_artifact(settings.crowd_models_dir, kind=kind)
+        art = _lightgbm_artifact(settings)
         if art is None:
             raise FileNotFoundError(
                 f"{kind} 아티팩트가 없다: {settings.crowd_models_dir} — 학습을 먼저 돌린다"
@@ -264,9 +298,9 @@ def predict_day(
     `override_kind`를 주면 라우팅을 건너뛰고 그 kind로 고정한다(디버그·재현용) — 이때
     meta의 `routing_rule`은 `None`, `predictor_override`는 `True`다. 주지 않으면
     `routing.availability()` → `routing.select(routing.POLICY, ...)`로 그날의 kind를 정한다
-    (145 판정, `routing.py` 참고). **옛 `predictor_fallback="no_history"`(이력 전무 시 lookup 강제
-    대체) 의미는 없어졌다** — `no_lag`도 라우팅이 정한 예측기(현재 GRU)를 쓴다. 그래도 BE가 이미
-    읽는 필드라 meta 키 자체는 유지하고 값을 `None`으로 둔다.
+    (145 후속 `masking-check` 판정, `routing.py` 참고). **옛 `predictor_fallback="no_history"`(이력
+    전무 시 lookup 강제 대체) 의미는 없어졌다** — `no_lag`도 라우팅이 정한 예측기(현재 마스킹
+    LightGBM)를 쓴다. 그래도 BE가 이미 읽는 필드라 meta 키 자체는 유지하고 값을 `None`으로 둔다.
     """
     target_date = pd.Timestamp(target_date).normalize()
     # 가용성 판정은 항상 HISTORY_DAYS(7일) 창 기준이다 — D-1·D-7 존재 여부만 보면 되고, 라우팅이
