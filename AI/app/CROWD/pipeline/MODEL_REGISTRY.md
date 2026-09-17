@@ -122,9 +122,9 @@ device, truncation, p_full, determinism`이 들어간다. `event_stats.parquet`�
 
 | kind | 뜻 | 언제 쓰이나 |
 | --- | --- | --- |
-| `lookup` | 평균만. 네이버·카카오 수준의 정직한 기준선 | 아티팩트가 없을 때의 `auto`, 그리고 **이력 창(직전 7일)에 실측이 하나도 없을 때의 대체**(143) |
-| `lightgbm:<폴더>` | lookup + 잔차 모델 | `auto` 기본. 배치 meta `predictor_version`에 폴더명이 남아 어느 모델이 예측했는지 추적 |
-| `dl:<폴더>` | lookup + GRU 시퀀스 잔차(144·198) | 명시 지정(`--predictor dl`)일 때만. `auto`는 고르지 않는다 |
+| `lookup` | 평균만. 네이버·카카오 수준의 정직한 기준선 | 아티팩트가 없을 때의 `auto`, 그리고 `--predictor lookup` 명시(197부터 "이력 전무 시 자동 대체"는 없어지고 라우팅이 `dl`을 쓴다) |
+| `lightgbm:<폴더>` | lookup + 잔차 모델 | `auto` 기본, 그리고 라우팅의 `full`(197) |
+| `dl:<폴더>` | lookup + GRU 시퀀스 잔차(144·198) | 명시 지정(`--predictor dl`), 그리고 라우팅의 `d1_only`·`d7_only`·`no_lag`(197). `auto`는 여전히 고르지 않는다 — `crowd_dl_artifact`로 폴더명을 고정한다(아래 "DL 배포판") |
 | `llm` | 시차·이벤트를 프롬프트로 주고 수치를 받는 실험 축 | 145 비교 실험 전용. 프로덕션 기본값 아님 |
 
 **`model_kind` 규칙(144).** 모든 아티팩트 `meta.json`은 계열을 `model_kind`로 밝힌다 — `lightgbm`(기본,
@@ -136,13 +136,13 @@ device, truncation, p_full, determinism`이 들어간다. `event_stats.parquet`�
 DL은 `seq_days`=14). 배치는 `max(HISTORY_DAYS, predictor.required_history_days)`로 이력 창을 잡고
 `meta.history_window_days`에 남긴다. DL은 창이 그보다 짧게 와도 앞쪽이 마스크 0으로 그대로 동작한다.
 
-**결측 내성(143에서 확인, 미해결).** 배포 세트 모델에 시차 컬럼을 전부 NaN으로 넣으면 lookup 대비 RMSE **−36.6 / −40.7%**,
+**결측 내성(143에서 확인).** 배포 세트 모델에 시차 컬럼을 전부 NaN으로 넣으면 lookup 대비 RMSE **−36.6 / −40.7%**,
 1주 전만 있으면 −20.8 / −14.9%(`validation/CROWD/recent-source-check/RESULTS.md` 4절). 학습 때 결측을 본 적이 없기 때문이다.
-그래서 이력이 전혀 없으면 lookup으로 대체하고, D−1 하루만 빠진 경우(`lag1d_available=false`)는 아직 노출만 한다.
+**197부터는 이 붕괴를 lookup 대체가 아니라 라우팅(아래)으로 피한다** — 이력 상태에 따라 처음부터 다른 예측기를 쓴다.
 학습 시 시차 마스킹은 144가 다뤘고 198이 입력을 고쳤다 — 채택 구성(V3)은 같은 상황에서 **+1.05 / +1.92%**다
 (144 V0은 −7.9 / −3.9였다).
 
-**가용성별 예측기 선택 — 145에서 쌍 부트스트랩으로 판정**(`validation/CROWD/family-check/RESULTS.md`).
+**가용성별 예측기 선택 — 145에서 쌍 부트스트랩으로 판정**(`validation/CROWD/family-check/RESULTS.md` 8절).
 같은 시나리오 안에서 계열을 쌍 비교한 결과(날짜 블록 1,000회, 2025 전체 1,992,900행):
 
 | 이력 상태 | 예측기 | GRU − LightGBM RMSE %p [CI 하한] 승/하 |
@@ -155,7 +155,36 @@ DL은 `seq_days`=14). 배치는 `max(HISTORY_DAYS, predictor.required_history_da
 (+0.35/+1.22)이고 나머지는 0을 포함한다(198의 시드 표준편차 ±1.02보다 날짜 CI 폭 ±1.9%p가 넓다).
 채택 근거는 정확도 우위가 아니라 **LightGBM의 −36.6/−40.7%p 붕괴를 피한다**는 것이다.
 하루치 CPU 추론은 GRU 0.23초 / LightGBM 0.03초(5,460행)로 운영 기준(10분)에 무관하다.
-운영 코드 반영(3단 선택)은 **197**이다 — 이 문서의 `auto` 규칙은 아직 `lightgbm`만 고른다.
+
+### DL 배포판 — 이름 정렬로 고르지 않는다(197 B-3)
+
+`--predictor dl`(과 라우팅이 `dl`을 고르는 모든 경우)은 `latest_artifact(kind="dl")`(폴더명 정렬 최신)을
+쓰지 않는다. DL 변형이 18개라 이름 정렬 최신은 채택 구성이 아니라 우연히 이름이 뒤에 오는 다른 변형
+(`dl_lstm_s14_noev_s44_…` 등)을 고른다. 대신 `Settings.crowd_dl_artifact`(`app/core/config.py`)로
+폴더명을 고정한다.
+
+| 항목 | 값 |
+| --- | --- |
+| 설정값 | `crowd_dl_artifact: str = "dl_gru_s14_noev_s42_20260914-1358"` |
+| 가리키는 아티팩트 | `dl_gru_s14_noev_s42_20260914-1358` — 198 V3 구성(7채널, **정적 이벤트 없음**), 시드 42 |
+| 판정 근거 | 198 판정 1·4(이벤트 5열 제거가 `full`·`no_lag` 동시 개선) + 145 family-check(위 표) |
+| 실패 동작 | 폴더가 없으면 `FileNotFoundError`(설정값 이름·기대 경로를 메시지에 남김), 폴더는 있는데 `meta.json`의 `model_kind`가 `dl`이 아니면 `ValueError`(설정값이 잘못된 폴더를 가리키는 경우를 잡는다) |
+
+### 가용성별 라우팅 정책 — `app/CROWD/pipeline/routing.py`
+
+운영 코드 반영(197 B부, `predict_day`가 매 날짜 `routing.availability()` → `routing.select()`로 kind를 정한다).
+활성 정책은 가용성 축만이라 오늘 한 표는 예측기가 하나로 배정된다(`routing.POLICY`).
+
+| 가용성(`avail`) | 뜻 | 예측기(`pred`) |
+| --- | --- | --- |
+| `full` | 전날·1주 전 실측 모두 있음 | `lightgbm`(`auto`와 동일 — 최신 lightgbm 아티팩트) |
+| `d1_only` | 전날만 있음 | `dl`(`crowd_dl_artifact` 고정 아티팩트) |
+| `d7_only` | 1주 전만 있음 | `dl` |
+| `no_lag` | 둘 다 없음 | `dl` |
+
+부원(비활성) 규칙 2개(1호선 전용 선형 회귀, 모양 군집 LightGBM)는 `routing.py`의 `POLICY` 목록에 **주석**으로만
+남아 있다 — 근거는 있으나 미검증이라 논의 I-1(원인 규명)이 선행돼야 켤 수 있다. `Rule`이 `avail` 외에
+`line`·`day_type`·`group`도 받을 수 있어 그 규칙을 켜도 구조를 다시 잡지 않는다(명시 조건이 많은 규칙이 우선).
 
 ## 5. 변환 층 산출물 — 배율표도 아티팩트처럼 추적한다
 
