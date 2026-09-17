@@ -10,10 +10,11 @@ set -uo pipefail
 usage() {
   printf '%s\n' \
     "Usage:" \
-    "  run_bike_avg_batch.sh [--artifact PATH] [--out-dir PATH]" \
+    "  run_bike_avg_batch.sh [--artifact PATH | --refresh-baseline PATH] [--out-dir PATH]" \
     "" \
     "Options:" \
     "  --artifact PATH  models/BIKE/<artifact> directory. Defaults to latest artifact." \
+    "  --refresh-baseline PATH  Refresh avg from recent snapshots using this baseline directory." \
     "  --out-dir PATH   Serving output directory. Defaults to app settings." \
     "  -h, --help       Show this help."
 }
@@ -81,11 +82,18 @@ if [[ -z "${PYTHON}" ]]; then
 fi
 
 BATCH_ARGS=(--predictor avg)
+ARTIFACT_SET=0
+REFRESH_BASELINE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --artifact)
       BATCH_ARGS+=(--artifact "$2")
+      ARTIFACT_SET=1
+      shift 2
+      ;;
+    --refresh-baseline)
+      REFRESH_BASELINE="$2"
       shift 2
       ;;
     --out-dir)
@@ -104,11 +112,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${ARTIFACT_SET}" -eq 1 && -n "${REFRESH_BASELINE}" ]]; then
+  echo "--artifact와 --refresh-baseline은 함께 사용할 수 없습니다." >&2
+  exit 2
+fi
+
 cd "${AI_ROOT}"
+
+if [[ -n "${REFRESH_BASELINE}" ]]; then
+  REFRESHED_ARTIFACT="${AI_ROOT}/models/BIKE/avg-refreshed"
+  BATCH_ARGS+=(--artifact "${REFRESHED_ARTIFACT}")
+fi
 
 printf '%s\n' "[BIKE avg batch] start: $(date -Is)"
 printf '%s\n' "[BIKE avg batch] python: ${PYTHON}"
 printf '%s\n' "[BIKE avg batch] args: ${BATCH_ARGS[*]}"
+
+if [[ -n "${REFRESH_BASELINE}" ]]; then
+  "${PYTHON}" -m app.BIKE.pipeline.refresh_avg \
+    --baseline "${REFRESH_BASELINE}/stock_profile_avg.parquet" \
+    --output-dir "${REFRESHED_ARTIFACT}"
+  status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    printf '%s\n' "[BIKE avg batch] refresh FAILED(status=${status}): $(date -Is)"
+    exit "${status}"
+  fi
+fi
 
 "${PYTHON}" -m app.BIKE.pipeline.batch_predict "${BATCH_ARGS[@]}"
 status=$?
