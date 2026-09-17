@@ -22,7 +22,9 @@ y      [B, 20, 2]      대상일 z-잔차,  y_mask [B, 20]
   채운다. 이력 채널에서 마스크 0인 날의 요일유형은 모델에 "그 날이 무슨 날이었는지"만 알려준다.
 - **이벤트**: 개수 컬럼과 `festival_min_duration_days`. 축제가 없는 날의 최단 기간은 원본이 NaN인데
   `festival_count=0`이 이미 "없음"을 말하므로 표준화 전에 0으로 둔다(입력 텐서에 NaN을 둘 수 없다).
-- 분할 경계는 144 계획대로 고정한다: 2024-01~10 학습 / 2024-11~12 검증 / 2025 평가(`SPLITS`).
+- 분할 경계는 144 계획대로 고정한 것이 **기본값**이다: 2024-01~10 학습 / 2024-11~12 검증 / 2025 평가
+  (`SPLITS`). 학습 창을 늘리는 실험(145 후속)은 `splits_with_train_start`로 학습 시작일만 당기고
+  검증·평가 경계는 그대로 둔다 — `SequencePanel.build(..., splits=...)`/`split_index`가 그 값을 쓴다.
 
 ## 입력 설계 변형(198)
 
@@ -65,8 +67,8 @@ LightGBM 쪽은 87·89·90·93에서 피처 세트 7개를 비교해 고른 것�
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -163,6 +165,20 @@ SPLITS: dict[str, tuple[str, str]] = {
     "valid": ("2024-11-01", "2024-12-31"),
     "eval": ("2025-01-01", "2025-12-31"),
 }
+
+
+def splits_with_train_start(
+    train_start: str, base: Mapping[str, tuple[str, str]] = SPLITS
+) -> dict[str, tuple[str, str]]:
+    """`base`(기본 `SPLITS`)를 복사해 **학습 시작일만** 당긴다 — 검증·평가 경계는 그대로(145 후속 학습 창 확장).
+
+    `base`는 바꾸지 않는다(항상 새 dict를 돌려준다). 학습 시작일이 학습 종료일 이상이면 학습
+    구간이 비거나 뒤집히므로 막는다.
+    """
+    train_end = base["train"][1]
+    if pd.Timestamp(train_start) >= pd.Timestamp(train_end):
+        raise ValueError(f"train_start({train_start})는 학습 종료일({train_end})보다 앞서야 한다")
+    return {**base, "train": (train_start, train_end)}
 
 
 # ── 스케일·표준화 표 ──
@@ -265,6 +281,7 @@ class SequencePanel:
     seq_features: str = "base"
     use_static_events: bool = True
     event_encoding: str = "zscore"  # 198 후속 — "zscore" | "log1p_max"
+    splits: dict[str, tuple[str, str]] = field(default_factory=lambda: dict(SPLITS))  # 145 후속
     nb_z: np.ndarray | None = None  # [S, D, 20, 6] float32 — `neighbor`일 때만
     nb_mask: np.ndarray | None = None  # [S, D, 20, 3] float32 — side별 1 있음 / 0 없음
 
@@ -285,6 +302,7 @@ class SequencePanel:
         use_static_events: bool = True,
         neighbor_map: pd.DataFrame | None = None,
         event_encoding: str = "zscore",
+        splits: Mapping[str, tuple[str, str]] | None = None,
     ) -> SequencePanel:
         """파생 프레임(학습·검증·평가 전부 포함 가능)을 밀집 배열로 pivot한다.
 
@@ -292,6 +310,8 @@ class SequencePanel:
         표에 없는 (역, 슬롯)은 std가 없어 z를 만들 수 없으므로 마스크 0으로 남긴다.
         `seq_features="neighbor"`면 `derived`에 `nb_*_resid` 6열이, `neighbor_map`에 이웃 표가 필요하다
         (`adjacency.build_neighbor_map`/`build_transfer_map`을 concat한 것).
+        `splits`를 주면 `split_index`가 그 경계를 쓴다(기본은 `SPLITS`) — 145 후속 학습 창 확장에서
+        학습 시작일만 당길 때 `splits_with_train_start`로 만든 값을 넘긴다.
         """
         if seq_features not in SEQ_FEATURE_SETS:
             raise ValueError(
@@ -415,6 +435,7 @@ class SequencePanel:
             seq_features=seq_features,
             use_static_events=use_static_events,
             event_encoding=event_encoding,
+            splits=dict(splits or SPLITS),
             nb_z=nb_z,
             nb_mask=nb_mask,
         )
@@ -433,7 +454,7 @@ class SequencePanel:
         return s_idx.astype("int64"), d_idx.astype("int64")
 
     def split_index(self, name: str) -> tuple[np.ndarray, np.ndarray]:
-        start, end = SPLITS[name]
+        start, end = self.splits[name]
         return self.sample_index(start, end)
 
     # ── 배치 ──
@@ -539,18 +560,39 @@ SLIM_COLS = ["date", "station_no", "time_slot", "day_type", *RESID_COLS, *EVENT_
 
 
 def load_derived_slim(
-    columns: Sequence[str] | None = None, cache_path: Path | None = None
+    columns: Sequence[str] | None = None,
+    cache_path: Path | None = None,
+    panel_path: Path | None = None,
+    events_path: Path | None = None,
+    split_date: str | pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """파생 캐시(398.7만 행 × 64열, 575MB)에서 **필요한 열만** 읽는다.
 
     시퀀스 모델은 잔차·요일유형·이벤트만 쓰므로 64열을 전부 올릴 이유가 없다(메모리·시간 모두 절약).
     캐시가 없거나 `derived_version`이 다르면 `load_or_build_derived`로 만든 뒤 열을 자른다 —
     파생 재계산 조건은 그 함수가 판정하는 그대로다(`AI/CLAUDE.md` "실험 실행 효율").
+
+    `panel_path`/`events_path`/`split_date`를 주면 캐시 미스일 때 그 패널로 파생을 새로 만든다
+    (145 후속 학습 창 확장 — 예: 2023~2025 패널). 캐시 히트 경로는 그대로다(요청한 열이 이미
+    캐시에 있으면 패널을 읽지 않는다). `panel_path`를 바꾸면서 `cache_path`를 생략하면 기본
+    파생 캐시(`crowd_panel_derived_2024_2025.parquet`)를 덮어쓰게 되므로 막는다.
     """
-    from app.CROWD.pipeline.dataset import DERIVED_CACHE, load_or_build_derived, load_panel
+    from app.CROWD.pipeline.dataset import (
+        CROWD_PROCESSED,
+        DERIVED_CACHE,
+        PANEL_NAME,
+        SPLIT_DATE,
+        load_or_build_derived,
+        load_panel,
+    )
     from app.CROWD.pipeline.dataset import time_split as _time_split
     from app.CROWD.pipeline.features import DERIVED_VERSION
     from app.CROWD.pipeline.lookup import DayTypeLookupBaseline
+
+    if panel_path is not None and cache_path is None:
+        raise ValueError(
+            "panel_path를 바꾸면 cache_path도 따로 줘야 한다 — 기본 파생 캐시를 덮어쓴다"
+        )
 
     cols = list(columns or SLIM_COLS)
     cache_path = Path(cache_path or DERIVED_CACHE)
@@ -567,9 +609,19 @@ def load_derived_slim(
             )
             out["date"] = pd.to_datetime(out["date"]).dt.normalize()
             return out
-    panel = load_panel(with_events=True)
-    train_raw, _ = _time_split(panel)
+    load_kwargs: dict[str, Path] = {}
+    if panel_path is not None:
+        load_kwargs["panel_path"] = panel_path
+    if events_path is not None:
+        load_kwargs["events_path"] = events_path
+    panel = load_panel(with_events=True, **load_kwargs)
+    train_raw, _ = _time_split(panel, split_date or SPLIT_DATE)
     lookup = DayTypeLookupBaseline().fit(train_raw)
-    out = load_or_build_derived(panel, lookup, cache_path=cache_path)[cols].copy()
+    out = load_or_build_derived(
+        panel,
+        lookup,
+        cache_path=cache_path,
+        panel_path=panel_path or CROWD_PROCESSED / PANEL_NAME,
+    )[cols].copy()
     out["date"] = pd.to_datetime(out["date"]).dt.normalize()
     return out
