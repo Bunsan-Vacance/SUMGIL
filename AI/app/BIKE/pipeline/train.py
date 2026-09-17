@@ -35,6 +35,15 @@ v4_weather(날씨 추가, S15P21A104-160) 스모크:
 v4_distance(역 거리 추가, S15P21A104-160) 스모크:
     python -m app.BIKE.pipeline.train --train-months 202401 202402 --valid-months 202412 \
         --test-months 202507 --tag smoke-v4-distance --feature-set v4_distance
+
+빈 재고/만차 확률 분류기(`--train-empty-full`, S15P21A104-160 Phase 6, v4_weather 전용):
+    이미 로드·프로파일링된 train/valid/test 프레임을 재사용해 `model_is_empty.txt`/
+    `model_is_full.txt`를 같은 아티팩트 디렉터리에 같이 저장한다(회귀와 별개 학습,
+    피처는 동일). 검증 결과는 `validation/BYC/eta-empty-full-check/RESULTS.md` 참고.
+
+    python -m app.BIKE.pipeline.train --train-months 202401 ... 202411 --valid-months 202412 \
+        --test-months 202507 202508 202509 --tag v4-weather-full --feature-set v4_weather \
+        --train-empty-full
 """
 
 from __future__ import annotations
@@ -61,6 +70,7 @@ from app.BIKE.pipeline.external_features import (
 from app.BIKE.pipeline.features import (
     BASE_FEATURE_COLS,
     FEATURE_SETS,
+    MODEL_FEATURE_COLS_V4_WEATHER,
     TARGET_COL,
     HistoricalProfileBuilder,
     apply_station_code,
@@ -82,6 +92,11 @@ STATION_DISTANCE_PATH = (
     / "station_distance_features_full_haversine.csv"
 )
 MODELS_DIR = AI_ROOT / "models" / "BIKE"
+# LightGBMEtaPredictor·anchor-horizon-feature-check/src/build_station_master.py와 같은 파일 —
+# is_full 타깃(도착 시점 재고 >= rack_count) 유도에 쓴다.
+STATION_MASTER_PATH = (
+    AI_ROOT / "data" / "EXTERNAL" / "station" / "processed" / "station_master.parquet"
+)
 
 BASE_READ_COLS = ["od_station_id", "date", *BASE_FEATURE_COLS, TARGET_COL]
 TRAIN_READ_COLS = [*BASE_READ_COLS, "target_rent_count", "target_return_count"]
@@ -156,6 +171,86 @@ def evaluate_lightgbm(
     }
 
 
+def attach_rack_count(df: pd.DataFrame, station_static: pd.DataFrame) -> pd.DataFrame:
+    """is_full 타깃 유도용 rack_count 조인. 결측 역은 is_full을 NaN으로 남긴다."""
+    merged = df.merge(
+        station_static[["od_station_id", "rack_count"]], on="od_station_id", how="left"
+    )
+    missing = int(merged["rack_count"].isna().sum())
+    if missing:
+        print(f"  rack_count 결측 {missing:,}행 — is_full 계산에서 제외(NaN 유지)")
+    return merged
+
+
+def attach_empty_full_targets(df: pd.DataFrame) -> pd.DataFrame:
+    """`arrival_stock = stock_anchor_hour + target_net_flow`에서 이진 타깃을 유도한다.
+
+    회귀 타깃(target_net_flow)과 같은 패널에서 바로 유도되므로 새 데이터가 필요 없다
+    (`validation/BYC/eta-empty-full-check/RESULTS.md` 검증 근거).
+    """
+    df = df.copy()
+    arrival_stock = df["stock_anchor_hour"] + df[TARGET_COL]
+    df["is_empty"] = (arrival_stock <= 0).astype(int)
+    df["is_full"] = (arrival_stock >= df["rack_count"]).astype(int)
+    df.loc[df["rack_count"].isna(), "is_full"] = float("nan")
+    return df
+
+
+def _make_xy_binary(df: pd.DataFrame, target_col: str) -> tuple[pd.DataFrame, pd.Series]:
+    rows = df.dropna(subset=[target_col])
+    return rows[MODEL_FEATURE_COLS_V4_WEATHER].fillna(0), rows[target_col].astype(int)
+
+
+def fit_binary(
+    train_df: pd.DataFrame, valid_df: pd.DataFrame, target_col: str, random_state: int = 42
+):
+    from lightgbm import LGBMClassifier, early_stopping, log_evaluation
+
+    x_train, y_train = _make_xy_binary(train_df, target_col)
+    x_valid, y_valid = _make_xy_binary(valid_df, target_col)
+    print(
+        f"  [{target_col}] train 양성비율 {y_train.mean():.4%} ({int(y_train.sum()):,}/{len(y_train):,})"
+    )
+
+    model = LGBMClassifier(
+        objective="binary",
+        n_estimators=1500,
+        learning_rate=0.02,
+        num_leaves=127,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        is_unbalance=True,
+        n_jobs=-1,
+        random_state=random_state,
+    )
+    t0 = time.time()
+    model.fit(
+        x_train,
+        y_train,
+        eval_set=[(x_valid, y_valid)],
+        eval_metric="binary_logloss",
+        callbacks=[early_stopping(60), log_evaluation(0)],
+    )
+    return model, time.time() - t0
+
+
+def evaluate_binary(model, df: pd.DataFrame, label: str, target_col: str) -> dict:
+    from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+
+    x, y = _make_xy_binary(df, target_col)
+    proba = model.predict_proba(x)[:, 1]
+    result = {
+        "split": label,
+        "target": target_col,
+        "rows": len(df),
+        "pos_rate": float(y.mean()),
+        "logloss": float(log_loss(y, proba, labels=[0, 1])),
+        "brier": float(brier_score_loss(y, proba)),
+    }
+    result["auc"] = float(roc_auc_score(y, proba)) if y.nunique() == 2 else None
+    return result
+
+
 def _attach_v4_features(
     df: pd.DataFrame,
     feature_set: str,
@@ -191,10 +286,16 @@ def run(
     tag: str = "v3",
     feature_set: str = "v3",
     out_root: Path = MODELS_DIR,
+    train_empty_full: bool = False,
 ) -> Path:
     if feature_set not in FEATURE_SETS:
         raise ValueError(f"알 수 없는 feature_set: {feature_set} (가능: {list(FEATURE_SETS)})")
+    if train_empty_full and feature_set != "v4_weather":
+        raise ValueError(
+            "--train-empty-full은 v4_weather에서만 검증됐다 (validation/BYC/eta-empty-full-check)"
+        )
     feature_cols = FEATURE_SETS[feature_set]
+    station_static = pd.read_parquet(STATION_MASTER_PATH) if train_empty_full else None
 
     train_paths = monthly_paths("train", train_months)
     valid_paths = monthly_paths("valid", valid_months)
@@ -261,6 +362,22 @@ def run(
         train_df, valid_df, random_state, feature_cols=feature_cols
     )
     reports = [evaluate_lightgbm(model, valid_df, "valid", feature_cols=feature_cols)]
+
+    empty_full_models: dict = {}
+    empty_full_reports: list = []
+    if train_empty_full:
+        train_ef = attach_empty_full_targets(attach_rack_count(train_df, station_static))
+        valid_ef = attach_empty_full_targets(attach_rack_count(valid_df, station_static))
+        for target_col in ("is_empty", "is_full"):
+            print(f"[{target_col}] 학습...")
+            ef_model, ef_time = fit_binary(train_ef, valid_ef, target_col, random_state)
+            empty_full_models[target_col] = ef_model
+            r = evaluate_binary(ef_model, valid_ef, "valid", target_col)
+            r["train_time_sec"] = ef_time
+            empty_full_reports.append(r)
+            print(f"  valid: {r}")
+        del train_ef, valid_ef
+
     del train_df, valid_df
 
     for p in test_paths:
@@ -274,6 +391,15 @@ def run(
         reports.append(
             evaluate_lightgbm(model, test_df, f"test:{p.stem[-6:]}", feature_cols=feature_cols)
         )
+        if train_empty_full:
+            test_ef = attach_empty_full_targets(attach_rack_count(test_df, station_static))
+            for target_col in ("is_empty", "is_full"):
+                r = evaluate_binary(
+                    empty_full_models[target_col], test_ef, f"test:{p.stem[-6:]}", target_col
+                )
+                empty_full_reports.append(r)
+                print(f"  {r['split']}: {r}")
+            del test_ef
         del test_df
 
     # ── 아티팩트 저장 ──
@@ -288,6 +414,9 @@ def run(
     (out_dir / "station_categories.json").write_text(
         json.dumps(list(station_dtype.categories), ensure_ascii=False), encoding="utf-8"
     )
+    if train_empty_full:
+        for target_col, ef_model in empty_full_models.items():
+            ef_model.booster_.save_model(str(out_dir / f"model_{target_col}.txt"))
     meta = {
         "tag": tag,
         "feature_set": feature_set,
@@ -299,6 +428,8 @@ def run(
         "sample_frac": sample_frac,
         "train_time_sec": train_time_sec,
         "lightgbm_eval": reports,
+        "empty_full_feature_cols": MODEL_FEATURE_COLS_V4_WEATHER if train_empty_full else None,
+        "empty_full_eval": empty_full_reports if train_empty_full else None,
         "avg_profile_rows": len(avg_baseline.table_),
         "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
     }
@@ -333,6 +464,12 @@ def main(argv: list[str] | None = None) -> None:
         choices=list(FEATURE_SETS),
         help="v3(기본) | v4_kbo_lag(KBO·D-1/D-7 lag 추가, S15P21A104-160)",
     )
+    ap.add_argument(
+        "--train-empty-full",
+        action="store_true",
+        help="빈 재고(is_empty)/만차(is_full) 확률 분류기도 같이 학습·저장한다 "
+        "(v4_weather 전용, S15P21A104-160 Phase 6)",
+    )
     args = ap.parse_args(argv)
     run(
         args.train_months,
@@ -342,6 +479,7 @@ def main(argv: list[str] | None = None) -> None:
         args.random_state,
         args.tag,
         args.feature_set,
+        train_empty_full=args.train_empty_full,
     )
 
 

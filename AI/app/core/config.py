@@ -60,10 +60,15 @@ class Settings(BaseSettings):
     # 행은 update_lag_lookup.py가 정리한다.
     bike_lag_lookup_retention_days: int = 10
 
-    # ── BIKE 실시간 예측 모델(anchor+horizon LightGBM, S15P21A104-160 Phase 5) ──
-    # train.py --feature-set v4_weather 로 만든 아티팩트. station_categories.json이
+    # ── BIKE 실시간 예측 모델(anchor+horizon LightGBM, S15P21A104-160 Phase 5~6) ──
+    # train.py --feature-set v4_weather --train-empty-full 로 만든 아티팩트. station_categories.json이
     # 저장된 버전이어야 한다(2026-09-17 이전 아티팩트는 이 파일이 없어 못 씀).
-    bike_eta_model_dir: Path = AI_ROOT / "models" / "BIKE" / "v4-weather-final_20260917-0941"
+    # 2026-09-17 20:37 아티팩트부터 model_is_empty.txt/model_is_full.txt(p_empty/p_full
+    # 분류기, S15P21A104-160 Phase 6)가 같이 들어있다 — 이전 아티팩트는 회귀만 있고
+    # 없어도 predictor_eta.LightGBMEtaPredictor가 없는 파일로 판단해 p_empty/p_full만 None으로 둔다.
+    # 회귀는 이전 아티팩트(45% 샘플)보다 전체 데이터로 다시 학습돼 소폭 개선됐다
+    # (valid MAE 1.4797->1.4741, R² 0.3319->0.3364) — validation/BYC/eta-empty-full-check/RESULTS.md.
+    bike_eta_model_dir: Path = AI_ROOT / "models" / "BIKE" / "v4-weather-final_20260917-2037"
     # 역별 rack_count 룩업(학습 원본 대신 미리 뽑아둔 작은 파일) —
     # validation/BYC/anchor-horizon-feature-check/src/build_station_master.py가 만듦.
     bike_station_master_path: Path = (

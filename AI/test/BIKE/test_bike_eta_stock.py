@@ -29,9 +29,17 @@ SUNDAY_MORNING = datetime(2026, 9, 20, 0, 10)  # noqa: DTZ001
 class FakeEtaPredictor:
     """predict_delta()만 구현 — 실제 모델 대신 고정값을 돌려주며 호출 인자를 기록한다."""
 
-    def __init__(self, net_flow: float = 0.0, horizon_min_used: int = 5) -> None:
+    def __init__(
+        self,
+        net_flow: float = 0.0,
+        horizon_min_used: int = 5,
+        p_empty: float | None = None,
+        p_full: float | None = None,
+    ) -> None:
         self.net_flow = net_flow
         self.horizon_min_used = horizon_min_used
+        self.p_empty = p_empty
+        self.p_full = p_full
         self.calls: list[dict] = []
 
     def predict_delta(
@@ -47,7 +55,12 @@ class FakeEtaPredictor:
                 "weather": weather,
             }
         )
-        return {"net_flow": self.net_flow, "horizon_min_used": self.horizon_min_used}
+        return {
+            "net_flow": self.net_flow,
+            "horizon_min_used": self.horizon_min_used,
+            "p_empty": self.p_empty,
+            "p_full": self.p_full,
+        }
 
 
 class RaisingEtaPredictor:
@@ -57,8 +70,15 @@ class RaisingEtaPredictor:
 
 @pytest.fixture
 def fake_predictor(monkeypatch):
-    def _install(net_flow: float = 3.0, horizon_min_used: int = 30) -> FakeEtaPredictor:
-        predictor = FakeEtaPredictor(net_flow=net_flow, horizon_min_used=horizon_min_used)
+    def _install(
+        net_flow: float = 3.0,
+        horizon_min_used: int = 30,
+        p_empty: float | None = None,
+        p_full: float | None = None,
+    ) -> FakeEtaPredictor:
+        predictor = FakeEtaPredictor(
+            net_flow=net_flow, horizon_min_used=horizon_min_used, p_empty=p_empty, p_full=p_full
+        )
         monkeypatch.setattr(service, "_eta_predictor", predictor)
         monkeypatch.setattr(service, "get_eta_predictor", lambda settings=None: predictor)
         return predictor
@@ -129,6 +149,18 @@ def test_happy_path_uses_predictor_net_flow(fake_predictor, live_dir):
     assert result["source"] == "lightgbm"
     assert result["arrival_dow_type"] == 0
     assert result["arrival_time_slot"] == 28  # 14:00 + 15분 = 14:15 -> hour*2 + (minute>=30) = 28
+
+
+def test_empty_full_probabilities_pass_through_when_predictor_returns_them(
+    fake_predictor, live_dir
+):
+    fake_predictor(net_flow=1.0, p_empty=0.12, p_full=0.34)
+    live_dir(current_stock=5, updated_at=NOW)
+
+    result = service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
+
+    assert result["p_empty"] == 0.12
+    assert result["p_full"] == 0.34
 
 
 def test_predicted_stock_clips_at_zero_not_negative(fake_predictor, live_dir):

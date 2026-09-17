@@ -11,6 +11,12 @@
     historical_profile_*.parquet   HistoricalProfileBuilder 3종(train.py가 저장)
     station_categories.json    station_code 복원용 카테고리 목록(train.py가 저장)
 
++ 선택 아티팩트(`--train-empty-full` 플래그로 같이 만든 것, S15P21A104-160 Phase 6):
+    model_is_empty.txt         빈 재고(0대) 확률 LightGBM 이진분류 booster
+    model_is_full.txt          만차 확률 LightGBM 이진분류 booster
+    없으면 `p_empty`/`p_full`을 `None`으로 둔다 — 구버전 아티팩트 디렉터리에서도 회귀는
+    그대로 동작해야 하므로 필수 아님(`ensure_loaded()`가 없어도 에러를 안 낸다).
+
 + 별도 룩업(train.py 아티팩트 밖):
     station_master.parquet     역별 rack_count(validation/BYC/anchor-horizon-feature-check
                                 /src/build_station_master.py가 만듦)
@@ -33,6 +39,8 @@ from app.BIKE.pipeline.calendar import get_holidays_cached
 from app.BIKE.pipeline.features import MODEL_FEATURE_COLS_V4_WEATHER
 
 HORIZON_CHOICES = (5, 10, 15, 30)
+EMPTY_MODEL_FILENAME = "model_is_empty.txt"
+FULL_MODEL_FILENAME = "model_is_full.txt"
 
 
 class ModelUnavailable(RuntimeError):
@@ -69,9 +77,16 @@ class LightGBMEtaPredictor:
             self._station_dtype = pd.CategoricalDtype(categories=categories)
             rack = pd.read_parquet(self.rack_count_path)
             self._rack_count = rack.set_index("od_station_id")["rack_count"]
+
+            self._booster_is_empty = self._load_optional_classifier(lgb, d / EMPTY_MODEL_FILENAME)
+            self._booster_is_full = self._load_optional_classifier(lgb, d / FULL_MODEL_FILENAME)
         except Exception as exc:
             raise ModelUnavailable(f"모델 아티팩트 로딩 실패({self.artifact_dir}): {exc}") from exc
         self._loaded = True
+
+    @staticmethod
+    def _load_optional_classifier(lgb, path: Path):
+        return lgb.Booster(model_file=str(path)) if path.exists() else None
 
     def _build_feature_row(
         self,
@@ -140,4 +155,11 @@ class LightGBMEtaPredictor:
         )
         x = frame.reindex(columns=MODEL_FEATURE_COLS_V4_WEATHER).fillna(0)
         net_flow = float(self._booster.predict(x)[0])
-        return {"net_flow": net_flow, "horizon_min_used": horizon_min}
+        p_empty = float(self._booster_is_empty.predict(x)[0]) if self._booster_is_empty else None
+        p_full = float(self._booster_is_full.predict(x)[0]) if self._booster_is_full else None
+        return {
+            "net_flow": net_flow,
+            "horizon_min_used": horizon_min,
+            "p_empty": p_empty,
+            "p_full": p_full,
+        }

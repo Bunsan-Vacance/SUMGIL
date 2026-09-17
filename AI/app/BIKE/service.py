@@ -330,7 +330,9 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
     도착 시점 재고를 낸다. 배치표(`bike_stock_pred`)는 이 경로에서 전혀 읽지 않는다 —
     그 표는 BE가 자체 DB로 적재해서 쓰는 폴백 전용이다(S15P21A104-159/-160 결정사항).
 
-    확률(`p_empty`/`p_full`)은 quantile 모델이 아직 없어 이번엔 항상 `None`이다.
+    확률(`p_empty`/`p_full`)은 모델 아티팩트 디렉터리에 이진분류 booster
+    (`model_is_empty.txt`/`model_is_full.txt`, S15P21A104-160 Phase 6)가 있을 때만 채워지고,
+    없으면 `None`이다 — `predictor_eta.LightGBMEtaPredictor`가 그 판단을 담당한다.
     """
     settings = get_settings()
     if now is None:
@@ -357,8 +359,8 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
         "eta_minutes": eta_minutes,
         "current_stock": live_stock,
         "predicted_stock": predicted_stock,
-        "p_empty": None,
-        "p_full": None,
+        "p_empty": result.get("p_empty"),
+        "p_full": result.get("p_full"),
         "arrival_dow_type": arr_dow,
         "arrival_time_slot": arr_slot,
         "source": "lightgbm",

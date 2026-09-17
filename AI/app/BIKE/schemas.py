@@ -39,8 +39,12 @@ class EtaStockResponse(BaseModel):
     predicted_stock: float = Field(
         description="도착 시점 예측 재고. 0 이상으로만 clip, 상한은 BE가 station master로 처리"
     )
-    p_empty: float | None = Field(description="도착 슬롯 0대 확률(0~1). avg 표 근사치")
-    p_full: float | None = Field(description="도착 슬롯 만차 확률(0~1). avg 표 근사치")
+    p_empty: float | None = Field(
+        description="도착 슬롯 0대 확률(0~1). 분류기 아티팩트 없으면 null"
+    )
+    p_full: float | None = Field(
+        description="도착 슬롯 만차 확률(0~1). 분류기 아티팩트 없으면 null"
+    )
     arrival_dow_type: int = Field(description="도착 시점 dow_type(0평일/1토/2일·공휴일)")
     arrival_time_slot: int = Field(description="도착 시점 30분 슬롯(0~47)")
     source: str = Field(description="델타 계산에 쓴 예측기. 지금은 lightgbm 고정")
