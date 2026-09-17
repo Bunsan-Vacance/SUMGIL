@@ -1,6 +1,6 @@
 # CROWD 혼잡도 — 서빙 산출물·API 명세 (BE 전달용)
 
-작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(20:35 생성)
+작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(2026-09-17 13:23 재생성 — 145 후속 라우팅 반영판)
 
 > **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
 > `batch_predict.OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 · 등급 임계값
@@ -74,11 +74,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:00",
   "time_slot": "06-07",
-  "congestion_pct": 9.8106944835,
+  "congestion_pct": 11.591921,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 591.8334049458,
-  "alighting_pred": 2282.2476847746,
+  "boarding_pred": 923.805823,
+  "alighting_pred": 2454.620876,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -94,11 +94,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:30",
   "time_slot": "06-07",
-  "congestion_pct": 13.9426219287,
+  "congestion_pct": 17.477853,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 591.8334049458,
-  "alighting_pred": 2282.2476847746,
+  "boarding_pred": 923.805823,
+  "alighting_pred": 2454.620876,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -109,7 +109,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 ]
 ```
 
-두 행의 `boarding_pred`가 **같다**(591.83). 0절 2번이 말하는 지점이다. `congestion_pct`는 9.8 → 13.9로 30분마다 다르다.
+두 행의 `boarding_pred`가 **같다**(923.81). 0절 2번이 말하는 지점이다. `congestion_pct`는 11.6 → 17.5로 30분마다 다르다.
 
 ---
 
@@ -165,10 +165,10 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
 | `rows` | `21606` | 표 행 수 |
 | `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
-| `lookup_substituted_rows` | `228` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
+| `lookup_substituted_rows` | `120` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
 | `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
 | `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
-| `generated_at` | `"2026-09-16T20:35:52+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
+| `generated_at` | `"2026-09-17T13:23:43+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
 
 ---
 
@@ -186,7 +186,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "grade_thresholds": [50.0, 100.0],
   "predictor": "lightgbm",
   "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113",
-  "generated_at": "2026-09-16T20:35:52+09:00",
+  "generated_at": "2026-09-17T13:23:43+09:00",
   "status_counts": {"ok": 20902, "no_calibration": 585, "segment_truncated": 119},
   "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}]
 }
@@ -210,8 +210,8 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113",
   "lag1d_available": false,
   "slots": [
-    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 6.282879, "grade": 0, "data_status": "ok", "pred_source": "model"},
-    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 4.556710, "grade": 0, "data_status": "ok", "pred_source": "model"}
+    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.286222, "grade": 0, "data_status": "ok", "pred_source": "model"},
+    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 6.320377, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -234,7 +234,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "line": "2호선",
   "time_slot_30min": "08:30",
   "stations": [
-    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 24.063364, "grade": 0, "data_status": "ok", "pred_source": "model"}
+    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 27.387391, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -286,7 +286,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 ## 6. 이번 검증(S15P21A104-145)이 만든 변경
 
-**실행되는 프로덕션 코드 변경은 없다.** 145는 검증 티켓이고, 18개 변경 파일 중 `app/` 아래는 문서 1건뿐이다.
+**145 본 검증에서는 실행되는 프로덕션 코드 변경이 없었다.** 145는 검증 티켓이고, 18개 변경 파일 중 `app/` 아래는 문서 1건뿐이었다. **145 후속(마스킹 학습, 2026-09-17)은 예외다** — `routing.POLICY`·`config.crowd_lgbm_artifact`·`batch_predict.resolve_predictor`를 바꿨고, 그 영향은 아래 표 마지막 행에 있다.
 
 | 경로 | 성격 |
 | --- | --- |
