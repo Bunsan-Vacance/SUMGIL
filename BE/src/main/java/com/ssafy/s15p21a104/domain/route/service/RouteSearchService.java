@@ -233,14 +233,18 @@ public class RouteSearchService {
                             edge.mode()))
                     .toList();
             // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다.
+            // 접근 경계(WALK ↔ 주행)는 환승이 아니라 비용을 가산하지 않는다(213 T1).
             List<Long> transferSecs = new ArrayList<>();
             String currentLine = null;
+            TravelMode currentMode = null;
             for (Edge edge : found.edges()) {
-                if (currentLine != null && !currentLine.equals(edge.routeId())) {
+                if (currentLine != null && !currentLine.equals(edge.routeId())
+                        && !TransferRule.isAccessBoundary(currentMode, edge.mode())) {
                     transferSecs.add(rule.costWithStation(
                             0, edge.fromNode(), currentLine, edge.routeId()));
                 }
                 currentLine = edge.routeId();
+                currentMode = edge.mode();
             }
             // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤(algorithmCandidates)
             // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.

@@ -5,6 +5,7 @@ import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -154,9 +155,14 @@ public final class RouteMapper {
             }
             legs.add(toLeg(segments.subList(start, i), stationsById));
             if (routeChanged && i < segments.size()) {
-                legs.add(transferLeg(segments.get(i).fromStationId(), stationsById,
-                        transferSeconds.get(boundary)));
-                boundary++;
+                EngineSegment prev = segments.get(i - 1);
+                EngineSegment next = segments.get(i);
+                // 접근 경계(WALK ↔ 주행)는 환승 TRANSFER leg를 만들지 않는다(213 T1).
+                if (!TransferRule.isAccessBoundary(prev.mode(), next.mode())) {
+                    legs.add(transferLeg(segments.get(i).fromStationId(), stationsById,
+                            transferSeconds.get(boundary)));
+                    boundary++;
+                }
             }
             start = i;
         }
