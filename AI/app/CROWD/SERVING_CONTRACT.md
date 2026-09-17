@@ -144,7 +144,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 
 ## 3. 배치 메타 — `.meta.json`
 
-경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다.
+경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다. 메타 키는 **23개**다(197까지 21개 + 200에서 이벤트 커버리지 2개 추가).
 
 | 키 | 예시 | 의미 |
 | --- | --- | --- |
@@ -162,6 +162,8 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `predictor_override` | `false` | (197) `--predictor` CLI로 kind를 명시해 라우팅을 건너뛰었는지 |
 | `predictor_fallback` | `null` | **(197부터 항상 `null`)** 옛 "이력 전무 시 lookup 강제 대체" 의미는 없어졌다 — 필드는 BE 계약 유지를 위해 키만 남는다 |
 | `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
+| `events_coverage_end` | `"2026-12-31"` | (200) `crowd_events_files`에 나열된 이벤트 표들을 합친 최대 date. 읽은 표가 하나도 없으면 `null` |
+| `events_available` | `true` | (200) `target_date`가 `events_coverage_end` 이내인지. `false`면 그 날짜의 경기·축제 칸은 "없었다"가 아니라 "표가 안 덮는다"는 뜻(0-채움 자체는 유지) |
 | `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
 | `rows` | `21606` | 표 행 수 |
 | `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
@@ -188,7 +190,9 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113",
   "generated_at": "2026-09-17T13:23:43+09:00",
   "status_counts": {"ok": 20902, "no_calibration": 585, "segment_truncated": 119},
-  "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}]
+  "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}],
+  "events_coverage_end": "2026-12-31",
+  "events_available": true
 }
 ```
 
@@ -303,6 +307,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 | 인원 음수 수정(5.1) | `*_pred` 클립 → lookup 대체 + `pred_clipped`(bool) → `pred_source`(str) 컬럼 교체 | **컬럼 1개 이름·타입 변경** — parquet 스키마·API 응답 반영 완료(197 B부) |
 | 가용성별 라우팅(197) | 이력 완비(`full`)는 LightGBM, 결손·전무(`d1_only`/`d7_only`/`no_lag`)는 GRU(`dl`)로 라우팅 | `meta.predictor`·`predictor_version` 값이 날짜마다 달라진다(이미 내려가는 필드, 스키마 변경 없음). `meta.availability`·`routing_rule`·`predictor_override` 3개 키가 새로 추가됐다 |
 | **가용성별 라우팅 수정(145 후속, 마스킹 LightGBM)** | `d7_only`·`no_lag`는 이제 LightGBM(마스킹 학습 아티팩트, `masking-check/RESULTS.md` 14절)이 맡는다. `d1_only`만 GRU(`dl`)로 남는다 | 스키마·키는 그대로다(변경 없음). `predictor_version`의 LightGBM 값이 `lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113`로 바뀐다 — `d7_only`·`no_lag` 날짜의 표시 모델명이 GRU에서 LightGBM으로 보인다. **값 드리프트**(2026-09-13/14 `d7_only` 두 날짜를 GRU 판 → 마스킹 LightGBM 판으로 재생성해 21,606행씩 행 정렬 비교): `congestion_pct` 평균 \|Δ\| **0.62 / 0.86%p**(중앙값 0.39 / 0.49, 95퍼센타일 1.93 / 3.06, 최대 32.4 / 50.1), `grade`가 달라진 셀 **3.85 / 4.36%**, `data_status` 100% 동일, `lookup_substituted_rows` 228 → 120 / 0 → 16, `history_window_days` 14 → 7. 지난 GRU 도입(변경 통지 01: 평균 4.7 / 4.4%p)보다 값은 훨씬 덜 움직인다. 통지문 `.claude/handoff/TO_BE-crowd-routing-change-02.md` |
+| **이벤트 커버리지 메타(200)** | 배치가 이벤트 표를 `crowd_events_files`(콤마 구분 다중 파일, 뒤 파일이 같은 키를 덮어씀)로 읽어 2026 이후 대상 날짜에도 경기·축제가 붙는다. 표가 그 날짜를 덮는지를 meta로 노출한다 | `/crowd/meta` 필드 2개 추가(`events_coverage_end`·`events_available`, additive) — 배치 `.meta.json` 키도 21→23개(2개 추가). 기존 필드·키는 그대로다 |
 
 ---
 
