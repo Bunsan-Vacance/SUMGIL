@@ -29,6 +29,14 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
   early stopping을 결정적으로 만들기 위해서다. 참고용으로 절단 섞인 손실(`valid_loss_trunc`,
   고정 시드)도 `history.json`에 같이 남긴다.
 
+## 학습 창 확장(145 후속)
+
+기본 구성은 `dl/dataset.SPLITS`(2024-01~10 학습)로 고정이다. `--train-start`를 주면
+`splits_with_train_start`로 **학습 시작일만** 당기고 검증(2024-11~12)·평가(2025) 경계는 그대로 둔다.
+다른 패널·파생 캐시(예: 2023~2025로 늘린 패널)로 학습하려면 `--panel`/`--events`/`--derived-cache`를
+같이 준다 — `--panel`만 주고 `--derived-cache`를 생략하면 기본 파생 캐시를 덮어쓰므로 막는다
+(`train.py`와 같은 가드).
+
 ## 재현성
 
 `torch.manual_seed` + `use_deterministic_algorithms(True, warn_only=True)`를 건다. cuDNN RNN은
@@ -43,6 +51,10 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
     python -m app.CROWD.pipeline.dl.train_dl --seq-features neighbor          # 198 V1
     python -m app.CROWD.pipeline.dl.train_dl --static-events                  # 198 V0(144 구성)
     python -m app.CROWD.pipeline.dl.train_dl --huber-delta 3                  # 198 손실 실험
+    python -m app.CROWD.pipeline.dl.train_dl --train-start 2023-01-01
+        --panel crowd_panel_2023_2025.parquet --events crowd_station_events_2023_2025.parquet
+        --derived-cache crowd_panel_derived_2023_2025.parquet
+        --out-root models/CROWD/_experiments/masking --name w2023_gru_s42   # 145 후속 창 확장(한 줄로)
 """
 
 from __future__ import annotations
@@ -53,6 +65,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -62,7 +75,7 @@ import pandas as pd
 # cuBLAS 결정적 경로. torch를 import하기 전에 설정해야 효과가 있다.
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
-from app.CROWD.pipeline.dataset import time_split
+from app.CROWD.pipeline.dataset import CROWD_INTERIM, CROWD_PROCESSED, time_split
 from app.CROWD.pipeline.dl.dataset import (
     EVENT_ENCODINGS,
     SEQ_FEATURE_SETS,
@@ -74,6 +87,7 @@ from app.CROWD.pipeline.dl.dataset import (
     load_derived_slim,
     seq_channels_for,
     seq_feature_columns,
+    splits_with_train_start,
     stat_features_for,
     truncate_seq,
 )
@@ -101,18 +115,33 @@ def build_train_panel(
     seq_features: str = "base",
     use_static_events: bool = True,
     event_encoding: str = "zscore",
+    splits: Mapping[str, tuple[str, str]] = SPLITS,
+    panel_path: Path | None = None,
+    events_path: Path | None = None,
+    derived_cache: Path | None = None,
 ) -> tuple[SequencePanel, pd.DataFrame, pd.DataFrame]:
-    """2024 파생(잔차·요일유형·이벤트 + 입력 안이 요구하는 열)만 읽어 밀집 패널·스케일·통계를 만든다.
+    """파생(잔차·요일유형·이벤트 + 입력 안이 요구하는 열)만 읽어 밀집 패널·스케일·통계를 만든다.
 
-    스케일·이벤트 통계는 **학습 구간(2024-01~10)만**으로 fit한다 — 검증·평가 구간 통계가 스며들면 누수다.
+    스케일·이벤트 통계는 **`splits["train"]`만**으로 fit한다 — 검증·평가 구간 통계가 스며들면 누수다.
     `seq_features="neighbor"`면 파생 캐시의 `nb_*_resid` 6열을 더 읽고(재계산 없음) 이웃 표를 만든다.
+    `splits`(기본 `SPLITS`)로 학습 구간을 고르고, `panel_path`/`events_path`/`derived_cache`를 주면
+    그 패널·파생 캐시를 쓴다(145 후속 학습 창 확장). 기본은 오늘과 동일하게 2024/2025 패널이다.
     """
-    derived = load_derived_slim(columns=[*SLIM_COLS, *seq_feature_columns(seq_features)])
-    derived = derived[derived["date"] < pd.Timestamp(SPLITS["eval"][0])]
+    load_kwargs: dict[str, Path] = {}
+    if panel_path is not None:
+        load_kwargs["panel_path"] = panel_path
+    if events_path is not None:
+        load_kwargs["events_path"] = events_path
+    derived = load_derived_slim(
+        columns=[*SLIM_COLS, *seq_feature_columns(seq_features)],
+        cache_path=derived_cache,
+        **load_kwargs,
+    )
+    derived = derived[derived["date"] < pd.Timestamp(splits["eval"][0])]
     if stations:
         keep = np.sort(derived["station_no"].unique())[:stations]
         derived = derived[derived["station_no"].isin(keep)]
-    tr_start, tr_end = SPLITS["train"]
+    tr_start, tr_end = splits["train"]
     train_d = derived[(derived["date"] >= tr_start) & (derived["date"] <= tr_end)]
     scale = fit_scale(train_d)
     stats = fit_event_stats(train_d, encoding=event_encoding)
@@ -124,6 +153,7 @@ def build_train_panel(
         use_static_events=use_static_events,
         neighbor_map=panel_neighbor_map() if seq_features == "neighbor" else None,
         event_encoding=event_encoding,
+        splits=splits,
     )
     return sp, scale, stats
 
@@ -322,11 +352,19 @@ def save_artifact(out_dir: Path, model, sp: SequencePanel, lookup, stats, meta, 
     return out_dir
 
 
-def prepare(args) -> tuple[SequencePanel, pd.DataFrame, DayTypeLookupBaseline]:
+def prepare(
+    args,
+    splits: Mapping[str, tuple[str, str]] = SPLITS,
+    panel_path: Path | None = None,
+    events_path: Path | None = None,
+    derived_cache: Path | None = None,
+) -> tuple[SequencePanel, pd.DataFrame, DayTypeLookupBaseline]:
     """밀집 패널·이벤트 통계·lookup — 한 안의 시드·손실 반복이 **공유하는** 준비물(198).
 
     시드마다 새로 만들면 400만 행 읽기·pivot을 반복하게 된다(`AI/CLAUDE.md` "실험 실행 효율").
-    lookup은 LightGBM 아티팩트와 같은 기준선(2024 전체 fit) — 파생 캐시의 잔차 정의와 같아야 한다.
+    lookup은 LightGBM 아티팩트와 같은 기준선(패널 전체 fit) — 파생 캐시의 잔차 정의와 같아야 한다.
+    `splits`/`panel_path`/`events_path`/`derived_cache`는 145 후속 학습 창 확장 — 기본값은 오늘과
+    동일한 144 구성이다. lookup도 같은 패널로 fit해야 파생 캐시의 잔차 정의와 어긋나지 않는다.
     """
     from app.CROWD.pipeline.dataset import load_panel
 
@@ -335,8 +373,17 @@ def prepare(args) -> tuple[SequencePanel, pd.DataFrame, DayTypeLookupBaseline]:
         seq_features=args.seq_features,
         use_static_events=args.static_events,
         event_encoding=args.event_encoding,
+        splits=splits,
+        panel_path=panel_path,
+        events_path=events_path,
+        derived_cache=derived_cache,
     )
-    panel = load_panel(with_events=True)
+    load_kwargs: dict[str, Path] = {}
+    if panel_path is not None:
+        load_kwargs["panel_path"] = panel_path
+    if events_path is not None:
+        load_kwargs["events_path"] = events_path
+    panel = load_panel(with_events=True, **load_kwargs)
     train_raw, _ = time_split(panel)
     return sp, stats, DayTypeLookupBaseline().fit(train_raw)
 
@@ -346,7 +393,29 @@ def run(args, prepared=None) -> Path:
 
     device = resolve_device(args.device)
     t0 = time.time()
-    sp, stats, lookup = prepared if prepared is not None else prepare(args)
+
+    panel_path = getattr(args, "panel", None)
+    events_path = getattr(args, "events", None)
+    derived_cache = getattr(args, "derived_cache", None)
+    if panel_path is not None and derived_cache is None:
+        raise SystemExit(
+            "--panel을 바꾸면 --derived-cache도 따로 줘야 한다 — 기본 캐시"
+            "(crowd_panel_derived_2024_2025)를 덮어쓴다"
+        )
+    train_start = getattr(args, "train_start", None) or SPLITS["train"][0]
+    splits = splits_with_train_start(train_start)
+
+    sp, stats, lookup = (
+        prepared
+        if prepared is not None
+        else prepare(
+            args,
+            splits=splits,
+            panel_path=panel_path,
+            events_path=events_path,
+            derived_cache=derived_cache,
+        )
+    )
     idx_train = sp.split_index("train")
     idx_valid = sp.split_index("valid")
     print(
@@ -422,7 +491,9 @@ def run(args, prepared=None) -> Path:
         "station_ids": [int(s) for s in sp.station_ids],
         "n_stations": len(sp.station_ids),
         "derived_version": DERIVED_VERSION,
-        "splits": {k: list(v) for k, v in SPLITS.items()},
+        "splits": {k: list(v) for k, v in sp.splits.items()},
+        "panel_file": Path(panel_path).name if panel_path else "기본",
+        "derived_cache": Path(derived_cache).name if derived_cache else "기본",
         "n_train_samples": len(idx_train[0]),
         "n_valid_samples": len(idx_valid[0]),
         "seed": args.seed,
@@ -504,9 +575,33 @@ def main(argv: list[str] | None = None) -> None:
         help="같은 시드 2회 학습 점검 에폭 수(0이면 생략)",
     )
     ap.add_argument("--stations", type=int, default=None, help="앞쪽 N개 역만(스모크)")
+    ap.add_argument(
+        "--train-start",
+        default=SPLITS["train"][0],
+        help=f"학습 시작일 YYYY-MM-DD(145 후속 학습 창 확장). 검증·평가 경계는 그대로. 기본 {SPLITS['train'][0]}",
+    )
+    ap.add_argument(
+        "--panel", default=None, help=f"패널 파일명 — 상대경로면 {CROWD_PROCESSED} 기준"
+    )
+    ap.add_argument(
+        "--events", default=None, help=f"이벤트 파일명 — 상대경로면 {CROWD_PROCESSED} 기준"
+    )
+    ap.add_argument(
+        "--derived-cache", default=None, help=f"파생 캐시 파일명 — 상대경로면 {CROWD_INTERIM} 기준"
+    )
     ap.add_argument("--name", default=None, help="아티팩트 폴더명 고정")
     ap.add_argument("--out-root", default=None)
     args = ap.parse_args(argv)
+
+    def _resolve(value: str | None, base: Path) -> Path | None:
+        if value is None:
+            return None
+        p = Path(value)
+        return p if p.is_absolute() else base / p
+
+    args.panel = _resolve(args.panel, CROWD_PROCESSED)
+    args.events = _resolve(args.events, CROWD_PROCESSED)
+    args.derived_cache = _resolve(args.derived_cache, CROWD_INTERIM)
     run(args)
 
 

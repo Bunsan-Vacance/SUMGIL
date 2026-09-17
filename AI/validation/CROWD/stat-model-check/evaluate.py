@@ -257,9 +257,22 @@ def table_a(losses: pd.DataFrame, series_names: list[str], n_boot: int, seed: in
     return pd.DataFrame(rows)
 
 
-# ── 표 B: LightGBM 대비 쌍 차이 ──
-def table_b(losses: pd.DataFrame, series_names: list[str], n_boot: int, seed: int) -> pd.DataFrame:
-    candidates = [s for s in series_names if s != LIGHTGBM]
+# ── 표 B: 기준 계열 대비 쌍 차이(기본은 LightGBM, `baseline`으로 바꿀 수 있다) ──
+def table_b(
+    losses: pd.DataFrame,
+    series_names: list[str],
+    n_boot: int,
+    seed: int,
+    baseline: str = LIGHTGBM,
+) -> pd.DataFrame:
+    """`baseline`과의 쌍 차이 CI. 기본값(`LIGHTGBM`)일 때의 동작·출력은 이전과 바이트 동일하다.
+
+    145 후속(마스킹 학습 비교, `masking-check/compare.py`)이 GRU 시드를 기준으로도 같은 표를
+    내야 해서 기준 계열을 인자로 뺐다 — 이 표의 수치는 이미 공개돼 있어 기본 호출 결과는
+    바꾸지 않는다.
+    """
+    candidates = [s for s in series_names if s != baseline]
+    baseline_label = "LightGBM" if baseline == LIGHTGBM else baseline
     dates = np.sort(losses["date"].unique())
     n_dates = len(dates)
     counts = boot.resample_counts(boot.resample_dates(n_dates, n_boot, seed), n_dates)
@@ -275,8 +288,8 @@ def table_b(losses: pd.DataFrame, series_names: list[str], n_boot: int, seed: in
         sae_lookup[pos] = sub["sae__lookup"].to_numpy(dtype="float64")
         sse_lgb = np.zeros(n_dates)
         sae_lgb = np.zeros(n_dates)
-        sse_lgb[pos] = sub[f"sse__{LIGHTGBM}"].to_numpy(dtype="float64")
-        sae_lgb[pos] = sub[f"sae__{LIGHTGBM}"].to_numpy(dtype="float64")
+        sse_lgb[pos] = sub[f"sse__{baseline}"].to_numpy(dtype="float64")
+        sae_lgb[pos] = sub[f"sae__{baseline}"].to_numpy(dtype="float64")
         boot_rmse_base = boot.weighted_rmse(counts, sse_lookup, n_vec)
         boot_mae_base = boot.weighted_mae(counts, sae_lookup, n_vec)
         boot_rmse_lgb = boot.improvement_pct(
@@ -321,14 +334,14 @@ def table_b(losses: pd.DataFrame, series_names: list[str], n_boot: int, seed: in
                     "axis": axis,
                     "group": group,
                     "target": target,
-                    "point_diff_RMSE_%p(계열-LightGBM)": point_rmse - point_rmse_lgb,
+                    f"point_diff_RMSE_%p(계열-{baseline_label})": point_rmse - point_rmse_lgb,
                     "diff_RMSE_CI_low": rmse_lo,
                     "diff_RMSE_CI_high": rmse_hi,
-                    "point_diff_MAE_%p(계열-LightGBM)": point_mae - point_mae_lgb,
+                    f"point_diff_MAE_%p(계열-{baseline_label})": point_mae - point_mae_lgb,
                     "diff_MAE_CI_low": mae_lo,
                     "diff_MAE_CI_high": mae_hi,
                     "대체_가능(RMSE·MAE 하한>-2%p)": bool(rmse_lo > -2.0 and mae_lo > -2.0),
-                    "DM_stat(계열-LightGBM)": dm["stat"],
+                    f"DM_stat(계열-{baseline_label})": dm["stat"],
                     "DM_p": dm["p"],
                 }
             )

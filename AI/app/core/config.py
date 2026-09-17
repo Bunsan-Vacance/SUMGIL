@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # 고르는데, DL 변형이 18개라 이름 운에 맡기면 dl_lstm_*(대조군)이 dl_gru_*(채택 구성)보다
     # 뒤에 와서 잘못 뽑힌다 — 198 V3(정적 이벤트 없음) 판정이 이 이름을 가리키게 명시로 고정한다.
     crowd_dl_artifact: str = "dl_gru_s14_noev_s42_20260914-1358"
+    # 145 후속 — LightGBM 배포 아티팩트도 이름으로 고정한다(`latest_artifact` 이름 정렬은
+    # `_masked-stack_`이 뒤에 와 우연히 맞지만 운에 맡기지 않는다). `None`이면 예전처럼
+    # `latest_artifact(kind="lightgbm")`, 그것도 없으면 lookup.
+    crowd_lgbm_artifact: str | None = "festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113"
     # 혼잡도 등급 임계치(%). 팀 논의 A-2 미확정 — 국토부 150/170/190은 판별력이 없어(90) 분포 기준 기본값.
     crowd_grade_thresholds: str = "50,100"
     # LLM 예측기(실험 축). 키가 없으면 llm kind는 명확한 오류로 막힌다.
