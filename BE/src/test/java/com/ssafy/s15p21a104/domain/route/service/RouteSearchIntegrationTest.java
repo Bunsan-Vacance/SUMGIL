@@ -213,10 +213,9 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
-    @DisplayName("IT8: 도보 지름길이 이기면 WALK legs로 응답한다 (대여소 경계 분할)")
+    @DisplayName("IT8: 도보 지름길이 이기면 WALK legs로 응답한다 (213 T2: K-path라 대체 후보도 나온다)")
     void it8_도보우위_WALK() {
-        // 지하철 A→C 직통 900초 vs 도보 A→R1→C 240초. 도보가 이겨야 한다.
-        // 122 경계 분할로 대여소 양단이 보인다.
+        // 지하철 A→C 직통 900초 vs 도보 A→R1→C 240초. 도보가 첫 후보, 지하철이 대체 후보.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 900),
                 walk("A", "R1", 120),
@@ -224,7 +223,7 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        assertEquals(2, result.size());
         assertEquals(2, result.get(0).legs().size());
         assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.WALK));
         assertEquals("A", result.get(0).legs().get(0).fromNodeId());
@@ -235,10 +234,10 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
-    @DisplayName("IT9: 혼합(지하철+도보) 경로가 응답된다")
+    @DisplayName("IT9: 혼합(지하철+도보) 경로가 응답된다 (213 T2: K-path라 대체 후보도 나온다)")
     void it9_혼합_지하철도보() {
         // A→B 지하철 100초, B→R1→C 도보 240초 vs A→B→C 지하철 500초(환승 포함).
-        // 혼합이 이긴다.
+        // 혼합이 첫 후보, 지하철 직통이 대체 후보.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "B", "L1", 100),
                 subway("B", "C", "L2", 400),
@@ -247,7 +246,7 @@ class RouteSearchIntegrationTest {
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertEquals(1, result.size());
+        assertEquals(2, result.size());
         List<TravelMode> modes = result.get(0).legs().stream().map(leg -> leg.mode()).toList();
         assertTrue(modes.contains(TravelMode.WALK));
         assertTrue(modes.contains(TravelMode.SUBWAY));

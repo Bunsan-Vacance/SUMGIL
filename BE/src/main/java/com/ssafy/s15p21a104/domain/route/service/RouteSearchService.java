@@ -19,6 +19,7 @@ import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.CandidateModeSets;
 import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
+import com.ssafy.s15p21a104.domain.route.finder.KShortestPathFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.finder.ShortestPathFinder;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
@@ -93,10 +94,9 @@ public class RouteSearchService {
         findStation(destStationId);
         // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
         DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
-        // 수단 조합별 하위 그래프는 그래프 로드 시점에 미리 계산해둔 캐시를 그대로 쓴다
-        // (S15P21A104-155) — 요청마다 22만 엣지짜리 그래프를 7번씩 다시 필터링하지 않는다.
+        // 213 T2: 원본 그래프 1회 + K-path로 후보를 뽑는다. 7조합 반복 탐색 대체.
         List<RouteSearchResponse> candidates = algorithmCandidates(
-                graphRegistry.candidateSubgraphs(), originStationId, destStationId, graphRegistry.stationInfos());
+                graph, originStationId, destStationId, graphRegistry.stationInfos());
         // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
         // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
         // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
@@ -169,28 +169,25 @@ public class RouteSearchService {
     }
 
     /**
-     * 허용 수단 조합별로 반복 탐색해 여러 경로 후보를 모은다(S15P21A104-185).
+     * 원본 그래프 1회에 K-path로 여러 경로 후보를 모은다(S15P21A104-213 T2).
      *
-     * <p>같은 최단경로 알고리즘을 하위 그래프 개수만큼 반복 적용할 뿐, 알고리즘 자체는
-     * 그대로다. 하위 그래프는 {@link CandidateModeSets#CORE_MODE_SETS} 조합별로 미리
-     * 필터링해둔 것을 받는다 — 역 검색은 {@link RouteGraphRegistry#candidateSubgraphs()}의
-     * 캐시를 그대로 넘기고, 좌표 검색은 그 캐시에 접근 임시 엣지만 얹은 걸 넘긴다
-     * (S15P21A104-155, 요청마다 22만 엣지짜리 그래프를 7번 다시 필터링하던 병목 제거).
-     * 조합마다 나온 후보 중 leg 구성이 같은 것은 중복 제거하고, 소요시간이 가장 짧은
-     * 것부터 정렬해 최대 {@value #MAX_CANDIDATES}개까지만 담는다. routeType 배정
-     * ({@link RouteType#SHORTEST}/{@link RouteType#ALTERNATIVE})은 여기서 하지 않는다 —
-     * {@code modes} 필터가 아직 안 걸린 시점이라 "가장 빠른 것"이 필터 후에도 그대로
-     * 유지된다는 보장이 없다({@link #relabelByRank} 참고).
+     * <p>7개 하위 그래프 반복 탐색을 대체한다. 서로 다른 leg 서명의 후보를 최대
+     * {@value #MAX_CANDIDATES}개까지 소요시간 오름차순으로 담는다. routeType 배정은
+     * 여기서 하지 않는다 — {@code modes} 필터가 아직 안 걸린 시점이라 "가장 빠른 것"이
+     * 필터 후에도 그대로 유지된다는 보장이 없다({@link #relabelByRank} 참고).
      */
     private List<RouteSearchResponse> algorithmCandidates(
-            List<RouteGraph> candidateSubgraphs, String originStationId, String destStationId,
+            RouteGraph graph, String originStationId, String destStationId,
             Map<String, RouteMapper.StationInfo> stationInfos) {
         // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(graphRegistry.transferTimes());
 
+        List<FoundPath> paths =
+                new KShortestPathFinder(rule).findK(graph, originStationId, destStationId, MAX_CANDIDATES);
+
         Map<String, RouteSearchResponse> byLegSignature = new LinkedHashMap<>();
-        for (RouteGraph subgraph : candidateSubgraphs) {
-            searchOne(subgraph, rule, originStationId, destStationId, stationInfos)
+        for (FoundPath found : paths) {
+            searchOne(found, rule, stationInfos)
                     .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
         }
 
@@ -221,13 +218,11 @@ public class RouteSearchService {
         return ranked;
     }
 
-    /** 하위 그래프 하나에 최단경로 알고리즘을 1회 적용한다. 경로 없음·재고 게이트 탈락이면 빈 값. */
+    /** 탐색 결과 1개를 응답 후보로 바꾼다. 경로 없음·재고 게이트 탈락이면 빈 값. */
     private Optional<RouteSearchResponse> searchOne(
-            RouteGraph subgraph, TransferRule rule, String originStationId, String destStationId,
+            FoundPath found, TransferRule rule,
             Map<String, RouteMapper.StationInfo> stationInfos) {
-        try {
-            FoundPath found = new ShortestPathFinder(rule).find(subgraph, originStationId, destStationId);
-            List<RouteMapper.EngineSegment> segments = found.edges().stream()
+        List<RouteMapper.EngineSegment> segments = found.edges().stream()
                     .map(edge -> new RouteMapper.EngineSegment(
                             edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec(),
                             edge.mode()))
@@ -256,15 +251,6 @@ public class RouteSearchService {
                     found.edges().stream().map(Edge::fromNode).toList(),
                     found.edges().stream().map(Edge::mode).toList(),
                     graphRegistry.bikeStock()));
-        } catch (DomainException exception) {
-            if (exception.getErrorType() == ErrorType.ROUTE_NOT_FOUND
-                    || exception.getErrorType() == ErrorType.STATION_NOT_FOUND) {
-                // 이 수단 조합으로는 출발·도착이 아예 연결되지 않거나 하위 그래프에 없는 역이다.
-                // 후보 하나가 없을 뿐이므로 건너뛴다(전체 탐색을 실패시키지 않는다).
-                return Optional.empty();
-            }
-            throw exception;
-        }
     }
 
     /** leg의 (수단·출발·도착·노선) 순서로 만든 서명. 같으면 사실상 같은 경로로 보고 중복 제거한다. */
@@ -541,12 +527,9 @@ public class RouteSearchService {
 
         List<Edge> accessEdges = new ArrayList<>(originAccessEdges);
         accessEdges.addAll(destAccessEdges);
-        // 캐시된 조합별 하위 그래프(RouteGraphRegistry.candidateSubgraphs()) 각각에 접근
-        // 임시 엣지만 얹는다 — 22만 엣지짜리 원본을 7번 다시 필터링하지 않는다(S15P21A104-155).
+        // 원본 그래프에 접근 임시 엣지만 얹는다 (213 T2: 7조합 반복 대신 1회 탐색).
         // withExtraEdges 자체도 얕은 복사라 안 건드리는 노드는 복사하지 않는다.
-        List<RouteGraph> augmentedSubgraphs = graphRegistry.candidateSubgraphs().stream()
-                .map(subgraph -> subgraph.withExtraEdges(accessEdges))
-                .toList();
+        RouteGraph augmentedGraph = graph.withExtraEdges(accessEdges);
 
         Map<String, RouteMapper.StationInfo> stationInfos = new HashMap<>(baseInfos);
         stationInfos.put(PLACE_ORIGIN_ID, new RouteMapper.StationInfo(
@@ -557,7 +540,7 @@ public class RouteSearchService {
         DepartureSlot departureSlot = DepartureSlot.of(
                 request.departureTime() != null ? request.departureTime() : LocalDateTime.now());
         List<RouteSearchResponse> candidates = algorithmCandidates(
-                augmentedSubgraphs, PLACE_ORIGIN_ID, PLACE_DEST_ID, stationInfos);
+                augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, stationInfos);
         List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, request.modes()));
         if (request.priority() == RoutePriority.COMFORT) {
             ranked = applyComfortPriority(ranked, departureSlot);
