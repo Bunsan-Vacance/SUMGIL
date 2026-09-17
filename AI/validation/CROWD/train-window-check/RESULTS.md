@@ -10,7 +10,11 @@
 예보 피드까지 놓고 배포에 넣을 근거는 없다 — 관측 기상으로도 이 정도면 예보로는 더 못 준다(2절). 2호선 슬라이스도 전체와 같은 모양이라
 2호선 전용 모델 후속은 열지 않는다(5절).
 
-**답(2) 창 확장·연도 가중**: (C-2·D-2 결과 기입 예정)
+**답(2) 창 확장 — 기각, 연도 가중으로도 못 살린다.** 2022~24 평탄 풀링은 lookup −12.97/−13.90%, 마스킹 LightGBM `full` −2.29/−2.65,
+`d7_only` −4.63/−4.17, `no_lag` −13.94/−14.92%(전부 CI 상한 < 0). 연도 가중(2022 .25 · 2023 .5)은 손해를 **절반으로 줄이지만 방향을 못 바꾼다** —
+lookup −5.26/−5.87, `full` −1.35/−1.19(CI 상한 −0.78/−0.56), `d7_only` −2.63/−2.41, `no_lag` −5.73/−6.40. 평탄 → 가중 → 2024 단독이 모든 지표에서
+단조라 가중을 더 탐색할 근거가 없다(가중 → 0이면 2024 단독과 같아진다). 배포 학습 창은 **2024(+2025 최종 fit) 유지**. 유일한 예외는 6호선(`full`
++1.1~+1.3%p, 두 창 모두)이며 관찰로만 남긴다(4.3절).
 
 **왜 이렇게 나눴나**: lookup은 요일유형×역×시간대 **평탄 평균**이고 잔차 LightGBM 피처는 이벤트·시차뿐이라 연도·추세 항이 없다.
 연도를 늘리면 추세가 아니라 옛 수준으로 끌린 평균이 된다 — 145 후속(`masking-check/RESULTS.md` 13·17절)이 2023 추가로
@@ -141,7 +145,53 @@ lookup 대비 개선율(표 A)로 보면 `no_lag` 1.68/1.76% → 3.63/3.29%, `fu
 
 ## 4. C-2·D-2 — 창 확장·연도 가중 (표 W, 기준 `w2024b`)
 
-(기입 예정)
+`w2022`·`w2022w` 둘 다 2022-01-01~2024-12-31 학습(증강 후 11,955,160행), 같은 이벤트 표, 시나리오·마스킹·시드 동일. 다른 것은 **연도 가중 유무**뿐이다
+(`w2022w`: lookup 가중 평균 + LightGBM `sample_weight`, 2022 0.25 · 2023 0.5 · 2024 1.0). 파생 캐시는 lookup에 따라 따로 만들었다(`…_2022_2025`,
+`…_2022_2025w`). 학습 각 1분 안, 4년 파생 캐시 각 1분 안, 비교 63·66초.
+
+가중이 실제로 들어갔는지: lookup 표의 평균 수준(공통 21,840셀)이 2024 단독 641.2명 / 가중 620.9명 / 평탄 602.2명(승차) — 가중판은 옛 수준으로
+끌리는 정도가 절반이다. 2022~23 역 집합(279·282)이 2024~25(273)보다 넓어 lookup 행은 22,380이지만 평가는 2025 행이라 무관.
+
+### 4.1 표 W — 전체, rel RMSE % (양수 = 넓힌 쪽이 낫다, 같은 2025 행, 날짜 블록 부트스트랩 95% CI)
+
+| 시나리오 | 계열 | `w2024b → w2022` 평탄, 하차 | 승차 | `w2024b → w2022w` 가중, 하차 | 승차 |
+| --- | --- | --- | --- | --- | --- |
+| `full` | `lgbm_masked_stack` | **−2.29** [−3.07, −1.50] | **−2.65** [−3.47, −1.83] | **−1.35** [−1.89, −0.78] | **−1.19** [−1.78, −0.56] |
+| `d7_only` | `lgbm_masked_stack` | **−4.63** [−5.72, −3.53] | **−4.17** [−5.17, −3.13] | **−2.63** [−3.32, −1.92] | **−2.41** [−3.09, −1.70] |
+| `d1_only` | `lgbm_masked_stack` | −0.59 [−1.34, +0.15] | −2.58 [−3.34, −1.81] | +0.52 [+0.02, +1.05] | −1.12 [−1.71, −0.54] |
+| `no_lag` | `lgbm_masked_stack` | **−13.94** [−15.51, −12.40] | **−14.92** [−16.45, −13.37] | **−5.73** [−6.51, −4.95] | **−6.40** [−7.19, −5.59] |
+| (전 시나리오) | `lookup` | **−12.97** [−14.43, −11.56] | **−13.90** [−15.28, −12.53] | **−5.26** [−5.97, −4.54] | **−5.87** [−6.56, −5.15] |
+
+MAE도 같은 방향(평탄 `full` −1.99/−2.88, 가중 −0.81/−1.23). 145 후속의 2023-24 창(lookup −3.95/−3.52, `full` −0.83/−1.26)에 2022를 더 얹으면
+lookup 손해가 −13~−14%로 커진다 — 2022 상반기가 거리두기·마스크 의무 해제 전이라 회복기 중에서도 가장 낮은 수준이기 때문이다.
+
+### 4.2 읽기
+
+- **lookup이 끌려 내려가고, 시차가 그 대부분을 흡수한다.** 평탄 풀링에서 lookup −13%인데 `full` LightGBM은 −2.3~−2.7%다 — 전날·전주 잔차 시차가
+  수준 이동을 거의 되돌린다. 시차가 없는 `no_lag`는 lookup에 그대로 묶여 −14~−15%. `d7_only`는 그 중간(−4~−5%).
+- **가중은 손해를 절반으로 줄이지만 부호를 못 바꾼다.** lookup −13 → −5, `full` −2.5 → −1.3, `no_lag` −14.5 → −6. 평탄 → 가중 → 2024 단독이
+  모든 시나리오·양쪽 타깃에서 **단조**라(가중 → 0이면 2024 단독) 가중값을 더 탐색해도 2024 단독을 넘어설 지점이 없다. "옛 연도가 패턴을 보강한다"는
+  기대는 어느 슬라이스에서도 나타나지 않았다(6호선 예외, 4.3절).
+- `d1_only` 하차만 가중에서 +0.52 [+0.02, +1.05] — CI가 0에 붙어 있고 승차는 −1.12라 판정에 넣지 않는다. `d1_only`는 현 라우팅에서 GRU 몫이다.
+
+### 4.3 슬라이스 — 6호선만 반대
+
+`full`, `lgbm_masked_stack`, RMSE % (하차/승차):
+
+| 창 | 1호선 | 2호선 | 3호선 | 4호선 | 5호선 | **6호선** | 7호선 | 8호선 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 평탄 | −3.27/−5.86 | −3.30/−2.94 | −2.43/−2.38 | −1.68/−1.04 | −1.37/−0.85 | **+1.32/+1.15** | −0.66/−1.19 | −3.50/−4.21 |
+| 가중 | −3.95/−3.91 | −1.55/−1.08 | −1.09/−1.11 | −0.27/+0.18 | −0.96/−0.22 | **+1.14/+1.29** | +0.04/−0.39 | −1.70/−2.31 |
+
+6호선은 배포 모델이 가장 약한 호선(93: lookup 대비 개선이 다른 호선보다 작고 응암 순환·연신내 결번이 걸림)이라 이력이 늘어나는 것이 도움이 되는
+유일한 곳이다. 호선별 학습 창을 따로 두는 설계는 lookup 키 구조상 가능하지만 +1%p를 위해 아티팩트 구조를 바꿀 가치는 없다 — 관찰로 남긴다.
+요일유형은 평일·토·일 모두 손해(평탄 −2.2~−3.7, 가중 −0.2~−2.5), 휴일은 표본 18일이라 CI가 ±4%p로 판정 불가.
+
+### 4.4 판정(H1·H2)
+
+- **H1**: 평탄 풀링은 `lgbm_masked_stack`·`lookup` 모두 CI 상한 < 0(`d1_only` 하차 하나만 +0.15) → **손해 확정**.
+- **H2**: 가중 창은 `full`·`d7_only`·`no_lag` 세 시나리오 모두 CI **상한**이 0 아래 → 채택 기준(하한 > 0)에 어느 것도 못 든다 → **미채택**.
+  배포 학습 창 2024(+2025 최종 fit) 유지. `dataset.py`의 `PANEL_NAME`/`SPLIT_DATE`, `config.py` 아티팩트 고정은 변경하지 않는다.
 
 ## 5. 호선 슬라이스 — 2호선
 
@@ -151,14 +201,23 @@ lookup 대비 개선율(표 A)로 보면 `no_lag` 1.68/1.76% → 3.63/3.29%, `fu
 1%p 이상 벌어진 칸이 없다. **2호선 전용 모델 후속은 열지 않는다.** 상/하행은 모델 축이 아니라 재귀식·배율표 층(`congestion.py`)의 몫이라 이 실험으로
 정의되지 않는다(93 (D) 결정 유지).
 
-**창·가중(4절)**: (C-2·D-2 후 기입)
+**창·가중(4절)**: 2호선 `full` 평탄 −3.30/−2.94, 가중 −1.55/−1.08 · `d7_only` −5.75/−4.77, −3.00/−2.42 · `no_lag` −17.85/−17.39, −8.13/−8.03 —
+전체보다 오히려 손해가 크다(2호선 순환선의 2022 회복 폭이 컸다는 뜻). 2호선 전용 후속 없음.
 
-## 6. 판정 (사전 고정 기준)
+## 6. 판정 (사전 고정 기준 → 결과)
 
-- **H1 평탄 풀링**: `w2022` 표 W에서 `lgbm_masked_stack`·`lookup` CI 상한 < 0이면 "손해" 확정.
-- **H2 연도 가중 채택**: `w2022w` 표 W에서 `full`·`d7_only`·`no_lag` 모두 CI 하한 > 0, 어느 시나리오도 하한 < −1%p 아님, 승·하차 모두.
-- **H3 기상 예비 채택**: `w2024wx` 표 B에서 세 시나리오 모두 CI 하한 > 0 **그리고** 승·하차 +1%p 이상. 관측 기상(상한)이므로 배포 반영은
-  **예보 피드 확보 + 예보 기반 재측정**이 조건(`data/EXTERNAL/weather/raw/forecast/`는 비어 있고 수집기가 없다).
+| 가설 | 기준 | 결과 | 판정 |
+| --- | --- | --- | --- |
+| H1 2022~24 평탄 풀링 | `lgbm_masked_stack`·`lookup` CI 상한 < 0이면 손해 | 전 시나리오 상한 < 0(`d1_only` 하차 +0.15 하나 제외), lookup −13/−14% | **손해 확정** |
+| H2 연도 가중(.25/.5/1) | `full`·`d7_only`·`no_lag` 모두 CI 하한 > 0, 어느 것도 < −1%p 아님 | 세 시나리오 모두 CI **상한** < 0(`full` −1.35/−1.19) | **미채택** — 창 2024(+2025) 유지 |
+| H3 기상 5열(관측 = 상한) | 세 시나리오 모두 CI 하한 > 0 그리고 +1%p 이상 | `no_lag`만 +1.96/+1.53, `full` −0.63/−0.18, MAE 전부 악화 | **미채택** — 예보 기반 재측정도 하지 않음 |
+
+**반영**: 프로덕션 변경 없음(`PANEL_NAME`·`SPLIT_DATE`·`crowd_*_artifact` 그대로). 코드로 남는 것은 `--year-weights` 옵션·캐시 지문·기상 실험 세트·
+비교 인자이며 전부 기본값에서 비활성이다. `MODEL_REGISTRY.md`는 채택이 없어 갱신하지 않고, 이 문서와 `validation/CROWD/README.md` 행이 근거다.
+
+**후속 후보(티켓 없음)**: (a) 축제 원천 파일 간 중복 제거(1.2절) → 배포 `festival_count` 재계산·영향 측정 — 3절 크기(±0.5%)면 재학습 불필요.
+(b) `weather + day_type` 상호작용 1회(2.2절) — 주말 +1.4~1.8%p를 살릴 수 있는지, 예보 피드가 다른 이유로 생기면 그때. (c) 6호선 이력 확장(4.3절) —
+6호선 고유 피처(93 후속) 쪽이 먼저다.
 
 ## 7. 재현
 
@@ -181,5 +240,22 @@ python validation/CROWD/masking-check/window_diff.py --base w2024 --other w2024b
 python validation/CROWD/masking-check/compare.py --window w2024wx --no-gru --lightgbm models/CROWD/_experiments/window227/w2024b_masked-stack \
   --masked weather=models/CROWD/_experiments/window227/w2024_weather_masked-stack --extra-cols temp_c precip_mm wind_ms humidity_pct snow_cm \
   --panel crowd_panel_2024_2025.parquet --events crowd_station_events_2022_2025.parquet --derived-cache crowd_panel_derived_2024_2025b.parquet
+# C-2 (가중 lookup 파생은 캐시를 따로 — --year-weights는 --derived-cache 필수)
+python -m app.CROWD.pipeline.train --mask-mode stack --split-date 2025-01-01 --out-root models/CROWD/_experiments/window227 \
+  --panel crowd_panel_2022_2025.parquet --events crowd_station_events_2022_2025.parquet --derived-cache crowd_panel_derived_2022_2025.parquet --name w2022_masked-stack
+python -m app.CROWD.pipeline.train --mask-mode stack --split-date 2025-01-01 --out-root models/CROWD/_experiments/window227 \
+  --panel crowd_panel_2022_2025.parquet --events crowd_station_events_2022_2025.parquet --derived-cache crowd_panel_derived_2022_2025w.parquet \
+  --year-weights 2022:0.25,2023:0.5 --name w2022w_masked-stack
+# D-2 (표 W 기준 w2024b; 비교의 단독 lookup도 같은 가중으로 fit)
+python validation/CROWD/masking-check/compare.py --window w2022 --no-gru --lightgbm models/CROWD/festival_selflag_d1sd_d7_resid_20260913-0340 \
+  --masked stack=models/CROWD/_experiments/window227/w2022_masked-stack \
+  --panel crowd_panel_2022_2025.parquet --events crowd_station_events_2022_2025.parquet --derived-cache crowd_panel_derived_2022_2025.parquet
+python validation/CROWD/masking-check/compare.py --window w2022w --no-gru --lightgbm models/CROWD/festival_selflag_d1sd_d7_resid_20260913-0340 \
+  --masked stack=models/CROWD/_experiments/window227/w2022w_masked-stack --year-weights 2022:0.25,2023:0.5 \
+  --panel crowd_panel_2022_2025.parquet --events crowd_station_events_2022_2025.parquet --derived-cache crowd_panel_derived_2022_2025w.parquet
+python validation/CROWD/masking-check/window_diff.py --base w2024b --other w2022  --out data/CROWD/interim/validation/masking_check/w2022/window_diff_W.md
+python validation/CROWD/masking-check/window_diff.py --base w2024b --other w2022w --out data/CROWD/interim/validation/masking_check/w2022w/window_diff_W.md
+# 노트북(그림만, 재계산 없음)
+python validation/CROWD/train-window-check/_build_notebook.py
 ```
 표 원본 `data/CROWD/interim/validation/masking_check/{w2024b,w2024wx,w2022,w2022w}/`, 아티팩트 `models/CROWD/_experiments/window227/`.
