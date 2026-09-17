@@ -4,7 +4,6 @@ import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
 import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
-import com.ssafy.s15p21a104.domain.congestion.scoring.CongestionScorer;
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
 import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
@@ -21,11 +20,11 @@ import com.ssafy.s15p21a104.domain.route.finder.KShortestPathFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
-import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
+import com.ssafy.s15p21a104.domain.route.scoring.RouteScoreRanker;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
@@ -103,68 +102,24 @@ public class RouteSearchService {
         List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, modes));
         // priority=COMFORT가 아니면 순서·라벨을 전혀 건드리지 않는다(S15P21A104-157 AC2, 회귀 없음).
         if (priority == RoutePriority.COMFORT) {
-            ranked = applyComfortPriority(ranked, departureSlot);
+            ranked = applyComfort(ranked, departureSlot);
         }
         return withRouteNames(ranked);
     }
 
     /**
-     * priority=COMFORT일 때 혼잡도가 가장 낮은 후보를 맨 앞으로 재정렬하고
-     * {@link RouteType#LOW_CONGESTION}으로 표시한다(S15P21A104-157).
-     *
-     * <p>이미 나온 후보들을 재정렬만 할 뿐, 탐색 알고리즘·그래프는 건드리지 않는다.
-     * 혼잡도 데이터가 하나도 없으면(노선 정보 자체가 없거나 congestion 테이블에 값이 없으면)
-     * 아무것도 바꾸지 않는다 — 혼잡도를 반영한 척하지 않는다(값을 지어내지 않는다는 원칙).
+     * 쾌적 우선 재정렬(213 T4). {@link RouteScoreRanker}에 위임하고 서비스는
+     * 혼잡도 조회 함수만 넘긴다.
      */
-    private List<RouteSearchResponse> applyComfortPriority(
+    private List<RouteSearchResponse> applyComfort(
             List<RouteSearchResponse> candidates, DepartureSlot departureSlot) {
-        Set<String> subwayRouteIds = new HashSet<>();
-        for (RouteSearchResponse candidate : candidates) {
-            for (RouteLegResponse leg : candidate.legs()) {
-                if (leg.mode() == TravelMode.SUBWAY && leg.routeId() != null) {
-                    subwayRouteIds.add(leg.routeId());
-                }
-            }
-        }
-        if (subwayRouteIds.isEmpty()) {
-            return candidates;
-        }
-        Map<String, Double> levelByRouteId = new HashMap<>();
-        for (String routeId : subwayRouteIds) {
-            congestionRepository.findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
-                            CongestionTarget.LINE, routeId, departureSlot.dowType(), departureSlot.timeSlot())
-                    .ifPresent(c -> levelByRouteId.put(routeId, c.getLevel().doubleValue()));
-        }
-        if (levelByRouteId.isEmpty()) {
-            return candidates;
-        }
-
-        Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
-        for (RouteSearchResponse candidate : candidates) {
-            CongestionScorer.score(candidate.legs(), levelByRouteId)
-                    .ifPresent(score -> scoreByCandidate.put(candidate, score));
-        }
-        if (scoreByCandidate.isEmpty()) {
-            return candidates;
-        }
-
-        List<RouteSearchResponse> sorted = new ArrayList<>(candidates);
-        sorted.sort(Comparator.comparingDouble(
-                candidate -> scoreByCandidate.getOrDefault(candidate, Double.MAX_VALUE)));
-
-        List<RouteSearchResponse> relabeled = new ArrayList<>();
-        boolean lowestTagged = false;
-        for (RouteSearchResponse candidate : sorted) {
-            if (!lowestTagged && scoreByCandidate.containsKey(candidate)) {
-                relabeled.add(new RouteSearchResponse(
-                        RouteType.LOW_CONGESTION, candidate.totalMinutes(), candidate.legs(),
-                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
-                lowestTagged = true;
-            } else {
-                relabeled.add(candidate);
-            }
-        }
-        return relabeled;
+        return new RouteScoreRanker(
+                (targetType, targetId, dowType, timeSlot) -> congestionRepository
+                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                                CongestionTarget.LINE, targetId, dowType, timeSlot)
+                        .map(c -> c.getLevel().doubleValue())
+                        .orElse(null))
+                .applyComfort(candidates, departureSlot.dowType(), departureSlot.timeSlot());
     }
 
     /**
@@ -403,7 +358,7 @@ public class RouteSearchService {
                 augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, stationInfos);
         List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, request.modes()));
         if (request.priority() == RoutePriority.COMFORT) {
-            ranked = applyComfortPriority(ranked, departureSlot);
+            ranked = applyComfort(ranked, departureSlot);
         }
         return withRouteNames(ranked);
     }
