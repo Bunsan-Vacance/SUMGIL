@@ -131,15 +131,6 @@ public class RouteSearchService {
     }
 
     /**
-     * 쾌적 우선 재정렬(213 T4, 좌표 검색용). {@link RouteScoreRanker}에 위임하고
-     * 서비스는 혼잡도 조회 함수만 넘긴다.
-     */
-    private List<RouteSearchResponse> applyComfort(
-            List<RouteSearchResponse> candidates, DepartureSlot departureSlot) {
-        return scoreRanker().applyComfort(candidates, departureSlot.dowType(), departureSlot.timeSlot());
-    }
-
-    /**
      * 후보 목록에 geometry를 붙인다(213 T3). {@link RouteGeometryEnhancer}가 후보별
      * 병렬 후처리 + 순서 보장 + 실패 격리를 맡는다. 서비스는 레지스트리 조회 함수만 넘긴다.
      */
@@ -237,15 +228,20 @@ public class RouteSearchService {
                 graphRegistry.rentalIds(),
                 stationInfos,
                 graphRegistry::bikeStock);
-        List<RouteSearchResponse> candidates = coordFinder.findCandidates(
-                augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES);
-        List<RouteSearchResponse> withGeometry = withGeometryAll(candidates);
-        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(
-                RouteCandidateFinder.filterByModes(withGeometry, request.modes()));
-        if (request.priority() == RoutePriority.COMFORT) {
-            ranked = applyComfort(ranked, departureSlot);
-        }
-        return withRouteNames(ranked);
+        // 214: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
+        List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
+                coordFinder.findCandidates(
+                        augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES),
+                request.modes());
+        List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
+                .limit(SPEED_ROUTES)
+                .toList();
+        List<RouteSearchResponse> calm = scoreRanker().topCalm(
+                RouteCandidateFinder.relabelByRank(filtered),
+                departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
+        List<RouteSearchResponse> six = new java.util.ArrayList<>(speed);
+        six.addAll(calm);
+        return withRouteNames(withGeometryAll(six));
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {
