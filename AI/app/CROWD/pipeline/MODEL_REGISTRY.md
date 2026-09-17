@@ -238,6 +238,55 @@ LightGBM도 이름 정렬(`latest_artifact`)에만 기대지 않는다 — 지�
 남아 있다 — 근거는 있으나 미검증이라 논의 I-1(원인 규명)이 선행돼야 켤 수 있다. `Rule`이 `avail` 외에
 `line`·`day_type`·`group`도 받을 수 있어 그 규칙을 켜도 구조를 다시 잡지 않는다(명시 조건이 많은 규칙이 우선).
 
+## 4b. 아티팩트 승격 절차(200)
+
+145 후속까지 배포 교체는 손으로 했다(학습 → 비교 → 폴더 복사 → 설정값 고정 → 서빙 표 재생성 →
+`SERVING_CONTRACT.md` 갱신 → BE 통지). 200 B부는 그 절차를 코드로 못박는다 — **재학습 주기는
+정하지 않는다**(아래 마지막 문단). 절차 자체만 고정한다.
+
+### 순서
+
+1. `_experiments/`(`models/CROWD/_experiments/<실험명>/<아티팩트명>/`)에서 학습하고
+   `validation/CROWD/*/RESULTS.md`에 비교 결과를 남긴다(비교 원칙은 `AI/CLAUDE.md` "모델 비교는
+   동등 조건에서만 한다"). 채택 판정이 서면 다음 단계로 넘어간다.
+2. **한 명령으로 복사한다**:
+
+   ```
+   python -m app.CROWD.pipeline.promote_artifact --src models/CROWD/_experiments/<실험명>/<아티팩트명>
+   ```
+
+   (`app/CROWD/pipeline/promote_artifact.py`, 200 B부 신설.) `src`의 `meta.json`을 읽어 kind
+   (`lightgbm`/`dl`)를 판정하고, kind별로 있어야 할 파일(`lightgbm`은 `lookup.parquet` +
+   `meta.json["model_files"]`의 모든 부스터 파일, `dl`은 `model.pt`·`scale.parquet`·`event_stats.parquet`·`lookup.parquet`)이 다 있는지 확인한 뒤 한 화면
+   요약(세트/모델, 학습 구간 또는 `splits`, 학습 표본 수, 마스킹 모드, `created_at`)을 찍고
+   `models/CROWD/<이름>/`로 `shutil.copytree`한다. 대상 폴더가 이미 있으면 `--force` 없이는
+   거부하고, **`--force`를 줘도 대상 이름이 현재 배포 중인 아티팩트**(`crowd_lgbm_artifact`/
+   `crowd_dl_artifact`)면 거부한다 — 운영 폴더를 승격 스크립트가 지우는 사고를 막기 위해서다.
+3. 이 스크립트는 **`app/core/config.py`를 편집하지 않는다** — 바꿀 줄(`crowd_lgbm_artifact: str |
+   None = "<이름>"` 또는 `crowd_dl_artifact: str = "<이름>"`)만 출력한다. 그 줄을 사람이 직접
+   `app/core/config.py`에 반영한다(설정값 고정, 운영 기본값을 스크립트가 조용히 바꾸지 않기 위해서).
+4. **확인**(순서대로):
+   - `pytest -q test/CROWD/` 통과.
+   - `batch_predict --date <최근 2일>`로 서빙 표를 재생성해 새 아티팩트로 도는지 확인
+     (`meta`의 `predictor_version`으로 확인).
+   - `SERVING_CONTRACT.md` 1·3·4절의 예시 값을 갱신한다 — 계약 테스트는 **값 자체는 보지 않는다**
+     (스키마만 검증), 예시가 실제 값과 어긋나면 사람이 보는 문서만 낡는다.
+   - 이 문서(`MODEL_REGISTRY.md`) 3절 아티팩트 표를 갱신한다(새 폴더 추가, 상태 갱신).
+   - BE 통지문을 `.claude/handoff/TO_BE-crowd-….md`로 남긴다(새 아티팩트 이름·변경 사항 요약).
+5. **롤백**은 설정값을 이전 폴더명으로 되돌리는 것뿐이다 — `promote_artifact`는 옛 아티팩트를
+   지우지 않으므로(3절 "폴더는 세트별·시각별로 갈리므로 옛 아티팩트는 지워지지 않고 남는다") 이전
+   폴더가 여전히 `models/CROWD/`에 있다.
+
+### 재학습 주기 · 데이터 창
+
+**재학습 주기는 프로젝트 기간 안에 정의하지 않는다**(사용자 결정 2026-09-17, 프로젝트가 몇 달
+안에 끝나 주기를 둘 이유가 없다) — 여기서 고정하는 것은 승격 **절차**뿐이다. 다음 프로덕션
+아티팩트는 2024·2025를 **둘 다 학습(+검증) 구간**으로 재적합하고 평가는 아직 데이터가 없는
+미래(예: 2026, `train_dl --splits`로 비워 둠 — 위 "학습 창 확장" Task 2)로 둔다. **2023은
+뺀다** — `validation/CROWD/masking-check/RESULTS.md` 13·17절이 학습 창을 2023까지 넓히면(2025를
+평가로 둔 비교에서) LightGBM이 손해(`full` −0.8~1.3%p, `no_lag` −4.5~4.0%p)를 본다고 판정했다
+(2023이 회복기라 분포가 이동하는 것이 원인, GRU만 이득이 있었으나 `d1_only` 구간에 한정된다).
+
 ## 5. 변환 층 산출물 — 배율표도 아티팩트처럼 추적한다
 
 모델만 버전이 있는 게 아니다. **배율표(`data/CROWD/processed/crowd_congestion_calibration.parquet`)는
