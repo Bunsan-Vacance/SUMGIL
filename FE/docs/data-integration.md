@@ -2,18 +2,18 @@
 
 ## 현재 연결 상태
 
-| 영역                           | 실제 구현                                                                            | 연결 위치                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
-| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                                                    | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`         |
-| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회                                 | `features/map/useCurrentLocation.ts`                      |
-| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                                                   | `features/map/MapPlacePicker.tsx`                         |
-| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                                                 | `lib/kakao/sdk.ts`, `api/repositories.ts`                 |
-| 실제 경로 입력의 장소·역 후보  | 백엔드 역 검색과 카카오 장소·주소 검색 결과                                          | `api/repositories.ts`, `features/route/usePlaceSearch.ts` |
-| 추천 경로                      | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 샘플                                 | `api/repositories.ts`                                     |
-| 정렬·이동수단 필터             | 요청 modes는 서버에 전달하고 결과에도 같은 필터를 적용, 우선순위 정렬은 클라이언트   | `api/repositories.ts`, `features/route`                   |
-| 경로선·실제 길찾기             | 응답 leg geometry를 연결하며 geometry가 없으면 직선으로 대체하지 않음                | `api/repositories.ts`, `features/map`                     |
-| 혼잡도                         | 화면 모델·샘플은 지원하지만 현재 backend route mapper가 서버 혼잡도 필드를 읽지 않음 | `features/route/types.ts`, `api/repositories.ts`          |
-| 따릉이 대여소 데이터·지도 마커 | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay                                     | `api/repositories.ts`, `features/map/bikeStations.ts`     |
+| 영역                           | 실제 구현                                                                                                          | 연결 위치                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                                                                                  | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`         |
+| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회                                                               | `features/map/useCurrentLocation.ts`                      |
+| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                                                                                 | `features/map/MapPlacePicker.tsx`                         |
+| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                                                                               | `lib/kakao/sdk.ts`, `api/repositories.ts`                 |
+| 실제 경로 입력의 장소·역 후보  | 백엔드 역 검색과 카카오 장소·주소 검색 결과                                                                        | `api/repositories.ts`, `features/route/usePlaceSearch.ts` |
+| 추천 경로                      | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 preview 샘플. `VITE_ROUTE_SEARCH_MOCK=true`면 경로만 API 형식 mock | `api/repositories.ts`, `api/mock`                         |
+| 정렬·이동수단 필터             | 요청 modes·priority는 서버에 전달하고 서버가 정렬한 배열 순서를 보존. preview fixture만 클라이언트 정렬            | `api/repositories.ts`, `features/route`                   |
+| 경로선·실제 길찾기             | 응답 leg geometry를 연결하며 geometry가 없으면 직선으로 대체하지 않음                                              | `api/repositories.ts`, `features/map`                     |
+| 혼잡도                         | 화면 모델·샘플은 지원하지만 현재 backend route mapper가 서버 혼잡도 필드를 읽지 않음                               | `features/route/types.ts`, `api/repositories.ts`          |
+| 따릉이 대여소 데이터·지도 마커 | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay                                                                   | `api/repositories.ts`, `features/map/bikeStations.ts`     |
 
 ### 따릉이 대여소 정적 데이터
 
@@ -30,7 +30,7 @@
 조회한 지도 중심 기준이다. 값이 없으면 해당 항목을 숨기고 주소가 없어도 대여소 이름과
 메타데이터 카드를 표시한다.
 
-일반 장소 검색은 카카오 JavaScript SDK의 키워드 검색을 사용하며 결과가 없으면 지오코더 주소 검색으로 재시도한다. 실제 경로 입력 검색은 백엔드 역 검색과 카카오 장소·주소 검색을 함께 제공한다. 역 ID가 출발지와 도착지 모두에 있으면 기존 역간 GET을 사용하고, 그 외에는 좌표와 장소명을 담은 coordinate POST를 사용한다. 일반 장소를 임의의 역으로 매핑하지 않으며, 화면 장소로 변환할 때 이름·주소·좌표를 검증하고 유효한 좌표가 없는 카카오 결과는 제외한다. 백엔드 역 결과는 좌표가 없어도 역 ID로 선택할 수 있다. 선택한 장소는 검색 화면의 최근 목록에 최대 10개까지 저장하며 현재 위치는 저장하지 않는다. 지도 선택은 `coord2Address(lng, lat)`으로 도로명·지번 주소를 표시하고, 주소를 찾지 못해도 좌표를 선택할 수 있다. SDK 콜백은 `AbortSignal`을 확인해 취소된 요청의 늦은 응답을 반영하지 않는다. 경로 조회는 `VITE_API_BASE_URL` 설정 시 백엔드, 미설정 시 샘플 저장소를 사용한다.
+일반 장소 검색은 카카오 JavaScript SDK의 키워드 검색을 사용하며 결과가 없으면 지오코더 주소 검색으로 재시도한다. 실제 경로 입력 검색은 백엔드 역 검색과 카카오 장소·주소 검색을 함께 제공한다. 역 ID가 출발지와 도착지 모두에 있으면 기존 역간 GET을 사용하고, 그 외에는 좌표와 장소명을 담은 coordinate POST를 사용한다. 일반 장소를 임의의 역으로 매핑하지 않으며, 화면 장소로 변환할 때 이름·주소·좌표를 검증하고 유효한 좌표가 없는 카카오 결과는 제외한다. 백엔드 역 결과는 좌표가 없어도 역 ID로 선택할 수 있다. 선택한 장소는 검색 화면의 최근 목록에 최대 10개까지 저장하며 현재 위치는 저장하지 않는다. 지도 선택은 `coord2Address(lng, lat)`으로 도로명·지번 주소를 표시하고, 주소를 찾지 못해도 좌표를 선택할 수 있다. SDK 콜백은 `AbortSignal`을 확인해 취소된 요청의 늦은 응답을 반영하지 않는다. 경로 조회는 `VITE_API_BASE_URL` 설정 시 백엔드, 미설정 시 기존 preview 샘플 저장소를 사용한다. `VITE_ROUTE_SEARCH_MOCK=true`를 명시하면 API base가 있어도 경로 검색만 최종 `ApiResult<List<RouteSearchResponse>>` fixture를 공용 mapper로 변환한다. 이 모드의 fixture 출처는 `MOCK`이며 서버가 준 후보 배열 순서와 중복 `ALTERNATIVE`를 그대로 유지한다. 역·장소·대여소 API는 API base 설정에 따라 계속 실제 연결을 사용한다.
 
 ## 프론트엔드 인터페이스
 
