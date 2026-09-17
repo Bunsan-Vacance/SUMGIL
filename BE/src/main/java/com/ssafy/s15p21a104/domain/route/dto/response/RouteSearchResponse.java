@@ -14,9 +14,9 @@ public record RouteSearchResponse(
          */
         Double totalDistanceMeters,
         /**
-         * 환승 횟수(S15P21A104-150/FE-175 항목8). 현재는 routeId 전환마다 삽입되는 TRANSFER
-         * leg 수를 그대로 센다 — WALK·BIKE 접근/반납 경계도 포함하는 현재 정의 그대로이며,
-         * "대중교통 환승만" 세는 정의로 좁히는 건 별도 정책 합의(FE-175 항목7, 전우석 영역) 대상이다.
+         * 환승 횟수(S15P21A104-150/FE-175 항목8, S15P21A104-213 T1·214).
+         * TRANSFER leg 수와 같다. 접근 경계(WALK ↔ 주행)는 환승이 아니라
+         * TRANSFER leg를 만들지 않으므로 카운트에서 제외한다.
          */
         Integer transferCount
 ) {

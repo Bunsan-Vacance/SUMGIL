@@ -8,17 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import com.ssafy.s15p21a104.domain.congestion.entity.Congestion;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionId;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
 import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
-import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
-import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
@@ -40,12 +37,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * S15P21A104-157: priority=COMFORT일 때 혼잡도 낮은 후보가 우선 반환되는지 검증.
- *
- * <p>탐색 알고리즘·그래프는 그대로 두고, 이미 나온 후보를 재정렬만 하는지 확인한다.
+ * S15P21A104-214 속도 3 + 혼잡 3 RED.
+ * 배포 문서(route-mock-interface-213) 순서표와 일치해야 한다.
  */
 @ExtendWith(MockitoExtension.class)
-class RouteSearchComfortPriorityTest {
+class SixRoutes214Test {
 
     @Mock
     private StationRepository stationRepository;
@@ -61,7 +57,7 @@ class RouteSearchComfortPriorityTest {
     @BeforeEach
     void setUp() {
         Map<String, Station> stations = new HashMap<>();
-        for (String id : List.of("A", "C", "R1")) {
+        for (String id : List.of("A", "B", "C", "D", "E", "R1")) {
             stations.put(id, RouteTestFixtures.mockStation(id, id + "역"));
         }
         for (Map.Entry<String, Station> entry : stations.entrySet()) {
@@ -69,19 +65,43 @@ class RouteSearchComfortPriorityTest {
                     .thenReturn(Optional.of(entry.getValue()));
         }
         Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
-        infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
-        infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
-        infos.put("R1", new RouteMapper.StationInfo("R1", "대여소1", 37.5, 127.0));
+        for (String id : List.of("A", "B", "C", "D", "E", "R1")) {
+            infos.put(id, new RouteMapper.StationInfo(id, id + "역", 37.5, 127.0));
+        }
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
         lenient().when(graphRegistry.rentalIds()).thenReturn(Set.of("R1"));
         lenient().when(graphRegistry.transferTimes()).thenReturn(Map.of());
         lenient().when(graphRegistry.bikeStock()).thenReturn(Map.of());
-        // 지하철(L1, 900초·15분, 느림) vs 자전거(A-R1-C, 240초·4분, 빠름).
-        // 필터 없이 검색하면 시간순으로 자전거가 SHORTEST, 지하철이 ALTERNATIVE다.
+        // 6개 서로 다른 경로: 직통 4개 + 혼합 2개.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 900),
-                bike("A", "R1", 120),
-                bike("R1", "C", 120)));
+                subway("A", "B", "L2", 200),
+                subway("B", "C", "L2", 200),
+                subway("A", "D", "L3", 300),
+                subway("D", "C", "L3", 300),
+                subway("A", "E", "L4", 250),
+                subway("E", "C", "L4", 250),
+                bike("A", "R1", 250),
+                bike("R1", "C", 250),
+                bike("B", "R1", 100)));
+        lenient().when(congestionRepository
+                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                                any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    String targetId = invocation.getArgument(1);
+                    // L1 가장 쾌적, L4·L3 중간, L2 혼잡.
+                    BigDecimal level = switch (targetId) {
+                        case "L1" -> BigDecimal.valueOf(1.0);
+                        case "L4" -> BigDecimal.valueOf(3.0);
+                        case "L3" -> BigDecimal.valueOf(5.0);
+                        case "L2" -> BigDecimal.valueOf(9.0);
+                        default -> null;
+                    };
+                    if (level == null) {
+                        return Optional.empty();
+                    }
+                    return Optional.of(mockCongestion(targetId, level));
+                });
 
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180),
@@ -92,56 +112,34 @@ class RouteSearchComfortPriorityTest {
     }
 
     @Test
-    @DisplayName("priority=COMFORT면 혼잡도를 아는 후보가 혼잡 3 맨 앞에 LOW_CONGESTION으로 온다 (214: 속도 3 + 혼잡 3)")
-    void COMFORT_혼잡도낮은후보_우선() {
-        lenient().when(congestionRepository
-                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
-                                any(), any(), any(), any()))
-                .thenAnswer(invocation -> {
-                    CongestionTarget targetType = invocation.getArgument(0);
-                    String targetId = invocation.getArgument(1);
-                    if (targetType == CongestionTarget.LINE && "L1".equals(targetId)) {
-                        return Optional.of(mockCongestion("L1", BigDecimal.valueOf(20.0)));
-                    }
-                    return Optional.empty();
-                });
-
-        List<RouteSearchResponse> result = routeSearchService.search(
-                "A", "C", null, RoutePriority.COMFORT, null);
-
-        // 214 순서표: 0-2 속도, 3-5 혼잡. 혼잡 데이터 있는 SUBWAY 후보가 혼잡 3 맨 앞에 온다.
-        // 이 그래프는 후보 2개라 six = 속도 2 + 혼잡 1 = 3개. LOW_CONGESTION은 2번이다.
-        assertEquals(3, result.size());
-        assertEquals(RouteType.SHORTEST, result.get(0).routeType());
-        assertEquals(RouteType.LOW_CONGESTION, result.get(2).routeType());
-        assertTrue(result.get(2).legs().stream().anyMatch(leg -> leg.mode() == TravelMode.SUBWAY));
-    }
-
-    @Test
-    @DisplayName("혼잡도 데이터가 전혀 없으면 COMFORT를 요청해도 기존 순서·라벨을 그대로 둔다")
-    void COMFORT_데이터없음_기존순서유지() {
-        lenient().when(congestionRepository
-                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
-                                any(), any(), any(), any()))
-                .thenReturn(Optional.empty());
-
-        List<RouteSearchResponse> withComfort = routeSearchService.search(
-                "A", "C", null, RoutePriority.COMFORT, null);
-        List<RouteSearchResponse> withoutPriority = routeSearchService.search(
-                "A", "C", null, null, null);
-
-        assertEquals(withoutPriority.get(0).routeType(), withComfort.get(0).routeType());
-        assertEquals(withoutPriority.get(0).legs().size(), withComfort.get(0).legs().size());
-    }
-
-    @Test
-    @DisplayName("priority 미지정(TIME)이면 기존 시간순 동작이 완전히 그대로다(회귀 없음)")
-    void priority_미지정_기존동작_불변() {
+    @DisplayName("214-T1: 속도 3 + 혼잡 3, 총 6개가 순서대로 나온다")
+    void t1_속도3_혼잡3_6개() {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
-        assertTrue(result.size() >= 2);
+        assertEquals(6, result.size());
+        // 속도 3: 시간순.
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
-        assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.BIKE));
+        assertEquals(RouteType.ALTERNATIVE, result.get(1).routeType());
+        assertEquals(RouteType.ALTERNATIVE, result.get(2).routeType());
+        assertTrue(result.get(0).totalMinutes() <= result.get(1).totalMinutes());
+        assertTrue(result.get(1).totalMinutes() <= result.get(2).totalMinutes());
+        // 혼잡 3: 쾌적순. 맨 앞은 LOW_CONGESTION.
+        assertEquals(RouteType.LOW_CONGESTION, result.get(3).routeType());
+        assertEquals(RouteType.ALTERNATIVE, result.get(4).routeType());
+        assertEquals(RouteType.ALTERNATIVE, result.get(5).routeType());
+    }
+
+    @Test
+    @DisplayName("214-T2: 후보 부족하면 있는 만큼만 나온다")
+    void t2_후보부족_있는만큼() {
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                subway("A", "C", "L1", 900)));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+
+        assertTrue(result.size() >= 1);
+        assertTrue(result.size() <= 6);
+        assertEquals(RouteType.SHORTEST, result.get(0).routeType());
     }
 
     private Congestion mockCongestion(String targetId, BigDecimal level) {

@@ -41,6 +41,7 @@ public final class RouteScoreRanker {
 
     /**
      * 혼잡도가 가장 낮은 후보를 맨 앞으로 재정렬하고 LOW_CONGESTION으로 표시한다.
+     * 데이터 없으면 원본 그대로 둔다(값을 지어내지 않음).
      *
      * @param candidates 시간순 정렬된 후보 목록
      * @param dowType 요일 구분
@@ -49,6 +50,51 @@ public final class RouteScoreRanker {
      */
     public List<RouteSearchResponse> applyComfort(
             List<RouteSearchResponse> candidates, int dowType, int timeSlot) {
+        List<RouteSearchResponse> calm = topCalm(candidates, dowType, timeSlot,
+                candidates == null ? 0 : candidates.size());
+        if (calm.isEmpty()) {
+            return candidates;
+        }
+        // topCalm은 상위 전체를 ALTERNATIVE로 다시 매기므로, 원본 순서를 유지한 채
+        // LOW_CONGESTION 1개만 맨 앞으로 옮긴 형태로 되돌린다.
+        Set<String> calmSignatures = new java.util.HashSet<>();
+        for (RouteSearchResponse c : calm) {
+            calmSignatures.add(signatureOf(c));
+        }
+        RouteSearchResponse lowest = calm.get(0);
+        List<RouteSearchResponse> result = new ArrayList<>();
+        result.add(lowest);
+        for (RouteSearchResponse candidate : candidates) {
+            if (signatureOf(candidate).equals(signatureOf(lowest))) {
+                continue;
+            }
+            result.add(candidate);
+        }
+        return result;
+    }
+
+    private static String signatureOf(RouteSearchResponse response) {
+        StringBuilder signature = new StringBuilder();
+        for (RouteLegResponse leg : response.legs()) {
+            signature.append(leg.mode()).append(':')
+                    .append(leg.fromNodeId()).append("->").append(leg.toNodeId()).append(':')
+                    .append(leg.routeId()).append('|');
+        }
+        return signature.toString();
+    }
+
+    /**
+     * 혼잡순 상위 N개를 뽑는다(S15P21A104-214). 맨 앞은 LOW_CONGESTION, 나머지는
+     * ALTERNATIVE로 표시한다. 혼잡도 데이터가 하나도 없으면 빈 목록 — 값을 지어내지 않는다.
+     *
+     * @param candidates 시간순 정렬된 후보 목록
+     * @param dowType 요일 구분
+     * @param timeSlot 시간 슬롯
+     * @param n 최대 개수
+     * @return 혼잡순 상위 목록 (최대 n개). 데이터 없으면 빈 목록
+     */
+    public List<RouteSearchResponse> topCalm(
+            List<RouteSearchResponse> candidates, int dowType, int timeSlot, int n) {
         Set<String> subwayRouteIds = new HashSet<>();
         for (RouteSearchResponse candidate : candidates) {
             for (RouteLegResponse leg : candidate.legs()) {
@@ -58,7 +104,7 @@ public final class RouteScoreRanker {
             }
         }
         if (subwayRouteIds.isEmpty()) {
-            return candidates;
+            return List.of();
         }
         Map<String, Double> levelByRouteId = new HashMap<>();
         for (String routeId : subwayRouteIds) {
@@ -68,7 +114,7 @@ public final class RouteScoreRanker {
             }
         }
         if (levelByRouteId.isEmpty()) {
-            return candidates;
+            return List.of();
         }
 
         Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
@@ -77,23 +123,29 @@ public final class RouteScoreRanker {
                     .ifPresent(score -> scoreByCandidate.put(candidate, score));
         }
         if (scoreByCandidate.isEmpty()) {
-            return candidates;
+            return List.of();
         }
 
-        List<RouteSearchResponse> sorted = new ArrayList<>(candidates);
-        sorted.sort(Comparator.comparingDouble(
+        // 점수 있는 후보만 혼잡순에 넣는다. 점수 없는 후보를 끼우면 순위 조작이다.
+        List<RouteSearchResponse> scored = new ArrayList<>(scoreByCandidate.keySet());
+        scored.sort(Comparator.comparingDouble(
                 candidate -> scoreByCandidate.getOrDefault(candidate, Double.MAX_VALUE)));
 
         List<RouteSearchResponse> relabeled = new ArrayList<>();
         boolean lowestTagged = false;
-        for (RouteSearchResponse candidate : sorted) {
-            if (!lowestTagged && scoreByCandidate.containsKey(candidate)) {
+        for (RouteSearchResponse candidate : scored) {
+            if (relabeled.size() >= n) {
+                break;
+            }
+            if (!lowestTagged) {
                 relabeled.add(new RouteSearchResponse(
                         RouteType.LOW_CONGESTION, candidate.totalMinutes(), candidate.legs(),
                         candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
                 lowestTagged = true;
             } else {
-                relabeled.add(candidate);
+                relabeled.add(new RouteSearchResponse(
+                        RouteType.ALTERNATIVE, candidate.totalMinutes(), candidate.legs(),
+                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
             }
         }
         return relabeled;
