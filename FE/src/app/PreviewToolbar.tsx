@@ -6,7 +6,6 @@ interface Props {
   onProposal: () => void
   onTrain: () => void
   onNext: () => void
-  onHome: () => void
   isLiveApi?: boolean
 }
 export default function PreviewToolbar({
@@ -15,7 +14,6 @@ export default function PreviewToolbar({
   onProposal,
   onTrain,
   onNext,
-  onHome,
   isLiveApi = isBackendConfigured,
 }: Props) {
   return (
@@ -37,7 +35,6 @@ export default function PreviewToolbar({
             <button onClick={onNext}>{lastStep ? '도착' : '다음 단계'}</button>
           </>
         )}
-        <button onClick={onHome}>처음으로</button>
       </div>
     </div>
   )
