@@ -102,6 +102,36 @@ def test_ensure_folder_path_reuses_existing_and_creates_missing_folders():
     assert all(item["supportsAllDrives"] is True for item in service.files_resource.created)
 
 
+def test_find_folder_path_does_not_create_missing_folders():
+    service = FakeDriveService()
+
+    result = drive_client.find_folder_path(service, "root", "BIKE/raw")
+
+    assert result is None
+    assert service.files_resource.created == []
+
+
+def test_list_folder_files_reads_all_pages():
+    calls = []
+
+    class Files:
+        def list(self, **kwargs):
+            calls.append(kwargs)
+            if "pageToken" not in kwargs:
+                return FakeRequest({"files": [{"name": "first"}], "nextPageToken": "next"})
+            return FakeRequest({"files": [{"name": "second"}]})
+
+    class Service:
+        def files(self):
+            return Files()
+
+    result = drive_client.list_folder_files(Service(), "folder")
+
+    assert [item["name"] for item in result] == ["first", "second"]
+    assert calls[1]["pageToken"] == "next"
+    assert calls[0]["supportsAllDrives"] is True
+
+
 def test_upload_file_skips_existing_by_default(tmp_path):
     service = FakeDriveService()
     service.files_resource.children[("parent", "snapshot.parquet", None)] = "existing-id"
