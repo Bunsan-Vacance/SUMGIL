@@ -148,6 +148,62 @@ public class TransferRule {
     }
 
     /**
+     * 환승 판정 결과. 비용 계산에 쓸 이전 노선까지 함께 돌려줘 호출 4곳이 같은 판정을 쓴다.
+     *
+     * @param transfer 환승 여부
+     * @param costLine 환승이면 실측·상수 조회용 이전 노선. 비환승이면 null
+     */
+    public record TransferDecision(boolean transfer, String costLine) {
+    }
+
+    /**
+     * 대중교통 수단인지 판정한다. SUBWAY·BUS만 대중교통으로 본다.
+     * WALK는 접근, BIKE는 단독 탑승으로 보고 노선 유지 대상에서 뺀다.
+     */
+    public static boolean isTransit(TravelMode mode) {
+        return mode == TravelMode.SUBWAY || mode == TravelMode.BUS;
+    }
+
+    /**
+     * 직전 대중교통 노선을 갱신한다(S15P21A104-232). 대중교통 구간을 지나면 그 노선으로,
+     * 그 외 수단(WALK·BIKE)이면 그대로 둔다 — WALK를 지나도 이전 대중교통이 유지된다.
+     */
+    public static String keptTransitLine(String keptLine, TravelMode mode, String routeId) {
+        if (!isTransit(mode)) {
+            return keptLine;
+        }
+        return routeId;
+    }
+
+    /**
+     * 환승 여부를 판정한다(S15P21A104-232). 탐색기·매퍼·조립기가 같은 판정을 호출한다.
+     *
+     * <p>직전 대중교통 노선과 다음 대중교통이 다르면 환승이다 — 사이에 WALK가 있어도
+     * 유지된 노선으로 비교한다. 첫 탑승(kept 없음)은 환승이 아니다. 대중교통↔BIKE
+     * 직접 경계는 기존대로 환승으로 본다 (WALK가 낀 접근과 다름).
+     *
+     * @param keptLine 직전 대중교통 노선. 없으면 null
+     * @param prevMode 이전 구간 수단. null이면 경로 시작으로 보고 환승 아님
+     * @param prevLine 이전 구간 노선
+     * @param nextMode 다음 구간 수단
+     * @param nextLine 다음 구간 노선
+     */
+    public static TransferDecision decide(String keptLine, TravelMode prevMode, String prevLine,
+                                          TravelMode nextMode, String nextLine) {
+        if (prevMode != null && isTransit(nextMode)
+                && keptLine != null && !keptLine.isEmpty()
+                && nextLine != null && !keptLine.equals(nextLine)) {
+            return new TransferDecision(true, keptLine);
+        }
+        if (prevMode != null && prevLine != null && nextLine != null
+                && !prevLine.equals(nextLine)
+                && !isAccessBoundary(prevMode, nextMode)) {
+            return new TransferDecision(true, prevLine);
+        }
+        return new TransferDecision(false, null);
+    }
+
+    /**
      * @return 환승 1회당 가산 초
      */
     public long getDefaultSec() {
