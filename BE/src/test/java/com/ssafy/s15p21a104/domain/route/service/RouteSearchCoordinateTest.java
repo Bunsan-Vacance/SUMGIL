@@ -62,6 +62,9 @@ class RouteSearchCoordinateTest {
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "B", "L1", 100),
                 subway("B", "C", "L1", 100)));
+        lenient().when(graphRegistry.graphFor(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(invocation -> graphRegistry.graph());
 
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180),

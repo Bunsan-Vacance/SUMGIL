@@ -82,6 +82,9 @@ class RouteSearchComfortPriorityTest {
                 subway("A", "C", "L1", 900),
                 bike("A", "R1", 120),
                 bike("R1", "C", 120)));
+        lenient().when(graphRegistry.graphFor(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(invocation -> graphRegistry.graph());
 
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180),
