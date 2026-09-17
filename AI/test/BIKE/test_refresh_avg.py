@@ -26,6 +26,24 @@ def _snapshot(root, day: date, minute: int, stock: int, station: str = "ST-1") -
     ).to_parquet(path, index=False)
 
 
+def _envelope_snapshot(root, day: date, minute: int, stock: int) -> None:
+    path = root / f"dt={day.isoformat()}" / "hh=00" / f"snapshot_envelope_{minute:02d}.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "entity_id": "ST-1",
+                "payload_json": json.dumps(
+                    {"stationId": "ST-1", "parkingBikeTotCnt": stock, "rackTotCnt": 4}
+                ),
+                "poll_run_at": pd.Timestamp(day, tz="Asia/Seoul") + pd.Timedelta(minutes=minute),
+                "ingested_at": pd.Timestamp(day, tz="Asia/Seoul")
+                + pd.Timedelta(minutes=minute + 1),
+            }
+        ]
+    ).to_parquet(path, index=False)
+
+
 def _baseline(path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -55,8 +73,10 @@ def test_refresh_blends_recent_snapshots_and_deduplicates_5m_slots(tmp_path):
     raw = tmp_path / "raw"
     baseline = tmp_path / "baseline" / "stock_profile_avg.parquet"
     _baseline(baseline)
-    for minute, stock in zip(range(0, 30, 5), [0, 4, 4, 4, 4, 4]):
+    (raw / "dt=2026-09-13" / "hh=00").mkdir(parents=True)
+    for minute, stock in zip(range(0, 25, 5), [0, 4, 4, 4, 4]):
         _snapshot(raw, day, minute, stock)
+    _envelope_snapshot(raw, day, 25, 4)
     _snapshot(raw, day, 1, 0)  # Same 5-minute slot: the later observation wins.
     for minute in range(0, 30, 5):
         _snapshot(raw, day, minute, 2, station="ST-2")

@@ -10,11 +10,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-
-from app.BIKE.pipeline.calendar import dow_type_for_date, load_holidays
+import pyarrow.parquet as pq
 
 AI_ROOT = Path(__file__).resolve().parents[3]
 KST = ZoneInfo("Asia/Seoul")
+HOLIDAY_PATH = AI_ROOT / "data/EXTERNAL/holiday/interim/holiday_calendar.parquet"
 RAW_ROOT = AI_ROOT / "data/BIKE/raw/realtime"
 DAILY_ROOT = AI_ROOT / "data/BIKE/processed/avg_daily"
 OUTPUT_DIR = AI_ROOT / "models/BIKE/avg-refreshed"
@@ -22,7 +22,25 @@ KEYS = ["od_station_id", "dow_type", "time_slot"]
 VALUES = ["exp_bikes", "p_empty", "p_full"]
 SUMS = ["stock_sum", "empty_sum", "full_sum"]
 RAW_COLUMNS = ["stationId", "parkingBikeTotCnt", "rackTotCnt", "collected_at"]
+ENVELOPE_COLUMNS = ["entity_id", "payload_json", "ingested_at"]
 MIN_SAMPLES_PER_SLOT = 6
+
+
+def load_holidays(path: Path = HOLIDAY_PATH) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame({"date": pd.to_datetime([]), "is_holiday": pd.Series([], dtype=bool)})
+    holidays = pd.read_parquet(path, columns=["date", "is_holiday"])
+    holidays["date"] = pd.to_datetime(holidays["date"]).dt.normalize()
+    return holidays
+
+
+def dow_type_for_date(day: date, holidays: pd.DataFrame) -> int:
+    if day.weekday() == 5:
+        return 1
+    if day.weekday() == 6:
+        return 2
+    matched = holidays.loc[holidays["date"] == pd.Timestamp(day), "is_holiday"]
+    return 2 if not matched.empty and bool(matched.iloc[0]) else 0
 
 
 def _atomic_parquet(frame: pd.DataFrame, path: Path) -> None:
@@ -39,14 +57,39 @@ def _daily_path(root: Path, day: date) -> Path:
     return root / f"dt={day.isoformat()}" / "part.parquet"
 
 
+def _read_snapshot(path: Path) -> pd.DataFrame:
+    columns = set(pq.read_schema(path).names)
+    if set(RAW_COLUMNS).issubset(columns):
+        return pd.read_parquet(path, columns=RAW_COLUMNS)
+    if not set(ENVELOPE_COLUMNS).issubset(columns):
+        raise ValueError(f"알 수 없는 따릉이 원천 스키마: {path}")
+
+    selected = [*ENVELOPE_COLUMNS]
+    if "poll_run_at" in columns:
+        selected.append("poll_run_at")
+    envelope = pd.read_parquet(path, columns=selected)
+    payload = envelope["payload_json"].map(json.loads)
+    collected_at = envelope["ingested_at"]
+    if "poll_run_at" in envelope:
+        collected_at = envelope["poll_run_at"].fillna(collected_at)
+    return pd.DataFrame(
+        {
+            "stationId": envelope["entity_id"].where(
+                envelope["entity_id"].notna(), payload.map(lambda row: row.get("stationId"))
+            ),
+            "parkingBikeTotCnt": payload.map(lambda row: row.get("parkingBikeTotCnt")),
+            "rackTotCnt": payload.map(lambda row: row.get("rackTotCnt")),
+            "collected_at": collected_at,
+        }
+    )
+
+
 def aggregate_day(raw_root: Path, day: date, holidays: pd.DataFrame) -> pd.DataFrame:
     paths = sorted((raw_root / f"dt={day.isoformat()}").glob("hh=*/snapshot_*.parquet"))
     if not paths:
         raise FileNotFoundError(f"따릉이 원천 스냅샷 없음: {day}")
 
-    frame = pd.concat(
-        (pd.read_parquet(path, columns=RAW_COLUMNS) for path in paths), ignore_index=True
-    )
+    frame = pd.concat((_read_snapshot(path) for path in paths), ignore_index=True)
     timestamps = pd.to_datetime(frame["collected_at"], errors="coerce")
     if timestamps.dt.tz is None:
         timestamps = timestamps.dt.tz_localize(KST)
@@ -132,7 +175,8 @@ def run(
     for offset in range(window_days - 1, -1, -1):
         day = as_of - timedelta(days=offset)
         path = _daily_path(daily_root, day)
-        if not path.exists() and (raw_root / f"dt={day.isoformat()}").exists():
+        raw_partition = raw_root / f"dt={day.isoformat()}"
+        if not path.exists() and any(raw_partition.glob("hh=*/snapshot_*.parquet")):
             _atomic_parquet(aggregate_day(raw_root, day, holidays), path)
         if path.exists():
             daily.append(pd.read_parquet(path))
