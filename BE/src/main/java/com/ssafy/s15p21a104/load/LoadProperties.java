@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.load;
 
+import com.ssafy.s15p21a104.load.bikepred.BikePredProperties;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -13,14 +14,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param region      포함할 line_id 목록. 비어 있으면 전부 (서비스 권역 확정 전 기본값). 지하철에만 적용된다
  * @param avgSpeedMps 소요시간이 없는 구간의 추정에 쓰는 기본 표정속도 (m/s). 노선별 값은 conf/line-speeds.csv 가 우선하고, 표에 없는 노선에만 이 값을 쓴다
  * @param prune       지하철 적재 뒤 시각표가 덮는 노선에서 이번 실행에 없는 edge_time 행과 고아 역을 지운다 (기본 true)
+ * @param bikepred    재고 예측 적재의 원천 선택. bikepred 소스를 쓸 때만 본다
  */
 @ConfigurationProperties("load")
 public record LoadProperties(List<String> sources, boolean dryRun, UpsertWriter.WriteMode writeMode,
-                             List<String> region, double avgSpeedMps, Boolean prune) {
+                             List<String> region, double avgSpeedMps, Boolean prune,
+                             BikePredProperties bikepred) {
 
     public LoadProperties {
         if (sources == null || sources.isEmpty()) {
             sources = List.of("subway");
+        }
+        if (bikepred == null) {
+            bikepred = new BikePredProperties(null, null);
         }
         if (writeMode == null) {
             writeMode = UpsertWriter.WriteMode.BATCH;
