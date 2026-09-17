@@ -1,0 +1,11 @@
+# BIKE_AVG_ARTIFACT in AI/.env points to the fixed baseline; daily snapshots refresh it.
+[Unit]
+Description=Build BIKE avg serving table
+
+[Service]
+Type=oneshot
+WorkingDirectory=<REPO_ROOT>/AI
+EnvironmentFile=<REPO_ROOT>/AI/.env
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/usr/bin/bash <REPO_ROOT>/AI/DATA_ENGINE/scripts/run_bike_avg_batch.sh --refresh-baseline ${BIKE_AVG_ARTIFACT}
+TimeoutStartSec=10min

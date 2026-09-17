@@ -199,6 +199,19 @@ uvicorn app.main:app --port 8000
   전날 실측이 없으면 `lag1d_available=false`로 표시되고, 이력이 하나도 없으면 LightGBM 대신 lookup으로 예측한다
   (`predictor_fallback="no_history"`) — 시차가 전부 비면 LightGBM이 lookup보다 나쁘기 때문이다.
 
+### BIKE avg 배치 표의 시간 구간
+
+`data/BIKE/serving/bike_stock_pred_*.parquet`과 같은 이름의 CSV에서 `time_slot`은
+하루를 30분씩 나눈 구간 번호(`0`~`47`)다. `시 = time_slot // 2`,
+`분 = (time_slot % 2) * 30`으로 구간 시작 시각을 구한다. 예를 들어 `0`은
+`00:00~00:29`, `1`은 `00:30~00:59`, `9`는 `04:30~04:59`, `33`은
+`16:30~16:59`, `47`은 `23:30~23:59`를 뜻한다. 표와 AI API에는 조회 키인
+`time_slot` 숫자를 그대로 저장한다.
+
+`dow_type`은 `0` 평일, `1` 토요일, `2` 일요일·공휴일이다. 따라서
+`rental_id=ST-10, dow_type=0, time_slot=9`는 ST-10 대여소의 평일
+04:30~04:59에 해당하는 과거 평균·빈도를 나타낸다.
+
 ## 7. 디렉터리 구조
 
 FastAPI 기준 **도메인 우선(domain-first)** 구조를 쓴다. 기능(산출물)마다 `app/<도메인>/`
