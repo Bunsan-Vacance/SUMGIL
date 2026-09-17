@@ -1,11 +1,14 @@
 package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
+import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -22,6 +25,12 @@ public final class MasterValidator {
     static final Set<String> CONGESTION_TARGETS = Set.of("STATION", "LINE");
     static final int MAX_DOW_TYPE = 2;
     static final int MAX_TIME_SLOT = 47;
+    /** V2 에서 넓힌 source 열 폭. */
+    static final int SOURCE_MAX = 16;
+    /** V5 prediction_source 열 폭. 실제 값 중 가장 긴 것이 station_global_fallback 23자라 여유가 크지 않다. */
+    static final int PREDICTION_SOURCE_MAX = 32;
+    /** 적재 대여소가 마스터에 없을 때 경고에 담는 예시 수. */
+    private static final int EXAMPLE_LIMIT = 10;
 
     private MasterValidator() {
     }
@@ -94,6 +103,70 @@ public final class MasterValidator {
             }
         }
         return new ValidationReport(errors, warnings);
+    }
+
+    /**
+     * bike_stock_pred 적재 전 검증. 기본키 중복·범위·값 규약은 오류로 막는다.
+     * <p>
+     * <b>마스터에 없는 대여소는 오류가 아니라 경고다.</b> 혼잡도는 적재되지 않은 역을 오류로 막지만 여기서는 그럴 수 없다 —
+     * 예측 표가 대여소 마스터보다 최근이라 신설 대여소가 정상적으로 섞이고(2026-09-17 산출물에 96곳),
+     * 막으면 그 대여소의 예측을 통째로 버리게 된다. 마스터를 갱신해야 한다는 신호로만 남긴다.
+     *
+     * @param knownRentalIds 적재된 대여소 ID. <b>비어 있으면 대조를 건너뛴다</b> — dry-run 은 DB 를 읽지 않아 빈 집합이 온다
+     */
+    public static ValidationReport validateBikeStockPred(List<BikeStockPredRow> rows, Set<String> knownRentalIds) {
+        List<String> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        Set<String> keys = new HashSet<>();
+        Set<String> unknownRentalIds = new LinkedHashSet<>();
+
+        for (BikeStockPredRow r : rows) {
+            String label = r.rentalId() + " " + r.dowType() + "/" + r.timeSlot();
+            if (!keys.add(r.rentalId() + "|" + r.dowType() + "|" + r.timeSlot())) {
+                errors.add("같은 (대여소, 요일, 슬롯) 이 두 번: " + label);
+                continue;
+            }
+            if (r.dowType() < 0 || r.dowType() > MAX_DOW_TYPE) {
+                errors.add("요일 유형이 0~" + MAX_DOW_TYPE + " 밖: " + label);
+            }
+            if (r.timeSlot() < 0 || r.timeSlot() > MAX_TIME_SLOT) {
+                errors.add("시간 슬롯이 0~" + MAX_TIME_SLOT + " 밖: " + label);
+            }
+            if (r.expBikes() == null || r.expBikes().signum() < 0) {
+                errors.add("예상 대수가 음수이거나 없음: " + label + " (" + r.expBikes() + ")");
+            }
+            checkProbability("0대 확률", label, r.pEmpty(), errors);
+            checkProbability("만차 확률", label, r.pFull(), errors);
+            checkName("source", label, r.source(), SOURCE_MAX, errors);
+            if (r.predictionSource() != null && r.predictionSource().length() > PREDICTION_SOURCE_MAX) {
+                errors.add("prediction_source " + PREDICTION_SOURCE_MAX + "자 초과: " + label
+                        + " (" + r.predictionSource().length() + "자)");
+            }
+            if (!knownRentalIds.isEmpty() && !knownRentalIds.contains(r.rentalId())) {
+                unknownRentalIds.add(r.rentalId());
+            }
+        }
+
+        if (!unknownRentalIds.isEmpty()) {
+            warnings.add("대여소 마스터에 없는 대여소 " + unknownRentalIds.size()
+                    + "곳의 예측을 함께 적재한다 (예측 표가 더 최근이다 — 마스터 갱신 필요): "
+                    + head(unknownRentalIds.stream().toList()));
+        }
+        return new ValidationReport(errors, warnings);
+    }
+
+    /** 확률은 0~1 이다. 범위를 벗어나면 원천 단위가 % 로 바뀐 것이라 그대로 적재하면 안 된다. */
+    private static void checkProbability(String label, String key, BigDecimal value, List<String> errors) {
+        if (value == null) {
+            errors.add(label + " 없음: " + key);
+        } else if (value.signum() < 0 || value.compareTo(BigDecimal.ONE) > 0) {
+            errors.add(label + " 가 0~1 밖: " + key + " (" + value + ")");
+        }
+    }
+
+    private static String head(List<String> items) {
+        String joined = String.join(", ", items.subList(0, Math.min(EXAMPLE_LIMIT, items.size())));
+        return items.size() > EXAMPLE_LIMIT ? joined + ", …(" + items.size() + ")" : joined;
     }
 
     private static void checkKey(String column, String key, String name, Set<String> seen, List<String> errors) {
