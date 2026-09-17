@@ -118,12 +118,27 @@ def test_add_derived_columns_produces_every_registered_column():
     assert np.isnan(r.loc[(pd.Timestamp("2025-01-01"), 2, "06-07"), "lag1d_boarding_resid"])
 
 
-def test_build_matrix_fills_absent_columns_with_nan_and_casts_categories():
-    panel = _panel()
-    X = build_matrix(panel, "festival_all_derived_resid")
+def test_build_matrix_fills_missing_realtime_columns_with_nan_and_casts_categories():
+    """환승 노드가 없는 세그먼트라 `nb_xfer_*`(REALTIME_COLS)가 아예 안 만들어지는 경우 —
+    이런 결손만 조용히 NaN으로 채운다(197 C부)."""
+    panel = _panel().assign(station_name=lambda d: d["station_no"].map({1: "A", 2: "B", 3: "C"}))
+    lookup = DayTypeLookupBaseline().fit(panel)
+    segments = [{"line": "L1", "segment": "본선", "stations": [1, 2]}]
+    out = add_derived_columns(panel, lookup, segments)
+    assert "nb_xfer_boarding_resid" not in out.columns
+
+    X = build_matrix(out, "festival_all_derived_resid")
     assert list(X.columns) == FEATURE_SETS["festival_all_derived_resid"]
-    assert X["nb_prev_boarding_resid"].isna().all()
+    assert X["nb_xfer_boarding_resid"].isna().all()
     assert str(X["station_no"].dtype) == "category"
+
+
+def test_build_matrix_raises_when_non_realtime_column_is_missing():
+    """파생이 아직 안 붙은 프레임으로 파생 세트를 요청하면 조용히 NaN을 채우지 않고 바로
+    실패한다 — 이게 197 C부 전의 실제 구멍이었다(`reindex`가 전 컬럼에 관대했다)."""
+    panel = _panel()
+    with pytest.raises(KeyError, match="lag1d_boarding_resid"):
+        build_matrix(panel, "festival_selflag_d1d7_resid")
 
 
 def test_mask_realtime_columns_only_touches_realtime_set():
