@@ -181,6 +181,67 @@ def splits_with_train_start(
     return {**base, "train": (train_start, train_end)}
 
 
+def parse_splits(
+    text: str, base: Mapping[str, tuple[str, str]] = SPLITS
+) -> dict[str, tuple[str, str]]:
+    """`--splits` JSON 문자열 → `{train, valid, eval: (시작일, 종료일)}`(200 B부, 학습 창 전체 재정의).
+
+    `splits_with_train_start`가 학습 시작일 하나만 당기는 것과 달리, 이 함수는 세 구간 경계를
+    **전부** 새로 받는다 — 예: 2024~2025로 학습·검증하고 2026(아직 없는 미래)을 평가 구간으로 비워
+    두는 재학습. `text`는 다음 형식의 JSON이어야 한다(`base`는 오늘 기본값 참고용 — 부분 지정은
+    지원하지 않고 세 키를 전부 줘야 한다)::
+
+        {"train": ["2024-01-01", "2025-10-31"],
+         "valid": ["2025-11-01", "2025-12-31"],
+         "eval": ["2026-01-01", "2026-12-31"]}
+
+    키는 정확히 `{"train", "valid", "eval"}`여야 하고, 각 값은 `[YYYY-MM-DD, YYYY-MM-DD]` 2원소
+    리스트다. 경계는 `train[0] <= train[1] < valid[0] <= valid[1] < eval[0] <= eval[1]`을 지켜야
+    한다 — 구간이 뒤집히거나 겹치면(다음 구간 통계가 스며드는 누수) `ValueError`(한국어 메시지)를
+    낸다. 평가 구간이 실제 패널 범위 밖(미래)이라 표본이 0개가 되는 것은 정상이다 — 그건
+    `SequencePanel.split_index("eval")`이 빈 배열을 돌려주는 것으로 나타나고, `train_dl.run`이
+    그 경우를 감지해 평가를 건너뛴다(빈 딕셔너리 자체는 여기서 막지 않는다).
+    """
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--splits는 올바른 JSON이어야 한다: {exc}") from exc
+    # CLI 입력 검증이라 타입·값 오류를 구분하지 않고 전부 ValueError로 통일한다(noqa: TRY004).
+    if not isinstance(obj, dict):
+        raise ValueError(f"--splits는 딕셔너리(JSON 객체)여야 한다: {obj!r}")  # noqa: TRY004
+    required = {"train", "valid", "eval"}
+    if set(obj) != required:
+        raise ValueError(
+            f"--splits의 키는 정확히 {sorted(required)}이어야 한다 — 받은 키: {sorted(obj)}"
+        )
+
+    parsed: dict[str, tuple[str, str]] = {}
+    bounds: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {}
+    for name in ("train", "valid", "eval"):
+        value = obj[name]
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"--splits의 {name!r}은 [시작일, 종료일] 2개짜리 리스트여야 한다")
+        start, end = value
+        try:
+            ts_start, ts_end = pd.Timestamp(start), pd.Timestamp(end)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"--splits의 {name!r} 날짜를 해석할 수 없다: {value!r}") from exc
+        if ts_start > ts_end:
+            raise ValueError(f"--splits의 {name!r} 구간이 뒤집혔다: {start} > {end}")
+        parsed[name] = (str(start), str(end))
+        bounds[name] = (ts_start, ts_end)
+
+    if not bounds["train"][1] < bounds["valid"][0]:
+        raise ValueError(
+            f"학습 종료일({parsed['train'][1]})은 검증 시작일({parsed['valid'][0]})보다 앞서야 한다"
+        )
+    if not bounds["valid"][1] < bounds["eval"][0]:
+        raise ValueError(
+            f"검증 종료일({parsed['valid'][1]})은 평가 시작일({parsed['eval'][0]})보다 앞서야 한다"
+        )
+    return parsed
+
+
 # ── 스케일·표준화 표 ──
 def fit_scale(train_derived: pd.DataFrame, min_std: float = 1.0) -> pd.DataFrame:
     """역×슬롯별 잔차 표준편차 표 `[station_no, time_slot, boarding_std, alighting_std]`.
