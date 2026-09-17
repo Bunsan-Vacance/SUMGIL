@@ -60,7 +60,8 @@
 | 2026-09-08 | `edge_time` 적재 107,136행 — 행 단위 INSERT vs JDBC 배치 1,000 | median 220,419 → 5,516 ms (약 40배), p95 240,065 → 6,176 ms | [2026-09-08-edge-time-load.md](./2026-09-08-edge-time-load.md) |
 | 2026-09-11 | 같은 비교, 193,536행으로 재측정 + dead tuple 누적 실험 | median 250,238 → 3,482 ms (약 72배), p95 285,428 → 3,611 ms | [2026-09-11-edge-time-reload.md](./2026-09-11-edge-time-reload.md) |
 | 2026-09-16 | 수집기 회차 내보내기 — Kafka 경유 vs Redis 직접 쓰기 (2,949건) | median 66 ms vs 546 ms, p95 88 vs 636 | [2026-09-16-kafka-vs-direct.md](./2026-09-16-kafka-vs-direct.md) |
-| 2026-09-16 | **prod 컨슈머 지연** — 운영 로그 38회차 (워밍업 1회차 제외) | produce median 158 ms · 회차 배수시간 median 2,831~3,471 ms · 초당 약 790~870건 | [2026-09-16-consumer-prod-latency.md](./2026-09-16-consumer-prod-latency.md) |
+| 2026-09-16 | prod 컨슈머 지연 — 운영 로그 38회차 (지하철 구간 9분뿐) | produce median 158 ms · 회차 배수시간 median 2,831~3,471 ms · 초당 약 790~870건 | [2026-09-16-consumer-prod-latency.md](./2026-09-16-consumer-prod-latency.md) |
+| 2026-09-17 | **prod 컨슈머 지연 — 371회차, 지하철 창 3시간 45분.** 위 기록을 대체한다 | produce median 183(창 안)·190 ms(창 밖) · 회차 배수시간 median 3,165~3,278 ms · 초당 약 765~906건 · 실패 0/1,090,799 | [2026-09-17-consumer-prod-latency.md](./2026-09-17-consumer-prod-latency.md) |
 
 앞 두 기록은 행 수가 달라 **서로 배수를 비교하지 않는다.** 그 사이 로더 커밋이 16개라 조건이 같지 않다(09-11 문서 "해석" 참고).
 
