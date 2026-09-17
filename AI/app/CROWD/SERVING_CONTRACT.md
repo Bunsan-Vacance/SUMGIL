@@ -1,6 +1,6 @@
 # CROWD 혼잡도 — 서빙 산출물·API 명세 (BE 전달용)
 
-작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(2026-09-17 13:23 재생성 — 145 후속 라우팅 반영판)
+작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(2026-09-17 15:24 재생성 — 200 2024-25 최종 fit 반영판)
 
 > **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
 > `batch_predict.OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 · 등급 임계값
@@ -74,11 +74,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:00",
   "time_slot": "06-07",
-  "congestion_pct": 11.591921,
+  "congestion_pct": 14.043068,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 923.805823,
-  "alighting_pred": 2454.620876,
+  "boarding_pred": 1380.633132,
+  "alighting_pred": 2441.109924,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -94,11 +94,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:30",
   "time_slot": "06-07",
-  "congestion_pct": 17.477853,
+  "congestion_pct": 22.342685,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 923.805823,
-  "alighting_pred": 2454.620876,
+  "boarding_pred": 1380.633132,
+  "alighting_pred": 2441.109924,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -109,7 +109,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 ]
 ```
 
-두 행의 `boarding_pred`가 **같다**(923.81). 0절 2번이 말하는 지점이다. `congestion_pct`는 11.6 → 17.5로 30분마다 다르다.
+두 행의 `boarding_pred`가 **같다**(1380.63). 0절 2번이 말하는 지점이다. `congestion_pct`는 14.0 → 22.3로 30분마다 다르다.
 
 ---
 
@@ -158,19 +158,19 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `availability` | `"d7_only"` | (197) 가용성 판정 — `full`/`d1_only`/`d7_only`/`no_lag`. `routing.availability()`가 `lag1d_available`·`lag7d_available`로 정한다 |
 | `routing_rule` | `{"pred": "lightgbm", "avail": "d7_only", "line": null, "day_type": null, "group": null}` | (197, 145 후속) 그 kind를 고른 라우팅 규칙(`routing.describe_policy`). `predictor_override=true`면 `null` |
 | `predictor` | `"lightgbm"` | 쓰인 예측기 종류. **라우팅 결과라 날짜마다 다를 수 있다**(197 B부, 145 후속) |
-| `predictor_version` | `"lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113"` | 아티팩트까지 포함한 버전 |
+| `predictor_version` | `"lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025"` | 아티팩트까지 포함한 버전 |
 | `predictor_override` | `false` | (197) `--predictor` CLI로 kind를 명시해 라우팅을 건너뛰었는지 |
 | `predictor_fallback` | `null` | **(197부터 항상 `null`)** 옛 "이력 전무 시 lookup 강제 대체" 의미는 없어졌다 — 필드는 BE 계약 유지를 위해 키만 남는다 |
 | `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
-| `events_coverage_end` | `"2026-12-31"` | (200) `crowd_events_files`에 나열된 이벤트 표들을 합친 최대 date. 읽은 표가 하나도 없으면 `null` |
+| `events_coverage_end` | `"2026-12-27"` | (200) `crowd_events_files`에 나열된 이벤트 표들을 합친 최대 date. 읽은 표가 하나도 없으면 `null` |
 | `events_available` | `true` | (200) `target_date`가 `events_coverage_end` 이내인지. `false`면 그 날짜의 경기·축제 칸은 "없었다"가 아니라 "표가 안 덮는다"는 뜻(0-채움 자체는 유지) |
 | `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
 | `rows` | `21606` | 표 행 수 |
 | `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
-| `lookup_substituted_rows` | `120` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
+| `lookup_substituted_rows` | `334` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
 | `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
 | `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
-| `generated_at` | `"2026-09-17T13:23:43+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
+| `generated_at` | `"2026-09-17T15:24:24+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
 
 ---
 
@@ -187,11 +187,11 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "available_dates": ["2026-09-13", "2026-09-14"],
   "grade_thresholds": [50.0, 100.0],
   "predictor": "lightgbm",
-  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113",
-  "generated_at": "2026-09-17T13:23:43+09:00",
+  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025",
+  "generated_at": "2026-09-17T15:24:24+09:00",
   "status_counts": {"ok": 20902, "no_calibration": 585, "segment_truncated": 119},
   "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}],
-  "events_coverage_end": "2026-12-31",
+  "events_coverage_end": "2026-12-27",
   "events_available": true
 }
 ```
@@ -211,11 +211,11 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "station_name": "서울역",
   "line": "1호선",
   "train_capacity": 1600,
-  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113",
+  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025",
   "lag1d_available": false,
   "slots": [
-    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.286222, "grade": 0, "data_status": "ok", "pred_source": "model"},
-    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 6.320377, "grade": 0, "data_status": "ok", "pred_source": "model"}
+    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 7.534097, "grade": 0, "data_status": "ok", "pred_source": "model"},
+    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 5.658234, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -238,7 +238,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "line": "2호선",
   "time_slot_30min": "08:30",
   "stations": [
-    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 27.387391, "grade": 0, "data_status": "ok", "pred_source": "model"}
+    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 27.087917, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -274,7 +274,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 `latest_artifact`는 이름 정렬로 최신을 고르는데, DL 변형 18개 중 이름이 가장 큰 `dl_lstm_s14_noev_s44`가 뽑혔다 — 채택된 모델은 `dl_gru_s14_noev_s42`다. 배포 아티팩트를 설정값(`crowd_dl_artifact`)으로 고정해 막았다. **DL 아티팩트를 새로 학습해 교체할 때는 이 설정값을 같이 고쳐야 한다.**
 
-145 후속부터는 LightGBM 배포판도 같은 이유로 고정한다 — `crowd_lgbm_artifact`(`app/core/config.py`)가 마스킹 학습 아티팩트(`festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113`)를 이름으로 못박는다. 지금은 이름 정렬로도 우연히 이 폴더가 최신이지만, 다음 학습이 그보다 이름이 앞서는 폴더를 만들면 `auto`가 조용히 옛 아티팩트로 돌아간다 — 그래서 운에 맡기지 않는다.
+145 후속부터는 LightGBM 배포판도 같은 이유로 고정한다 — `crowd_lgbm_artifact`(`app/core/config.py`)가 마스킹 학습 아티팩트를 이름으로 못박는다(145 후속 `…_masked-stack_20260917-1113` → 200에서 2024+2025 최종 fit `…_masked-stack_train2024-2025`로 교체, DL도 `dl_gru_s14_noev_s42_train2024-2025`로 교체. 승격 절차는 `MODEL_REGISTRY.md` 4b). 지금은 이름 정렬로도 우연히 이 폴더가 최신이지만, 다음 학습이 그보다 이름이 앞서는 폴더를 만들면 `auto`가 조용히 옛 아티팩트로 돌아간다 — 그래서 운에 맡기지 않는다.
 
 ### 5.4 강동(5호선) 행 중복 — `(station_no, direction, time_slot_30min)`은 유일 키가 아니다 (미해결, 티켓 필요)
 
@@ -306,8 +306,9 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 | --- | --- | --- |
 | 인원 음수 수정(5.1) | `*_pred` 클립 → lookup 대체 + `pred_clipped`(bool) → `pred_source`(str) 컬럼 교체 | **컬럼 1개 이름·타입 변경** — parquet 스키마·API 응답 반영 완료(197 B부) |
 | 가용성별 라우팅(197) | 이력 완비(`full`)는 LightGBM, 결손·전무(`d1_only`/`d7_only`/`no_lag`)는 GRU(`dl`)로 라우팅 | `meta.predictor`·`predictor_version` 값이 날짜마다 달라진다(이미 내려가는 필드, 스키마 변경 없음). `meta.availability`·`routing_rule`·`predictor_override` 3개 키가 새로 추가됐다 |
-| **가용성별 라우팅 수정(145 후속, 마스킹 LightGBM)** | `d7_only`·`no_lag`는 이제 LightGBM(마스킹 학습 아티팩트, `masking-check/RESULTS.md` 14절)이 맡는다. `d1_only`만 GRU(`dl`)로 남는다 | 스키마·키는 그대로다(변경 없음). `predictor_version`의 LightGBM 값이 `lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113`로 바뀐다 — `d7_only`·`no_lag` 날짜의 표시 모델명이 GRU에서 LightGBM으로 보인다. **값 드리프트**(2026-09-13/14 `d7_only` 두 날짜를 GRU 판 → 마스킹 LightGBM 판으로 재생성해 21,606행씩 행 정렬 비교): `congestion_pct` 평균 \|Δ\| **0.62 / 0.86%p**(중앙값 0.39 / 0.49, 95퍼센타일 1.93 / 3.06, 최대 32.4 / 50.1), `grade`가 달라진 셀 **3.85 / 4.36%**, `data_status` 100% 동일, `lookup_substituted_rows` 228 → 120 / 0 → 16, `history_window_days` 14 → 7. 지난 GRU 도입(변경 통지 01: 평균 4.7 / 4.4%p)보다 값은 훨씬 덜 움직인다. 통지문 `.claude/handoff/TO_BE-crowd-routing-change-02.md` |
+| **가용성별 라우팅 수정(145 후속, 마스킹 LightGBM)** | `d7_only`·`no_lag`는 이제 LightGBM(마스킹 학습 아티팩트, `masking-check/RESULTS.md` 14절)이 맡는다. `d1_only`만 GRU(`dl`)로 남는다 | 스키마·키는 그대로다(변경 없음). `predictor_version`의 LightGBM 값이 `lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025`로 바뀐다 — `d7_only`·`no_lag` 날짜의 표시 모델명이 GRU에서 LightGBM으로 보인다. **값 드리프트**(2026-09-13/14 `d7_only` 두 날짜를 GRU 판 → 마스킹 LightGBM 판으로 재생성해 21,606행씩 행 정렬 비교): `congestion_pct` 평균 \|Δ\| **0.62 / 0.86%p**(중앙값 0.39 / 0.49, 95퍼센타일 1.93 / 3.06, 최대 32.4 / 50.1), `grade`가 달라진 셀 **3.85 / 4.36%**, `data_status` 100% 동일, `lookup_substituted_rows` 228 → 120 / 0 → 16, `history_window_days` 14 → 7. 지난 GRU 도입(변경 통지 01: 평균 4.7 / 4.4%p)보다 값은 훨씬 덜 움직인다. 통지문 `.claude/handoff/TO_BE-crowd-routing-change-02.md` |
 | **이벤트 커버리지 메타(200)** | 배치가 이벤트 표를 `crowd_events_files`(콤마 구분 다중 파일, 뒤 파일이 같은 키를 덮어씀)로 읽어 2026 이후 대상 날짜에도 경기·축제가 붙는다. 표가 그 날짜를 덮는지를 meta로 노출한다 | `/crowd/meta` 필드 2개 추가(`events_coverage_end`·`events_available`, additive) — 배치 `.meta.json` 키도 21→23개(2개 추가). 기존 필드·키는 그대로다 |
+| **2024-25 최종 fit 승격(200)** | 라우팅 표는 그대로. LightGBM(`…_masked-stack_train2024-2025`)·GRU(`dl_gru_s14_noev_s42_train2024-2025`) 둘 다 2024+2025 전체로 재적합해 `promote_artifact`로 승격(`MODEL_REGISTRY.md` 4b). 2023은 뺀다(masking-check 13·17절) | 스키마·키 변경 없음. `predictor_version` 두 값이 바뀐다. **값 드리프트**(09-13/14 `d7_only`, 1113 판 → 2024-25 판, 21,606행 행 정렬): `congestion_pct` 평균 \|Δ\| **0.41 / 0.41%p**(중앙값 0.23 / 0.24, 95퍼센타일 1.34 / 1.31, 최대 31.8 / 42.5), `grade` 변화 셀 **3.71 / 3.71%**, `data_status` 100% 동일, `lookup_substituted_rows` 120 → 334 / 16 → 36(2024-25 판이 음수 셀을 더 내고 lookup으로 대체됨 — 인원 하한 규칙은 그대로). 보유 평가 연도가 없어 성능 표는 없다 — 2026 실측 누적 시 사후 검증. 통지문 `.claude/handoff/TO_BE-crowd-artifact-refit-03.md` |
 
 ---
 

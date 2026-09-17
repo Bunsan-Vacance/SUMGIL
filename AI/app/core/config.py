@@ -22,11 +22,16 @@ class Settings(BaseSettings):
     # 197: DL 배포 아티팩트를 이름으로 고정한다. latest_artifact(kind="dl")는 폴더명 정렬 최신을
     # 고르는데, DL 변형이 18개라 이름 운에 맡기면 dl_lstm_*(대조군)이 dl_gru_*(채택 구성)보다
     # 뒤에 와서 잘못 뽑힌다 — 198 V3(정적 이벤트 없음) 판정이 이 이름을 가리키게 명시로 고정한다.
-    crowd_dl_artifact: str = "dl_gru_s14_noev_s42_20260914-1358"
+    # 200: 2024+2025 전체(학습 2024-01~2025-10, 검증 2025-11~12)로 최종 fit한 V3 s42. 이전 배포
+    # `dl_gru_s14_noev_s42_20260914-1358`(2024 단독)은 롤백용으로 남겨둔다. 이름 정렬 최신은 여전히
+    # `dl_lstm_s14_noev_s44_*`(대조군)라 고정 없이는 잘못 뽑힌다.
+    crowd_dl_artifact: str = "dl_gru_s14_noev_s42_train2024-2025"
     # 145 후속 — LightGBM 배포 아티팩트도 이름으로 고정한다(`latest_artifact` 이름 정렬은
     # `_masked-stack_`이 뒤에 와 우연히 맞지만 운에 맡기지 않는다). `None`이면 예전처럼
     # `latest_artifact(kind="lightgbm")`, 그것도 없으면 lookup.
-    crowd_lgbm_artifact: str | None = "festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113"
+    # 200: 2024+2025 전체로 최종 fit한 마스킹 stack 아티팩트(2023 제외 근거 masking-check 13·17절).
+    # 이전 배포 `..._masked-stack_20260917-1113`(2024 단독)은 롤백용으로 남겨둔다.
+    crowd_lgbm_artifact: str | None = "festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025"
     # 혼잡도 등급 임계치(%). 팀 논의 A-2 미확정 — 국토부 150/170/190은 판별력이 없어(90) 분포 기준 기본값.
     crowd_grade_thresholds: str = "50,100"
     # 200: 배치 서빙이 읽는 이벤트 표 목록(콤마 구분, `CROWD_PROCESSED` 아래). 학습은
