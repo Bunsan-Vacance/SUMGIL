@@ -14,9 +14,15 @@ API는 요청 시점에 모델을 돌리지 않고 이 표만 읽는다(`AI/CLAU
 
 - **패널에 있는 날짜**(과거 재현·검증용): 그 날 행을 그대로 창에 넣고 예측한다. 실측이 있으니
   `actual_*` 컬럼도 같이 남겨 API가 "예측 vs 실측"을 보여줄 수 있다.
-- **패널에 없는 날짜**(오늘·내일 — 실제 운영): 역 × 20슬롯 골격을 만들고 달력에서 day_type, 이벤트
-  테이블에서 경기·축제(없으면 0), 승하차는 NaN으로 둔다. 시차 피처는 창에 든 과거 행에서 채워진다.
-  패널(연간 CSV, 2025-12까지) 뒤에는 D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`)가 쌓은
+- **패널에 없는 날짜**(오늘·내일 — 실제 운영): 역 × 20슬롯 골격을 만들고 달력에서 day_type,
+  `settings.crowd_events_files`에 나열된 이벤트 표들(콤마 구분, `load_event_tables`, 200)에서 경기·
+  축제를 붙인다. 학습(`dataset.EVENTS_NAME`)은 2024_2025 표 하나만 쓰지만, 서빙은 대상 날짜가
+  2026 이후로 넘어가므로 그 구간을 덮는 표(예: `crowd_station_events_2026_2026.parquet`)를 뒤에
+  이어 붙인다 — 같은 (date, station_no)는 뒤 파일이 덮어쓴다. 어느 표도 그 날짜를 덮지 않으면
+  경기·축제 칸은 그대로 0으로 채워지는데(원칙 8과 무관 — "이벤트가 없었다"의 0-채움 자체는
+  유지한다), 그 사실을 meta의 `events_coverage_end`(표들의 최대 date)·`events_available`(대상
+  날짜가 그 안에 있는지)로 노출한다. 승하차는 NaN으로 둔다. 시차 피처는 창에 든 과거 행에서
+  채워진다. 패널(연간 CSV, 2025-12까지) 뒤에는 D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`)가 쌓은
   `data/CROWD/interim/crowd_recent_ridership_long.parquet`을 이어 붙여 이력 창을 채운다(143). 내일은 `lag1d`
   (전날)가 비어 `lag7d`만으로 예측되는데 이 사실을 `lag1d_available`로 표시한다.
 
@@ -58,7 +64,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -78,7 +84,6 @@ from app.CROWD.pipeline.congestion import (
 from app.CROWD.pipeline.dataset import (
     CROWD_PROCESSED,
     EVENT_COUNT_COLS,
-    EVENTS_NAME,
     extend_panel_with_recent,
     load_panel,
     load_recent_long,
@@ -113,7 +118,7 @@ DATA_STATUS_VALUES = (
 # 표에는 없고 API에서만 나타나는 상태(그 날짜 표가 아직 없음 -> 404).
 API_ONLY_DATA_STATUS = ("no_data",)
 
-# `.meta.json`에 실리는 키와 그 순서. `predict_day`가 만드는 앞쪽 13개 + `run`이 덧붙이는 8개.
+# `.meta.json`에 실리는 키와 그 순서. `predict_day`가 만드는 앞쪽 13개 + `run`이 덧붙이는 10개(200에서 8→10).
 META_KEYS = (
     "target_date",
     "in_panel",
@@ -129,6 +134,8 @@ META_KEYS = (
     "predictor_override",
     "predictor_fallback",
     "recent_dates_available",
+    "events_coverage_end",
+    "events_available",
     "grade_thresholds",
     "rows",
     "status_counts",
@@ -482,6 +489,42 @@ def _atomic_write(write_fn: Callable[[Path], None], path: Path) -> None:
         raise
 
 
+def load_event_tables(paths: Sequence[Path]) -> tuple[pd.DataFrame | None, pd.Timestamp | None]:
+    """`settings.events_paths`에 나열된 이벤트 표들을 읽어 합친다(200) — 배치 서빙 전용.
+
+    학습(`dataset.load_panel(with_events=True)`)은 `dataset.EVENTS_NAME` 표 하나만 읽는다 — 이
+    함수와 무관하다. 없는 경로는 `[안내]`로 알리고 건너뛴다. 같은 (date, station_no) 키가 여러
+    표에 있으면 **뒤 파일이 이긴다**(`crowd_events_files` 순서 — 나중 구간 표를 뒤에 둔다). 반환하는
+    두 번째 값은 합친 표의 최대 date(이벤트 커버리지 종료일) — 아무 표도 못 읽으면 `(None, None)`.
+    """
+    frames = []
+    for path in paths:
+        path = Path(path)
+        if not path.exists():
+            print(f"[안내] 이벤트 표 없음, 건너뜀: {path}", flush=True)
+            continue
+        frames.append(pd.read_parquet(path))
+    if not frames:
+        return None, None
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    combined = combined.drop_duplicates(subset=["date", "station_no"], keep="last").reset_index(
+        drop=True
+    )
+    return combined, combined["date"].max()
+
+
+def events_available(target_date: pd.Timestamp, coverage_end: pd.Timestamp | None) -> bool:
+    """대상 날짜가 이벤트 표 커버리지 안에 있는지(200).
+
+    `False`면 그 날짜의 경기·축제 칸은 "이벤트가 없었다"가 아니라 "표가 그 구간을 안 덮는다"는
+    뜻이다(0-채움 자체는 유지 — 원칙 8이 막는 것은 기준선 값을 채우는 것이지, 이벤트 개수 0-채움이
+    아니다). `coverage_end`가 `None`(읽은 표가 없음)이면 항상 `False`.
+    """
+    if coverage_end is None:
+        return False
+    return pd.Timestamp(target_date).normalize() <= pd.Timestamp(coverage_end).normalize()
+
+
 def run(
     target_dates: list[pd.Timestamp],
     predictor_kind: str | None = None,
@@ -494,8 +537,7 @@ def run(
 
     panel = load_panel(with_events=True)
     holidays = load_holidays()
-    events_path = CROWD_PROCESSED / EVENTS_NAME
-    events = pd.read_parquet(events_path) if events_path.exists() else None
+    events, events_coverage_end = load_event_tables(settings.events_paths)
     # 143: D−1 수집기가 쌓은 최근 실측을 패널 뒤에 이어 붙여 이력 창(시차 피처)을 채운다. 파일이 없으면 패널만.
     recent_dates: list[str] = []
     recent = load_recent_long() if use_recent else None
@@ -536,6 +578,10 @@ def run(
         meta.update(
             {
                 "recent_dates_available": recent_dates,
+                "events_coverage_end": (
+                    str(events_coverage_end.date()) if events_coverage_end is not None else None
+                ),
+                "events_available": events_available(d, events_coverage_end),
                 "grade_thresholds": thresholds,
                 "rows": len(table),
                 "status_counts": table["data_status"].value_counts().to_dict(),

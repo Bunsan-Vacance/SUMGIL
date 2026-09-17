@@ -19,10 +19,21 @@
 경기 일정(KBO·K리그)은 지금 2024-03부터만 수집돼 있어 그 이전 구간은 `game_count`가
 전부 0이 된다. 축제는 2013~2027로 넓다. `main()`이 구간 밖 원천을 경고로 찍는다.
 
+**`--start`/`--end`를 주면 패널 날짜 대신 그 구간을 쓴다** — 역·좌표는 여전히 `--panel`에서
+온다(학습 패널과 무관하게 서빙용 미래 구간 표를 만들 때 쓴다, 200). 둘 다 줘야 하고 하나만
+주면 오류(`SystemExit`)다.
+
+**축제는 2026부터 원본이 없다(200).** 축제 원천 CSV(`KC_488_WNTY_CLTFSTVL_{year}.csv`)는
+2022~2025년치만 수집돼 있어, 2026 이후 구간을 돌리면 `festival_count`는 **2025년 항목 중
+`end_date`가 2026으로 넘어오는 장기 축제**만 잡힌다 — 2026에 새로 열리는 축제는 원본이 없어
+전부 0이다("없었다"가 아니라 "수집 안 됨", 위 `warn_source_coverage`와 같은 함정). 새로
+내려받지 않고 이 한계를 그대로 둔다.
+
 실행:
     cd AI
     python -m DATA_ENGINE.eda.map_events_to_stations
     python -m DATA_ENGINE.eda.map_events_to_stations --panel crowd_panel_2023_2023.parquet
+    python -m DATA_ENGINE.eda.map_events_to_stations --start 2026-01-01 --end 2026-12-31
 """
 
 from __future__ import annotations
@@ -82,6 +93,26 @@ def events_output_name(panel_name: str) -> str:
     if stem.startswith("crowd_panel_"):
         return f"crowd_station_events_{stem.removeprefix('crowd_panel_')}.parquet"
     return f"crowd_station_events__{stem}.parquet"
+
+
+def resolve_range(
+    panel_dates: pd.Series, start: str | None, end: str | None
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """이벤트 구간을 정한다 — `--start`/`--end`가 둘 다 있으면 그 구간, 둘 다 없으면 패널 구간.
+
+    하나만 주면 나머지 경계가 불명확해 `SystemExit`으로 막는다(역·좌표는 이 함수와 무관하게
+    항상 `--panel`에서 온다).
+    """
+    if (start is None) != (end is None):
+        raise SystemExit("--start과 --end는 함께 줘야 한다(하나만 주면 구간 경계가 불명확하다)")
+    if start is not None and end is not None:
+        return pd.Timestamp(start), pd.Timestamp(end)
+    return panel_dates.min(), panel_dates.max()
+
+
+def range_output_name(start: pd.Timestamp, end: pd.Timestamp) -> str:
+    """`--start`/`--end` 구간 → 출력 파일명. `events_output_name`(패널 이름 기반)의 구간판."""
+    return f"crowd_station_events_{start.year}_{end.year}.parquet"
 
 
 def load_panel_stations(panel_name: str = PANEL_NAME) -> pd.DataFrame:
@@ -268,13 +299,22 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--panel", default=PANEL_NAME, help="이벤트를 붙일 패널 파일명")
-    ap.add_argument("--out", default=None, help="출력 파일명(기본: 패널 이름에서 자동)")
+    ap.add_argument("--panel", default=PANEL_NAME, help="역·좌표를 가져올 패널 파일명")
+    ap.add_argument(
+        "--start", default=None, help="이벤트 구간 시작(YYYY-MM-DD). --end와 같이 줘야 한다"
+    )
+    ap.add_argument(
+        "--end", default=None, help="이벤트 구간 끝(YYYY-MM-DD). --start와 같이 줘야 한다"
+    )
+    ap.add_argument("--out", default=None, help="출력 파일명(기본: 패널 이름·구간에서 자동)")
     args = ap.parse_args(argv)
-    output_name = args.out or events_output_name(args.panel)
 
     panel_dates = pd.read_parquet(CROWD_PROCESSED / args.panel, columns=["date"])["date"]
-    panel_range = (panel_dates.min(), panel_dates.max())
+    panel_range = resolve_range(panel_dates, args.start, args.end)
+    if args.start and args.end:
+        output_name = args.out or range_output_name(*panel_range)
+    else:
+        output_name = args.out or events_output_name(args.panel)
     warn_source_coverage(panel_range)
     events, venue_summary, venue_links = build_station_events(panel_range, args.panel)
 

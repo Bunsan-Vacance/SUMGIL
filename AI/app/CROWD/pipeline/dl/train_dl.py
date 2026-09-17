@@ -29,13 +29,21 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
   early stopping을 결정적으로 만들기 위해서다. 참고용으로 절단 섞인 손실(`valid_loss_trunc`,
   고정 시드)도 `history.json`에 같이 남긴다.
 
-## 학습 창 확장(145 후속)
+## 학습 창 확장(145 후속) · 전체 재정의(200 B부)
 
 기본 구성은 `dl/dataset.SPLITS`(2024-01~10 학습)로 고정이다. `--train-start`를 주면
 `splits_with_train_start`로 **학습 시작일만** 당기고 검증(2024-11~12)·평가(2025) 경계는 그대로 둔다.
 다른 패널·파생 캐시(예: 2023~2025로 늘린 패널)로 학습하려면 `--panel`/`--events`/`--derived-cache`를
 같이 준다 — `--panel`만 주고 `--derived-cache`를 생략하면 기본 파생 캐시를 덮어쓰므로 막는다
 (`train.py`와 같은 가드).
+
+**`--splits`**(200 B부)는 세 구간 경계를 전부 새로 받는다(`dl/dataset.parse_splits`) — 예:
+2024~2025를 학습·검증으로 쓰고 아직 데이터가 없는 2026을 평가로 비워 두는 재학습(다음 프로덕션
+아티팩트가 이 창을 쓴다, `MODEL_REGISTRY.md` "4b. 아티팩트 승격 절차"). `--train-start`와는
+**동시에 줄 수 없다**(`SystemExit`) — 하나는 시작일만 옮기고 다른 하나는 전체를 새로 받아 같이
+쓰면 어느 쪽이 이겼는지 모호하다. 평가 구간이 실제 패널 범위 밖(미래)이면 표본이 0개인 것이
+정상이다 — `run()`이 그 경우 `[안내] 평가 구간 표본 0 — 평가 생략`을 찍고 학습·검증(early
+stopping)은 그대로 진행한다. `meta.json`에는 `eval_rows`로 남는다.
 
 ## 재현성
 
@@ -55,6 +63,10 @@ DL 아티팩트를 만들어도 운영 기본값이 조용히 바뀌지 않는�
         --panel crowd_panel_2023_2025.parquet --events crowd_station_events_2023_2025.parquet
         --derived-cache crowd_panel_derived_2023_2025.parquet
         --out-root models/CROWD/_experiments/masking --name w2023_gru_s42   # 145 후속 창 확장(한 줄로)
+    python -m app.CROWD.pipeline.dl.train_dl
+        --splits '{"train": ["2024-01-01", "2025-10-31"], "valid": ["2025-11-01", "2025-12-31"],
+                   "eval": ["2026-01-01", "2026-12-31"]}'
+        --out-root models/CROWD/_experiments/ops --name w2024_2025_gru_s42   # 200 B부 전체 재정의
 """
 
 from __future__ import annotations
@@ -85,6 +97,7 @@ from app.CROWD.pipeline.dl.dataset import (
     fit_event_stats,
     fit_scale,
     load_derived_slim,
+    parse_splits,
     seq_channels_for,
     seq_feature_columns,
     splits_with_train_start,
@@ -402,8 +415,14 @@ def run(args, prepared=None) -> Path:
             "--panel을 바꾸면 --derived-cache도 따로 줘야 한다 — 기본 캐시"
             "(crowd_panel_derived_2024_2025)를 덮어쓴다"
         )
-    train_start = getattr(args, "train_start", None) or SPLITS["train"][0]
-    splits = splits_with_train_start(train_start)
+    splits_json = getattr(args, "splits", None)
+    train_start = getattr(args, "train_start", None)
+    if splits_json and train_start:
+        raise SystemExit("--splits와 --train-start는 함께 쓸 수 없다 — 하나만 골라라")
+    if splits_json:
+        splits = parse_splits(splits_json)
+    else:
+        splits = splits_with_train_start(train_start or SPLITS["train"][0])
 
     sp, stats, lookup = (
         prepared
@@ -418,12 +437,19 @@ def run(args, prepared=None) -> Path:
     )
     idx_train = sp.split_index("train")
     idx_valid = sp.split_index("valid")
+    # `--splits`로 평가 구간을 아직 데이터가 없는 미래(예: 2026)에 두면 표본이 0개다 — 학습·early
+    # stopping은 train/valid만 쓰므로 크래시 없이 진행하고, 정보용으로만 기록한다(200 B부).
+    idx_eval = sp.split_index("eval")
+    eval_rows = len(idx_eval[0])
     print(
         f"[준비] 역 {len(sp.station_ids)} · 학습 표본 {len(idx_train[0]):,} · 검증 {len(idx_valid[0]):,}"
-        f" · 채널 {sp.seq_channels}({args.seq_features}) · 정적 {stat_features_for(sp.use_static_events)}"
+        f" · 평가 {eval_rows:,} · 채널 {sp.seq_channels}({args.seq_features})"
+        f" · 정적 {stat_features_for(sp.use_static_events)}"
         f" · {time.time() - t0:.0f}s · 장치 {device}",
         flush=True,
     )
+    if eval_rows == 0:
+        print("[안내] 평가 구간 표본 0 — 평가 생략", flush=True)
 
     common = {
         "model_kind": args.model,
@@ -496,6 +522,9 @@ def run(args, prepared=None) -> Path:
         "derived_cache": Path(derived_cache).name if derived_cache else "기본",
         "n_train_samples": len(idx_train[0]),
         "n_valid_samples": len(idx_valid[0]),
+        # 200 B부 — --splits로 평가 구간을 미래(데이터 없음)에 두면 0. dl/infer.py·evaluate_dl.py는
+        # 이 키를 읽지 않으므로(meta.get 방식) 추가해도 기존 리더를 깨지 않는다.
+        "eval_rows": eval_rows,
         "seed": args.seed,
         "epochs": args.epochs,
         "epochs_run": len(history),
@@ -577,8 +606,21 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--stations", type=int, default=None, help="앞쪽 N개 역만(스모크)")
     ap.add_argument(
         "--train-start",
-        default=SPLITS["train"][0],
-        help=f"학습 시작일 YYYY-MM-DD(145 후속 학습 창 확장). 검증·평가 경계는 그대로. 기본 {SPLITS['train'][0]}",
+        default=None,
+        help=(
+            "학습 시작일 YYYY-MM-DD(145 후속 학습 창 확장). 검증·평가 경계는 그대로."
+            f" 기본 {SPLITS['train'][0]}. --splits와 함께 쓸 수 없다"
+        ),
+    )
+    ap.add_argument(
+        "--splits",
+        default=None,
+        help=(
+            "세 구간 경계를 전부 새로 주는 JSON(200 B부, 예: "
+            '\'{"train": ["2024-01-01", "2025-10-31"], "valid": ["2025-11-01", "2025-12-31"],'
+            ' "eval": ["2026-01-01", "2026-12-31"]}\''
+            "). --train-start와 함께 쓸 수 없다(dl/dataset.parse_splits)"
+        ),
     )
     ap.add_argument(
         "--panel", default=None, help=f"패널 파일명 — 상대경로면 {CROWD_PROCESSED} 기준"

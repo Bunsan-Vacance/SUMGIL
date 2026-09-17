@@ -145,4 +145,6 @@ def crowd_meta() -> dict:
         "generated_at": latest.get("generated_at"),
         "status_counts": latest.get("status_counts"),
         "topology_gaps": latest.get("topology_gaps"),
+        "events_coverage_end": latest.get("events_coverage_end"),
+        "events_available": latest.get("events_available"),
     }
