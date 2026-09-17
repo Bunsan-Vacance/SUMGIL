@@ -911,6 +911,85 @@ describe('백엔드 repository', () => {
     ])
   })
 
+  it('대여소 단건 재고 응답을 상태별로 보존한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 0,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({
+      rentalId: 'ST-1',
+      availableBikes: 0,
+      status: 'AVAILABLE',
+    })
+  })
+
+  it('대여소 단건 재고의 대여소 ID가 요청과 다르면 거부한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-2',
+            availableBikes: 4,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'STALE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+  })
+
+  it('UNAVAILABLE 재고는 수량을 지어낸 응답으로 받지 않는다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: null,
+            stockUpdatedAt: null,
+            status: 'UNAVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ availableBikes: null, stockUpdatedAt: null, status: 'UNAVAILABLE' })
+  })
+
   it('HTTP 오류와 취소를 빈 성공 결과로 숨기지 않는다', async () => {
     vi.stubGlobal(
       'fetch',

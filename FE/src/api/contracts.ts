@@ -48,4 +48,14 @@ export interface BikeStationRequest {
 
 export interface BikeStationRepository {
   nearby(request: BikeStationRequest, signal: AbortSignal): Promise<NearbyBikeStation[]>
+  stock(rentalId: string, signal: AbortSignal): Promise<BikeStock>
+}
+
+export type BikeStockStatus = 'AVAILABLE' | 'STALE' | 'UNAVAILABLE'
+
+export interface BikeStock {
+  rentalId: string
+  availableBikes: number | null
+  stockUpdatedAt: string | null
+  status: BikeStockStatus
 }

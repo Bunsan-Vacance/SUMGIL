@@ -1,9 +1,121 @@
 import { Bike, LocateFixed, RotateCw, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { isBackendConfigured } from '../../api/repositories'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import BottomSheet from '../../components/BottomSheet'
+import { bikeStockRepository } from '../../api/repositories'
+import type { BikeStock } from '../../api/contracts'
 import type { Place, Route } from '../route/types'
 import { useKakaoMap } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
+
+function bikeRentalId(place: Place) {
+  if (place.id.startsWith('bike-station:')) return place.id.slice('bike-station:'.length)
+  if (place.id.startsWith('route-endpoint:id:')) return place.id.slice('route-endpoint:id:'.length)
+  return undefined
+}
+
+function stockUpdatedLabel(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleTimeString('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : value
+}
+
+function BikeStockSheet({
+  station,
+  state,
+  stock,
+  onClose,
+  onRetry,
+}: {
+  station: Place
+  state: 'loading' | 'success' | 'error' | 'unavailable'
+  stock: BikeStock | null
+  onClose: () => void
+  onRetry: () => void
+}) {
+  return (
+    <BottomSheet
+      key={station.id}
+      initialSnap="collapsed"
+      preferredSnap="collapsed"
+      className="map-bike-stock-sheet"
+      ariaLabel="따릉이 실시간 재고"
+    >
+      <section className="bike-stock-sheet" aria-live="polite">
+        <header className="bike-stock-heading">
+          <div className="bike-stock-title">
+            <span className="bike-station-info-icon">
+              <Bike size={15} />
+            </span>
+            <div>
+              <small>따릉이 대여소</small>
+              <h2>{station.name}</h2>
+            </div>
+          </div>
+          <button className="icon-button" aria-label="재고 정보 닫기" onClick={onClose}>
+            <X size={17} />
+          </button>
+        </header>
+        {station.address && <p>{station.address}</p>}
+        <div className="map-place-info-meta">
+          {station.dockCount !== undefined && <span>거치대 총 {station.dockCount}개</span>}
+          {station.distanceMeters !== undefined && (
+            <span>조회한 지도 중심에서 {Math.round(station.distanceMeters)}m</span>
+          )}
+        </div>
+        {state === 'loading' && (
+          <p className="bike-stock-state" role="status">
+            실시간 재고를 확인하고 있어요…
+          </p>
+        )}
+        {state === 'error' && (
+          <div className="bike-stock-state" role="alert">
+            <p>재고 정보를 불러오지 못했어요.</p>
+            <button className="secondary" onClick={onRetry}>
+              다시 시도
+            </button>
+          </div>
+        )}
+        {state === 'unavailable' && (
+          <p className="bike-stock-state" role="status">
+            현재 실시간 재고를 확인할 수 없어요.
+          </p>
+        )}
+        {state === 'success' && stock && (
+          <div className={`bike-stock-result bike-stock-${stock.status.toLowerCase()}`}>
+            {stock.status === 'AVAILABLE' && stock.availableBikes !== null ? (
+              <>
+                <strong>{stock.availableBikes}대</strong>
+                <p>
+                  {stock.availableBikes === 0
+                    ? '대여 가능한 자전거가 없어요.'
+                    : '현재 대여할 수 있어요.'}
+                </p>
+              </>
+            ) : stock.status === 'STALE' && stock.availableBikes !== null ? (
+              <>
+                <strong>{stock.availableBikes}대</strong>
+                <p>마지막 확인 재고예요. 최신 정보가 아닐 수 있어요.</p>
+              </>
+            ) : (
+              <p>현재 실시간 재고를 확인할 수 없어요.</p>
+            )}
+            {stockUpdatedLabel(stock.stockUpdatedAt) && (
+              <small>마지막 확인 {stockUpdatedLabel(stock.stockUpdatedAt)}</small>
+            )}
+          </div>
+        )}
+      </section>
+    </BottomSheet>
+  )
+}
+
 export default function KakaoMap({
   origin,
   destination,
@@ -24,6 +136,14 @@ export default function KakaoMap({
   route?: Route | null
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
+  const [bikeStationsVisible, setBikeStationsVisible] = useState(true)
+  const [bikeStockStation, setBikeStockStation] = useState<Place | null>(null)
+  const [bikeStock, setBikeStock] = useState<BikeStock | null>(null)
+  const [bikeStockState, setBikeStockState] = useState<
+    'loading' | 'success' | 'error' | 'unavailable'
+  >('unavailable')
+  const stockRequestIdRef = useRef(0)
+  const stockAbortRef = useRef<AbortController | null>(null)
   const routePlaces = useMemo(
     () => [origin, destination].filter((place): place is Place => Boolean(place)),
     [origin, destination],
@@ -31,7 +151,48 @@ export default function KakaoMap({
   const mapPlaces = places ?? routePlaces
   const mapFocus = focusedPlace === undefined ? selectedPlace : focusedPlace
   const showSelectedPlaceInfo = showPlaceInfo && selectedPlace
+  const closeBikeStock = () => {
+    stockAbortRef.current?.abort()
+    stockAbortRef.current = null
+    stockRequestIdRef.current += 1
+    setBikeStockStation(null)
+    setBikeStock(null)
+    setBikeStockState('unavailable')
+    setSelectedPlace(null)
+  }
+  const selectBikeStation = (place: Place) => {
+    stockAbortRef.current?.abort()
+    const requestId = ++stockRequestIdRef.current
+    setBikeStockStation(place)
+    setSelectedPlace(place)
+    setBikeStock(null)
+    setBikeStockState('loading')
+    const rentalId = bikeRentalId(place)
+    if (!bikeStockRepository || !rentalId) {
+      setBikeStockState('unavailable')
+      return
+    }
+    const controller = new AbortController()
+    stockAbortRef.current = controller
+    bikeStockRepository
+      .stock(rentalId, controller.signal)
+      .then((value) => {
+        if (controller.signal.aborted || requestId !== stockRequestIdRef.current) return
+        setBikeStock(value)
+        setBikeStockState('success')
+      })
+      .catch(() => {
+        if (controller.signal.aborted || requestId !== stockRequestIdRef.current) return
+        setBikeStockState('error')
+      })
+  }
   const selectPlace = (place: Place) => {
+    if (place.kind === '따릉이 대여소') {
+      selectBikeStation(place)
+      onPlaceSelect?.(place)
+      return
+    }
+    if (bikeStockStation) closeBikeStock()
     setSelectedPlace(place)
     onPlaceSelect?.(place)
   }
@@ -44,22 +205,37 @@ export default function KakaoMap({
     mapFocus,
     places === undefined ? null : mapFocus,
     route,
+    bikeStationsVisible,
   )
   const { locating, locate } = useCurrentLocation(showPosition, onMessage, locationScope)
   useEffect(() => {
     setSelectedPlace(null)
+    closeBikeStock()
   }, [origin, destination, places])
   useEffect(() => {
     if (!selectedPlace) return
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSelectedPlace(null)
+      if (event.key === 'Escape') bikeStockStation ? closeBikeStock() : setSelectedPlace(null)
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [selectedPlace])
+  }, [selectedPlace, bikeStockStation])
+  useEffect(() => () => stockAbortRef.current?.abort(), [])
   return (
     <div className="kakao-map-wrap">
       <div ref={container} className="kakao-map-canvas" aria-label="카카오 지도" />
+      <button
+        type="button"
+        className="map-bike-toggle"
+        aria-label={bikeStationsVisible ? '따릉이 대여소 숨기기' : '따릉이 대여소 보이기'}
+        aria-pressed={bikeStationsVisible}
+        title={bikeStationsVisible ? '따릉이 대여소 숨기기' : '따릉이 대여소 보이기'}
+        onClick={() => setBikeStationsVisible((visible) => !visible)}
+      >
+        <span className="map-bike-toggle-thumb" aria-hidden="true">
+          <Bike size={14} strokeWidth={2.4} />
+        </span>
+      </button>
       {status !== 'ready' && (
         <div className="map-state" role="status">
           <p>{status === 'loading' ? '지도를 불러오고 있어요' : '지도를 불러오지 못했어요'}</p>
@@ -82,7 +258,7 @@ export default function KakaoMap({
             {locating ? <span className="spinner" /> : <LocateFixed />}
           </button>
         )}
-        {showSelectedPlaceInfo && selectedPlace && (
+        {showSelectedPlaceInfo && selectedPlace && !bikeStockStation && (
           <section
             className="map-place-info"
             role="region"
@@ -122,7 +298,6 @@ export default function KakaoMap({
           </section>
         )}
       </div>
-      {isBackendConfigured && <p className="map-nearby-hint">지도 중심 3km 이내 대여소</p>}
       {showPlaceInfo && (
         <div className="map-place-shortcuts" aria-label="지도 장소 정보">
           {origin && (
@@ -137,6 +312,17 @@ export default function KakaoMap({
           )}
         </div>
       )}
+      {bikeStockStation &&
+        createPortal(
+          <BikeStockSheet
+            station={bikeStockStation}
+            state={bikeStockState}
+            stock={bikeStock}
+            onClose={closeBikeStock}
+            onRetry={() => selectBikeStation(bikeStockStation)}
+          />,
+          document.querySelector('.page-viewport') || document.body,
+        )}
     </div>
   )
 }

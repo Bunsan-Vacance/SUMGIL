@@ -8,6 +8,8 @@ import {
 } from '../lib/kakao/sdk'
 import type {
   BikeStationRepository,
+  BikeStock,
+  BikeStockStatus,
   NearbyBikeStation,
   PlaceRepository,
   RouteRepository,
@@ -589,6 +591,36 @@ function mapNearbyStation(value: unknown): NearbyBikeStation {
   }
 }
 
+function mapBikeStock(value: unknown): BikeStock {
+  if (!isRecord(value) || !text(value.rentalId)) {
+    throw new RepositoryError('invalid-response', '따릉이 재고 응답이 올바르지 않아요.')
+  }
+  if (value.status !== 'AVAILABLE' && value.status !== 'STALE' && value.status !== 'UNAVAILABLE') {
+    throw new RepositoryError('invalid-response', '따릉이 재고 상태 응답이 올바르지 않아요.')
+  }
+  const hasCount = Number.isInteger(value.availableBikes) && (value.availableBikes as number) >= 0
+  const timestamp = text(value.stockUpdatedAt)
+  const hasValidTimestamp =
+    !!timestamp &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(timestamp) &&
+    Number.isFinite(new Date(timestamp).getTime())
+  if (value.status !== 'UNAVAILABLE' && (!hasCount || !hasValidTimestamp)) {
+    throw new RepositoryError('invalid-response', '따릉이 재고 응답이 올바르지 않아요.')
+  }
+  if (
+    value.status === 'UNAVAILABLE' &&
+    (value.availableBikes != null || value.stockUpdatedAt != null)
+  ) {
+    throw new RepositoryError('invalid-response', '따릉이 재고 응답이 올바르지 않아요.')
+  }
+  return {
+    rentalId: value.rentalId as string,
+    availableBikes: hasCount ? (value.availableBikes as number) : null,
+    stockUpdatedAt: hasValidTimestamp ? timestamp : null,
+    status: value.status as BikeStockStatus,
+  }
+}
+
 export function createBackendBikeStationRepository(baseUrl: string): BikeStationRepository {
   return {
     async nearby(request, signal) {
@@ -610,14 +642,36 @@ export function createBackendBikeStationRepository(baseUrl: string): BikeStation
         throw error
       }
     },
+    async stock(rentalId, signal) {
+      const id = rentalId.trim()
+      if (!id) throw new RepositoryError('bad-request', '대여소 정보를 확인해 주세요.')
+      try {
+        const data = await requestApi<unknown>(
+          `${baseUrl}/api/bike-stations/${encodeURIComponent(id)}/stock`,
+          signal,
+        )
+        const stock = mapBikeStock(data)
+        if (stock.rentalId !== id) {
+          throw new RepositoryError('invalid-response', '따릉이 대여소 응답이 요청과 다릅니다.')
+        }
+        return stock
+      } catch (error) {
+        if (signal.aborted) throw abortError()
+        if (error instanceof RepositoryError && error.status === 404) {
+          throw new RepositoryError('bike-station-not-found', '따릉이 대여소를 찾지 못했어요.', 404)
+        }
+        throw error
+      }
+    },
   }
 }
 
 export const routeRepository = apiBaseUrl
   ? createBackendRouteRepository(apiBaseUrl)
   : mockRouteRepository
-export const bikeStationRepository = apiBaseUrl
+export const bikeStockRepository = apiBaseUrl
   ? createBackendBikeStationRepository(apiBaseUrl)
   : null
+export const bikeStationRepository = bikeStockRepository
 export const stationRepository = apiBaseUrl ? createBackendStationRepository(apiBaseUrl) : null
 export const placeRepository = createKakaoPlaceRepository()

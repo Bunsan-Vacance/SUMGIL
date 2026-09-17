@@ -32,10 +32,6 @@ export default function App() {
           onProposal={() => setModal('proposal')}
           onTrain={() => setModal('train')}
           onNext={planner.advance}
-          onHome={() => {
-            setModal(null)
-            go('home')
-          }}
         />
       )}
       <main className={`app-shell screen-${screen}`}>

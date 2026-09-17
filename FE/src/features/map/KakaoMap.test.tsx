@@ -11,10 +11,11 @@ import type {
 import type { Place, Route } from '../route/types'
 import KakaoMap from './KakaoMap'
 
-const mocks = vi.hoisted(() => ({ loadKakaoMaps: vi.fn() }))
+const mocks = vi.hoisted(() => ({ loadKakaoMaps: vi.fn(), stock: vi.fn() }))
 vi.mock('../../lib/kakao/sdk', () => ({ loadKakaoMaps: mocks.loadKakaoMaps }))
 vi.mock('../../api/repositories', () => ({
   bikeStationRepository: null,
+  bikeStockRepository: { stock: mocks.stock },
   isBackendConfigured: false,
 }))
 
@@ -226,6 +227,12 @@ function renderMap(
 }
 
 beforeEach(() => {
+  mocks.stock.mockReset().mockResolvedValue({
+    rentalId: 'ST-1',
+    status: 'UNAVAILABLE',
+    availableBikes: null,
+    stockUpdatedAt: null,
+  })
   FakeMap.instances = []
   FakeCustomOverlay.instances = []
   FakeAbstractOverlay.instances = []
@@ -256,7 +263,7 @@ describe('일반 지도 장소 마커', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '출발 장소 정보' })).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
 
-    const card = screen.getByRole('region', { name: '선택한 장소 정보' })
+    const card = screen.getByRole('region', { name: '따릉이 실시간 재고' })
     expect(card.textContent).toContain('대여소')
     expect(card.textContent).toContain('거치대 총 0개')
     expect(card.textContent).toContain('지도 중심에서 43m')
@@ -275,7 +282,7 @@ describe('일반 지도 장소 마커', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '출발 장소 정보' }))
 
-    const card = screen.getByRole('region', { name: '선택한 장소 정보' })
+    const card = screen.getByRole('region', { name: '따릉이 실시간 재고' })
     expect(card.textContent).toContain('정보 없는 대여소')
     expect(card.textContent).not.toContain('거치대 총')
     expect(card.textContent).not.toContain('지도 중심에서')
@@ -615,5 +622,100 @@ describe('일반 지도 장소 마커', () => {
 
     expect(map.setBounds.mock.calls.length).toBeGreaterThan(setBoundsCalls)
     expect(map.setCenter).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('따릉이 재고 조회', () => {
+  const bike = { ...origin, id: 'bike-station:ST-1', name: '시험 대여소', kind: '따릉이 대여소' }
+  it.each([
+    ['AVAILABLE', 0, '대여 가능한 자전거가 없어요.'],
+    ['AVAILABLE', 7, '현재 대여할 수 있어요.'],
+    ['STALE', 7, '마지막 확인 재고예요. 최신 정보가 아닐 수 있어요.'],
+    ['UNAVAILABLE', null, '현재 실시간 재고를 확인할 수 없어요.'],
+  ])('%s 재고 %s를 구분한다', async (status, count, label) => {
+    mocks.stock.mockResolvedValue({
+      rentalId: 'ST-1',
+      status,
+      availableBikes: count,
+      stockUpdatedAt: count === null ? null : '2026-09-17T10:00:00+09:00',
+    })
+    renderMap({ origin: bike })
+    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    expect(await screen.findByText(label as string)).toBeTruthy()
+    expect(mocks.stock).toHaveBeenCalledWith('ST-1', expect.any(AbortSignal))
+  })
+  it('실패 후 재시도하며 닫은 뒤 늦은 응답을 반영하지 않는다', async () => {
+    let resolveStock!: (value: unknown) => void
+    mocks.stock.mockRejectedValueOnce(new Error('network')).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStock = resolve
+        }),
+    )
+    renderMap({ origin: bike })
+    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    fireEvent.click(await screen.findByRole('button', { name: '다시 시도' }))
+    const signal = mocks.stock.mock.calls[1][1] as AbortSignal
+    fireEvent.click(screen.getByRole('button', { name: '재고 정보 닫기' }))
+    expect(signal.aborted).toBe(true)
+    await act(async () =>
+      resolveStock({
+        rentalId: 'ST-1',
+        status: 'AVAILABLE',
+        availableBikes: 9,
+        stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+      }),
+    )
+    expect(screen.queryByRole('region', { name: '따릉이 실시간 재고' })).toBeNull()
+  })
+  it('새 선택의 재고를 이전 요청의 늦은 응답으로 덮어쓰지 않는다', async () => {
+    let resolveFirst!: (value: unknown) => void
+    mocks.stock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce({
+        rentalId: 'ST-2',
+        status: 'AVAILABLE',
+        availableBikes: 2,
+        stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+      })
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    render(
+      <KakaoMap
+        origin={bike}
+        destination={{ ...bike, id: 'bike-station:ST-2', name: '두 번째' }}
+        onMessage={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    const signal = mocks.stock.mock.calls[0][1] as AbortSignal
+    fireEvent.click(screen.getByRole('button', { name: '도착 장소 정보' }))
+    expect(await screen.findByText('2대')).toBeTruthy()
+    expect(signal.aborted).toBe(true)
+    await act(async () =>
+      resolveFirst({
+        rentalId: 'ST-1',
+        status: 'AVAILABLE',
+        availableBikes: 9,
+        stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+      }),
+    )
+    expect(screen.queryByText('9대')).toBeNull()
+  })
+  it('대여소 표시 토글은 기본 켜짐이며 껐다가 켤 수 있다', () => {
+    renderMap()
+    fireEvent.click(screen.getByRole('button', { name: '따릉이 대여소 숨기기' }))
+    expect(
+      screen.getByRole('button', { name: '따릉이 대여소 보이기' }).getAttribute('aria-pressed'),
+    ).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: '따릉이 대여소 보이기' }))
+    expect(
+      screen.getByRole('button', { name: '따릉이 대여소 숨기기' }).getAttribute('aria-pressed'),
+    ).toBe('true')
+    expect(mocks.stock).not.toHaveBeenCalled()
   })
 })
