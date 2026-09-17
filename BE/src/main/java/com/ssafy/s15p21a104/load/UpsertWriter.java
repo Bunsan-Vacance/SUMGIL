@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
+import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
@@ -92,6 +93,15 @@ public class UpsertWriter {
             SET level = EXCLUDED.level, source = EXCLUDED.source, updated_at = now()
             """;
 
+    private static final String UPSERT_BIKE_STOCK_PRED = """
+            INSERT INTO bike_stock_pred
+              (rental_id, dow_type, time_slot, exp_bikes, p_empty, p_full, source, prediction_source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
+            ON CONFLICT (rental_id, dow_type, time_slot) DO UPDATE
+              SET exp_bikes = EXCLUDED.exp_bikes, p_empty = EXCLUDED.p_empty, p_full = EXCLUDED.p_full,
+                  source = EXCLUDED.source, prediction_source = EXCLUDED.prediction_source, updated_at = now()
+            """;
+
     private final JdbcTemplate jdbc;
 
     public UpsertWriter(JdbcTemplate jdbc) {
@@ -108,6 +118,29 @@ public class UpsertWriter {
             ps.setString(6, r.source());
         });
         return rows.size();
+    }
+
+    /**
+     * 재고 예측. 대여소 약 2,800 × 요일 3 × 슬롯 48 = 40만 행이라 배치로 쓴다.
+     * {@code prediction_source} 는 null 이 올 수 있어 {@code setObject} 로 넣는다 — 그 열이 없던 시절의 산출물이다.
+     */
+    public int upsertBikeStockPred(List<BikeStockPredRow> rows) {
+        jdbc.batchUpdate(UPSERT_BIKE_STOCK_PRED, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setString(1, r.rentalId());
+            ps.setInt(2, r.dowType());
+            ps.setInt(3, r.timeSlot());
+            ps.setBigDecimal(4, r.expBikes());
+            ps.setBigDecimal(5, r.pEmpty());
+            ps.setBigDecimal(6, r.pFull());
+            ps.setString(7, r.source());
+            ps.setObject(8, r.predictionSource(), Types.VARCHAR);
+        });
+        return rows.size();
+    }
+
+    /** 적재된 대여소 ID. 재고 예측 적재가 마스터 대조(없는 대여소는 경고)에 쓴다. */
+    public Set<String> existingRentalIds() {
+        return Set.copyOf(jdbc.queryForList("SELECT rental_id FROM bike_station", String.class));
     }
 
     /** 적재된 역 ID. 혼잡도처럼 다른 테이블을 참조하는 적재가 대상 존재를 검증하는 데 쓴다. */
