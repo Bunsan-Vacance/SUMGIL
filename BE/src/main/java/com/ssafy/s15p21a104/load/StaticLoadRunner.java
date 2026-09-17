@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationParser;
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
+import com.ssafy.s15p21a104.load.bus.BusHeadwayParser;
 import com.ssafy.s15p21a104.load.bus.BusRouteParser;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopParser;
@@ -99,6 +100,8 @@ public class StaticLoadRunner implements ApplicationRunner {
     static final double COORD_REPLACE_METERS = 5000;
     static final String BUS_STOPS_FILE = "seoul-bus-stops_20260902.csv";
     static final String BUS_ROUTE_STOPS_FILE = "seoul-bus-route-stops_20260902.csv";
+    /** 버스 배차간격 수집 결과 (BE/scripts/data/bus-headway-fetch.mjs). 도착정보 API 의 term 을 노선당 한 행으로 모은 것. */
+    static final String BUS_HEADWAY_FILE = "seoul-bus-headway_20260917.csv";
     static final String BIKE_SNAPSHOT_FILE = "seoul-bike-stations-live_20260909.csv";
     static final String BIKE_FILE = "seoul-bike-stations_202606.csv";
     /** 서울교통공사 지하철혼잡도정보(공공데이터포털 15071311). 1~8호선 요일·30분 슬롯별 혼잡도 %. */
@@ -118,7 +121,8 @@ public class StaticLoadRunner implements ApplicationRunner {
                 case "railgeometry" -> loadRailGeometry();
                 case "congestion" -> loadCongestion();
                 case "bikepred" -> loadBikeStockPred();
-                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred)", source);
+                case "busheadway" -> loadBusHeadway();
+                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred, busheadway)", source);
             }
         }
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
@@ -330,6 +334,38 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         timed("congestion", () -> writer.upsertCongestion(parsed.rows()));
         log.info("혼잡도 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 버스 배차간격. 수집 CSV 의 {@code term} 을 {@code bus_route.headway_min} 에 <b>갱신</b>한다(새 행을 만들지 않는다).
+     * <p>
+     * <b>버스 마스터 적재(bus)가 선행 조건이다</b> — 기존 행을 UPDATE 하므로 대상이 없으면 갱신될 것이 없다.
+     * 그래서 {@code application-load.yml} 기본 순서에서 {@code bus} 뒤에 온다.
+     * <p>
+     * 718 노선 중 값이 있는 것은 446 개다. 나머지는 도착정보 API 가 다루지 않아 NULL 로 남는다 —
+     * 정류소·시간대를 바꿔도 받을 수 없다는 것을 2026-09-17 에 호출 525회로 확인했다
+     * (근거는 {@code docs/db/load-bus-bike.md} "배차간격").
+     */
+    private void loadBusHeadway() throws IOException {
+        long started = System.nanoTime();
+
+        var parser = new BusHeadwayParser();
+        BusHeadwayParser.Result parsed = parser.parse(csv(BUS_DIR, BUS_HEADWAY_FILE).rows());
+        logWarnings("배차간격 파싱", parser.warnings());
+        var st = parsed.stats();
+        log.info("버스 배차간격: 원천 {} 행 · 갱신 대상 {} · 값 있음 {} · 건너뜀 {} ({})",
+                st.sourceRows(), parsed.rows().size(), st.withHeadway(), st.skipped(), BUS_HEADWAY_FILE);
+
+        // dry-run 은 DB 를 읽지 않으므로 마스터 대조를 건너뛴다 (검증기가 빈 집합을 그렇게 다룬다).
+        Set<String> knownRouteIds = props.dryRun() ? Set.of() : writer.existingRouteIds();
+        ValidationReport report = MasterValidator.validateBusHeadway(parsed.rows(), knownRouteIds);
+        logWarnings("검증", report.warnings());
+        if (!abortIfErrors("버스 배차간격", report) || dryRun("버스 배차간격", started)) {
+            return;
+        }
+
+        timed("bus_route.headway_min", () -> writer.updateBusHeadway(parsed.rows()));
+        log.info("버스 배차간격 적재 완료 ({} ms)", elapsedMs(started));
     }
 
     /**
