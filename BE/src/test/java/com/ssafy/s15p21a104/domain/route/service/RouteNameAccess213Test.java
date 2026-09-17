@@ -11,6 +11,7 @@ import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -59,7 +60,7 @@ class RouteNameAccess213Test {
                         new Edge("FAR", "FAR", "L9", 10, 0, TravelMode.SUBWAY));
 
         List<Edge> edges = CoordinateAccessEdges.accessEdges(
-                "PLACE-ORIGIN", 37.5, 127.0, infos, graph, true);
+                "PLACE-ORIGIN", 37.5, 127.0, infos, graph, true, Set.of("S1", "S2"));
 
         assertEquals(2, edges.size());
         assertTrue(edges.stream().allMatch(e -> e.fromNode().equals("PLACE-ORIGIN")));
