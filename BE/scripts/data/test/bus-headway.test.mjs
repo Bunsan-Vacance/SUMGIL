@@ -6,7 +6,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HEADWAY_FIELDS, coverStops, mergeByRoute, toHeadwayRows } from '../lib/bus-headway.mjs';
+import { HEADWAY_FIELDS, coverStops, mergeByRoute, oneStopPerRoute, toHeadwayRows } from '../lib/bus-headway.mjs';
 
 /** 노선-정류소 표 한 행 (원천 CSV 의 ROUTE_ID · NODE_ID 만 쓴다) */
 const pair = (routeId, stopId) => ({ routeId, stopId });
@@ -74,6 +74,124 @@ describe('coverStops', () => {
 
   test('빈 입력이면 둘 다 빈 배열이다', () => {
     assert.deepEqual(coverStops([]), { stops: [], uncovered: [] });
+  });
+});
+
+describe('coverStops — 대상 노선 좁히기 (2차 수집)', () => {
+  const pairs = [
+    pair('R1', 'S1'), pair('R2', 'S1'), pair('R3', 'S1'),
+    pair('R3', 'S2'), pair('R4', 'S2'),
+  ];
+
+  test('only 를 주면 그 노선만 덮는다 — 이미 받은 노선은 다시 부르지 않는다', () => {
+    const { stops } = coverStops(pairs, { only: ['R4'] });
+
+    assert.deepEqual(stops, ['S2']);
+  });
+
+  test('only 밖의 노선은 덮지 못한 노선에도 넣지 않는다', () => {
+    const { uncovered } = coverStops(pairs, { only: ['R4'] });
+
+    assert.deepEqual(uncovered, []);
+  });
+
+  test('skipStops 로 응답이 비었던 정류소를 제외한다', () => {
+    // S1 이 R1·R2·R3 를 덮지만 실패한 정류소라 빼면 R3 는 S2 로 받는다
+    const { stops, uncovered } = coverStops(pairs, { only: ['R1', 'R3'], skipStops: ['S1'] });
+
+    assert.deepEqual(stops, ['S2']);
+    assert.deepEqual(uncovered, ['R1']);
+  });
+
+  test('only 가 비어 있으면 덮을 것이 없다', () => {
+    assert.deepEqual(coverStops(pairs, { only: [] }), { stops: [], uncovered: [] });
+  });
+
+  test('옵션을 주지 않으면 이전과 같다', () => {
+    assert.deepEqual(coverStops(pairs), coverStops(pairs, {}));
+  });
+});
+
+describe('oneStopPerRoute', () => {
+  // coverStops 는 "가장 많은 노선을 덮는 정류소" 부터 고르는데, 그런 곳은 간선이 몰리는 큰 환승 거점이다.
+  // 그래서 정류소를 적게 지나는 노선(마을버스 등)이 계속 빠진다 — 2026-09-17 실측: 받은 노선 평균 70정류소,
+  // 못 받은 노선 평균 36정류소. 남은 노선을 확실히 덮으려면 노선마다 정류소를 하나씩 집는다.
+
+  test('노선마다 정류소를 하나씩 고른다', () => {
+    const { stops, uncovered } = oneStopPerRoute([
+      pair('R1', 'S1'), pair('R1', 'S2'),
+      pair('R2', 'S3'),
+    ]);
+
+    assert.deepEqual(uncovered, []);
+    assert.equal(stops.length, 2);
+  });
+
+  test('한 정류소가 여러 노선을 덮으면 중복해서 부르지 않는다', () => {
+    const { stops } = oneStopPerRoute([pair('R1', 'S1'), pair('R2', 'S1')]);
+
+    assert.deepEqual(stops, ['S1']);
+  });
+
+  test('이미 고른 정류소가 다음 노선도 덮으면 그것을 재사용한다', () => {
+    // R1 은 S1 만, R2 는 S1·S2 를 지난다 → S1 하나로 둘 다 덮인다
+    const { stops } = oneStopPerRoute([pair('R1', 'S1'), pair('R2', 'S1'), pair('R2', 'S2')]);
+
+    assert.deepEqual(stops, ['S1']);
+  });
+
+  test('같은 입력이면 같은 결과다 — 노선·정류소 ID 순으로 가른다', () => {
+    const pairs = [pair('R2', 'S9'), pair('R1', 'S8'), pair('R1', 'S7')];
+
+    assert.deepEqual(oneStopPerRoute(pairs).stops, oneStopPerRoute([...pairs].reverse()).stops);
+  });
+
+  test('only 로 대상 노선을 좁힌다', () => {
+    const { stops } = oneStopPerRoute([pair('R1', 'S1'), pair('R2', 'S2')], { only: ['R2'] });
+
+    assert.deepEqual(stops, ['S2']);
+  });
+
+  test('skipStops 에 든 정류소는 고르지 않는다', () => {
+    const { stops, uncovered } = oneStopPerRoute(
+      [pair('R1', 'S1'), pair('R1', 'S2'), pair('R2', 'S1')],
+      { skipStops: ['S1'] },
+    );
+
+    assert.deepEqual(stops, ['S2']);
+    assert.deepEqual(uncovered, ['R2']);
+  });
+
+  test('정류소가 없는 노선은 덮지 못한 노선이다', () => {
+    const { uncovered } = oneStopPerRoute([pair('R1', 'S1'), pair('R2', '')]);
+
+    assert.deepEqual(uncovered, ['R2']);
+  });
+
+  test('빈 입력이면 빈 결과다', () => {
+    assert.deepEqual(oneStopPerRoute([]), { stops: [], uncovered: [] });
+  });
+
+  // 마을버스 전용 정류소(NODE_ID 4~6자리가 900)는 도착정보 API 가 빈 응답을 준다.
+  // 2026-09-17 실측: 받은 노선의 정류소 중 900 패턴이 1%, 못 받은 노선은 65%.
+  test('stopFilter 로 부를 수 있는 정류소만 고른다', () => {
+    const { stops, uncovered } = oneStopPerRoute(
+      [pair('R1', '107900344'), pair('R1', '107000012'), pair('R2', '119900209')],
+      { stopFilter: (id) => id.slice(3, 6) === '000' },
+    );
+
+    assert.deepEqual(stops, ['107000012']);
+    assert.deepEqual(uncovered, ['R2']);
+  });
+
+  test('stopFilter 와 skipStops 를 함께 쓴다 — 이미 불러 본 곳은 뺀다', () => {
+    const { stops, uncovered } = oneStopPerRoute(
+      [pair('R1', '107000012'), pair('R1', '107000999'), pair('R2', '107000012')],
+      { stopFilter: (id) => id.slice(3, 6) === '000', skipStops: ['107000012'] },
+    );
+
+    assert.deepEqual(stops, ['107000999']);
+    assert.deepEqual(uncovered, ['R2']);
   });
 });
 
