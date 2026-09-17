@@ -15,6 +15,7 @@ import GuidePage from './pages/GuidePage'
 import ArrivalPage from './pages/ArrivalPage'
 import ActiveGuidanceBar from './features/guidance/ActiveGuidanceBar'
 import Modal from './components/Modal'
+import { isBackendConfigured, isRouteSearchMockEnabled } from './api/repositories'
 
 export default function App() {
   const planner = useRoutePlanner()
@@ -107,6 +108,7 @@ export default function App() {
               go={go}
               canSwap={!!trip.destination}
               swapPlaces={planner.swapPlaces}
+              isLiveApi={isBackendConfigured && !isRouteSearchMockEnabled}
               departureTime={trip.departureTime ?? undefined}
               onDepartureTimeChange={trip.setDepartureTime}
             />

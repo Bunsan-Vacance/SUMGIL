@@ -72,6 +72,7 @@ export default function ResultsPage({
   const liveApi = isLiveApi ?? isBackendConfigured
   const canSortByCongestion =
     liveApi ||
+    (visible.length > 1 && visible.every((route) => route.routeType !== undefined)) ||
     (visible.length > 1 && visible.every((route) => route.congestionPercent !== undefined))
   const departure = departureTime || clockTime(visible[0]?.departedAt)
   const fastestRoute = visible.reduce<Route | undefined>(
