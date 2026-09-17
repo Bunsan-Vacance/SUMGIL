@@ -50,6 +50,7 @@ public class RouteGraphRegistry {
     private Map<String, RouteMapper.StationInfo> stationInfos = Map.of();
     private Map<TransferRule.TransferKey, Integer> transferTimes = Map.of();
     private java.util.Set<String> rentalIds = java.util.Set.of();
+    private java.util.Set<String> stationIds = java.util.Set.of();
     private final java.util.concurrent.ConcurrentMap<String, RouteGraph> slotGraphs =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -71,10 +72,12 @@ public class RouteGraphRegistry {
             List<RouteEdgeRow> rows = edgeTimeRepository.findSubwayEdgesForDefaultSlot();
             Map<String, String> stationNames = new HashMap<>();
             Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+            java.util.Set<String> stationIdSet = new java.util.HashSet<>();
             for (Station station : stationRepository.findAll()) {
                 stationNames.put(station.getStationId(), station.getName());
                 infos.put(station.getStationId(), new RouteMapper.StationInfo(
                         station.getStationId(), station.getName(), station.getLat(), station.getLng()));
+                stationIdSet.add(station.getStationId());
             }
             Map<String, String> lineNames = new HashMap<>();
             for (Line line : lineRepository.findAll()) {
@@ -118,6 +121,7 @@ public class RouteGraphRegistry {
             this.graph = result.graph();
             this.stationInfos = Map.copyOf(infos);
             this.rentalIds = java.util.Set.copyOf(rentals.keySet());
+            this.stationIds = java.util.Set.copyOf(stationIdSet);
             Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
             for (TransferMeta meta : transferMetaRepository.findAll()) {
                 times.put(new TransferRule.TransferKey(
@@ -226,6 +230,13 @@ public class RouteGraphRegistry {
      */
     public java.util.Set<String> rentalIds() {
         return rentalIds;
+    }
+
+    /**
+     * @return 역 ID 집합(좌표 접근 후보 유형 구분용, S15P21A104-231). 미적재 시 빈 집합
+     */
+    public java.util.Set<String> stationIds() {
+        return stationIds;
     }
 
     /**

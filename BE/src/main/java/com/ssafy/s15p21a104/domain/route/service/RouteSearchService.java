@@ -212,9 +212,11 @@ public class RouteSearchService {
 
         Map<String, RouteMapper.StationInfo> baseInfos = graphRegistry.stationInfos();
         List<Edge> originAccessEdges = CoordinateAccessEdges.accessEdges(
-                PLACE_ORIGIN_ID, origin.lat(), origin.lng(), baseInfos, slotGraph, true);
+                PLACE_ORIGIN_ID, origin.lat(), origin.lng(), baseInfos, slotGraph, true,
+                graphRegistry.stationIds());
         List<Edge> destAccessEdges = CoordinateAccessEdges.accessEdges(
-                PLACE_DEST_ID, destination.lat(), destination.lng(), baseInfos, slotGraph, false);
+                PLACE_DEST_ID, destination.lat(), destination.lng(), baseInfos, slotGraph, false,
+                graphRegistry.stationIds());
         if (originAccessEdges.isEmpty() || destAccessEdges.isEmpty()) {
             throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_FOUND);
         }
