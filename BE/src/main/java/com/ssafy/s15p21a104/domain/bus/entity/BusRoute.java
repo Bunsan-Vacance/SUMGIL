@@ -22,6 +22,13 @@ public class BusRoute {
     @Column(name = "name", length = 50, nullable = false)
     private String name;
 
+    /**
+     * 배차간격(분). 노선당 대표값 하나이며 시간대별로 갈리지 않는다 (V6).
+     * NULL 은 원천이 값을 주지 않은 노선 — 도착정보 API 가 다루지 않는 마을버스가 대부분이다.
+     */
+    @Column(name = "headway_min")
+    private Integer headwayMin;
+
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
 }

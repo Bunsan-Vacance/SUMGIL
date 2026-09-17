@@ -8,8 +8,8 @@ spring:
     show-sql: false
 
 load:
-  sources: subway,bus,bike,railgeometry,congestion   # 한 명령으로 전부. 골라 실행: --load.sources=bus,bike
-                                                     # congestion 은 station·line 을 참조하므로 subway 뒤에 온다
+  sources: subway,bus,bike,railgeometry,congestion,busheadway   # 한 명령으로 전부. 골라 실행: --load.sources=bus,bike
+                                                     # congestion 은 station·line 을, busheadway 는 bus_route 를 참조하므로 뒤에 온다
   dry-run: false
   write-mode: BATCH      # ROW 는 성능 비교용 baseline (BE/docs/perf)
   region: []             # 비어 있으면 전 노선. 예: --load.region=1002,1005
