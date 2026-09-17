@@ -24,6 +24,13 @@ public final class CacheKeys {
      */
     public static final Duration BIKE_STOCK_TTL = Duration.ofSeconds(300);
 
+    /**
+     * 실시간 재고를 "최신(AVAILABLE)"으로 볼 신선도 기준(BIKE-001 156). 수집 주기 120초의 1.5배 —
+     * 정상 회차 하나를 놓쳐도 바로 STALE로 떨어뜨리지 않되, TTL(300초)보다는 짧게 잡아 STALE 구간이 존재하게 한다.
+     * 이 창을 넘기면(그러나 아직 TTL 안이면) STALE, TTL까지 넘기면(키 자체가 없음) UNAVAILABLE이다.
+     */
+    public static final Duration BIKE_STOCK_FRESH_WINDOW = Duration.ofSeconds(180);
+
     /** 실시간 도착. 수집 주기 60초 기준, 위와 같은 규칙으로 한 회차 + 서킷 브레이커를 버티는 180초 (171). */
     public static final Duration SUBWAY_ARRIVAL_TTL = Duration.ofSeconds(180);
 
