@@ -254,10 +254,10 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
-    @DisplayName("IT10: 122 접근 WALK+본선 BIKE 혼합에 대여소가 보인다")
+    @DisplayName("IT10: 122 접근 WALK+본선 BIKE 혼합에 대여소가 보인다 (213 T1: 접근 TRANSFER 없음)")
     void it10_122_접근WALK_본선BIKE() {
-        // 지하철 A→C 직통 900초 vs 도보 A→R1 + 자전거 R1→R2 + 도보 R2→C 360초+환승360초.
-        // 혼합(720초)이 이기고 대여소 양단이 보인다.
+        // 지하철 A→C 직통 900초 vs 도보 A→R1 + 자전거 R1→R2 + 도보 R2→C 360초.
+        // 혼합(360초)이 이기고 대여소 양단이 보인다. 접근 경계는 TRANSFER가 아니다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 900),
                 walk("A", "R1", 120),
@@ -267,25 +267,23 @@ class RouteSearchIntegrationTest {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertTrue(result.size() >= 1);
-        assertEquals(5, result.get(0).legs().size());
+        assertEquals(3, result.get(0).legs().size());
         assertEquals(TravelMode.WALK, result.get(0).legs().get(0).mode());
-        assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(1).mode());
-        assertEquals(TravelMode.BIKE, result.get(0).legs().get(2).mode());
-        assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(3).mode());
-        assertEquals(TravelMode.WALK, result.get(0).legs().get(4).mode());
+        assertEquals(TravelMode.BIKE, result.get(0).legs().get(1).mode());
+        assertEquals(TravelMode.WALK, result.get(0).legs().get(2).mode());
         assertEquals("A", result.get(0).legs().get(0).fromNodeId());
         assertEquals("R1", result.get(0).legs().get(0).toNodeId());
-        assertEquals("R1", result.get(0).legs().get(2).fromNodeId());
-        assertEquals("R2", result.get(0).legs().get(2).toNodeId());
-        assertEquals("R2", result.get(0).legs().get(4).fromNodeId());
-        assertEquals("C", result.get(0).legs().get(4).toNodeId());
+        assertEquals("R1", result.get(0).legs().get(1).fromNodeId());
+        assertEquals("R2", result.get(0).legs().get(1).toNodeId());
+        assertEquals("R2", result.get(0).legs().get(2).fromNodeId());
+        assertEquals("C", result.get(0).legs().get(2).toNodeId());
     }
 
     @Test
-    @DisplayName("IT11: 122 복수 hop 본선도 중간 대여소가 보인다")
+    @DisplayName("IT11: 122 복수 hop 본선도 중간 대여소가 보인다 (213 T1: 접근 TRANSFER 없음)")
     void it11_122_본선복수hop_가시성() {
-        // 지하철 A→C 직통 1500초 vs 도보+자전거2hop+도보 440초+환승360초.
-        // 혼합(800초)이 이기고 중간 대여소 R2가 보인다.
+        // 지하철 A→C 직통 1500초 vs 도보+자전거2hop+도보 440초.
+        // 혼합(440초)이 이기고 중간 대여소 R2가 보인다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 1500),
                 walk("A", "R1", 120),
@@ -296,13 +294,13 @@ class RouteSearchIntegrationTest {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertTrue(result.size() >= 1);
-        assertEquals(6, result.get(0).legs().size());
+        assertEquals(4, result.get(0).legs().size());
+        assertEquals(TravelMode.BIKE, result.get(0).legs().get(1).mode());
         assertEquals(TravelMode.BIKE, result.get(0).legs().get(2).mode());
-        assertEquals(TravelMode.BIKE, result.get(0).legs().get(3).mode());
-        assertEquals("R1", result.get(0).legs().get(2).fromNodeId());
-        assertEquals("R2", result.get(0).legs().get(2).toNodeId());
-        assertEquals("R2", result.get(0).legs().get(3).fromNodeId());
-        assertEquals("R3", result.get(0).legs().get(3).toNodeId());
+        assertEquals("R1", result.get(0).legs().get(1).fromNodeId());
+        assertEquals("R2", result.get(0).legs().get(1).toNodeId());
+        assertEquals("R2", result.get(0).legs().get(2).fromNodeId());
+        assertEquals("R3", result.get(0).legs().get(2).toNodeId());
     }
 
     @Test
