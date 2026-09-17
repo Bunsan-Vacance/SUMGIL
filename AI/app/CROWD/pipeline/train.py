@@ -18,10 +18,25 @@ lookup은 그룹과 무관하게 전역 하나다(키에 station_no가 이미 �
 
 무거운 의존성(lightgbm)은 함수 안에서 지연 import한다(`AI/CLAUDE.md`).
 
+## 결측 마스킹 학습(145)
+
+143에서 배포 세트(LightGBM)는 시차가 전부 NaN이면 lookup보다 −37%였다 — 학습 때 그 상황을
+한 번도 못 봤기 때문이다. `--mask-mode`로 켜면 `masking.assign_date_scenarios`가 **날짜
+단위**로 시나리오(`full`/`d7_only`/`d1_only`/`no_lag`)를 뽑아 학습 프레임에 결측 상황을
+섞는다(서빙은 하루 전체가 같은 시차 가용성을 공유하므로 행 단위가 아니라 날짜 단위로 뽑는다).
+`stack`(기본)은 원본에 마스킹 사본을 이어붙이고, `replace`는 마스킹된 사본으로 통째로 바꾼다.
+
+마스킹 실험 아티팩트는 `--out-root`로 `models/CROWD/_experiments/…` 아래에 저장한다 —
+`predictor.latest_artifact`는 `models/CROWD/` 바로 아래 폴더를 이름 정렬로 골라 `auto`
+기본값을 정하므로, 마스킹 실험 폴더가 그 자리에 섞이면 이름 운으로 프로덕션 기본값이
+실험 아티팩트로 바뀔 수 있다.
+
 실행:
     cd AI
     python -m app.CROWD.pipeline.train --feature-set festival_all_derived_resid
     python -m app.CROWD.pipeline.train --feature-set festival_all_derived_resid --group-col line
+    python -m app.CROWD.pipeline.train --mask-mode stack
+        --out-root models/CROWD/_experiments/masking --name w2024_masked-stack   # (한 줄로)
 """
 
 from __future__ import annotations
@@ -29,13 +44,25 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from app.CROWD.pipeline.dataset import SPLIT_DATE, load_or_build_derived, load_panel, time_split
+from app.CROWD.pipeline.dataset import (
+    CROWD_INTERIM,
+    CROWD_PROCESSED,
+    DERIVED_CACHE,
+    EVENTS_NAME,
+    PANEL_NAME,
+    SPLIT_DATE,
+    load_or_build_derived,
+    load_panel,
+    time_split,
+)
 from app.CROWD.pipeline.features import (
     CATEGORICAL_COLS,
     DERIVED_VERSION,
@@ -43,6 +70,7 @@ from app.CROWD.pipeline.features import (
     build_matrix,
 )
 from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
+from app.CROWD.pipeline.masking import assign_date_scenarios, count_dates_by_scenario, mask_by_date
 
 AI_ROOT = Path(__file__).resolve().parents[3]
 MODELS_DIR = AI_ROOT / "models" / "CROWD"
@@ -58,6 +86,74 @@ DEFAULT_PARAMS = {
     "n_jobs": -1,
     "verbose": -1,
 }
+
+
+@dataclass(frozen=True)
+class MaskingSpec:
+    """결측 마스킹 학습 설정(145). `weights`는 `masking.assign_date_scenarios`로 그대로 넘어가는
+    시나리오별 확률(날짜 단위)이라 키·합계 검증은 거기서 한다 — 여기서는 `mode`만 검증한다."""
+
+    mode: str  # "stack" | "replace"
+    weights: dict[str, float]
+    seed: int = 42
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("stack", "replace"):
+            raise ValueError(f"mode는 'stack' 또는 'replace'만 지원한다 — {self.mode!r}")
+        if self.mode == "stack" and "full" in self.weights:
+            raise ValueError(
+                "stack 모드에서는 원본 행 자체가 이미 'full' 몫이다 — weights에 'full'을 "
+                "또 넣으면 그 비중이 이중으로 반영된다."
+            )
+
+
+# 145 실험 기본값. stack: 원본(=full)에 결측 시나리오 사본을 이어붙인다.
+STACK_WEIGHTS = {"d7_only": 0.5, "no_lag": 0.3, "d1_only": 0.2}
+# replace: 원본을 통째로 마스킹된 사본으로 바꾸므로 full도 하나의 시나리오로 포함한다.
+REPLACE_WEIGHTS = {"full": 0.5, "d7_only": 0.25, "no_lag": 0.15, "d1_only": 0.10}
+
+
+def apply_masking(
+    train: pd.DataFrame, feature_cols: Sequence[str], spec: MaskingSpec
+) -> tuple[pd.DataFrame, dict]:
+    """`spec`대로 결측 시나리오를 섞은 학습 프레임과 요약을 돌려준다.
+
+    **왜 날짜 단위인가** — 서빙에서는 하루 전체가 같은 시차 가용성 상태를 공유한다(전날
+    배치가 안 왔으면 그날 모든 역·슬롯이 같이 없다). 행 단위로 섞으면 모델이 서빙에서
+    실제로 겪지 않는 "같은 날 안에서 시차가 있다/없다가 섞인" 조합을 학습하게 된다.
+    **왜 stack이 기본인가** — `replace`는 원본(`full`) 행을 통째로 마스킹된 사본으로
+    바꿔버려 "이력이 온전한 날"의 학습 비중이 줄어든다. `stack`은 원본을 그대로 두고
+    마스킹 사본을 이어붙이므로 `full` 레짐을 약화하지 않으면서 결측 시나리오를 더 보여준다.
+    """
+    rng = np.random.default_rng(spec.seed)
+    date_scenarios = assign_date_scenarios(train["date"], spec.weights, rng)
+    masked = mask_by_date(train, date_scenarios, feature_cols)
+
+    if spec.mode == "stack":
+        out = pd.concat([train, masked], ignore_index=True)
+    else:
+        out = masked.reset_index(drop=True)
+
+    summary = {
+        "mode": spec.mode,
+        "weights": dict(spec.weights),
+        "seed": spec.seed,
+        "date_level": True,
+        "n_dates": len(date_scenarios),
+        "n_dates_by_scenario": count_dates_by_scenario(date_scenarios),
+        "n_rows_in": len(train),
+        "n_rows_out": len(out),
+    }
+    return out, summary
+
+
+def _augment(
+    train: pd.DataFrame, feature_set: str, masking: MaskingSpec | None
+) -> tuple[pd.DataFrame, dict | None]:
+    """`masking`이 없으면 원본 그대로(요약 None), 있으면 `apply_masking` 결과를 돌려준다."""
+    if masking is None:
+        return train, None
+    return apply_masking(train, FEATURE_SETS[feature_set], masking)
 
 
 def _fit_lgbm(X: pd.DataFrame, y: pd.Series, params: dict):
@@ -78,9 +174,17 @@ def train_models(
     feature_set: str,
     params: dict | None = None,
     group_col: str | None = None,
+    masking: MaskingSpec | None = None,
 ) -> dict[str, dict[str, object]]:
-    """잔차 모델을 타깃별(·그룹별)로 fit한다. 반환: {target: {group_key: booster}}."""
+    """잔차 모델을 타깃별(·그룹별)로 fit한다. 반환: {target: {group_key: booster}}.
+
+    `masking`을 주면 `apply_masking`으로 증강한 프레임에 대해 잔차·피처·그룹 마스크를
+    다시 계산한 뒤 fit한다(잔차는 승하차·lookup 키에만 의존해 증강된 프레임에도 그대로
+    유효하고, 그룹 마스크도 증강 후 행 수에 맞춰 다시 만들어야 한다). `masking=None`이면
+    오늘과 동일하게 동작한다.
+    """
     params = {**DEFAULT_PARAMS, **(params or {})}
+    train, _ = _augment(train, feature_set, masking)
     resid = lookup.residuals(train)
     X = build_matrix(train, feature_set)
     groups = [None] if group_col is None else sorted(train[group_col].dropna().unique())
@@ -126,17 +230,54 @@ def run(
     params: dict | None = None,
     split_date: pd.Timestamp = SPLIT_DATE,
     out_root: Path = MODELS_DIR,
+    masking: MaskingSpec | None = None,
+    panel_path: Path | None = None,
+    events_path: Path | None = None,
+    derived_cache: Path | None = None,
+    name: str | None = None,
 ) -> Path:
-    """패널 로딩 → lookup fit → 파생 → 잔차 모델 fit → 아티팩트 저장. 디렉터리 경로를 돌려준다."""
-    panel = load_panel(with_events=True)
+    """패널 로딩 → lookup fit → 파생 → (선택) 마스킹 증강 → 잔차 모델 fit → 아티팩트 저장.
+
+    디렉터리 경로를 돌려준다.
+    """
+    if panel_path is not None and derived_cache is None:
+        raise SystemExit(
+            "--panel을 바꾸면 --derived-cache도 따로 줘야 한다 — 기본 캐시"
+            "(crowd_panel_derived_2024_2025)를 덮어쓴다"
+        )
+    if masking is not None and Path(out_root).resolve() == MODELS_DIR.resolve():
+        raise SystemExit(
+            "마스킹 실험 아티팩트는 models/CROWD/ 바로 아래에 두지 않는다 — "
+            "predictor.latest_artifact가 이름 정렬로 auto 기본값을 고르므로 프로덕션이 바뀔 수 있다. "
+            "--out-root models/CROWD/_experiments/<실험명> 을 준다(채택 시에만 승격)"
+        )
+
+    load_kwargs: dict[str, Path] = {}
+    if panel_path is not None:
+        load_kwargs["panel_path"] = panel_path
+    if events_path is not None:
+        load_kwargs["events_path"] = events_path
+    panel = load_panel(with_events=True, **load_kwargs)
     train_raw, _ = time_split(panel, split_date)
     lookup = DayTypeLookupBaseline().fit(train_raw)
-    derived = load_or_build_derived(panel, lookup)
+    derived = load_or_build_derived(
+        panel,
+        lookup,
+        cache_path=derived_cache or DERIVED_CACHE,
+        panel_path=panel_path or (CROWD_PROCESSED / PANEL_NAME),
+    )
     train, _ = time_split(derived, split_date)
 
+    # 여기서 한 번만 증강해 n_train_rows·아티팩트가 실제 학습 행 수(stack이면 2배)를
+    # 반영하게 하고, train_models에는 이미 증강된 프레임을 masking=None으로 넘겨
+    # 이중 증강을 막는다.
+    train, mask_summary = _augment(train, feature_set, masking)
     models = train_models(train, lookup, feature_set, params, group_col)
 
     stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M")
+    resolved_panel = panel_path or (CROWD_PROCESSED / PANEL_NAME)
+    resolved_events = events_path or (CROWD_PROCESSED / EVENTS_NAME)
+    resolved_cache = derived_cache or DERIVED_CACHE
     meta = {
         "feature_set": feature_set,
         "feature_columns": FEATURE_SETS[feature_set],
@@ -151,8 +292,17 @@ def run(
         "n_train_rows": len(train),
         "params": {**DEFAULT_PARAMS, **(params or {})},
         "created_at": stamp,
+        "training": {
+            "masking": mask_summary,
+            "panel_file": Path(resolved_panel).name,
+            "events_file": Path(resolved_events).name,
+            "derived_cache": Path(resolved_cache).name,
+        },
     }
-    out_dir = save_artifact(out_root / f"{feature_set}_{stamp}", lookup, models, meta)
+    out_dir = Path(out_root) / (name if name else f"{feature_set}_{stamp}")
+    if out_dir.exists():
+        raise SystemExit(f"아티팩트 폴더가 이미 있다 — 덮어쓰지 않는다: {out_dir}")
+    out_dir = save_artifact(out_dir, lookup, models, meta)
     print(f"[학습] 저장: {out_dir} (학습 {len(train):,}행, 그룹 {group_col or '없음'})", flush=True)
     return out_dir
 
@@ -168,8 +318,56 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--group-col", default=None, help="예: line — 그룹별로 잔차 모델을 따로 fit")
     ap.add_argument("--params", default=None, help="JSON, 예: '{\"num_leaves\": 127}'")
+    ap.add_argument(
+        "--mask-mode",
+        default="none",
+        choices=["none", "stack", "replace"],
+        help="145 결측 마스킹 학습(none이면 기존과 동일)",
+    )
+    ap.add_argument(
+        "--mask-weights",
+        default=None,
+        help='JSON, 예: \'{"d7_only": 0.5, "no_lag": 0.3, "d1_only": 0.2}\' (기본: mode별 프리셋)',
+    )
+    ap.add_argument("--mask-seed", type=int, default=42)
+    ap.add_argument(
+        "--panel", default=None, help=f"패널 파일명 — 상대경로면 {CROWD_PROCESSED} 기준"
+    )
+    ap.add_argument(
+        "--events", default=None, help=f"이벤트 파일명 — 상대경로면 {CROWD_PROCESSED} 기준"
+    )
+    ap.add_argument(
+        "--derived-cache", default=None, help=f"파생 캐시 파일명 — 상대경로면 {CROWD_INTERIM} 기준"
+    )
+    ap.add_argument("--split-date", default=str(SPLIT_DATE.date()), help="YYYY-MM-DD")
+    ap.add_argument("--out-root", default=str(MODELS_DIR))
+    ap.add_argument("--name", default=None, help="아티팩트 폴더명 — 주면 스탬프 없이 그대로 쓴다")
     args = ap.parse_args(argv)
-    run(args.feature_set, args.group_col, json.loads(args.params) if args.params else None)
+
+    masking = None
+    if args.mask_mode != "none":
+        default_weights = STACK_WEIGHTS if args.mask_mode == "stack" else REPLACE_WEIGHTS
+        weights = json.loads(args.mask_weights) if args.mask_weights else default_weights
+        masking = MaskingSpec(mode=args.mask_mode, weights=weights, seed=args.mask_seed)
+
+    def _resolve(value: str | None, base: Path) -> Path | None:
+        if value is None:
+            return None
+        p = Path(value)
+        return p if p.is_absolute() else base / p
+
+    run(
+        args.feature_set,
+        args.group_col,
+        json.loads(args.params) if args.params else None,
+        split_date=pd.Timestamp(args.split_date),
+        out_root=Path(args.out_root),
+        masking=masking,
+        panel_path=_resolve(args.panel, CROWD_PROCESSED),
+        events_path=_resolve(args.events, CROWD_PROCESSED),
+        derived_cache=_resolve(args.derived_cache, CROWD_INTERIM),
+        name=args.name,
+    )
 
 
 if __name__ == "__main__":

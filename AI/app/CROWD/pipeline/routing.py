@@ -1,4 +1,4 @@
-"""가용성별 예측기 라우팅 정책 — 순수 함수(197 B-1).
+"""가용성별 예측기 라우팅 정책 — 순수 함수(197 B-1, 145 후속 갱신).
 
 `Predictor`는 이미 플러그인(`predictor.py`)이지만 "어떤 상황에 어떤 kind를 쓰나"는 코드 어디에도
 없어서 `predict_day`에 if-else로 박으면 145의 다른 축(노선·군집)을 켤 때 구조를 다시 잡아야 하고
@@ -9,7 +9,20 @@ BE 계약도 다시 바뀐다. 그래서 규칙을 데이터(`POLICY: list[Rule]
 가용성 4단은 `masking.SCENARIOS`(`full`/`d7_only`/`d1_only`/`no_lag`)와 같은 이름을 쓴다 — 학습 때
 쓰는 결측 시나리오와 서빙 때 실제로 마주치는 이력 상태가 같은 축이기 때문이다.
 
-145 `family-check/RESULTS.md` 8절 판정(2026-09-16 확정, 휴일 예외 없음):
+145 후속 `masking-check/RESULTS.md` 14절 판정(2026-09-17 확정, 결정 "(나) 혼합 유지, 표 수정") —
+LightGBM에 결측 시나리오를 학습 때부터 보여주는 마스킹 학습(`train.py --mask-mode stack`)이
+`d7_only`·`no_lag`의 붕괴를 없애 아래로 갱신됐다(197 당시 표는 그 아래):
+
+| 이력 상태 | 예측기 | 근거 |
+| --- | --- | --- |
+| `full` | LightGBM(마스킹 학습) | 배포 대비 손실 없음(+0.04/+0.38%p, 등급 97.012 vs 97.025) |
+| **`d7_only`** | LightGBM(마스킹 학습) | GRU보다 +12.0/+13.8%p 우위(등급 96.706 vs 96.205) — 197 당시 |
+| | | GRU를 택한 근거(배포 LightGBM −20.8%p 붕괴)가 마스킹으로 사라졌다 |
+| `d1_only` | GRU(dl) | GRU가 +5.6~+9.0%p 우위 — 4단 중 유일하게 라우팅이 그대로다 |
+| `no_lag` | LightGBM(마스킹 학습) | RMSE가 GRU와 동등(쌍 차이 −0.5/−1.8%p, CI가 0을 포함) — 정확도 |
+| | | 우위가 아니라 동률이라 모델 하나로 합친다 |
+
+**197 당시** `family-check/RESULTS.md` 8절 판정(2026-09-16 확정, 휴일 예외 없음, 위 표로 대체됨):
 
 | 이력 상태 | 예측기 | 근거 |
 | --- | --- | --- |
@@ -56,8 +69,8 @@ class Rule:
 POLICY: list[Rule] = [
     Rule(avail="full", pred="lightgbm"),
     Rule(avail="d1_only", pred="dl"),
-    Rule(avail="d7_only", pred="dl"),
-    Rule(avail="no_lag", pred="dl"),
+    Rule(avail="d7_only", pred="lightgbm"),
+    Rule(avail="no_lag", pred="lightgbm"),
     # 부원(비활성) — 근거는 있으나 미검증. 켜기 전 논의 I-1(원인 규명)이 선행.
     # Rule(avail="full", line="1호선", pred="linear"),
     #   근거: stat-model-check 3절 ols_series − lightgbm RMSE +15.48/+17.45%p [하한 +13.65/+15.01]

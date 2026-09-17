@@ -1,6 +1,6 @@
 # CROWD 혼잡도 — 서빙 산출물·API 명세 (BE 전달용)
 
-작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(20:35 생성)
+작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(2026-09-17 13:23 재생성 — 145 후속 라우팅 반영판)
 
 > **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
 > `batch_predict.OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 · 등급 임계값
@@ -32,7 +32,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | --- | --- | --- |
 | 1 | **(수정됨, 197)** `boarding_pred`·`alighting_pred`는 이제 항상 0 이상이다 — 등급 계산이 쓰는 대체 값과 같은 값이 출력에 실린다. 음수가 났던 셀(과거 3,744행/17.3%, 최솟값 −457.9명이었던 원인)은 lookup 값으로 대체되고(둘 다 없으면 0), 그 사실은 새 컬럼 `pred_source`(str: `model`/`lookup_negative`)로 식별한다 | 인원 필드를 그대로 노출해도 된다. 정확도를 다르게 표시하고 싶으면 `pred_source="lookup_negative"`인 셀만 구분 표시. 아래 5.1절 참고 |
 | 2 | **`boarding_pred`는 1시간 값이고, 30분 행 2개에 같은 값이 중복된다.** 승하차 예측은 1시간 단위이고 30분 분해는 혼잡도(`congestion_pct`)에만 적용된다 | **절대 합산하지 말 것.** `06:00`과 `06:30` 행의 `boarding_pred`를 더하면 2배가 된다 |
-| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. 옛 LightGBM 판에서 `lookup_substituted_rows`가 3,744(17.3%)까지 갔던 이유다 — B부 라우팅이 이 상태를 GRU로 넘기면서 **228행(1.06%)**으로 줄었다 | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
+| 3 | **현재 운영이 이력 결손 상태다.** 2026-09-13 메타가 `lag1d_available: false` — 전날 실측이 없어 1주 전 시차만으로 예측됐다. 옛 LightGBM 판에서 `lookup_substituted_rows`가 3,744(17.3%)까지 갔던 이유다 — B부 라우팅이 이 상태를 GRU로 넘기면서 **228행(1.06%)**으로 줄었다. 145 후속부터는 이 `d7_only` 상태를 마스킹 학습 LightGBM이 맡는다(`masking-check/RESULTS.md` 14절) | `meta.lag1d_available`이 `false`면 화면에 정확도 주의 표시를 붙일 수 있게 준비. API `StationCongestionResponse.lag1d_available`로 내려간다 |
 
 ---
 
@@ -74,11 +74,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:00",
   "time_slot": "06-07",
-  "congestion_pct": 9.8106944835,
+  "congestion_pct": 11.591921,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 591.8334049458,
-  "alighting_pred": 2282.2476847746,
+  "boarding_pred": 923.805823,
+  "alighting_pred": 2454.620876,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -94,11 +94,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
   "direction": "하선",
   "time_slot_30min": "06:30",
   "time_slot": "06-07",
-  "congestion_pct": 13.9426219287,
+  "congestion_pct": 17.477853,
   "grade": 0.0,
   "data_status": "ok",
-  "boarding_pred": 591.8334049458,
-  "alighting_pred": 2282.2476847746,
+  "boarding_pred": 923.805823,
+  "alighting_pred": 2454.620876,
   "pred_source": "model",
   "boarding_lookup": 542.6489795918,
   "alighting_lookup": 2115.8204081633,
@@ -109,7 +109,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 ]
 ```
 
-두 행의 `boarding_pred`가 **같다**(591.83). 0절 2번이 말하는 지점이다. `congestion_pct`는 9.8 → 13.9로 30분마다 다르다.
+두 행의 `boarding_pred`가 **같다**(923.81). 0절 2번이 말하는 지점이다. `congestion_pct`는 11.6 → 17.5로 30분마다 다르다.
 
 ---
 
@@ -150,25 +150,25 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | --- | --- | --- |
 | `target_date` | `"2026-09-13"` | 대상 날짜 |
 | `in_panel` | `false` | 그 날짜가 학습 패널에 있는지(과거 재현 여부). `false`면 실운영 예측 |
-| `history_window_days` | `14` | 이력 창 길이(DL 예측기는 14일을 요구한다 — `Predictor.required_history_days`) |
+| `history_window_days` | `7` | 이력 창 길이 — 예측기에 따라 7 또는 14다(LightGBM·lookup은 7, DL은 14 — `Predictor.required_history_days`) |
 | `history_days_present` | `6` | 실제로 확보된 이력 일수 |
 | `history_dates` | `["2026-09-06", …]` | 확보된 이력 날짜 |
 | **`lag1d_available`** | **`false`** | **전날 실측 유무. `false`면 정확도 저하** |
 | `lag7d_available` | `true` | 1주 전 실측 유무 |
 | `availability` | `"d7_only"` | (197) 가용성 판정 — `full`/`d1_only`/`d7_only`/`no_lag`. `routing.availability()`가 `lag1d_available`·`lag7d_available`로 정한다 |
-| `routing_rule` | `{"pred": "dl", "avail": "d7_only", "line": null, "day_type": null, "group": null}` | (197) 그 kind를 고른 라우팅 규칙(`routing.describe_policy`). `predictor_override=true`면 `null` |
-| `predictor` | `"dl"` | 쓰인 예측기 종류. **라우팅 결과라 날짜마다 다를 수 있다**(197 B부) |
-| `predictor_version` | `"dl:dl_gru_s14_noev_s42_20260914-1358"` | 아티팩트까지 포함한 버전 |
+| `routing_rule` | `{"pred": "lightgbm", "avail": "d7_only", "line": null, "day_type": null, "group": null}` | (197, 145 후속) 그 kind를 고른 라우팅 규칙(`routing.describe_policy`). `predictor_override=true`면 `null` |
+| `predictor` | `"lightgbm"` | 쓰인 예측기 종류. **라우팅 결과라 날짜마다 다를 수 있다**(197 B부, 145 후속) |
+| `predictor_version` | `"lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113"` | 아티팩트까지 포함한 버전 |
 | `predictor_override` | `false` | (197) `--predictor` CLI로 kind를 명시해 라우팅을 건너뛰었는지 |
 | `predictor_fallback` | `null` | **(197부터 항상 `null`)** 옛 "이력 전무 시 lookup 강제 대체" 의미는 없어졌다 — 필드는 BE 계약 유지를 위해 키만 남는다 |
 | `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
 | `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
 | `rows` | `21606` | 표 행 수 |
 | `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
-| `lookup_substituted_rows` | `228` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
+| `lookup_substituted_rows` | `120` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
 | `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
 | `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
-| `generated_at` | `"2026-09-16T20:35:52+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
+| `generated_at` | `"2026-09-17T13:23:43+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
 
 ---
 
@@ -184,9 +184,9 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 {
   "available_dates": ["2026-09-13", "2026-09-14"],
   "grade_thresholds": [50.0, 100.0],
-  "predictor": "dl",
-  "predictor_version": "dl:dl_gru_s14_noev_s42_20260914-1358",
-  "generated_at": "2026-09-16T20:35:52+09:00",
+  "predictor": "lightgbm",
+  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113",
+  "generated_at": "2026-09-17T13:23:43+09:00",
   "status_counts": {"ok": 20902, "no_calibration": 585, "segment_truncated": 119},
   "topology_gaps": [{"line": "3호선", "segment": "본선", "missing": [321]}]
 }
@@ -207,11 +207,11 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "station_name": "서울역",
   "line": "1호선",
   "train_capacity": 1600,
-  "predictor_version": "dl:dl_gru_s14_noev_s42_20260914-1358",
+  "predictor_version": "lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113",
   "lag1d_available": false,
   "slots": [
-    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 6.282879, "grade": 0, "data_status": "ok", "pred_source": "model"},
-    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 4.556710, "grade": 0, "data_status": "ok", "pred_source": "model"}
+    {"time_slot_30min": "06:00", "direction": "하선", "congestion_pct": 8.286222, "grade": 0, "data_status": "ok", "pred_source": "model"},
+    {"time_slot_30min": "06:30", "direction": "하선", "congestion_pct": 6.320377, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -234,7 +234,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
   "line": "2호선",
   "time_slot_30min": "08:30",
   "stations": [
-    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 24.063364, "grade": 0, "data_status": "ok", "pred_source": "model"}
+    {"station_no": 201, "station_name": "시청", "direction": "내선", "congestion_pct": 27.387391, "grade": 0, "data_status": "ok", "pred_source": "model"}
   ]
 }
 ```
@@ -270,11 +270,23 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 `latest_artifact`는 이름 정렬로 최신을 고르는데, DL 변형 18개 중 이름이 가장 큰 `dl_lstm_s14_noev_s44`가 뽑혔다 — 채택된 모델은 `dl_gru_s14_noev_s42`다. 배포 아티팩트를 설정값(`crowd_dl_artifact`)으로 고정해 막았다. **DL 아티팩트를 새로 학습해 교체할 때는 이 설정값을 같이 고쳐야 한다.**
 
+145 후속부터는 LightGBM 배포판도 같은 이유로 고정한다 — `crowd_lgbm_artifact`(`app/core/config.py`)가 마스킹 학습 아티팩트(`festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113`)를 이름으로 못박는다. 지금은 이름 정렬로도 우연히 이 폴더가 최신이지만, 다음 학습이 그보다 이름이 앞서는 폴더를 만들면 `auto`가 조용히 옛 아티팩트로 돌아간다 — 그래서 운에 맡기지 않는다.
+
+### 5.4 강동(5호선) 행 중복 — `(station_no, direction, time_slot_30min)`은 유일 키가 아니다 (미해결, 티켓 필요)
+
+145 후속 드리프트 측정 중 발견(2026-09-17). 강동은 5호선 본선의 종점이자 하남선의 첫 역이라 토폴로지에서 **링크가 2개** 잡히고,
+표에는 30분 셀마다 강동 행이 **2개**(하루 234행 = 117셀 × 2) 실린다. 두 행의 값은 다르다 — 한쪽은 본선 종점이라 재차 0(`congestion_pct` 0),
+다른 쪽은 하남선 방향의 실제 재차(예: 168.8%). 다른 272역은 유일하다. 197 계약이 이 사실을 적지 않았다(AI 측 누락).
+
+| 영향 | 지금 할 것 | 고칠 방향 |
+| --- | --- | --- |
+| 세 필드로 map을 만들면 강동은 나중 행이 앞 행을 덮는다(어느 쪽이 남는지 순서 운). 두 행을 합산하면 2배 | BE: 강동만 두 행이 온다고 알고 처리(합산 금지, `max` 또는 두 값 표시). AI: 이 절과 통지문 02 4절로 알림 | (a) 링크 식별 컬럼(`segment` 또는 `from_station_no`/`to_station_no`)을 추가해 키를 유일하게 — 정보를 안 버림(권고) / (b) 강동을 한 행으로 접음. BE 선호 회수 후 별도 티켓. 컬럼이 늘면 1절 표·`OUTPUT_COLS`·계약 테스트가 같이 바뀐다 |
+
 ---
 
 ## 6. 이번 검증(S15P21A104-145)이 만든 변경
 
-**실행되는 프로덕션 코드 변경은 없다.** 145는 검증 티켓이고, 18개 변경 파일 중 `app/` 아래는 문서 1건뿐이다.
+**145 본 검증에서는 실행되는 프로덕션 코드 변경이 없었다.** 145는 검증 티켓이고, 18개 변경 파일 중 `app/` 아래는 문서 1건뿐이었다. **145 후속(마스킹 학습, 2026-09-17)은 예외다** — `routing.POLICY`·`config.crowd_lgbm_artifact`·`batch_predict.resolve_predictor`를 바꿨고, 그 영향은 아래 표 마지막 행에 있다.
 
 | 경로 | 성격 |
 | --- | --- |
@@ -290,6 +302,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 | --- | --- | --- |
 | 인원 음수 수정(5.1) | `*_pred` 클립 → lookup 대체 + `pred_clipped`(bool) → `pred_source`(str) 컬럼 교체 | **컬럼 1개 이름·타입 변경** — parquet 스키마·API 응답 반영 완료(197 B부) |
 | 가용성별 라우팅(197) | 이력 완비(`full`)는 LightGBM, 결손·전무(`d1_only`/`d7_only`/`no_lag`)는 GRU(`dl`)로 라우팅 | `meta.predictor`·`predictor_version` 값이 날짜마다 달라진다(이미 내려가는 필드, 스키마 변경 없음). `meta.availability`·`routing_rule`·`predictor_override` 3개 키가 새로 추가됐다 |
+| **가용성별 라우팅 수정(145 후속, 마스킹 LightGBM)** | `d7_only`·`no_lag`는 이제 LightGBM(마스킹 학습 아티팩트, `masking-check/RESULTS.md` 14절)이 맡는다. `d1_only`만 GRU(`dl`)로 남는다 | 스키마·키는 그대로다(변경 없음). `predictor_version`의 LightGBM 값이 `lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113`로 바뀐다 — `d7_only`·`no_lag` 날짜의 표시 모델명이 GRU에서 LightGBM으로 보인다. **값 드리프트**(2026-09-13/14 `d7_only` 두 날짜를 GRU 판 → 마스킹 LightGBM 판으로 재생성해 21,606행씩 행 정렬 비교): `congestion_pct` 평균 \|Δ\| **0.62 / 0.86%p**(중앙값 0.39 / 0.49, 95퍼센타일 1.93 / 3.06, 최대 32.4 / 50.1), `grade`가 달라진 셀 **3.85 / 4.36%**, `data_status` 100% 동일, `lookup_substituted_rows` 228 → 120 / 0 → 16, `history_window_days` 14 → 7. 지난 GRU 도입(변경 통지 01: 평균 4.7 / 4.4%p)보다 값은 훨씬 덜 움직인다. 통지문 `.claude/handoff/TO_BE-crowd-routing-change-02.md` |
 
 ---
 
