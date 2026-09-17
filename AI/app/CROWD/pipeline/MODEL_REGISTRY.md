@@ -6,7 +6,7 @@
 | 층 | 코드 예 | 정의 위치 |
 | --- | --- | --- |
 | 피처 세트 | `festival_selflag_d1sd_d7_resid` | `features.py: FEATURE_SETS` |
-| 아티팩트 | `models/CROWD/festival_selflag_d1sd_d7_resid_20260913-0340/` | `train.py`가 저장, `meta.json` 동봉 |
+| 아티팩트 | `models/CROWD/festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025/` | `train.py`가 저장, `meta.json` 동봉 |
 | 예측기 | `lookup` / `lightgbm:<폴더명>` / `dl:<폴더명>` / `llm` | `predictor.py: build_predictor`, 배치 meta `predictor_version` |
 
 ## 1. 모델 구조(모든 세트 공통)
@@ -116,10 +116,12 @@ d1_only .2`(날짜 기준 185/113/68일).
 | `festival_all_derived_resid_20260911-1518` | 실시간 상한 세트 | 90 비교용 보존 |
 | `festival_selflag_d1d7_resid_20260911-1533` | 90 배포 세트 | 93까지 배치가 쓴 모델. 보존 |
 | `festival_selflag_d1sd_d7_resid_20260913-0340` | 이전 배포 세트 | 이전 배포(197까지). 보존 |
-| **`festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113`** | **현재 배포**(145 후속, 마스킹 학습) | `crowd_lgbm_artifact`로 고정. 세트·`model_kind`는 동일(`lightgbm`), `meta.json`에 `training.masking` 블록만 추가. `batch_predict --today` meta `predictor_version`으로 확인 |
+| `festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113` | 이전 배포(145 후속, 2024 단독 마스킹 학습). 롤백용 보존 | `crowd_lgbm_artifact`로 고정. 세트·`model_kind`는 동일(`lightgbm`), `meta.json`에 `training.masking` 블록만 추가. `batch_predict --today` meta `predictor_version`으로 확인 |
+| **`festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025`** | **현재 배포**(200, 2024+2025 최종 fit) | `crowd_lgbm_artifact`로 고정. 마스킹 stack, 학습 2024-01-01~2025-12-31(7,974,000행). 보유 평가 연도 없음 — 2026 실측 누적 시 `compare.py`로 사후 검증(4b절) |
 | `dl_gru_s14_20260914-0949` | 144 GRU = 198 V0(시드 42) | `model_kind="dl"` — `auto`가 고르지 않는다 |
 | `dl_gru_s14_s43_…`, `dl_gru_s14_s44_…` | V0 시드 43·44 | 198 시드 분산 측정 |
-| **`dl_gru_s14_noev_s42_20260914-1358`** | **198 채택 구성(V3)** | 시드 43·44도 같이 있다(`_noev_s43`, `_noev_s44`) |
+| `dl_gru_s14_noev_s42_20260914-1358` | 198 채택 구성(V3), 이전 DL 배포(2024 단독). 롤백용 보존 | 시드 43·44도 같이 있다(`_noev_s43`, `_noev_s44`) |
+| **`dl_gru_s14_noev_s42_train2024-2025`** | **현재 DL 배포**(200, 2024+2025 최종 fit) | `crowd_dl_artifact`로 고정. V3 구성, 학습 2024-01-01~2025-10-31·검증 2025-11~12(`train_dl --splits`), 평가 구간 0표본. 라우팅상 `d1_only`만 맡는다 |
 | `dl_gru_s14_neighbor_s42_…`, `dl_gru_s14_neighbor_noev_s42_…` | 198 V1 · V1+V3 | 비교 보존 |
 | `dl_gru_s14_events_hist_s42_…`, `dl_gru_s14_hd3_s42_…` | 198 V2 · δ=3 | 기각 기록 보존 |
 | `dl_lstm_s14_20260914-1236` | 144 LSTM 1회 실험 | 계열 확정 근거. 보존 |
@@ -201,8 +203,8 @@ LightGBM도 이름 정렬(`latest_artifact`)에만 기대지 않는다 — 지�
 
 | 항목 | 값 |
 | --- | --- |
-| 설정값 | `crowd_lgbm_artifact: str \| None = "festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113"` |
-| 가리키는 아티팩트 | `festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113` — 세트는 `festival_selflag_d1sd_d7_resid` 그대로, `train.py --mask-mode stack`으로 학습(`meta.json`에 `training.masking` 블록, `model_kind` 키는 없어 기존과 같이 `lightgbm`으로 읽힌다) |
+| 설정값 | `crowd_lgbm_artifact: str \| None = "festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025"` (200에서 1113 → 2024-25 판으로 교체) |\| None = "festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113"` |
+| 가리키는 아티팩트 | `festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025` — 세트는 `festival_selflag_d1sd_d7_resid` 그대로, `train.py --mask-mode stack`으로 학습(`meta.json`에 `training.masking` 블록, `model_kind` 키는 없어 기존과 같이 `lightgbm`으로 읽힌다) |
 | 판정 근거 | 145 후속 `masking-check/RESULTS.md` 6·7·13·14절(위 표) |
 | 실패 동작 | 폴더가 없으면 `FileNotFoundError`(설정값 이름·기대 경로를 메시지에 남김), 폴더는 있는데 `meta.json`의 `model_kind`가 `lightgbm`이 아니면 `ValueError`(DL과 같은 패턴, `resolve_predictor._lightgbm_artifact`) |
 | `None`일 때 | 예전처럼 `latest_artifact(kind="lightgbm")`(이름 정렬 최신)로 떨어진다 |
@@ -216,8 +218,8 @@ LightGBM도 이름 정렬(`latest_artifact`)에만 기대지 않는다 — 지�
 
 | 항목 | 값 |
 | --- | --- |
-| 설정값 | `crowd_dl_artifact: str = "dl_gru_s14_noev_s42_20260914-1358"` |
-| 가리키는 아티팩트 | `dl_gru_s14_noev_s42_20260914-1358` — 198 V3 구성(7채널, **정적 이벤트 없음**), 시드 42 |
+| 설정값 | `crowd_dl_artifact: str = "dl_gru_s14_noev_s42_train2024-2025"` (200에서 1358 → 2024-25 판으로 교체) |
+| 가리키는 아티팩트 | `dl_gru_s14_noev_s42_train2024-2025` — 198 V3 구성(2024+2025 재적합, 200)(7채널, **정적 이벤트 없음**), 시드 42 |
 | 판정 근거 | 198 판정 1·4(이벤트 5열 제거가 `full`·`no_lag` 동시 개선) + 145 family-check(위 표) |
 | 실패 동작 | 폴더가 없으면 `FileNotFoundError`(설정값 이름·기대 경로를 메시지에 남김), 폴더는 있는데 `meta.json`의 `model_kind`가 `dl`이 아니면 `ValueError`(설정값이 잘못된 폴더를 가리키는 경우를 잡는다) |
 
