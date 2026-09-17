@@ -92,7 +92,7 @@ class RouteSearchComfortPriorityTest {
     }
 
     @Test
-    @DisplayName("priority=COMFORT면 혼잡도를 아는 후보가 더 느려도 앞으로 오고 LOW_CONGESTION으로 표시된다")
+    @DisplayName("priority=COMFORT면 혼잡도를 아는 후보가 혼잡 3 맨 앞에 LOW_CONGESTION으로 온다 (214: 속도 3 + 혼잡 3)")
     void COMFORT_혼잡도낮은후보_우선() {
         lenient().when(congestionRepository
                         .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
@@ -109,9 +109,12 @@ class RouteSearchComfortPriorityTest {
         List<RouteSearchResponse> result = routeSearchService.search(
                 "A", "C", null, RoutePriority.COMFORT, null);
 
-        assertTrue(result.size() >= 2);
-        assertEquals(RouteType.LOW_CONGESTION, result.get(0).routeType());
-        assertTrue(result.get(0).legs().stream().anyMatch(leg -> leg.mode() == TravelMode.SUBWAY));
+        // 214 순서표: 0-2 속도, 3-5 혼잡. 혼잡 데이터 있는 SUBWAY 후보가 혼잡 3 맨 앞에 온다.
+        // 이 그래프는 후보 2개라 six = 속도 2 + 혼잡 1 = 3개. LOW_CONGESTION은 2번이다.
+        assertEquals(3, result.size());
+        assertEquals(RouteType.SHORTEST, result.get(0).routeType());
+        assertEquals(RouteType.LOW_CONGESTION, result.get(2).routeType());
+        assertTrue(result.get(2).legs().stream().anyMatch(leg -> leg.mode() == TravelMode.SUBWAY));
     }
 
     @Test
