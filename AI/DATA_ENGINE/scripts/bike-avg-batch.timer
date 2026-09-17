@@ -1,0 +1,11 @@
+[Unit]
+Description=Build BIKE avg serving table daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Seoul
+Persistent=true
+Unit=bike-avg-batch.service
+
+[Install]
+WantedBy=timers.target
+
