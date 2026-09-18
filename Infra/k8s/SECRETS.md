@@ -4,7 +4,7 @@
 > 값은 절대 커밋·채팅·문서에 남기지 않는다.
 > 배포는 파트별이다 (`CI.md`): 자기 변수가 비어 있으면 **자기 파트 배포 job만** 실패한다. 다른 파트는 영향 없다.
 
-## 등록 대상 (7건)
+## 등록 대상 (9건)
 
 | 변수 | 발급처 | 소유 | 사용처 | 비면 멈추는 job |
 |---|---|---|---|---|
@@ -13,6 +13,8 @@
 | `SEOUL_API_KEY` | 열린데이터광장 | BE | `be-secret` → 수집기 | `deploy-be` |
 | `SEOUL_BIKE_KEY` | 열린데이터광장 | BE | `be-secret` → 수집기 | `deploy-be` |
 | `KMA_API_KEY` | 기상청 API허브 | BE | `be-secret` → 수집기 | `deploy-be` |
+| `SEOUL_SUBWAY_KEY_EVENING` | 열린데이터광장 (둘째 키, S15P21A104-238) | BE | `be-secret` → 저녁 수집기 | `deploy-be` |
+| `SEOUL_BIKE_KEY_EVENING` | 열린데이터광장 (둘째 키, S15P21A104-238) | BE | `be-secret` → 저녁 수집기 | `deploy-be` |
 | `VITE_API_BASE_URL` | 고정값 (`https://j15a104.p.ssafy.io`) | FE | `fe-image` 빌드 인자 | `fe-image` (develop-FE) |
 | `VITE_KAKAO_MAP_APP_KEY` | 카카오 개발자 콘솔 (JS 키) | FE | `fe-image` 빌드 인자 | `fe-image` |
 
@@ -22,8 +24,8 @@
 
 ```bash
 # 값 있는 셸에서 1회 실행 (없으면 생성, 있으면 값 갱신)
-export DB_PASSWORD=... SEOUL_SUBWAY_KEY=... SEOUL_API_KEY=... SEOUL_BIKE_KEY=... \
-  KMA_API_KEY=... VITE_API_BASE_URL=... VITE_KAKAO_MAP_APP_KEY=...
+export DB_PASSWORD=... SEOUL_SUBWAY_KEY=... SEOUL_API_KEY=... SEOUL_BIKE_KEY=... KMA_API_KEY=... \
+  SEOUL_SUBWAY_KEY_EVENING=... SEOUL_BIKE_KEY_EVENING=... VITE_API_BASE_URL=... VITE_KAKAO_MAP_APP_KEY=...
 bash Infra/k8s/scripts/register-gitlab-vars.sh
 
 # 등록 여부만 확인 (값 미출력)

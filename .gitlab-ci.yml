@@ -5,7 +5,7 @@ stages:
   - deploy
 
 # 파트별 CI 정의. 루트는 공통(workflow·guard·AI)만 두고 파트별 정의는 분리한다.
-# 네이밍: 파트-동작 (be-test·be-image·fe-test·fe-image·manifests-validate·deploy-prod·ai-*).
+# 네이밍: 파트-동작 (be-test·be-image·fe-test·fe-image·manifests-validate·deploy-infra·deploy-be·deploy-fe·ai-*).
 include:
   - local: .gitlab/ci/be.yml
   - local: .gitlab/ci/fe.yml

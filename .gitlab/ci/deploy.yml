@@ -1,12 +1,12 @@
 # 배포 (S15P21A104-210 ②). 배포 job은 소유 단위로 나눈다 — 트리거 = 소유자 브랜치 (Infra/k8s/CONTRACT.md §1).
 #   deploy-infra  main         Infra/k8s     클러스터 계층 (namespace·ingress-nginx·cert-manager·데이터·registry·TLS)
-#   deploy-be     develop-BE   BE/k8s/prod   BE 워크로드 (be·be-collector·be-consumer·ingress)
+#   deploy-be     develop-BE   BE/k8s/prod   BE 워크로드 (be·be-collector·be-collector-evening·be-consumer·ingress)
 #   deploy-fe     develop-FE   FE/k8s/prod   FE 워크로드
 #   deploy-ai     없음 — AI Dockerfile·이미지 미정. manifests-validate만 (뼈대).
 # 환경은 하나(namespace prod). 세 job은 resource_group prod로 직렬화된다.
 # 전제 (⬜ 미확인 시 해당 job이 실패한다 — 그때는 노드 수동 apply.sh로 전환):
 #   1. 러너에 kubeconfig (a104 호스트 직통 가정).
-#   2. GitLab protected 변수 — deploy-infra: DB_PASSWORD · deploy-be: SEOUL_SUBWAY_KEY·SEOUL_API_KEY·SEOUL_BIKE_KEY·KMA_API_KEY.
+#   2. GitLab protected 변수 — deploy-infra: DB_PASSWORD · deploy-be: BE/k8s/prod/be-secret.env.example의 키 전부 (SEOUL_*·KMA_*·*_EVENING).
 #      자기 변수가 없으면 자기 job만 before_script에서 멈춘다 (kubectl apply 전). 다른 파트 배포는 영향 없다.
 #   3. 러너 호스트 docker의 insecure-registry 등록 (이미지 job).
 # 이미지 태그: *-image가 남긴 IMAGE_TAG(short SHA)로 `kustomize edit set image` 후 apply — 태그가 바뀌어야 롤아웃이 난다
@@ -74,6 +74,7 @@ deploy-be:
     - kubectl apply -k BE/k8s/prod --server-side
     - kubectl rollout status deployment/be -n prod --timeout=300s
     - kubectl rollout status deployment/be-collector -n prod --timeout=300s
+    - kubectl rollout status deployment/be-collector-evening -n prod --timeout=300s
     - kubectl rollout status deployment/be-consumer -n prod --timeout=300s
   after_script:
     - rm -f BE/k8s/prod/be-secret.env
