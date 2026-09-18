@@ -26,10 +26,16 @@ else
 fi
 
 BIKE_MAX_AGE_MIN="${BIKE_MAX_AGE_MIN:-10}"
-WEATHER_MAX_AGE_MIN="${WEATHER_MAX_AGE_MIN:-20}"
+WEATHER_SOURCE="${WEATHER_SOURCE:-poller}"
+if [[ "${WEATHER_SOURCE}" == "kafka" ]]; then
+  WEATHER_MAX_AGE_MIN="${WEATHER_MAX_AGE_MIN:-90}"
+  WEATHER_MIN_COUNT="${WEATHER_MIN_COUNT:-1}"
+else
+  WEATHER_MAX_AGE_MIN="${WEATHER_MAX_AGE_MIN:-20}"
+  WEATHER_MIN_COUNT="${WEATHER_MIN_COUNT:-5}"
+fi
 PARTITION_HOURS="${PARTITION_HOURS:-1}"
 BIKE_MIN_COUNT="${BIKE_MIN_COUNT:-10}"
-WEATHER_MIN_COUNT="${WEATHER_MIN_COUNT:-5}"
 DISCORD_NOTIFY_ON_FAILURE="${DISCORD_NOTIFY_ON_FAILURE:-1}"
 
 status=0
@@ -74,14 +80,16 @@ run_check "[1/2] collection freshness check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_collection_freshness \
     --ai-root "${AI_ROOT}" \
     --bike-max-age-min "${BIKE_MAX_AGE_MIN}" \
-    --weather-max-age-min "${WEATHER_MAX_AGE_MIN}"
+    --weather-max-age-min "${WEATHER_MAX_AGE_MIN}" \
+    --weather-source "${WEATHER_SOURCE}"
 
 run_check "[2/2] partition count check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_partition_counts \
     --ai-root "${AI_ROOT}" \
     --hours "${PARTITION_HOURS}" \
     --bike-min-count "${BIKE_MIN_COUNT}" \
-    --weather-min-count "${WEATHER_MIN_COUNT}"
+    --weather-min-count "${WEATHER_MIN_COUNT}" \
+    --weather-source "${WEATHER_SOURCE}"
 
 printf '\n'
 if [[ "${status}" -eq 0 ]]; then

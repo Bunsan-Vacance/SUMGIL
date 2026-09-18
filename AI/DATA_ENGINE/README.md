@@ -195,6 +195,21 @@ python -m DATA_ENGINE.monitor.check_partition_counts
 - 날씨 완료 시간대 파티션: `snapshot_*.parquet` 최소 5개/hour.
 - 현재 진행 중인 KST 시간대는 파티션 파일 수 검사에서 제외한다.
 
+날씨 Kafka 전환 전까지 모니터 기본값은 기존 poller다. 새 코드 배포 후 poller를
+유지한 상태에서 다음 명령으로 Kafka 경로를 별도 검증할 수 있다.
+
+```bash
+WEATHER_SOURCE=kafka DISCORD_NOTIFY_ON_FAILURE=0 \
+  bash DATA_ENGINE/scripts/run_data_engine_monitor.sh
+```
+
+Kafka 모드에서는 `latest_by_grid.parquet`의 파일 갱신을 90분 이내로 검사하고,
+완료 시간대에 `kafka_topic` 컬럼이 있는 날씨 snapshot을 최소 1개 요구한다.
+약 60분인 현재 발행 간격에 맞춘 초기 기준으로, BIKE API의 관측 시각 신선도
+기준과는 별개다. 검증 후 poller를 중지하려면 cron의 모니터 명령 앞에도
+`WEATHER_SOURCE=kafka`를 지정해야 한다. 이 설정은 `AI/.env`에 적는 것만으로
+shell 스크립트에 전달되지 않는다. BIKE poller 모드는 이 변경으로 전환되지 않는다.
+
 기준값은 실행 시 환경변수로 조정할 수 있다.
 
 ```bash
@@ -322,6 +337,12 @@ collected_minute, source
 collected_at, collected_date, collected_hour, collected_minute, weather_source,
 base_datetime, forecast_datetime, nx, ny, t1h, rn1, reh, wsd, pty
 ```
+
+날씨 배치는 poller raw의 평탄화된 컬럼과 Kafka raw의 `payload_json`을 함께 읽는다.
+Kafka payload의 `obsrValue`/`fcstValue`로 `observed`/`forecast`를 구분하고,
+동일 종류·발표 시각·유효 시각·격자·category가 반복되면 마지막 수집값을 사용한다.
+따라서 위 2026-09-13 행 수는 변경 전 실행 기록이며 재실행 시 결과 행 수가 줄 수 있다.
+해석할 수 없는 Kafka payload는 파일별 건수를 경고로 남기고 해당 이벤트만 건너뛴다.
 
 주기 실행은 EC2에서 수동 실행 결과를 확인한 뒤 등록한다. 예를 들어 전날 데이터 기준으로 매일
 새벽 04:10에 배치를 돌리려면 아래처럼 등록할 수 있다.
@@ -589,6 +610,61 @@ data/BIKE/raw/realtime/latest_stock.parquet
 `updated_at`은 `freshness_at` 기준이며, 따릉이는 `source_generated_at`이 없으면 `ingested_at`을
 KST naive datetime으로 저장한다. 같은 대여소의 이전 값은 더 최신 `updated_at` 이벤트로만
 갱신된다.
+
+`weather.nowcast`도 raw snapshot 저장 후 공통 최신 날씨 파일을 갱신한다.
+
+```text
+data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet
+```
+
+컬럼은 `nx`, `ny`, `weather_source`, `category`, `base_datetime`,
+`forecast_datetime`, `weather_value`, `source_generated_at`, `ingested_at`,
+`event_id`다. 시각은 KST naive로 저장한다. 격자·관측/예보 종류·category별로
+가장 최근 발표 시각의 값만 유지하며, 예보는 해당 발표의 유효 시각별 값을 모두
+유지한다. 늦게 도착한 이전 발표는 최신값을 덮지 않는다. BIKE 전용
+`latest_weather.parquet`과는 별개의 공통 파일이다.
+
+BIKE ETA 서빙용 어댑터는 공통 파일에서 대표 격자 `(60, 127)`의 동일한
+`base_datetime`에 해당하는 실황 `T1H`와 `RN1`만 선택해 다음 파일을 갱신한다.
+
+```text
+data/EXTERNAL/weather/raw/nowcast/latest_weather.parquet
+```
+
+이 파일은 단일 행의 `temp`, `is_rain`, `updated_at` 컬럼을 갖는다.
+`is_rain`은 학습 데이터와 동일하게 `RN1 > 0`으로 정의하고, `updated_at`은
+파일 저장/수집 시각이 아닌 실제 관측 시각(KST naive)이다. 두 항목이 같은
+관측 시각에 모두 없거나 숫자로 해석할 수 없으면 이전 파일을 유지한다.
+Kafka 발행이 약 60분 간격인 현 상태에서 BIKE의 15분 신선도 기준을 그대로
+적용하면 정상 수집 중에도 폴백이 발생하므로, BIKE 설정과 운영 관측을 함께
+검토해야 한다. 공통 파일은 BIKE 전용 포맷으로 바꾸지 않는다.
+
+### 날씨 Kafka 입력 계약 (2026-09-18 확인)
+
+J15A104A의 최근 Kafka 날씨 snapshot을 확인한 결과, `weather.nowcast`의 envelope
+`source`는 관측과 예보 모두 동일하다. 종류는 `payload_json`의 값 필드로 구분한다.
+
+| 종류 | payload 필드 | 값 필드 | 기준 시각 |
+| --- | --- | --- | --- |
+| 실황 `observed` | `baseDate`, `baseTime`, `category`, `nx`, `ny`, `obsrValue` | `obsrValue` | `baseDate` + `baseTime` |
+| 예보 `forecast` | `baseDate`, `baseTime`, `fcstDate`, `fcstTime`, `category`, `nx`, `ny`, `fcstValue` | `fcstValue` | 발표: `baseDate` + `baseTime`; 유효: `fcstDate` + `fcstTime` |
+
+확인한 category는 `T1H`, `RN1`, `REH`, `WSD`, `PTY`이며, 샘플의 격자는
+`nx=60, ny=127` 한 곳이다. 이는 현재 샘플의 사실이지 producer가 항상 한 격자만
+발행한다는 계약은 아니다. 공통 산출물은 격자와 관측/예보 종류, 발표/유효 시각을
+보존해야 한다. 기존 poller raw는 이 필드가 평탄화되어 있고 `source`가
+`observed`/`forecast`인 반면, Kafka raw는 `payload_json` 안에 필드가 있으며
+envelope `source`가 `weather.nowcast`다. 현재 날씨 배치는 평탄화된 poller 형식만
+받으므로 Kafka raw를 그대로 입력할 수 없다.
+
+최근 서버 snapshot의 서로 다른 `poll_run_at` 간격은 약 60분이었다. BIKE 서빙의
+15분 신선도 기준을 Kafka 발행 간격에 그대로 적용하면 정상 수집 중에도 오래된 값으로
+판정될 수 있다. 구현 전 다음 정책을 확정한다.
+
+- 동일 관측이 poller와 Kafka 양쪽에 있거나 Kafka에서 재전송될 때의 중복 키와 우선순위.
+- BIKE가 사용할 실황 `observed`의 대표 격자와 `RN1`/`PTY` 기반 강수 판정, 결측 처리.
+- 신선도를 관측 시각, 수집 시각, 최신 파일 갱신 시각 중 어디에 적용할지와 허용 지연.
+  값의 관측 시각을 파일 갱신 시각으로 대체해 신선해 보이게 만들지 않는다.
 
 서버에서 수동 확인:
 
