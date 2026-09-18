@@ -23,19 +23,19 @@ spec:
       containers:
         - name: be-collector
           image: sumgil-be:latest
+          # SHA 태그는 불변이라 재pull이 필요 없다. :latest는 호환용으로만 push된다.
+          imagePullPolicy: IfNotPresent
           env:
             # be-config 의 SPRING_PROFILES_ACTIVE=prod 를 덮는다 (env 가 envFrom 보다 우선).
             - name: SPRING_PROFILES_ACTIVE
               value: prod,collect
           envFrom:
             - configMapRef:
-                name: be-config             # DB_URL·REDIS_HOST 등. collect 프로파일도 컨텍스트를 공유해 필요하다
-            - configMapRef:
-                name: be-collector-config   # 수집 주기·운영 시간 창·브로커 주소 (collector.env)
+                name: be-config             # DB_URL·수집 주기·운영 창·브로커 주소 전부 여기 (be-config.env)
             - secretRef:
                 name: data-secret           # DB_PASSWORD (데이터 계층 소유)
             - secretRef:
-                name: be-secret             # 외부 API 인증키 (.env.secret, 앱 고유 비밀 — CONTRACT.md 4절)
+                name: be-secret             # 외부 API 인증키 (be-secret.env — CONTRACT.md 4절)
           # HTTP 포트가 없어 httpGet 프로브를 걸 수 없다. v1 은 프로브 없이 두고 프로세스가 죽으면
           # restartPolicy(Always) 로 다시 뜨게 한다. 행(hang) 감지가 필요해지면 exec 프로브를 붙인다.
           resources:

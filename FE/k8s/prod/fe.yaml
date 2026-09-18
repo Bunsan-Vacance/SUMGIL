@@ -4,7 +4,8 @@ kind: Deployment
 metadata:
   name: fe
 spec:
-  replicas: 2
+  # replicas 1 고정 (S15P21A104-210). 정적 서빙·무상태라 2의 이득이 없다. 무중단 필요 시 2와 함께 올린다.
+  replicas: 1
   selector:
     matchLabels:
       app: fe
@@ -16,6 +17,8 @@ spec:
       containers:
         - name: fe
           image: sumgil-fe:latest
+          # SHA 태그는 불변이라 재pull이 필요 없다. :latest는 호환용으로만 push된다.
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
           livenessProbe:

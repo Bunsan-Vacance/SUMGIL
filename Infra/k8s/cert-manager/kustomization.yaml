@@ -1,0 +1,9 @@
+# cert-manager (S15P21A104-210 ④ TLS). 클러스터 내 인증서 발급.
+# 설치는 릴리스 고정 URL — 적용 시점에 최신 안정 버전인지 확인한다 (현재 핀: v1.18.2).
+# 노드는 registry.k8s.io·quay.io outbound가 되므로(기존 ingress-nginx 이미지와 동일 조건) pull 가능하다.
+# 갱신 시: 아래 URL의 버전만 올린다 (ingress-nginx kustomization의 갱신 주석과 같은 방식).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - https://github.com/cert-manager/cert-manager/releases/download/v1.18.2/cert-manager.yaml
+  - cluster-issuer.yaml

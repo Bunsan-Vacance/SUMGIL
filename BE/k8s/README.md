@@ -20,11 +20,12 @@
 
 | 구분 | 파일 | 주입 | 키 |
 |---|---|---|---|
-| 비민감 | `k8s/prod/config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
-| 비밀(데이터) | 데이터 계층 소유(`Infra/k8s/prod/.env.secret`) | Secret `data-secret` | `DB_PASSWORD` |
+| 비민감 | `k8s/prod/be-config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
+| 비밀(데이터) | 데이터 계층 소유(`Infra/k8s/prod/data-secret.env`) | Secret `data-secret` | `DB_PASSWORD` |
+| 비밀(앱) | `k8s/prod/be-secret.env` (gitignore) | Secret `be-secret` | 수집기·BE 공용 API 키 |
 
 - `DB_PASSWORD`는 데이터 계층(Infra)이 소유한다. BE는 `data-secret`을 소비만 한다. 배포용 환경변수는 로컬용 `BE/.env`와 별개 파일이다.
-- BE 고유 비밀은 아직 없다. 생기면 `k8s/prod/.env.secret`(gitignore) + secretGenerator `be-secret`로 추가한다.
+- 파일명 규칙(210): `<용도>.env` / `<용도>-secret.env` / `<용도>.env.example`.
 
 ## 이미지 만들기
 
@@ -47,4 +48,3 @@ docker build -t sumgil-be:latest .
 
 - `k8s/prod/` — BE 워크로드 매니페스트(Deployment·Service·Ingress·config·secret).
 - 데이터 계층(Postgres·Redis·Kafka)은 BE가 아니라 Infra 소유다(`Infra/k8s/prod/`).
-- `k8s/argocd-application.yaml` — GitOps 전환용(설치 후순위).
