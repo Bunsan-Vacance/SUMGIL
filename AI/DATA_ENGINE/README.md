@@ -195,6 +195,21 @@ python -m DATA_ENGINE.monitor.check_partition_counts
 - 날씨 완료 시간대 파티션: `snapshot_*.parquet` 최소 5개/hour.
 - 현재 진행 중인 KST 시간대는 파티션 파일 수 검사에서 제외한다.
 
+날씨 Kafka 전환 전까지 모니터 기본값은 기존 poller다. 새 코드 배포 후 poller를
+유지한 상태에서 다음 명령으로 Kafka 경로를 별도 검증할 수 있다.
+
+```bash
+WEATHER_SOURCE=kafka DISCORD_NOTIFY_ON_FAILURE=0 \
+  bash DATA_ENGINE/scripts/run_data_engine_monitor.sh
+```
+
+Kafka 모드에서는 `latest_by_grid.parquet`의 파일 갱신을 90분 이내로 검사하고,
+완료 시간대에 `kafka_topic` 컬럼이 있는 날씨 snapshot을 최소 1개 요구한다.
+약 60분인 현재 발행 간격에 맞춘 초기 기준으로, BIKE API의 관측 시각 신선도
+기준과는 별개다. 검증 후 poller를 중지하려면 cron의 모니터 명령 앞에도
+`WEATHER_SOURCE=kafka`를 지정해야 한다. 이 설정은 `AI/.env`에 적는 것만으로
+shell 스크립트에 전달되지 않는다. BIKE poller 모드는 이 변경으로 전환되지 않는다.
+
 기준값은 실행 시 환경변수로 조정할 수 있다.
 
 ```bash
