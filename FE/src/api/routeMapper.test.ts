@@ -12,6 +12,46 @@ const response = (overrides: Record<string, unknown> = {}) => ({
 })
 
 describe('경로 응답 확장 필드', () => {
+  it('leg 혼잡도 수치를 내부 구간 필드로 보존하고 100 초과도 허용한다', () => {
+    const route = mapBackendRoute(
+      response({
+        legs: [{ mode: 'SUBWAY', minutes: 10, congestionLevel: 120.5 }],
+      }),
+      0,
+      '2026-09-17T00:00:00.000Z',
+    )
+
+    expect(route.legs[0].segmentCongestionLevel).toBe(120.5)
+  })
+
+  it('도보·자전거 구간의 혼잡도 수치는 표시 모델에 넣지 않는다', () => {
+    const route = mapBackendRoute(
+      response({
+        legs: [
+          { mode: 'WALK', minutes: 5, congestionLevel: 20 },
+          { mode: 'BIKE', minutes: 5, congestionLevel: 80 },
+        ],
+      }),
+      0,
+      '2026-09-17T00:00:00.000Z',
+    )
+
+    expect(route.legs.map((leg) => leg.segmentCongestionLevel)).toEqual([undefined, undefined])
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, '80', {}])(
+    '잘못된 leg 혼잡도 수치를 거부한다: %#',
+    (congestionLevel) => {
+      expect(() =>
+        mapBackendRoute(
+          response({ legs: [{ mode: 'SUBWAY', minutes: 10, congestionLevel }] }),
+          0,
+          '2026-09-17T00:00:00.000Z',
+        ),
+      ).toThrow(RepositoryError)
+    },
+  )
+
   it('혼잡도 예측 객체와 source를 보존한다', () => {
     const route = mapBackendRoute(
       response({

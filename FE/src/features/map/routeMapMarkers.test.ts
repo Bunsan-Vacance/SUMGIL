@@ -284,14 +284,23 @@ describe('경로 지도 선과 지점', () => {
       routeLineStyle({ mode: 'walk', transfer: true, title: '', note: '', minutes: 1 }),
     ).toEqual({ strokeColor: '#28323c', strokeStyle: 'dashed' })
     expect(
-      (['RELAXED', 'NORMAL', 'CONGESTED', 'SATURATED'] as const).map(
-        (grade) =>
+      routeLineStyle({
+        mode: 'walk',
+        title: '',
+        note: '',
+        minutes: 1,
+        segmentCongestionLevel: 110,
+      }),
+    ).toEqual({ strokeColor: '#28323c', strokeStyle: 'solid' })
+    expect(
+      [20, 50, 80, 110].map(
+        (level) =>
           routeLineStyle({
             mode: 'subway',
             title: '',
             note: '',
             minutes: 1,
-            segmentCongestionGrade: grade,
+            segmentCongestionLevel: level,
           }).strokeColor,
       ),
     ).toEqual(['#1d4ed8', '#15803d', '#b91c1c', '#7e22ce'])

@@ -89,7 +89,7 @@ describe('경로 카드 구간 혼잡도', () => {
           title: '2호선',
           note: '2호선',
           minutes: 5,
-          segmentCongestionGrade: 'CONGESTED',
+          segmentCongestionLevel: 80,
           from: { name: '역삼역' },
           to: { name: '선릉역' },
         },
@@ -105,7 +105,7 @@ describe('경로 카드 구간 혼잡도', () => {
           title: '수인분당선',
           note: '수인분당선',
           minutes: 4,
-          segmentCongestionGrade: 'SATURATED',
+          segmentCongestionLevel: 110,
           from: { name: '선릉역' },
           to: { name: '도곡역' },
         },
@@ -127,32 +127,18 @@ describe('경로 카드 구간 혼잡도', () => {
     expect(screen.getByRole('button').getAttribute('aria-label')).toContain('상세 경로')
   })
 
-  it('지하철·버스 구간에만 화면 확인용 mock level을 순서대로 적용한다', () => {
+  it('구간 혼잡도 값이 없으면 구간별 혼잡도 UI를 만들지 않는다', () => {
     const route: Route = {
-      id: 'preview-route',
-      label: '시안 경로',
-      minutes: 10,
+      id: 'live-route',
+      label: '실시간 경로',
+      minutes: 4,
       transfers: 0,
-      modes: ['subway', 'bus'],
-      legs: [
-        { mode: 'walk', title: 'A → B', note: '도보', minutes: 1 },
-        { mode: 'subway', title: 'B → C', note: '지하철', minutes: 2 },
-        { mode: 'bus', title: 'C → D', note: '버스', minutes: 2 },
-        { mode: 'subway', title: 'D → E', note: '지하철', minutes: 2 },
-        { mode: 'bus', title: 'E → F', note: '버스', minutes: 3 },
-      ],
+      modes: ['subway'],
+      legs: [{ mode: 'subway', title: 'B → C', note: '지하철', minutes: 4 }],
     }
 
     render(<RouteCard route={route} onDetail={vi.fn()} />)
 
-    const labels = screen.getByLabelText('구간별 혼잡도')
-    expect(Array.from(labels.children, (cell) => cell.textContent)).toEqual([
-      '',
-      '여유',
-      '보통',
-      '혼잡',
-      '포화',
-    ])
-    expect(labels.children).toHaveLength(5)
+    expect(screen.queryByLabelText('구간별 혼잡도')).toBeNull()
   })
 })

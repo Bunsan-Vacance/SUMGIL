@@ -10,8 +10,8 @@ import type { Route } from './types'
 import { compactLegs } from './LegList'
 import { modeIcons } from './ModeIcon'
 import { lineColor, lineTextColor } from './lineColor'
-import { segmentCongestionPresentation, withSegmentCongestionPreview } from './segmentCongestion'
-import { isTransferLeg, transitionLabel } from './transitions'
+import { segmentCongestionGradeForLevel, segmentCongestionPresentation } from './segmentCongestion'
+import { isTransitLeg, isTransferLeg, transitionLabel } from './transitions'
 
 export default function RouteCard({
   route,
@@ -24,8 +24,10 @@ export default function RouteCard({
   busVariantCount?: number
   onDetail: () => void
 }) {
-  const displayLegs = compactLegs(withSegmentCongestionPreview(route.legs))
-  const hasCongestion = displayLegs.some((leg) => leg.segmentCongestionGrade)
+  const displayLegs = compactLegs(route.legs)
+  const hasCongestion = displayLegs.some(
+    (leg) => isTransitLeg(leg) && leg.segmentCongestionLevel !== undefined,
+  )
   const departure = clockTime(route.departedAt)
   const arrival = routeArrival(route.minutes, route.departedAt)
   const finalLeg = displayLegs.at(-1)
@@ -95,7 +97,11 @@ export default function RouteCard({
       {hasCongestion && (
         <span className="route-segment-labels" aria-label="구간별 혼잡도">
           {displayLegs.map((leg, index) => {
-            const congestion = segmentCongestionPresentation(leg.segmentCongestionGrade)
+            const congestion = isTransitLeg(leg)
+              ? segmentCongestionPresentation(
+                  segmentCongestionGradeForLevel(leg.segmentCongestionLevel),
+                )
+              : undefined
             const from = leg.from?.name || leg.title.split(' → ')[0]
             const to = leg.to?.name || leg.title.split(' → ').at(-1)
             const segment = [from, to].filter(Boolean).join(' → ') || leg.title

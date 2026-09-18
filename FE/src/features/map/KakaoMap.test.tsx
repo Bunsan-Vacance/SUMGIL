@@ -591,7 +591,7 @@ describe('일반 지도 장소 마커', () => {
     }
   })
 
-  it('지하철 geometry에 mock 혼잡 색상과 승차·환승·하차 marker를 관리한다', async () => {
+  it('지하철·버스 geometry에 실제 혼잡 색상과 승차·환승·하차 marker를 관리한다', async () => {
     const onPlaceSelect = vi.fn()
     const transfer = { id: 'transfer', name: '환승역', lat: 37.51, lng: 127.04 }
     const route: Route = {
@@ -607,6 +607,7 @@ describe('일반 지도 장소 마커', () => {
           note: '2호선',
           minutes: 5,
           routeId: '1002',
+          segmentCongestionLevel: 20,
           from: { id: 'start', name: '승차역', lat: 37.5, lng: 127.03 },
           to: transfer,
           geometry: {
@@ -625,6 +626,7 @@ describe('일반 지도 장소 마커', () => {
           note: '버스',
           minutes: 5,
           routeId: 'bus-1',
+          segmentCongestionLevel: 50,
           from: transfer,
           to: { id: 'end', name: '하차역', lat: 37.52, lng: 127.05 },
           geometry: {
@@ -671,7 +673,7 @@ describe('일반 지도 장소 마커', () => {
     rendered.customOverlays.forEach((overlay) => expect(overlay.setMap).toHaveBeenCalledWith(null))
   })
 
-  it('화면 확인용 mock level을 등급으로 보완해 실제 경로 선 색상에 반영한다', async () => {
+  it('백엔드 구간 혼잡도 숫자를 등급 색상으로 변환한다', async () => {
     const route: Route = {
       id: 'route-preview-congestion',
       label: '혼잡도 시안 경로',
@@ -683,6 +685,7 @@ describe('일반 지도 장소 마커', () => {
         title: `구간 ${index + 1}`,
         note: '시안 구간',
         minutes: 3,
+        segmentCongestionLevel: [20, 50, 80, 110][index],
         geometry: {
           type: 'MultiLineString' as const,
           coordinates: [
@@ -721,7 +724,7 @@ describe('일반 지도 장소 마커', () => {
             title: '2호선',
             note: '2호선',
             minutes: 8,
-            segmentCongestionGrade: 'SATURATED',
+            segmentCongestionLevel: 110,
           },
         ],
       },
@@ -747,7 +750,7 @@ describe('일반 지도 장소 마커', () => {
             title: '2호선',
             note: '역삼역 → 선릉역',
             minutes: 8,
-            segmentCongestionGrade: 'CONGESTED',
+            segmentCongestionLevel: 80,
             geometry: {
               type: 'MultiLineString',
               coordinates: [

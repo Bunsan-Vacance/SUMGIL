@@ -8,8 +8,8 @@ import { isCongestionPreview } from '../../app/preview'
 import type { Place, Route } from '../route/types'
 import {
   SEGMENT_CONGESTION_LEVELS,
+  segmentCongestionGradeForLevel,
   segmentCongestionPresentation,
-  withSegmentCongestionPreview,
 } from '../route/segmentCongestion'
 import { useKakaoMap } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
@@ -89,14 +89,15 @@ function CongestionPreviewMap({ route }: { route: Route }) {
         <path className="congestion-preview-road secondary" d="M90 -20 300 540 M280 -20 80 540" />
         {entries.map(({ leg, coordinates }, index) => {
           const points = coordinates.map(point).join(' ')
-          const congestion = segmentCongestionPresentation(leg.segmentCongestionGrade)
+          const grade = segmentCongestionGradeForLevel(leg.segmentCongestionLevel)
+          const congestion = segmentCongestionPresentation(grade)
           const color = congestion?.color || '#708078'
           return (
             <g key={`${leg.title}-${index}`}>
               <polyline className="congestion-preview-casing" points={points} />
               <polyline
                 className="congestion-preview-line"
-                data-grade={leg.segmentCongestionGrade || 'NEUTRAL'}
+                data-grade={grade || 'NEUTRAL'}
                 points={points}
                 stroke={color}
                 strokeDasharray={leg.transfer ? '8 7' : undefined}
@@ -249,13 +250,7 @@ export default function KakaoMap({
   const mapPlaces = places ?? routePlaces
   const mapFocus = focusedPlace === undefined ? selectedPlace : focusedPlace
   const showSelectedPlaceInfo = showPlaceInfo && selectedPlace
-  const effectiveRoute = useMemo(() => {
-    if (!route) return null
-    return {
-      ...route,
-      legs: withSegmentCongestionPreview(route.legs),
-    }
-  }, [route])
+  const effectiveRoute = route || null
   const closeBikeStock = () => {
     stockAbortRef.current?.abort()
     stockAbortRef.current = null
@@ -344,7 +339,13 @@ export default function KakaoMap({
           <Bike size={14} strokeWidth={2.4} />
         </span>
       </button>
-      {effectiveRoute?.legs.some((leg) => leg.segmentCongestionGrade) && (
+      {effectiveRoute?.legs.some(
+        (leg) =>
+          (leg.mode === 'subway' || leg.mode === 'bus') &&
+          !leg.transfer &&
+          !leg.transitionType &&
+          leg.segmentCongestionLevel !== undefined,
+      ) && (
         <div className="map-congestion-legend" role="group" aria-label="구간 혼잡도 범례">
           {SEGMENT_CONGESTION_LEVELS.map((level) => (
             <span className="map-congestion-legend-item" key={level.grade}>

@@ -45,7 +45,7 @@ const railLegs = (quiet: boolean): Leg[] => [
     note: '역삼역 → 선릉역',
     minutes: quiet ? 3 : 2,
     routeId: '1002',
-    segmentCongestionGrade: quiet ? 'RELAXED' : 'CONGESTED',
+    segmentCongestionLevel: quiet ? 20 : 80,
     from: railEndpoints.yeoksam,
     to: railEndpoints.seolleung,
     geometry: {
@@ -82,7 +82,7 @@ const railLegs = (quiet: boolean): Leg[] => [
     note: '선릉역 → 한티역 → 도곡역',
     minutes: quiet ? 6 : 5,
     routeId: '1075',
-    segmentCongestionGrade: quiet ? 'NORMAL' : 'SATURATED',
+    segmentCongestionLevel: quiet ? 50 : 110,
     from: railEndpoints.seolleung,
     to: railEndpoints.dogok,
     geometry: {

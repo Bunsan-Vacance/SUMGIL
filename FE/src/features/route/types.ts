@@ -48,7 +48,7 @@ export interface Leg {
   transfer?: boolean
   transitionType?: TransitionType
   routeId?: string
-  segmentCongestionGrade?: SegmentCongestionGrade
+  segmentCongestionLevel?: number
   from?: RouteEndpoint
   to?: RouteEndpoint
   geometry?: RouteGeometry
