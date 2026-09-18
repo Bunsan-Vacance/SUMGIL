@@ -88,11 +88,16 @@ public final class RouteNameResolver {
     /**
      * 정규 BUS 구간 leg에 운행 노선 후보를 붙인다(S15P21A104-234).
      * 구간 단위라 노선 선택을 미루고 목록으로 싣는다. 단일 routeName은 null로 둔다.
+     * 매퍼가 묶음 교집합으로 싣고 온 ID를 우선 쓰고(다정거장 ride의 빈 옵션 방지),
+     * 없을 때만 양끝점 조회로 폴백한다(기존 2-arg 경로 동일).
      */
     private RouteLegResponse withBusOptions(RouteLegResponse leg) {
-        Set<String> optionIds = BusRouteIndex.optionsFor(
-                new Edge(leg.fromNodeId(), leg.toNodeId(), leg.routeId(), 0, 0, leg.mode()),
-                busRouteIndex);
+        Set<String> optionIds = leg.routeOptions() != null
+                ? leg.routeOptions().stream().map(RouteOptionResponse::routeId)
+                        .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new))
+                : BusRouteIndex.optionsFor(
+                        new Edge(leg.fromNodeId(), leg.toNodeId(), leg.routeId(), 0, 0, leg.mode()),
+                        busRouteIndex);
         List<String> optionList = optionIds.stream().sorted().toList();
         Map<String, String> names = busNames.apply(optionIds);
         Map<String, Integer> headways = busHeadways.apply(optionIds);

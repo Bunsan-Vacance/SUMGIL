@@ -137,6 +137,7 @@ public final class RouteCandidateFinder {
         // WALK를 지나도 유지된 대중교통 노선 집합으로 비교한다.
         List<Long> transferSecs = new ArrayList<>();
         Set<String> kept = Set.of();
+        String keptStr = null;
         TravelMode prevMode = null;
         Set<String> prevOptions = Set.of();
         for (Edge edge : found.edges()) {
@@ -146,40 +147,35 @@ public final class RouteCandidateFinder {
                         kept, prevMode, prevOptions, edge.mode(), options);
                 if (decision.transfer()) {
                     transferSecs.add(rule.transferCost(edge.fromNode(), kept, options));
-                } else {
+                } else if (prevOptions.size() == 1 && options.size() == 1) {
                     // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
                     // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일.
                     TransferRule.TransferDecision legacy = TransferRule.decide(
-                            singleOrNull(kept), prevMode, singleOrNull(prevOptions),
-                            edge.mode(), edge.routeId());
+                            keptStr, prevMode, prevOptions.iterator().next(),
+                            edge.mode(), options.iterator().next());
                     if (legacy.transfer()) {
                         transferSecs.add(rule.costWithStation(
-                                0, edge.fromNode(), legacy.costLine(), edge.routeId()));
+                                0, edge.fromNode(), legacy.costLine(), options.iterator().next()));
                     }
                 }
             }
             prevOptions = options;
             kept = TransferRule.keptTransitLines(kept, edge.mode(), options);
+            keptStr = TransferRule.keptTransitLine(keptStr, edge.mode(), edge.routeId());
             prevMode = edge.mode();
         }
         // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤
         // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.
+        // 인덱스 전달(234 C1·I2): 매퍼가 같은 교집합 규칙으로 BUS 분리를 해야
+        // transferSecs 개수와 경계가 일치한다. null이면 routeId 폴백(기존 동일).
         Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
                 new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
                 stationInfos, RouteType.SHORTEST, RouteSource.ALGORITHM,
-                transferSecs, rentalIds);
+                transferSecs, rentalIds, busRouteIndex);
         return response.filter(r -> BikeStockGate.passesEdges(
                 found.edges().stream().map(Edge::fromNode).toList(),
                 found.edges().stream().map(Edge::mode).toList(),
                 bikeStock.get()));
-    }
-
-    /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용. */
-    private static String singleOrNull(Set<String> lines) {
-        if (lines == null || lines.size() != 1) {
-            return null;
-        }
-        return lines.iterator().next();
     }
 
     /** leg의 (수단·출발·도착·노선) 순서로 만든 서명. 같으면 사실상 같은 경로로 보고 중복 제거한다. */

@@ -80,7 +80,7 @@ class BusCorridorService234Test {
         edges.addAll(BusEdgeBuilder.buildCorridors(busRoutes()));
         edges.add(walk("S2", "C", 120));
         edges.add(subway("A", "B", "L2", 200));
-        edges.add(subway("B", "C", "L2", 200));
+        edges.add(subway("B", "C", "L3", 200));
         lenient().when(graphRegistry.graph())
                 .thenReturn(graphOf(edges.toArray(new com.ssafy.s15p21a104.domain.route.graph.Edge[0])));
         lenient().when(graphRegistry.graphFor(
@@ -116,6 +116,18 @@ class BusCorridorService234Test {
         for (RouteSearchResponse response : result) {
             assertTrue(seen.add(corridorOf(response)),
                     "물리 중복 후보 검출: " + corridorOf(response));
+        }
+        // routeId 무시 corridor 유일성: 정규 구간이라 노선 선택이 미뤄지므로
+        // 노선을 뺀 물리 서명이 겹치면 같은 경로의 중복이다.
+        Set<String> seenPhysical = new HashSet<>();
+        for (RouteSearchResponse response : result) {
+            StringBuilder physical = new StringBuilder();
+            for (RouteLegResponse leg : response.legs()) {
+                physical.append(leg.mode()).append(':')
+                        .append(leg.fromNodeId()).append("->").append(leg.toNodeId()).append('|');
+            }
+            assertTrue(seenPhysical.add(physical.toString()),
+                    "물리 중복 후보 검출(routeId 무시): " + physical);
         }
         for (RouteSearchResponse response : result) {
             double sum = response.legs().stream().mapToDouble(RouteLegResponse::minutes).sum();
