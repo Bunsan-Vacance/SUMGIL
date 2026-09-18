@@ -1,10 +1,13 @@
 package com.ssafy.s15p21a104.domain.route.scoring;
 
 import com.ssafy.s15p21a104.domain.congestion.scoring.CongestionScorer;
+import com.ssafy.s15p21a104.domain.congestion.scoring.LinkCongestionScorer;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.finder.ScoredCandidate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -147,6 +150,50 @@ public final class RouteScoreRanker {
                         RouteType.ALTERNATIVE, candidate.totalMinutes(), candidate.legs(),
                         candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
             }
+        }
+        return relabeled;
+    }
+
+    /**
+     * 링크 단위·통과 시각 슬롯 기반 혼잡순 상위 N개(S15P21A104-158, 통지 05 S-1).
+     * {@link #topCalm}(노선 단위·출발 슬롯 1개)을 대체한다 — 같은 노선을 여러 정거장
+     * 타는 leg도 원본 엣지({@link ScoredCandidate#path()})로 되돌아가 엣지마다 실제
+     * 통과 시각의 혼잡도를 조회한다.
+     *
+     * @param candidates 응답+원본 경로 목록
+     * @param departureTime 출발 시각(엣지별 통과 시각 계산의 기준)
+     * @param lookup 엣지·통과시각으로 혼잡도를 조회하는 함수(방향 판정 포함, 모르면 null)
+     * @param n 최대 개수
+     * @return 혼잡순 상위 목록(최대 n개). 혼잡도 데이터가 하나도 없으면 빈 목록
+     */
+    public List<RouteSearchResponse> topCalmByLink(
+            List<ScoredCandidate> candidates, LocalDateTime departureTime,
+            LinkCongestionScorer.LinkLevelLookup lookup, int n) {
+        Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
+        for (ScoredCandidate candidate : candidates) {
+            LinkCongestionScorer.score(candidate.path().edges(), departureTime, lookup)
+                    .ifPresent(result -> scoreByCandidate.put(candidate.response(), result.weightedAverage()));
+        }
+        if (scoreByCandidate.isEmpty()) {
+            return List.of();
+        }
+
+        // 점수 있는 후보만 혼잡순에 넣는다. 점수 없는 후보를 끼우면 순위 조작이다.
+        List<RouteSearchResponse> scored = new ArrayList<>(scoreByCandidate.keySet());
+        scored.sort(Comparator.comparingDouble(
+                candidate -> scoreByCandidate.getOrDefault(candidate, Double.MAX_VALUE)));
+
+        List<RouteSearchResponse> relabeled = new ArrayList<>();
+        boolean lowestTagged = false;
+        for (RouteSearchResponse candidate : scored) {
+            if (relabeled.size() >= n) {
+                break;
+            }
+            RouteType routeType = lowestTagged ? RouteType.ALTERNATIVE : RouteType.LOW_CONGESTION;
+            lowestTagged = true;
+            relabeled.add(new RouteSearchResponse(
+                    routeType, candidate.totalMinutes(), candidate.legs(),
+                    candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
         }
         return relabeled;
     }

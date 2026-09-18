@@ -10,10 +10,8 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.ssafy.s15p21a104.domain.congestion.entity.Congestion;
-import com.ssafy.s15p21a104.domain.congestion.entity.CongestionId;
-import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
-import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
+import com.ssafy.s15p21a104.domain.congestion.entity.CongestionPred;
+import com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository;
 import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
@@ -26,7 +24,6 @@ import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import java.math.BigDecimal;
-import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,14 +51,14 @@ class RouteSearchComfortPriorityTest {
     private RouteGraphRegistry graphRegistry;
 
     @Mock
-    private CongestionRepository congestionRepository;
+    private CongestionPredRepository congestionPredRepository;
 
     private RouteSearchService routeSearchService;
 
     @BeforeEach
     void setUp() {
         Map<String, Station> stations = new HashMap<>();
-        for (String id : List.of("A", "C", "R1")) {
+        for (String id : List.of("501", "503", "R1")) {
             stations.put(id, RouteTestFixtures.mockStation(id, id + "역"));
         }
         for (Map.Entry<String, Station> entry : stations.entrySet()) {
@@ -69,8 +66,8 @@ class RouteSearchComfortPriorityTest {
                     .thenReturn(Optional.of(entry.getValue()));
         }
         Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
-        infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
-        infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
+        infos.put("501", new RouteMapper.StationInfo("501", "에이역", 37.5, 127.0));
+        infos.put("503", new RouteMapper.StationInfo("503", "씨역", 37.5, 127.0));
         infos.put("R1", new RouteMapper.StationInfo("R1", "대여소1", 37.5, 127.0));
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
         lenient().when(graphRegistry.rentalIds()).thenReturn(Set.of("R1"));
@@ -79,9 +76,9 @@ class RouteSearchComfortPriorityTest {
         // 지하철(L1, 900초·15분, 느림) vs 자전거(A-R1-C, 240초·4분, 빠름).
         // 필터 없이 검색하면 시간순으로 자전거가 SHORTEST, 지하철이 ALTERNATIVE다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
-                subway("A", "C", "L1", 900),
-                bike("A", "R1", 120),
-                bike("R1", "C", 120)));
+                subway("501", "503", "L1", 900),
+                bike("501", "R1", 120),
+                bike("R1", "503", 120)));
         lenient().when(graphRegistry.graphFor(
                 org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenAnswer(invocation -> graphRegistry.graph());
@@ -91,26 +88,26 @@ class RouteSearchComfortPriorityTest {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                congestionRepository);
+                RouteTestFixtures.noopCongestionRepository(), congestionPredRepository);
     }
 
     @Test
     @DisplayName("priority=COMFORT면 혼잡도를 아는 후보가 혼잡 3 맨 앞에 LOW_CONGESTION으로 온다 (214: 속도 3 + 혼잡 3)")
     void COMFORT_혼잡도낮은후보_우선() {
-        lenient().when(congestionRepository
-                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
-                                any(), any(), any(), any()))
+        // 158: 링크 단위 조회로 대체 — lineId(routeId)로 구분한다.
+        lenient().when(congestionPredRepository
+                        .findById_PredDateAndId_FromStationIdAndId_ToStationIdAndId_LineIdAndId_DirectionAndId_TimeSlot(
+                                any(), any(), any(), any(), any(), any()))
                 .thenAnswer(invocation -> {
-                    CongestionTarget targetType = invocation.getArgument(0);
-                    String targetId = invocation.getArgument(1);
-                    if (targetType == CongestionTarget.LINE && "L1".equals(targetId)) {
-                        return Optional.of(mockCongestion("L1", BigDecimal.valueOf(20.0)));
+                    String lineId = invocation.getArgument(3);
+                    if ("L1".equals(lineId)) {
+                        return Optional.of(mockCongestionPred(BigDecimal.valueOf(20.0)));
                     }
                     return Optional.empty();
                 });
 
         List<RouteSearchResponse> result = routeSearchService.search(
-                "A", "C", null, RoutePriority.COMFORT, null);
+                "501", "503", null, RoutePriority.COMFORT, null);
 
         // 214 순서표: 0-2 속도, 3-5 혼잡. 혼잡 데이터 있는 SUBWAY 후보가 혼잡 3 맨 앞에 온다.
         // 이 그래프는 후보 2개라 six = 속도 2 + 혼잡 1 = 3개. LOW_CONGESTION은 2번이다.
@@ -123,15 +120,15 @@ class RouteSearchComfortPriorityTest {
     @Test
     @DisplayName("혼잡도 데이터가 전혀 없으면 COMFORT를 요청해도 기존 순서·라벨을 그대로 둔다")
     void COMFORT_데이터없음_기존순서유지() {
-        lenient().when(congestionRepository
-                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
-                                any(), any(), any(), any()))
+        lenient().when(congestionPredRepository
+                        .findById_PredDateAndId_FromStationIdAndId_ToStationIdAndId_LineIdAndId_DirectionAndId_TimeSlot(
+                                any(), any(), any(), any(), any(), any()))
                 .thenReturn(Optional.empty());
 
         List<RouteSearchResponse> withComfort = routeSearchService.search(
-                "A", "C", null, RoutePriority.COMFORT, null);
+                "501", "503", null, RoutePriority.COMFORT, null);
         List<RouteSearchResponse> withoutPriority = routeSearchService.search(
-                "A", "C", null, null, null);
+                "501", "503", null, null, null);
 
         assertEquals(withoutPriority.get(0).routeType(), withComfort.get(0).routeType());
         assertEquals(withoutPriority.get(0).legs().size(), withComfort.get(0).legs().size());
@@ -140,20 +137,16 @@ class RouteSearchComfortPriorityTest {
     @Test
     @DisplayName("priority 미지정(TIME)이면 기존 시간순 동작이 완전히 그대로다(회귀 없음)")
     void priority_미지정_기존동작_불변() {
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("501", "503", null, null, null);
 
         assertTrue(result.size() >= 2);
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
         assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.BIKE));
     }
 
-    private Congestion mockCongestion(String targetId, BigDecimal level) {
-        Congestion congestion = mock(Congestion.class);
-        lenient().when(congestion.getId())
-                .thenReturn(new CongestionId(CongestionTarget.LINE, targetId, 0, 0));
-        lenient().when(congestion.getLevel()).thenReturn(level);
-        lenient().when(congestion.getSource()).thenReturn("stat");
-        lenient().when(congestion.getUpdatedAt()).thenReturn(OffsetDateTime.now());
-        return congestion;
+    private CongestionPred mockCongestionPred(BigDecimal level) {
+        CongestionPred pred = mock(CongestionPred.class);
+        lenient().when(pred.getLevel()).thenReturn(level);
+        return pred;
     }
 }

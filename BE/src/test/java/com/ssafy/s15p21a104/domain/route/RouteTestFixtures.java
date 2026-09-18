@@ -273,7 +273,8 @@ public final class RouteTestFixtures {
         lenient().when(registry.stationInfos()).thenReturn(infos);
         return new RouteSearchService(stationRepository, registry, new TransferRule(180),
                 new RailGeometryRegistry(null, null), noopWalkGeometryRegistry(), noopBikeGeometryRegistry(),
-                noopRouteLineRepository(), noopBusRouteRepository(), noopCongestionRepository());
+                noopRouteLineRepository(), noopBusRouteRepository(), noopCongestionRepository(),
+                noopCongestionPredRepository());
     }
 
     /**
@@ -310,5 +311,10 @@ public final class RouteTestFixtures {
      */
     public static com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository noopCongestionRepository() {
         return mock(com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository.class);
+    }
+
+    /** 링크 단위 혼잡도 예측 조회 목(S15P21A104-158) — 항상 빈 값(결측 취급). */
+    public static com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository noopCongestionPredRepository() {
+        return mock(com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository.class);
     }
 }

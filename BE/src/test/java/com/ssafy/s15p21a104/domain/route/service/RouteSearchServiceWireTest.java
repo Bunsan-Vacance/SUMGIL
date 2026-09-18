@@ -75,7 +75,8 @@ class RouteSearchServiceWireTest {
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
                 RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
     }
 
     @Test

@@ -92,7 +92,8 @@ class RouteSearchBikeGeometryContinuityTest {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 bikeGeometryRegistry,
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
     }
 
     @Test
@@ -130,7 +131,8 @@ class RouteSearchBikeGeometryContinuityTest {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 failingRegistry,
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
 
         List<RouteSearchResponse> result = service.search("B", "C", null, null, null);
 

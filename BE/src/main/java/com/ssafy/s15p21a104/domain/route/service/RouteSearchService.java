@@ -3,7 +3,10 @@ package com.ssafy.s15p21a104.domain.route.service;
 import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
 import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
+import com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
+import com.ssafy.s15p21a104.domain.congestion.scoring.LinkCongestionScorer;
+import com.ssafy.s15p21a104.domain.congestion.scoring.SubwayDirectionResolver;
 import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
@@ -14,6 +17,7 @@ import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
+import com.ssafy.s15p21a104.domain.route.finder.ScoredCandidate;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
@@ -63,6 +67,7 @@ public class RouteSearchService {
     private final RouteLineRepository routeLineRepository;
     private final BusRouteRepository busRouteRepository;
     private final CongestionRepository congestionRepository;
+    private final CongestionPredRepository congestionPredRepository;
 
     /** 6경로 응답 상한: 속도 3 + 혼잡 3(S15P21A104-214, 배포 문서 순서표). */
     private static final int SPEED_ROUTES = 3;
@@ -91,23 +96,25 @@ public class RouteSearchService {
         findStation(originStationId);
         findStation(destStationId);
         // 생략 시 현재 시각 기준. 슬롯은 탐색 그래프 선택에도 쓴다(190).
-        DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
+        LocalDateTime effectiveDepartureTime = departureTime != null ? departureTime : LocalDateTime.now();
+        DepartureSlot departureSlot = DepartureSlot.of(effectiveDepartureTime);
         RouteGraph slotGraph = graphRegistry.graphFor(departureSlot.dowType(), departureSlot.timeSlot());
         if (slotGraph == null) {
             throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
         // 214: 속도 3 + 혼잡 3 (배포 문서 순서표). modes 필터는 라벨 전에 걸고,
         // 속도 3은 시간순 상위, 혼잡 3은 혼잡순 상위(중복 가능)로 뽑는다.
-        List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
-                candidateFinder().findCandidates(
+        List<ScoredCandidate> scoredCandidates = RouteCandidateFinder.filterScoredByModes(
+                candidateFinder().findCandidatesWithPaths(
                         slotGraph, originStationId, destStationId, MAX_CANDIDATES),
                 modes);
+        List<RouteSearchResponse> filtered = scoredCandidates.stream().map(ScoredCandidate::response).toList();
         List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
                 .limit(SPEED_ROUTES)
                 .toList();
-        List<RouteSearchResponse> calm = scoreRanker().topCalm(
-                RouteCandidateFinder.relabelByRank(filtered),
-                departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
+        // 158(통지 05 S-1): 링크 단위·통과 시각 슬롯 기반. 노선 단위 topCalm은 더 안 쓴다.
+        List<RouteSearchResponse> calm = scoreRanker().topCalmByLink(
+                scoredCandidates, effectiveDepartureTime, congestionPredLookup(), CALM_ROUTES);
         List<RouteSearchResponse> six = new java.util.ArrayList<>(speed);
         six.addAll(calm);
         // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
@@ -133,6 +140,23 @@ public class RouteSearchService {
                                 CongestionTarget.LINE, targetId, dowType, timeSlot)
                         .map(c -> c.getLevel().doubleValue())
                         .orElse(null));
+    }
+
+    /**
+     * 링크 단위 혼잡도 예측 조회 함수(S15P21A104-158, 통지 05 S-1). 방향을 모르면
+     * (2호선 지선 등, {@link SubwayDirectionResolver} 참고) 조회 자체를 안 하고 null —
+     * 결측과 동일하게 다룬다.
+     */
+    private LinkCongestionScorer.LinkLevelLookup congestionPredLookup() {
+        return (edge, passThroughTime) -> SubwayDirectionResolver
+                .resolve(edge.fromNode(), edge.toNode(), edge.routeId())
+                .flatMap(direction -> congestionPredRepository
+                        .findById_PredDateAndId_FromStationIdAndId_ToStationIdAndId_LineIdAndId_DirectionAndId_TimeSlot(
+                                passThroughTime.toLocalDate(), edge.fromNode(), edge.toNode(), edge.routeId(),
+                                direction, DepartureSlot.of(passThroughTime).timeSlot())
+                        .map(com.ssafy.s15p21a104.domain.congestion.entity.CongestionPred::getLevel))
+                .map(java.math.BigDecimal::doubleValue)
+                .orElse(null);
     }
 
     /**
