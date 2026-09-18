@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { Route } from './types'
 import LegList from './LegList'
 
+afterEach(cleanup)
+
 describe('구간 이동 안내', () => {
-  it('구간 거리와 혼잡도 미제공 상태를 함께 표시한다', () => {
+  it('실제 구간 혼잡도 숫자와 거리를 함께 표시한다', () => {
     const route: Route = {
       id: 'route',
       label: '빠른 경로',
@@ -21,6 +23,7 @@ describe('구간 이동 안내', () => {
           note: '2호선',
           minutes: 6,
           distanceMeters: 1234,
+          segmentCongestionLevel: 20,
           from: { id: '221', name: '역삼역' },
         },
       ],
@@ -29,7 +32,22 @@ describe('구간 이동 안내', () => {
     render(<LegList route={route} />)
 
     expect(screen.getByText('도보 · 거리 준비중입니다')).toBeTruthy()
-    expect(screen.getByText('2호선 · 1.2km · 출발역 통계: 예측 정보 없음')).toBeTruthy()
+    expect(screen.getByText('2호선 · 1.2km · 구간 예상 혼잡도 20%')).toBeTruthy()
+  })
+
+  it('구간 혼잡도 값이 없으면 혼잡도 숫자를 표시하지 않는다', () => {
+    const route: Route = {
+      id: 'route-without-congestion',
+      label: '빠른 경로',
+      minutes: 4,
+      transfers: 0,
+      modes: ['subway'],
+      legs: [{ mode: 'subway', title: '역삼역 → 선릉역', note: '2호선', minutes: 4 }],
+    }
+
+    render(<LegList route={route} />)
+
+    expect(screen.queryByText(/구간 예상 혼잡도/)).toBeNull()
   })
 
   it('원본 구간 인덱스의 현재 단계에 aria-current와 텍스트를 표시한다', () => {

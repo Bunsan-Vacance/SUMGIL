@@ -31,6 +31,18 @@ function deferred<T>() {
 }
 
 describe('경로 검색 요청 수명', () => {
+  it('예측값 없는 실제 경로는 혼잡도 예측 없이 보존한다', async () => {
+    const routeWithoutPrediction = { ...routes[0], congestionPrediction: undefined }
+    const repository: RouteRepository = { search: vi.fn(async () => [routeWithoutPrediction]) }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+
+    expect(result.current.selected?.congestionPrediction).toBeUndefined()
+  })
+
   it('쾌적 전환은 같은 조건으로 재조회하고 서버의 첫 후보를 선택한다', async () => {
     const serverRoutes = [
       { ...routes[1], routeType: 'LOW_CONGESTION' as const, minutes: 30 },

@@ -1,5 +1,9 @@
 import type { KakaoMapInstance, KakaoMaps, MapOverlay } from '../../lib/kakao/sdk'
 import type { GeometryLineString, Leg, Place, Route, RouteEndpoint } from '../route/types'
+import {
+  segmentCongestionGradeForLevel,
+  segmentCongestionPresentation,
+} from '../route/segmentCongestion'
 import { isTransitLeg, isTransferLeg } from '../route/transitions'
 
 export type RouteEndpointRole = '승차' | '환승' | '하차'
@@ -28,7 +32,15 @@ export interface RouteLineEntry {
 }
 
 export function routeLineStyle(leg: Leg) {
-  if (isTransferLeg(leg)) return ROUTE_LINE_STYLES.transfer
+  const congestion = isTransitLeg(leg)
+    ? segmentCongestionPresentation(segmentCongestionGradeForLevel(leg.segmentCongestionLevel))
+    : undefined
+  if (isTransferLeg(leg)) {
+    return congestion
+      ? { ...ROUTE_LINE_STYLES.transfer, strokeColor: congestion.color }
+      : ROUTE_LINE_STYLES.transfer
+  }
+  if (congestion) return { ...ROUTE_LINE_STYLES[leg.mode], strokeColor: congestion.color }
   return ROUTE_LINE_STYLES[leg.mode]
 }
 
@@ -99,7 +111,7 @@ export function createRouteSvgOverlay(
         casing.setAttribute('points', points)
         casing.setAttribute('fill', 'none')
         casing.setAttribute('stroke', '#fff')
-        casing.setAttribute('stroke-width', '8')
+        casing.setAttribute('stroke-width', '12')
         casing.setAttribute('stroke-opacity', '0.9')
         casing.setAttribute('stroke-linecap', 'round')
         casing.setAttribute('stroke-linejoin', 'round')
@@ -110,7 +122,7 @@ export function createRouteSvgOverlay(
         line.setAttribute('points', points)
         line.setAttribute('fill', 'none')
         line.setAttribute('stroke', style.strokeColor)
-        line.setAttribute('stroke-width', '5')
+        line.setAttribute('stroke-width', '8')
         line.setAttribute('stroke-opacity', '0.95')
         line.setAttribute('stroke-linecap', 'round')
         line.setAttribute('stroke-linejoin', 'round')
