@@ -167,6 +167,65 @@ systemd-analyze calendar '*-*-* 03:00:00 Asia/Seoul'
 통계 자체를 갱신하려면 새 데이터로 `stock_profile_avg.parquet`을 다시 생성하고
 `BIKE_AVG_ARTIFACT`를 검증된 새 폴더로 변경해야 한다.
 
+### CROWD 혼잡도 예측 배치 (S15P21A104-245)
+
+`crowd-batch-predict.timer`는 매일 09:30(Asia/Seoul)에 `crowd-batch-predict.service`를
+실행한다. 서비스는 `app.CROWD.pipeline.batch_predict --today --tomorrow --link-table`을 돌려
+`data/CROWD/serving/`에 오늘·내일 2일치 `predictions_<날짜>.parquet` + `.meta.json`,
+`predictions_link_<날짜>.parquet`, 그리고 **BE 적재용 `predictions_link_<날짜>_<HHMMSS>.csv`**를
+만든다.
+
+09:30인 이유는 D−1 승하차 수집기(`subway-ridership-daily.timer`, 09:00 + 최대 5분 랜덤 지연)가
+끝난 뒤라야 전날 실측이 이어붙어 `lag1d_available: true`(가용성 `full`)가 되기 때문이고,
+서버의 기존 일정(bike-avg 03:00, Drive 업로드 12:10, 리텐션 13:00, 배치 13:10, 품질검사 13:30)과
+겹치지 않으며, BE(이원빈)가 이 시각을 수용했다.
+
+선행 조건:
+
+- venv에 `lightgbm`·`torch`가 설치돼 있어야 한다. `torch`가 없으면 가용성 `d1_only` 날짜의
+  GRU 라우팅이 깨진다.
+- gitignore 대상이라 따로 복사해야 하는 입력(합계 약 20MB):
+  `data/CROWD/processed/crowd_panel_2024_2025.parquet`(16M),
+  `crowd_station_events_2024_2025.parquet`, `crowd_station_events_2026_2026.parquet`,
+  `crowd_congestion_calibration.parquet`(1.2M),
+  `data/EXTERNAL/holiday/interim/holiday_calendar.parquet`(없으면 전 날짜를 비공휴일로
+  취급하므로 반드시 복사),
+  `models/CROWD/festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025/`(2.2M),
+  `models/CROWD/dl_gru_s14_noev_s42_train2024-2025/`(604K).
+- `data/CROWD/interim/crowd_recent_ridership_long.parquet`은 복사하지 않는다 — D−1 수집기가
+  서버에서 만든다.
+
+서버의 저장소에서 다음 순서로 설정·확인한다.
+
+```bash
+cd <REPO_ROOT>/AI
+bash DATA_ENGINE/scripts/install_data_engine_services.sh
+sudo systemctl start crowd-batch-predict.service
+sudo systemctl status crowd-batch-predict.service --no-pager
+tail -n 50 logs/crowd_batch_predict.log
+ls -lt data/CROWD/serving/predictions_link_*.csv | head
+
+sudo systemctl enable --now crowd-batch-predict.timer
+sudo systemctl list-timers --no-pager crowd-batch-predict.timer
+systemd-analyze calendar '*-*-* 09:30:00 Asia/Seoul'
+```
+
+정상 동작 기준(수동 1회 실행 뒤 이걸 확인하고 나서 타이머를 켠다):
+
+- 로그에 `[CROWD batch] OK`가 나온다.
+- `.meta.json`의 `link_table`이 `true`이고, `link_csv_rows`가 CSV 실제 데이터 행 수와 같다
+  (BE 로더가 이 값으로 전송 손상을 검증한다).
+- `.meta.json`의 `generated_at` 시각(HHMMSS)이 CSV 파일명의 `_HHMMSS`와 같다.
+- `lag1d_available`이 `true`다(D−1 수집기가 돌고 있으면). `false`면 표는 나오지만 가용성이
+  `d7_only`로 떨어진 상태다 — 결함이 아니라 상태다.
+- 첫 실행에서 **소요 시간과 피크 메모리를 기록**한다(`TimeoutStartSec` 조정 근거, 워커 노드에
+  운영 PG·Redis가 같이 떠 있다).
+
+BE 연동: 산출 CSV는 BE(이원빈)가 `scp`로 가져가 `congestion_pred` 테이블에 적재한다. 적재는
+수동·비주기이고 upsert라 멱등이다. BE는 **파일명 사전순 최신**을 고르므로 같은 날짜를 다시
+만들어도 파일명이 겹치지 않게 `_HHMMSS`가 들어간다. 재적재 판정은 `meta.generated_at`으로
+한다. 자세한 계약은 [`AI/app/CROWD/SERVING_CONTRACT.md`](../app/CROWD/SERVING_CONTRACT.md) 8절.
+
 ## 데이터 수집 모니터링
 
 systemd 서비스가 `active`여도 API 오류, 저장 실패, 일부 시간대 누락이 생길 수 있으므로

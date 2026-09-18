@@ -441,6 +441,20 @@ parquet 컬럼과의 대응은 이름만 바뀌고 값은 그대로다 — `date
 
 ---
 
+## 9. 운영 배치 — 스케줄·파일 수명
+
+- 서버에서 `crowd-batch-predict.timer`가 매일 **09:30 KST**에 1회 실행하고, 대상 날짜는
+  **오늘·내일 2일치**다.
+- 산출 경로는 `AI/data/CROWD/serving/`이고, 서버 절대 경로는
+  `/home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI/data/CROWD/serving`이다.
+- 같은 날짜가 여러 번 만들어질 수 있다(재실행·배율표/모델 교체). parquet은 덮어쓰이고
+  **CSV는 `_HHMMSS`가 달라 쌓인다** — BE는 파일명 사전순 최신을 고른다.
+- 재적재 판정은 `meta.generated_at`이다. 적재는 BE load job이 수동으로 하며 upsert라 멱등이다.
+- 오래된 CSV 정리 규칙은 **두지 않는다**(BE와 합의). 필요해지면 그때 옵션으로 붙인다.
+- 이 절이 바뀌면(시각·경로·파일명 규칙) BE 통지문을 보낸다.
+
+---
+
 ## 문의
 
 수치 원본은 `AI/validation/CROWD/*/RESULTS.md`, 모델 명세는 `AI/app/CROWD/pipeline/MODEL_REGISTRY.md`.

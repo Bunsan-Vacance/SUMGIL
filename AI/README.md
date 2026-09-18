@@ -161,7 +161,7 @@ cd AI
 python -m app.CROWD.pipeline.train
 
 # 배치 추론 — data/CROWD/serving/predictions_YYYY-MM-DD.parquet + .meta.json
-python -m app.CROWD.pipeline.batch_predict --today --tomorrow          # 운영
+python -m app.CROWD.pipeline.batch_predict --today --tomorrow --link-table  # 운영(BE 적재용 링크 CSV까지 산출)
 python -m app.CROWD.pipeline.batch_predict --date 2025-06-02           # 패널 안 날짜(재현·검증)
 python -m app.CROWD.pipeline.batch_predict --date 2026-01-05 --predictor lookup   # 기준선만
 
@@ -198,6 +198,8 @@ uvicorn app.main:app --port 8000
   D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`, 매일 09:00·13:00)가 쌓은 파일을 이어붙여 채운다(143).
   전날 실측이 없으면 `lag1d_available=false`로 표시되고, 이력이 하나도 없으면 LightGBM 대신 lookup으로 예측한다
   (`predictor_fallback="no_history"`) — 시차가 전부 비면 LightGBM이 lookup보다 나쁘기 때문이다.
+- 서버에서는 이 명령을 `crowd-batch-predict.timer`(매일 09:30 KST)가 돌리며, 설정·확인 절차는
+  [`DATA_ENGINE/README.md`](DATA_ENGINE/README.md)의 "CROWD 혼잡도 예측 배치" 절에 있다.
 
 ### BIKE avg 배치 표의 시간 구간
 
