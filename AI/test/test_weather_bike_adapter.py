@@ -16,8 +16,11 @@ def weather_event(
     forecast: bool = False,
 ):
     payload = {
-        "baseDate": "20260918", "baseTime": base_time,
-        "category": category, "nx": nx, "ny": 127,
+        "baseDate": "20260918",
+        "baseTime": base_time,
+        "category": category,
+        "nx": nx,
+        "ny": 127,
     }
     if forecast:
         payload.update(fcstDate="20260918", fcstTime="1100", fcstValue=value)
@@ -90,8 +93,7 @@ def test_bike_weather_ignores_other_grid_and_invalid_observation(tmp_path):
 
 def test_bike_weather_does_not_regress_for_late_old_events(tmp_path):
     write_events(
-        [weather_event("T1H", "25", base_time="1100"),
-         weather_event("RN1", "1", base_time="1100")],
+        [weather_event("T1H", "25", base_time="1100"), weather_event("RN1", "1", base_time="1100")],
         ai_root=tmp_path,
     )
     write_events(

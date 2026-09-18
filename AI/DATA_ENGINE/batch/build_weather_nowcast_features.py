@@ -102,10 +102,22 @@ def flatten_kafka_weather(frame: pd.DataFrame, path: Path) -> pd.DataFrame:
         )
     if invalid:
         logger.warning("Skipped %d invalid Kafka weather rows in %s", invalid, path)
-    return pd.DataFrame(rows, columns=[
-        "baseDate", "baseTime", "fcstDate", "fcstTime", "category", "nx", "ny",
-        "obsrValue", "fcstValue", "source", "collected_at",
-    ])
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "baseDate",
+            "baseTime",
+            "fcstDate",
+            "fcstTime",
+            "category",
+            "nx",
+            "ny",
+            "obsrValue",
+            "fcstValue",
+            "source",
+            "collected_at",
+        ],
+    )
 
 
 def parse_kma_datetime(date_series: pd.Series, time_series: pd.Series) -> pd.Series:
@@ -167,16 +179,12 @@ def normalize_weather_nowcast(raw: pd.DataFrame) -> pd.DataFrame:
     df["nx"] = pd.to_numeric(df["nx"], errors="coerce")
     df["ny"] = pd.to_numeric(df["ny"], errors="coerce")
     df = df.dropna(
-        subset=[
-            "collected_at", "base_datetime", "forecast_datetime", "weather_source", "nx", "ny"
-        ]
+        subset=["collected_at", "base_datetime", "forecast_datetime", "weather_source", "nx", "ny"]
     ).copy()
 
     # Poller and Kafka may report the same observation more than once.
     df = df.sort_values("collected_at").drop_duplicates(
-        subset=[
-            "weather_source", "base_datetime", "forecast_datetime", "nx", "ny", "category"
-        ],
+        subset=["weather_source", "base_datetime", "forecast_datetime", "nx", "ny", "category"],
         keep="last",
     )
 

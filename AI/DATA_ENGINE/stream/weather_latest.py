@@ -16,8 +16,16 @@ logger = logging.getLogger(__name__)
 WEATHER_TOPIC = "weather.nowcast"
 LATEST_WEATHER_RELATIVE_PATH = Path("data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet")
 LATEST_WEATHER_COLUMNS = [
-    "nx", "ny", "weather_source", "category", "base_datetime", "forecast_datetime",
-    "weather_value", "source_generated_at", "ingested_at", "event_id",
+    "nx",
+    "ny",
+    "weather_source",
+    "category",
+    "base_datetime",
+    "forecast_datetime",
+    "weather_value",
+    "source_generated_at",
+    "ingested_at",
+    "event_id",
 ]
 SERIES_KEY = ["nx", "ny", "weather_source", "category"]
 VALUE_KEY = [*SERIES_KEY, "forecast_datetime"]
@@ -95,7 +103,11 @@ def update_weather_latest(events: list[KafkaEvent], *, ai_root: Path = AI_ROOT) 
 
     path = latest_weather_path(ai_root=ai_root)
     incoming = pd.DataFrame(rows, columns=LATEST_WEATHER_COLUMNS)
-    combined = pd.concat([pd.read_parquet(path), incoming], ignore_index=True) if path.exists() else incoming
+    combined = (
+        pd.concat([pd.read_parquet(path), incoming], ignore_index=True)
+        if path.exists()
+        else incoming
+    )
     for column in ("base_datetime", "forecast_datetime", "source_generated_at", "ingested_at"):
         combined[column] = pd.to_datetime(combined[column], errors="coerce")
 

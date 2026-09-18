@@ -98,12 +98,8 @@ def test_build_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
 
 
 def test_freshness_kafka_mode_checks_kafka_latest_not_poller(tmp_path, capsys):
-    touch_with_age(
-        tmp_path / "data/BIKE/raw/realtime/latest.parquet", 4, time.time()
-    )
-    touch_with_age(
-        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest.parquet", 4, time.time()
-    )
+    touch_with_age(tmp_path / "data/BIKE/raw/realtime/latest.parquet", 4, time.time())
+    touch_with_age(tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest.parquet", 4, time.time())
 
     assert main(["--ai-root", str(tmp_path), "--weather-source", "kafka"]) == 1
     assert "latest_by_grid.parquet" in capsys.readouterr().out

@@ -15,8 +15,11 @@ def weather_event(
     value: str = "23",
 ):
     payload = {
-        "baseDate": "20260918", "baseTime": base_time, "category": "T1H",
-        "nx": nx, "ny": 127,
+        "baseDate": "20260918",
+        "baseTime": base_time,
+        "category": "T1H",
+        "nx": nx,
+        "ny": 127,
     }
     if forecast_time is None:
         payload["obsrValue"] = value
@@ -52,7 +55,8 @@ def test_update_weather_latest_preserves_grid_kind_and_forecast_horizons(tmp_pat
     assert set(frame["nx"]) == {60, 61}
     assert set(frame["weather_source"]) == {"observed", "forecast"}
     assert set(frame.loc[frame["weather_source"] == "forecast", "forecast_datetime"].dt.hour) == {
-        11, 12,
+        11,
+        12,
     }
 
 

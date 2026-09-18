@@ -77,21 +77,53 @@ def raw_frame() -> pd.DataFrame:
 
 def kafka_frame(*, collected_at="2026-09-13T01:14:00+09:00") -> pd.DataFrame:
     payloads = [
-        {"baseDate": "20260913", "baseTime": "0100", "category": "T1H", "nx": 60,
-         "ny": 127, "obsrValue": "24.1"},
-        {"baseDate": "20260913", "baseTime": "0100", "category": "RN1", "nx": 60,
-         "ny": 127, "obsrValue": "0"},
-        {"baseDate": "20260913", "baseTime": "0130", "fcstDate": "20260913",
-         "fcstTime": "0200", "category": "T1H", "nx": 60, "ny": 127,
-         "fcstValue": "25"},
-        {"baseDate": "20260913", "baseTime": "0130", "fcstDate": "20260913",
-         "fcstTime": "0200", "category": "REH", "nx": 60, "ny": 127,
-         "fcstValue": "70"},
+        {
+            "baseDate": "20260913",
+            "baseTime": "0100",
+            "category": "T1H",
+            "nx": 60,
+            "ny": 127,
+            "obsrValue": "24.1",
+        },
+        {
+            "baseDate": "20260913",
+            "baseTime": "0100",
+            "category": "RN1",
+            "nx": 60,
+            "ny": 127,
+            "obsrValue": "0",
+        },
+        {
+            "baseDate": "20260913",
+            "baseTime": "0130",
+            "fcstDate": "20260913",
+            "fcstTime": "0200",
+            "category": "T1H",
+            "nx": 60,
+            "ny": 127,
+            "fcstValue": "25",
+        },
+        {
+            "baseDate": "20260913",
+            "baseTime": "0130",
+            "fcstDate": "20260913",
+            "fcstTime": "0200",
+            "category": "REH",
+            "nx": 60,
+            "ny": 127,
+            "fcstValue": "70",
+        },
     ]
     return pd.DataFrame(
-        [{"source": "weather.nowcast", "payload_json": json.dumps(payload),
-          "poll_run_at": collected_at, "ingested_at": collected_at}
-         for payload in payloads]
+        [
+            {
+                "source": "weather.nowcast",
+                "payload_json": json.dumps(payload),
+                "poll_run_at": collected_at,
+                "ingested_at": collected_at,
+            }
+            for payload in payloads
+        ]
     )
 
 

@@ -205,10 +205,14 @@ def main(argv: list[str] | None = None) -> int:
     checks = build_partition_checks(
         args.ai_root,
         bike_min_count=args.bike_min_count,
-        weather_min_count=args.weather_min_count if args.weather_min_count is not None else (
-            KAFKA_WEATHER_MIN_COUNT
-            if args.weather_source == "kafka"
-            else DEFAULT_WEATHER_MIN_COUNT
+        weather_min_count=(
+            args.weather_min_count
+            if args.weather_min_count is not None
+            else (
+                KAFKA_WEATHER_MIN_COUNT
+                if args.weather_source == "kafka"
+                else DEFAULT_WEATHER_MIN_COUNT
+            )
         ),
         weather_source=args.weather_source,
     )

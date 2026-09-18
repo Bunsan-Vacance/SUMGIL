@@ -104,7 +104,9 @@ def check_freshness(
 
 
 def build_checks(
-    ai_root: Path, bike_max_age_min: float, weather_max_age_min: float,
+    ai_root: Path,
+    bike_max_age_min: float,
+    weather_max_age_min: float,
     weather_source: str = "poller",
 ) -> list[FreshnessCheck]:
     if weather_source not in {"poller", "kafka"}:
@@ -117,9 +119,8 @@ def build_checks(
         ),
         FreshnessCheck(
             name="weather",
-            path=ai_root / (
-                KAFKA_WEATHER_LATEST if weather_source == "kafka" else DEFAULT_WEATHER_LATEST
-            ),
+            path=ai_root
+            / (KAFKA_WEATHER_LATEST if weather_source == "kafka" else DEFAULT_WEATHER_LATEST),
             max_age_min=weather_max_age_min,
         ),
     ]
@@ -156,10 +157,14 @@ def main(argv: list[str] | None = None) -> int:
     checks = build_checks(
         args.ai_root,
         bike_max_age_min=args.bike_max_age_min,
-        weather_max_age_min=args.weather_max_age_min if args.weather_max_age_min is not None else (
-            KAFKA_WEATHER_MAX_AGE_MIN
-            if args.weather_source == "kafka"
-            else DEFAULT_WEATHER_MAX_AGE_MIN
+        weather_max_age_min=(
+            args.weather_max_age_min
+            if args.weather_max_age_min is not None
+            else (
+                KAFKA_WEATHER_MAX_AGE_MIN
+                if args.weather_source == "kafka"
+                else DEFAULT_WEATHER_MAX_AGE_MIN
+            )
         ),
         weather_source=args.weather_source,
     )
