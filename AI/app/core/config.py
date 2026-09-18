@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # LLM 예측기(실험 축). 키가 없으면 llm kind는 명확한 오류로 막힌다.
     crowd_llm_api_key: str | None = None
     crowd_llm_model: str | None = None
+    # 239: 열차·노드 표(`predictions_train_*.parquet`) 산출 여부. 기본 False — BE 적재 경로가
+    # 정해지기 전까지 기존 산출물(`predictions_*.parquet`과 메타 값)을 바꾸지 않는다.
+    crowd_train_table: bool = False
+    # 239: 135 시각표 파서 산출물(공공데이터포털 15098251). 열차 표 옵션을 켰는데 이 파일이
+    # 없으면 `timetable.load_timetable`이 무엇을 먼저 돌려야 하는지 알려주는 오류를 낸다.
+    crowd_timetable_path: Path = AI_ROOT / "data" / "CROWD" / "interim" / "timetable_long.parquet"
 
     # ── BIKE 서빙 ──
     # bike_stock_pred 표가 놓이는 곳. CROWD와 달리 날짜별 파일이 아니라 **단일 최신 표**다

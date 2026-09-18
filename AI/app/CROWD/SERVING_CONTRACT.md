@@ -3,13 +3,14 @@
 작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(2026-09-17 15:24 재생성 — 200 2024-25 최종 fit 반영판)
 
 > **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
-> `batch_predict.OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 · 등급 임계값
-> (`crowd_grade_thresholds`) · 예측기 계열 추가·교체 · 배율표 판 교체 · API 경로·파라미터.
+> `batch_predict.OUTPUT_COLS`·`TRAIN_OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 ·
+> 등급 임계값(`crowd_grade_thresholds`) · 예측기 계열 추가·교체 · 배율표 판 교체 · API 경로·파라미터.
 > 모델 성능·피처 세트는 이 문서가 아니라 `pipeline/MODEL_REGISTRY.md`에 적는다.
 >
 > **이 문서는 테스트가 강제한다**(197 C부). `test/CROWD/test_crowd_serving_contract.py`가 1절 컬럼 표·
-> 2절 상태 표·3절 메타 표·4절 경로·파라미터·응답 예시를 각각 `OUTPUT_COLS`·`DATA_STATUS_VALUES`·
-> `META_KEYS`·OpenAPI·`schemas.py`와 대조한다. 코드만 고치면 CI가 막힌다.
+> 2절 상태 표·3절 메타 표·4절 경로·파라미터·응답 예시·7절 열차 표 컬럼을 각각 `OUTPUT_COLS`·
+> `DATA_STATUS_VALUES`·`META_KEYS`·OpenAPI·`schemas.py`·`TRAIN_OUTPUT_COLS`와 대조한다. 코드만
+> 고치면 CI가 막힌다.
 >
 > **테스트가 못 막는 것 — 사람이 챙긴다.** 아래 셋은 리포 밖이거나 값이라서 CI가 잡지 못한다.
 > 1. **예시 값**(1절 실제 2행, 4절 응답 JSON) — 테스트는 키와 타입만 보고 값은 안 본다. **배치를
@@ -144,7 +145,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 
 ## 3. 배치 메타 — `.meta.json`
 
-경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다. 메타 키는 **23개**다(197까지 21개 + 200에서 이벤트 커버리지 2개 추가).
+경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다. 메타 키는 **28개**다(197까지 21개 + 200에서 이벤트 커버리지 2개 추가 + 239에서 열차·노드 표 관련 5개 추가).
 
 | 키 | 예시 | 의미 |
 | --- | --- | --- |
@@ -170,6 +171,11 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `lookup_substituted_rows` | `334` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
 | `holiday_calendar_until` | `"2035-10-02"` | 공휴일 달력 커버 종료일 |
 | `topology_gaps` | `[…]` | 노선 토폴로지 결번 구간 |
+| `train_table` | `false` | (239) 열차·노드 표(`predictions_train_{date}.parquet`, 7절)를 이번에 만들었는지. 기본 `false`(설정값 `crowd_train_table`, CLI `--trains`/`--no-trains`로 이번 실행만 덮어쓸 수 있다) |
+| `timetable_version` | `"timetable_long.parquet@2026-09-11"` | (239) 시각표 interim 파일 버전(`파일명@수정일`, 135 파서 산출물엔 버전 컬럼이 없어 파일 mtime을 쓴다). `train_table=false`면 `null` |
+| `train_rows` | `105470` | (239) 열차·노드 표 행 수. `train_table=false`면 `null` |
+| `headway_long_rows` | `4279` | (239) 배차 간격이 `long_headway_min`(12분)을 넘어 균등 도착 가정이 약해진 채 배분된 열차 행 수. `train_table=false`면 `null` |
+| `train_mass_gap` | `3.6e-12` | (239) 슬롯 재차인원 합과 열차 배분 합의 최대 절대오차(질량 보존 확인, 7절). `train_table=false`면 `null` |
 | `generated_at` | `"2026-09-17T15:24:24+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
 
 ---
@@ -309,6 +315,73 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 | **가용성별 라우팅 수정(145 후속, 마스킹 LightGBM)** | `d7_only`·`no_lag`는 이제 LightGBM(마스킹 학습 아티팩트, `masking-check/RESULTS.md` 14절)이 맡는다. `d1_only`만 GRU(`dl`)로 남는다 | 스키마·키는 그대로다(변경 없음). `predictor_version`의 LightGBM 값이 `lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025`로 바뀐다 — `d7_only`·`no_lag` 날짜의 표시 모델명이 GRU에서 LightGBM으로 보인다. **값 드리프트**(2026-09-13/14 `d7_only` 두 날짜를 GRU 판 → 마스킹 LightGBM 판으로 재생성해 21,606행씩 행 정렬 비교): `congestion_pct` 평균 \|Δ\| **0.62 / 0.86%p**(중앙값 0.39 / 0.49, 95퍼센타일 1.93 / 3.06, 최대 32.4 / 50.1), `grade`가 달라진 셀 **3.85 / 4.36%**, `data_status` 100% 동일, `lookup_substituted_rows` 228 → 120 / 0 → 16, `history_window_days` 14 → 7. 지난 GRU 도입(변경 통지 01: 평균 4.7 / 4.4%p)보다 값은 훨씬 덜 움직인다. 통지문 `.claude/handoff/TO_BE-crowd-routing-change-02.md` |
 | **이벤트 커버리지 메타(200)** | 배치가 이벤트 표를 `crowd_events_files`(콤마 구분 다중 파일, 뒤 파일이 같은 키를 덮어씀)로 읽어 2026 이후 대상 날짜에도 경기·축제가 붙는다. 표가 그 날짜를 덮는지를 meta로 노출한다 | `/crowd/meta` 필드 2개 추가(`events_coverage_end`·`events_available`, additive) — 배치 `.meta.json` 키도 21→23개(2개 추가). 기존 필드·키는 그대로다 |
 | **2024-25 최종 fit 승격(200)** | 라우팅 표는 그대로. LightGBM(`…_masked-stack_train2024-2025`)·GRU(`dl_gru_s14_noev_s42_train2024-2025`) 둘 다 2024+2025 전체로 재적합해 `promote_artifact`로 승격(`MODEL_REGISTRY.md` 4b). 2023은 뺀다(masking-check 13·17절) | 스키마·키 변경 없음. `predictor_version` 두 값이 바뀐다. **값 드리프트**(09-13/14 `d7_only`, 1113 판 → 2024-25 판, 21,606행 행 정렬): `congestion_pct` 평균 \|Δ\| **0.41 / 0.41%p**(중앙값 0.23 / 0.24, 95퍼센타일 1.34 / 1.31, 최대 31.8 / 42.5), `grade` 변화 셀 **3.71 / 3.71%**, `data_status` 100% 동일, `lookup_substituted_rows` 120 → 334 / 16 → 36(2024-25 판이 음수 셀을 더 내고 lookup으로 대체됨 — 인원 하한 규칙은 그대로). 보유 평가 연도가 없어 성능 표는 없다 — 2026 실측 누적 시 사후 검증. 통지문 `.claude/handoff/TO_BE-crowd-artifact-refit-03.md` |
+
+---
+
+## 7. 열차·노드 표 — `predictions_train_{YYYY-MM-DD}.parquet`(239, 옵션)
+
+**분해이지 예측이 아니다** — 슬롯 표(1절)의 30분 보정 혼잡도 총량을 시각표로 나누고 열차 궤적을
+역(노드) 관점으로 재색인할 뿐, 새 정보를 만들지 않는다(`RESOLUTION_LADDER.md` §1.1·§3 L4·L5).
+
+경로: `AI/data/CROWD/serving/predictions_train_{YYYY-MM-DD}.parquet`. **`crowd_train_table=true`
+(설정값, CLI `--trains`)일 때만 만들어진다** — 기본은 꺼짐이고, 꺼져 있으면 이 파일 자체가 없다.
+크기: 열차 한 대 × 역 하나가 한 행이라 **평일 약 10.5만 행/일**(시각표의 열차-역 통과 행 수와
+거의 같다 — 슬롯 값이 NaN인 열차 행도 상태를 상속해 남기므로, 값 있는 셀만 셌던 135의 6.7만
+행보다 많다).
+
+| 컬럼 | 타입 | 의미 | null 가능 |
+| --- | --- | --- | --- |
+| `date` | datetime64[us] | 대상 날짜(자정) | 없음 |
+| `station_no` | int64 | 역번호 | 없음 |
+| `station_name` | str | 역명 | 있음 |
+| `line` | str | 호선 | 있음 |
+| `direction` | str | `상선`/`하선`/`내선`/`외선` | 없음 |
+| `segment` | str | 토폴로지 세그먼트 이름(`line_topology.yaml`, "본선" 등 이름이 호선 간 겹칠 수 있다) | 없음 |
+| `to_station_no` | Int64 | 이 열차가 다음에 서는 역(종점이면 없음) | 있음 |
+| `prev_station_no` | Int64 | 이 열차가 직전에 선 역(그 런의 첫 정차역이면 없음) | 있음 |
+| `train_id` | str | 시각표 열차코드 | 없음 |
+| `run_id` | int64 | 같은 `train_id`를 배차 간격(`max_gap_min` 초과)으로 끊은 운행 번호(2호선 순환 등 재사용 대응) | 없음 |
+| `pass_time` | str | 이 역을 지나는 계획 시각(`HH:MM[:SS]`, 시각표 `arrival_time`) | 없음 |
+| `express` | bool | 급행 여부(시각표) | 있음 |
+| `time_slot_30min` | str | 소속 30분 슬롯(`"08:30"`) | 없음 |
+| `headway_min` | float64 | 직전 열차와의 배차 간격(분). 그 역·방향·요일유형의 첫차는 슬롯 길이(30)로 대체 | 없음 |
+| `headway_long` | bool | 배차 간격이 `long_headway_min`(12분)을 넘는지 — 균등 도착 가정이 약한 열차 표시 | 없음 |
+| `mix_w` | float64 | 도착 혼합 가중 `w(headway)`(1=무작위 도착, 0=시각표 의존, 92) | 없음 |
+| `share` | float64 | 이 열차가 그 슬롯 재차인원에서 차지하는 몫(2층 배분, 질량 보존) | 없음 |
+| `load_arr_est` | float64 | 도착 재차(%, 정원 대비) — 직전 정차역의 `load_dep_est` | **있음** — 슬롯 결측 상속·경로 단절(`arr_source="gap"`) |
+| `load_dep_est` | float64 | 출발 재차(%, 정원 대비). 기존 슬롯 표 `congestion_pct`와 같은 정의를 열차 단위로 나눈 값 | **있음** — 슬롯 표 결측 상속 |
+| `onboard_arr_est` | float64 | 도착 재차인원(명) | **있음** |
+| `onboard_dep_est` | float64 | 출발 재차인원(명) | **있음** |
+| `boarding_train_est` | float64 | 이 열차에서 이 역에 타는 인원(명, 1층 30분 비중 × 2층 몫) | **있음** |
+| `alighting_train_est` | float64 | 이 열차에서 이 역에 내리는 인원(명) | **있음** |
+| `grade_dep` | float64 | `load_dep_est`를 등급 임계값으로 자른 값(슬롯 표 `grade`와 같은 정의) | **있음** |
+| `arr_source` | str | 도착 재차의 출처 — `origin`(그 런의 첫 정차역, 0으로 둠) / `prev_stop`(직전 정차역에서 이어붙임 — 급행·정차 행 결측으로 역을 건너뛰어도 **같은 세그먼트 안이면** 이어붙인다) / `gap`(직전 정차역이 다른 세그먼트에 있어 이어붙일 수 없음 → NaN. 2026-09-14 표에서 1행, 09-13 표 0행) | 없음 |
+| `link_ambiguous` | bool | 강동처럼 한 역이 여러 세그먼트에 걸쳐 링크가 중복될 때, 실제 경로(다음 역, 없으면 직전 역)로 못 정해 재차 최댓값 규칙으로 대신 골랐는지 | 없음 |
+| `data_status` | str | 슬롯 표(2절)와 같은 값을 상속 | 없음 |
+| `pred_source` | str | 슬롯 표(`model`/`lookup_negative`)와 같은 값을 상속 | 없음 |
+| `train_capacity` | int64 | 편성 정원(명) | 없음 |
+
+**NaN은 슬롯 표를 상속하고, 채우지 않는다.** 배율표 결측·절단 종점처럼 슬롯 혼잡도가 이미 NaN인
+셀은 그 슬롯을 지나는 모든 열차의 `load_arr_est`·`load_dep_est`·`onboard_*_est`·`grade_dep`이
+그대로 NaN이다(원칙 8) — 열차 단위로 나눈다고 값이 생기지 않는다. 그 30분에 운행하는 열차가
+아예 없는 슬롯(시각표 결측·막차 이후)은 배분할 곳이 없어 표에 행 자체가 없다(메타 `train_rows`가
+슬롯 표 21,606행보다 적게 늘어난 정도로 간접 확인 가능).
+
+**강동(5호선) 링크 중복**은 5.4절이 말하는 슬롯 표 중복과 같은 원인(본선 종점·하남선 첫 역이 같은
+역)이지만 이 표에서는 `to_station_no`/`prev_station_no`로 실제 경로가 남아 있어 행이 중복되지
+않는다 — **링크 배정은 열차 궤적(다음 역, 없으면 직전 역)으로 배분 전에 정해지고**, 링크마다
+열차 수·질량이 따로 보존된다(135 버그 수정: 예전에는 배분을 먼저 하고 나서 세그먼트 중복을
+나중에 해소해 강동에서 링크별 열차 수·재차인원이 뒤섞였다). 다음 역(없으면 직전 역)과 실제로
+이어지는 세그먼트를 골라 `segment`를 정하고, 그래도 안 정해지면(둘 다 없는 퇴화 케이스이거나
+후보가 여럿 남으면) 세그먼트 등록 순서에서 역이 첫/끝(종점 링크)인 첫 후보를, 없으면 등록 순서상
+첫 후보를 고른 뒤 `link_ambiguous=true`로 표시한다(숨기지 않는다, 원칙 8).
+
+**질량 보존**은 슬롯 표와 열차 표 사이에서 **링크 단위로** 검증한다 — 한 (역, 방향, 링크, 슬롯)의
+열차별 `onboard_dep_est` 합은 그 링크·슬롯의 재차인원(`congestion_pct/100 × train_capacity ×
+그 링크를 실제로 지나는 열차 수`)과 같아야 하고, 그 최대 절대오차가 메타 `train_mass_gap`이다
+(부동소수 오차 수준이어야 정상, `RESOLUTION_LADDER.md` §3 L4의 "질량 보존 오차 3.6e-12"와 같은
+성격의 수). 링크를 구분하지 않고 역·방향·슬롯만으로 재면 강동처럼 세그먼트가 겹치는 역에서
+중복된 인덱스끼리 빼는 꼴이 되어 오차가 실제보다 훨씬 크게(예: 3만대) 부풀려진다.
 
 ---
 
