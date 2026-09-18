@@ -267,10 +267,74 @@ describe('경로와 안내 화면의 수명', () => {
     expect(result.current.guidance).toMatchObject({ route: routes[0], step: 1 })
   })
 
+  it.each([
+    ['NO_INFO', 'no-info'],
+    ['OUTSIDE_WINDOW', 'outside-window'],
+    ['STALE', 'stale'],
+  ] as const)('도착 응답의 %s 상태를 안내 상태로 보존한다', async (status, expected) => {
+    const transitRoute = {
+      ...routes[0],
+      legs: [
+        {
+          ...routes[0].legs[1],
+          routeId: '1002',
+          from: { id: '221', name: '역삼역' },
+          to: { id: '220', name: '선릉역' },
+        },
+      ],
+    }
+    const guidanceApi: GuidanceRepository = {
+      arrivals: async () => ({ status, trains: [], updatedAt: null }),
+      replan: async () => [],
+    }
+    const { result } = renderHook(() =>
+      useRoutePlanner({ search: async () => [transitRoute] }, guidanceApi),
+    )
+    act(() => result.current.findRoutes({ ...places[1], stationId: 'dogok' }))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    act(() => result.current.startGuide())
+    act(() => result.current.openTrain())
+
+    await waitFor(() => expect(result.current.arrivalStatus).toBe(expected))
+    expect(result.current.arrivals).toEqual([])
+  })
+
+  it('버스 구간에서는 지하철 도착 API를 호출하지 않는다', async () => {
+    const arrivals = vi.fn(async () => ({
+      status: 'NO_INFO' as const,
+      trains: [],
+      updatedAt: null,
+    }))
+    const busRoute = {
+      ...routes[0],
+      legs: [
+        {
+          mode: 'bus' as const,
+          title: '간선버스',
+          note: '역삼역 → 도곡역',
+          minutes: 10,
+          routeId: '146',
+          from: { id: 'station-1', name: '역삼역' },
+          to: { id: 'station-2', name: '도곡역' },
+        },
+      ],
+    }
+    const { result } = renderHook(() =>
+      useRoutePlanner({ search: async () => [busRoute] }, { arrivals, replan: async () => [] }),
+    )
+    act(() => result.current.findRoutes({ ...places[1], stationId: 'dogok' }))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    act(() => result.current.startGuide())
+    act(() => result.current.openTrain())
+
+    expect(result.current.arrivalStatus).toBe('unsupported')
+    expect(arrivals).not.toHaveBeenCalled()
+  })
+
   it('재탐색 모달을 닫은 뒤 늦게 온 후보는 반영하지 않는다', async () => {
     let resolveReplan!: (proposals: ReplanProposal[]) => void
     const guidanceApi: GuidanceRepository = {
-      arrivals: async () => [],
+      arrivals: async () => ({ status: 'NO_INFO', trains: [], updatedAt: null }),
       replan: () => new Promise((resolve) => (resolveReplan = resolve)),
     }
     const { result } = await renderLoadedPlanner(guidanceApi)
@@ -296,7 +360,7 @@ describe('경로와 안내 화면의 수명', () => {
   it('재탐색 조건은 안내 시작 시점 스냅샷을 사용한다', async () => {
     const replan = vi.fn(async () => [])
     const guidanceApi: GuidanceRepository = {
-      arrivals: async () => [],
+      arrivals: async () => ({ status: 'NO_INFO', trains: [], updatedAt: null }),
       replan,
     }
     const { result } = await renderLoadedPlanner(guidanceApi)

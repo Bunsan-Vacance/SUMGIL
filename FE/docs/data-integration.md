@@ -2,19 +2,20 @@
 
 ## 현재 연결 상태
 
-| 영역                           | 실제 구현                                                                                                          | 연결 위치                                                                          |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| 지도 타일·장소 마커            | 카카오 JavaScript SDK + 장소 검색                                                                                  | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`                                  |
-| 현재 위치                      | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회                                                               | `features/map/useCurrentLocation.ts`                                               |
-| 지도 위치 선택                 | 카카오 지도 클릭 + 좌표 역지오코딩                                                                                 | `features/map/MapPlacePicker.tsx`                                                  |
-| 검색 화면의 장소 후보          | 카카오 JavaScript SDK 장소·주소 검색                                                                               | `lib/kakao/sdk.ts`, `api/repositories.ts`                                          |
-| 실제 경로 입력의 장소·역 후보  | 백엔드 역 검색과 카카오 장소·주소 검색 결과                                                                        | `api/repositories.ts`, `features/route/usePlaceSearch.ts`                          |
-| 추천 경로                      | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 preview 샘플. `VITE_ROUTE_SEARCH_MOCK=true`면 경로만 API 형식 mock | `api/repositories.ts`, `api/mock`                                                  |
-| 정렬·이동수단 필터             | 요청 modes·priority는 서버에 전달한다. API 후보는 서버 응답 순서를 시작점으로 사용하고, 화면의 TIME은 시간순, COMFORT는 유효한 `congestionPrediction`만 혼잡도순으로 정렬하며 값이 없는 후보는 뒤에 둔다. preview fixture도 같은 화면 규칙을 따른다 | `api/repositories.ts`, `features/route` |
-| 경로선·실제 길찾기             | 응답 leg geometry를 연결하며 geometry가 없으면 직선으로 대체하지 않음                                              | `api/repositories.ts`, `features/map`                                              |
-| 혼잡도·예측                    | `Route.congestionPrediction`의 퍼센트·서버 등급·데이터 상태·예측 근거를 mapper에서 검증·보존. `comfort.*`와 근거 없는 경로 전체 혼잡도는 사용하지 않음 | `features/route/types.ts`, `api/routeMapper.ts` |
-| 구간 전환·대여소 ID            | 선택 `transitionType`과 명시 `rentalId`를 보존하고 기존 TRANSFER 응답과 호환                                       | `features/route/types.ts`, `api/routeMapper.ts`, `features/map/routeMapMarkers.ts` |
-| 따릉이 대여소 데이터·지도 마커 | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay                                                                   | `api/repositories.ts`, `features/map/bikeStations.ts`                              |
+| 영역                              | 실제 구현                                                                                                                                                                                                                                           | 연결 위치                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 지도 타일·장소 마커               | 카카오 JavaScript SDK + 장소 검색                                                                                                                                                                                                                   | `lib/kakao/sdk.ts`, `features/map/useKakaoMap.ts`                                  |
+| 현재 위치                         | 브라우저 Geolocation, 출발 검색에서 버튼 클릭 시 1회                                                                                                                                                                                                | `features/map/useCurrentLocation.ts`                                               |
+| 지도 위치 선택                    | 카카오 지도 클릭 + 좌표 역지오코딩                                                                                                                                                                                                                  | `features/map/MapPlacePicker.tsx`                                                  |
+| 검색 화면의 장소 후보             | 카카오 JavaScript SDK 장소·주소 검색                                                                                                                                                                                                                | `lib/kakao/sdk.ts`, `api/repositories.ts`                                          |
+| 실제 경로 입력의 장소·역 후보     | 백엔드 역 검색과 카카오 장소·주소 검색 결과                                                                                                                                                                                                         | `api/repositories.ts`, `features/route/usePlaceSearch.ts`                          |
+| 추천 경로                         | `VITE_API_BASE_URL` 설정 시 실제 API, 미설정 시 preview 샘플. `VITE_ROUTE_SEARCH_MOCK=true`면 경로만 API 형식 mock                                                                                                                                  | `api/repositories.ts`, `api/mock`                                                  |
+| 정렬·이동수단 필터                | 요청 modes·priority는 서버에 전달한다. API 후보는 서버 응답 순서를 시작점으로 사용하고, 화면의 TIME은 시간순, COMFORT는 유효한 `congestionPrediction`만 혼잡도순으로 정렬하며 값이 없는 후보는 뒤에 둔다. preview fixture도 같은 화면 규칙을 따른다 | `api/repositories.ts`, `features/route`                                            |
+| 경로선·실제 길찾기                | 응답 leg geometry를 연결하며 geometry가 없으면 직선으로 대체하지 않음                                                                                                                                                                               | `api/repositories.ts`, `features/map`                                              |
+| 혼잡도·예측                       | `Route.congestionPrediction`의 퍼센트·서버 등급·데이터 상태·예측 근거를 mapper에서 검증·보존. `comfort.*`와 근거 없는 경로 전체 혼잡도는 사용하지 않음                                                                                              | `features/route/types.ts`, `api/routeMapper.ts`                                    |
+| 구간 전환·대여소 ID               | 선택 `transitionType`과 명시 `rentalId`를 보존하고 기존 TRANSFER 응답과 호환                                                                                                                                                                        | `features/route/types.ts`, `api/routeMapper.ts`, `features/map/routeMapMarkers.ts` |
+| 따릉이 대여소 데이터·지도 마커    | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay                                                                                                                                                                                                    | `api/repositories.ts`, `features/map/bikeStations.ts`                              |
+| 실시간 열차 도착·잔여 경로 재탐색 | `VITE_GUIDANCE_MOCK=true` 또는 API 주소 미설정 시 mock, 그 외 백엔드 API                                                                                                                                                                            | `api/guidance.ts`, `features/guidance`, `app/useRoutePlanner.ts`                   |
 
 ### 따릉이 대여소 정적 데이터
 
@@ -50,6 +51,12 @@
 `api/repositories.ts`에서 사용할 구현을 선택한다. 페이지에서는 `fixtures`를 import하지 않는다. `app/preview.ts`는 초기 후보를 만들지 않고 미리보기 시나리오의 제안 경로만 주입한다.
 
 조회 훅은 이전 요청을 `AbortController`로 취소하고 취소 후 도착한 결과를 무시한다. 구현을 교체할 때 `signal`을 실제 `fetch`에도 전달한다. 실패를 빈 성공 응답으로 바꾸지 않는다.
+
+## 안내 API 계약 (2026-09-17)
+
+지하철 구간의 실시간 도착 조회는 `GET /api/transit/arrivals?stationId=&routeId=`를 사용한다. 응답의 `status`는 `LIVE`, `NO_INFO`, `OUTSIDE_WINDOW`, `STALE`를 구분하며 `LIVE`일 때만 `trains`에 열차 후보가 있다. 화면은 세 빈 상태를 하나로 합치지 않고 각각 운행 정보 없음, 운행 시간 외, 정보 지연으로 안내한다.
+
+잔여 경로 재탐색은 `POST /api/routes/replan`에 `step`, `boundaryId`, `destStationId`, `destLat`, `destLng`, `modes`, `priority`, `requestedAt`을 평면 JSON으로 보낸다. 응답 후보는 현재 단계 경계에서 목적지까지 이어지는지 검증한 뒤 안내 세션에만 반영한다. 안내 요청은 닫기·교체 시 취소하며 늦게 도착한 응답은 반영하지 않는다.
 
 ## 백엔드 연결 순서
 

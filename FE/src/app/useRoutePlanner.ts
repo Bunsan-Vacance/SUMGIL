@@ -219,7 +219,7 @@ export function useRoutePlanner(
     setModal('train')
     const route = guidance.route
     const leg = route?.legs[guidance.step]
-    if (!route || !leg || (leg.mode !== 'subway' && leg.mode !== 'bus')) {
+    if (!route || !leg || leg.mode !== 'subway') {
       setArrivalStatus('unsupported')
       return
     }
@@ -246,8 +246,16 @@ export function useRoutePlanner(
       )
       .then((result) => {
         if (controller.signal.aborted) return
-        setArrivals(result)
-        setArrivalStatus(result.length ? 'success' : 'empty')
+        setArrivals(result.trains)
+        setArrivalStatus(
+          result.status === 'LIVE'
+            ? 'success'
+            : result.status === 'NO_INFO'
+              ? 'no-info'
+              : result.status === 'OUTSIDE_WINDOW'
+                ? 'outside-window'
+                : 'stale',
+        )
       })
       .catch((error: unknown) => {
         if (

@@ -13,6 +13,14 @@ export interface TrainArrival {
   source: 'LIVE' | 'MOCK'
 }
 
+export type TrainArrivalDataStatus = 'LIVE' | 'NO_INFO' | 'OUTSIDE_WINDOW' | 'STALE'
+
+export interface TrainArrivalResult {
+  status: TrainArrivalDataStatus
+  trains: TrainArrival[]
+  updatedAt: string | null
+}
+
 export interface TrainArrivalRequest {
   stationId: string
   routeId: string
@@ -43,7 +51,7 @@ export interface ReplanProposal {
 }
 
 export interface GuidanceRepository {
-  arrivals(request: TrainArrivalRequest, signal: AbortSignal): Promise<TrainArrival[]>
+  arrivals(request: TrainArrivalRequest, signal: AbortSignal): Promise<TrainArrivalResult>
   replan(request: ReplanRequest, signal: AbortSignal): Promise<ReplanProposal[]>
 }
 
@@ -67,8 +75,6 @@ function timestamp(value: unknown) {
   return parsed
 }
 
-const arrivalStatuses = new Set(['LIVE', 'NO_INFO', 'OUTSIDE_WINDOW', 'STALE'])
-
 function mapArrival(value: unknown): TrainArrival {
   if (!isRecord(value)) {
     throw new RepositoryError('invalid-response', '실시간 도착 정보 응답이 올바르지 않아요.')
@@ -84,6 +90,29 @@ function mapArrival(value: unknown): TrainArrival {
     arrivalTime: timestamp(value.arrivalTime),
     updatedAt: timestamp(value.updatedAt),
     source: value.source,
+  }
+}
+
+function mapArrivalResult(value: unknown): TrainArrivalResult {
+  if (!isRecord(value)) {
+    throw new RepositoryError('invalid-response', '실시간 도착 정보 응답이 올바르지 않아요.')
+  }
+  const statuses: TrainArrivalDataStatus[] = ['LIVE', 'NO_INFO', 'OUTSIDE_WINDOW', 'STALE']
+  if (!statuses.includes(value.status as TrainArrivalDataStatus) || !Array.isArray(value.trains)) {
+    throw new RepositoryError('invalid-response', '실시간 도착 정보 응답이 올바르지 않아요.')
+  }
+  const status = value.status as TrainArrivalDataStatus
+  const trains = value.trains.map(mapArrival)
+  if ((status === 'LIVE') !== trains.length > 0) {
+    throw new RepositoryError(
+      'invalid-response',
+      '실시간 도착 정보 상태와 열차 목록이 맞지 않아요.',
+    )
+  }
+  return {
+    status,
+    trains,
+    updatedAt: value.updatedAt == null ? null : timestamp(value.updatedAt),
   }
 }
 
@@ -146,48 +175,35 @@ export function createBackendGuidanceRepository(baseUrl: string): GuidanceReposi
         `${baseUrl}/api/transit/arrivals?${params.toString()}`,
         signal,
       )
-      if (
-        !isRecord(data) ||
-        typeof data.status !== 'string' ||
-        !arrivalStatuses.has(data.status) ||
-        !Array.isArray(data.trains)
-      ) {
-        throw new RepositoryError('invalid-response', '실시간 도착 정보 응답이 올바르지 않아요.')
-      }
-      return data.trains.map(mapArrival)
+      return mapArrivalResult(data)
     },
     async replan(request, signal) {
+      const boundaryId = request.currentBoundary.id?.trim()
+      const destStationId = request.destination.stationId?.trim()
+      const hasDestinationCoordinates =
+        Number.isFinite(request.destination.lat) && Number.isFinite(request.destination.lng)
       if (
         !request.currentRoute.id ||
         !Number.isInteger(request.step) ||
         request.step < 0 ||
-        (!request.currentBoundary.id &&
-          (request.currentBoundary.lat === undefined || request.currentBoundary.lng === undefined))
+        !boundaryId ||
+        (!destStationId && !hasDestinationCoordinates)
       ) {
         throw new RepositoryError('bad-request', '현재 안내 정보를 확인해 주세요.')
       }
-      const departedAt =
-        request.conditions.requestedAt || request.conditions.departedAt || new Date().toISOString()
+      const departedAt = request.conditions.requestedAt || new Date().toISOString()
       const data = await requestApi<unknown>(`${baseUrl}/api/routes/replan`, signal, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          currentRoute: { id: request.currentRoute.id },
           step: request.step,
-          currentBoundary: request.currentBoundary,
-          currentLeg: {
-            mode: request.currentLeg.mode,
-            routeId: request.currentLeg.routeId ?? null,
-            from: request.currentLeg.from ?? null,
-            to: request.currentLeg.to ?? null,
-          },
-          destination: {
-            ...(request.destination.stationId ? { stationId: request.destination.stationId } : {}),
-            name: request.destination.name,
-            ...(request.destination.lat !== undefined ? { lat: request.destination.lat } : {}),
-            ...(request.destination.lng !== undefined ? { lng: request.destination.lng } : {}),
-          },
-          conditions: request.conditions,
+          boundaryId,
+          destStationId: destStationId || null,
+          destLat: request.destination.lat ?? null,
+          destLng: request.destination.lng ?? null,
+          modes: request.conditions.modes,
+          priority: request.conditions.priority,
+          requestedAt: departedAt,
         }),
       })
       if (!Array.isArray(data)) {
@@ -217,13 +233,17 @@ export const mockGuidanceRepository: GuidanceRepository = {
       )
     })
     const updatedAt = new Date().toISOString()
-    return [2, 5].map((offset, index) => ({
-      trainId: `${request.routeId}-${index + 1}`,
-      direction: `${request.routeName || request.stationName || request.routeId} 방면`,
-      arrivalTime: mockArrivalTime(offset),
+    return {
+      status: 'LIVE',
+      trains: [2, 5].map((offset, index) => ({
+        trainId: `${request.routeId}-${index + 1}`,
+        direction: `${request.routeName || request.stationName || request.routeId} 방면`,
+        arrivalTime: mockArrivalTime(offset),
+        updatedAt,
+        source: 'MOCK' as const,
+      })),
       updatedAt,
-      source: 'MOCK' as const,
-    }))
+    }
   },
   async replan(request, signal) {
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
