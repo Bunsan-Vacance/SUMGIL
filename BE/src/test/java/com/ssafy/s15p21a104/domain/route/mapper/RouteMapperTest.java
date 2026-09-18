@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -310,5 +312,32 @@ class RouteMapperTest {
         assertEquals(3, response.legs().size());
         assertEquals("R1", response.legs().get(1).fromNodeId());
         assertEquals("R3", response.legs().get(1).toNodeId());
+    }
+
+    @Test
+    @DisplayName("234-T30: 같은 구간 BUS 연속은 TRANSFER 없이 1개 leg이다")
+    void t230_같은구간BUS_단일leg_비환승() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS)
+        ), 240, 0);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(), Set.of(),
+                        BusRouteIndex.build(Map.of(
+                                "108", List.of(
+                                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)),
+                                "143", List.of(
+                                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)))))
+                .orElseThrow();
+
+        assertEquals(1, response.legs().size());
+        assertEquals(TravelMode.BUS, response.legs().get(0).mode());
     }
 }
