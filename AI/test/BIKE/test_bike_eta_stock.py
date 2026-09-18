@@ -134,6 +134,8 @@ def test_round_horizon_snaps_to_nearest_trained_value():
     assert round_horizon(17) == 15
     assert round_horizon(23) == 30  # 15과 30 사이 정중앙(22.5)보다 위
     assert round_horizon(30) == 30
+    assert round_horizon(120) == 30  # 30분 초과는 전부 30으로 근사
+    assert round_horizon(1440) == 30
 
 
 def test_happy_path_uses_predictor_net_flow(fake_predictor, live_dir):
@@ -294,6 +296,34 @@ def test_http_eta_minutes_out_of_range_returns_422(fake_predictor, live_dir):
     fake_predictor(net_flow=1.0)
     live_dir(current_stock=5, updated_at=NOW)
 
-    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 999})
+    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 1441})
 
     assert r.status_code == 422
+
+
+def test_http_eta_minutes_beyond_30_still_returns_200_with_model_horizon_min_capped(
+    fake_predictor, live_dir, monkeypatch
+):
+    """30분 초과 요청도 거부하지 않는다 — 예측치는 30분 기준으로 근사되지만, 도착 시점
+    라벨(arrival_dow_type/arrival_time_slot)은 근사 없이 실제 요청 eta_minutes로 계산된다."""
+    fake_predictor(net_flow=2.0, horizon_min_used=30)
+    live_dir(current_stock=5, updated_at=NOW)
+    monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda: pd.Timestamp(NOW)))
+
+    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 1440})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model_horizon_min"] == 30
+    # NOW(2026-09-14 14:00, 월요일) + 1440분(24시간) = 2026-09-15 14:00, 화요일, 공휴일 아님
+    assert body["arrival_dow_type"] == 0
+    assert body["arrival_time_slot"] == 28
+
+
+def test_model_horizon_min_passes_through_predictor_value(fake_predictor, live_dir):
+    fake_predictor(net_flow=1.0, horizon_min_used=15)
+    live_dir(current_stock=5, updated_at=NOW)
+
+    result = service.predict_eta_stock("ST-1", eta_minutes=17, now=NOW)
+
+    assert result["model_horizon_min"] == 15

@@ -364,4 +364,5 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
         "arrival_dow_type": arr_dow,
         "arrival_time_slot": arr_slot,
         "source": "lightgbm",
+        "model_horizon_min": result["horizon_min_used"],
     }
