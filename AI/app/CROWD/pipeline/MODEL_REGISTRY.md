@@ -319,6 +319,14 @@ out-of-sample 성능(연도 홀드아웃)은 셀 MAE 2.147(2023→2024) / 1.428(
 96.776 / 97.965%다 — 수치 원본은 `validation/CROWD/calibration-refit/RESULTS.md`(199)와
 `calibration-holdout/RESULTS.md`(142).
 
+**열차·노드 표(239)는 이 배율표 위의 분해이지 새 모델이 아니다.** 슬롯 표(L3)의 30분 보정
+혼잡도를 시각표(`timetable.py`)로 나눠 열차 단위로 만들고(`disaggregate.allocate_to_trains`, L4),
+열차 궤적을 역(노드) 관점으로 재색인한다(`disaggregate.node_states`·`allocate_flows_to_trains`,
+L5) — 새 정보를 만들지 않으므로 정확도 판정·아티팩트 추적 대상이 아니다. 옵션
+`settings.crowd_train_table`(기본 `false`)로 켜고, 설계·근거·검증 가능성은
+`app/CROWD/pipeline/RESOLUTION_LADDER.md`(§1.1·§3 L4·L5), 산출물 계약은 `SERVING_CONTRACT.md`
+7절에 있다.
+
 ## 6. 이 코드들이 바뀌는 경우
 
 - 세트 정의가 바뀌면 `FEATURE_SETS`에 **새 이름을 추가**하고 옛 이름은 남긴다(기록·재현). 파생 규칙이 바뀌면 `DERIVED_VERSION`을 올린다.

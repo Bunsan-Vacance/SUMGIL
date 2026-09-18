@@ -57,6 +57,16 @@ lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 �
     python -m app.CROWD.pipeline.batch_predict --date 2025-06-02            # 패널 안 날짜(재현)
     python -m app.CROWD.pipeline.batch_predict --date 2026-01-05 --predictor lookup
     python -m app.CROWD.pipeline.batch_predict --today --tomorrow             # 운영
+    python -m app.CROWD.pipeline.batch_predict --date 2025-06-02 --trains    # 열차·노드 표도 산출(239, 옵션)
+
+## 열차·노드 표(239, 옵션) — `predictions_train_{date}.parquet`
+
+`settings.crowd_train_table`(또는 `--trains`/`--no-trains`)를 켜면 같은 슬롯 표에서 열차 한 대 ×
+역 한 개 단위의 표를 추가로 만든다. **예측이 아니라 분해**다(`RESOLUTION_LADDER.md` §1.1·§4) — 슬롯
+혼잡도의 총량을 시각표(`timetable.py`)로 나누고 열차 궤적을 노드로 재색인할 뿐 새 정보를 만들지
+않는다. 기본은 꺼짐 — BE 적재 경로가 정해지기 전까지 기존 산출물·메타 값을 바꾸지 않는다. 컬럼·
+메타 키는 `SERVING_CONTRACT.md` 7절·3절, 구현은 `to_train_table`(`timetable.py`·`disaggregate.py`
+3층 함수를 잇는다).
 """
 
 from __future__ import annotations
@@ -89,6 +99,15 @@ from app.CROWD.pipeline.dataset import (
     load_recent_long,
     resolved_segments,
 )
+from app.CROWD.pipeline.disaggregate import (
+    MIX_H0_DEFAULT,
+    MIX_H1_DEFAULT,
+    allocate_flows_to_trains,
+    allocate_to_trains,
+    node_states,
+    split_hourly_to_30min,
+    train_trajectory,
+)
 from app.CROWD.pipeline.features import SLOT_ORDER
 from app.CROWD.pipeline.lookup import TARGETS
 from app.CROWD.pipeline.predictor import (
@@ -96,6 +115,15 @@ from app.CROWD.pipeline.predictor import (
     artifact_kind,
     build_predictor,
     latest_artifact,
+)
+from app.CROWD.pipeline.timetable import (
+    assign_links,
+    load_timetable,
+    segment_links,
+    segment_pairs,
+    timetable_day_type,
+    timetable_version,
+    trains_per_slot,
 )
 from app.CROWD.pipeline.topology import load_capacity
 
@@ -118,7 +146,8 @@ DATA_STATUS_VALUES = (
 # 표에는 없고 API에서만 나타나는 상태(그 날짜 표가 아직 없음 -> 404).
 API_ONLY_DATA_STATUS = ("no_data",)
 
-# `.meta.json`에 실리는 키와 그 순서. `predict_day`가 만드는 앞쪽 13개 + `run`이 덧붙이는 10개(200에서 8→10).
+# `.meta.json`에 실리는 키와 그 순서. `predict_day`가 만드는 앞쪽 13개 + `run`이 덧붙이는
+# 15개(200에서 8→10, 239에서 열차·노드 표 메타 5개를 `generated_at` 앞에 추가해 10→15).
 META_KEYS = (
     "target_date",
     "in_panel",
@@ -142,6 +171,11 @@ META_KEYS = (
     "lookup_substituted_rows",
     "holiday_calendar_until",
     "topology_gaps",
+    "train_table",
+    "timetable_version",
+    "train_rows",
+    "headway_long_rows",
+    "train_mass_gap",
     "generated_at",
 )
 
@@ -163,6 +197,41 @@ OUTPUT_COLS = [
     "alighting_lookup",
     "actual_boarding",
     "actual_alighting",
+    "train_capacity",
+]
+
+# 239 — 열차·노드 표(`predictions_train_{date}.parquet`, 옵션)의 컬럼과 순서.
+# `SERVING_CONTRACT.md` 7절과 짝이고 `test_crowd_serving_contract.test_train_output_columns_match_contract_table`가
+# 대조한다.
+TRAIN_OUTPUT_COLS = [
+    "date",
+    "station_no",
+    "station_name",
+    "line",
+    "direction",
+    "segment",
+    "to_station_no",
+    "prev_station_no",
+    "train_id",
+    "run_id",
+    "pass_time",
+    "express",
+    "time_slot_30min",
+    "headway_min",
+    "headway_long",
+    "mix_w",
+    "share",
+    "load_arr_est",
+    "load_dep_est",
+    "onboard_arr_est",
+    "onboard_dep_est",
+    "boarding_train_est",
+    "alighting_train_est",
+    "grade_dep",
+    "arr_source",
+    "link_ambiguous",
+    "data_status",
+    "pred_source",
     "train_capacity",
 ]
 
@@ -365,7 +434,7 @@ def predict_day(
     return out, meta
 
 
-def to_congestion_table(
+def _congestion_table_full(
     predicted: pd.DataFrame,
     segments: list[dict],
     capacity: dict,
@@ -373,17 +442,11 @@ def to_congestion_table(
     thresholds: list[float],
     holiday_fallback: str | None = HOLIDAY_FALLBACK_DAY_TYPE,
 ) -> pd.DataFrame:
-    """승하차 예측 → 30분 보정 혼잡도·등급·상태 표(OUTPUT_COLS).
+    """`to_congestion_table`의 몸통 — `OUTPUT_COLS`로 추리기 전 전체 프레임을 돌려준다(239).
 
-    `holiday_fallback=None`으로 부르면 146 이전 동작(1~8호선 공휴일 전체가 `no_calibration`)이 나온다 —
-    전후 비교용이다(`validation/CROWD/congestion-criteria-check/diagnose.py`).
-
-    모델 예측이 음수인 셀은 그 타깃의 lookup 값(`{target}_lookup`)으로 대체한다(197 B-2) — 145
-    `family-check/RESULTS.md` 7절에서 모델이 음수를 낸 셀은 lookup이 더 정확했다(RMSE `no_lag`
-    90.46→69.85, `d7_only` 53.86→27.18). lookup도 없거나(NaN) 음수면 최종 하한으로 0을 쓴다
-    (lookup 자체가 음수일 수는 없으니 이 경로는 사실상 "lookup 결측" 케이스다). 대체 여부는 `pred_source`
-    (`model`/`lookup_negative`)로 노출한다 — 인원 ≥ 0은 물리 제약이라 대체 자체는 원칙 8("값을 채우지
-    않는다")과 무관하고, 여전히 채우지 않는 것은 `congestion_pct`·`grade`의 NaN(배율표·기준선 결측)뿐이다.
+    `segment`·`day_type`·`calibration_fallback` 등 슬롯 표 계약(`OUTPUT_COLS`)에는 없지만
+    `to_train_table`(열차·노드 표)이 필요로 하는 중간 컬럼을 그대로 남긴다. `to_congestion_table`은
+    이 함수의 결과를 `reindex`만 해서 반환하므로 공개 동작은 이전과 완전히 같다.
     """
     board = predicted.copy()
     was_negative = pd.Series(False, index=board.index)
@@ -455,7 +518,223 @@ def to_congestion_table(
             f"문서화되지 않은 data_status: {unknown} — DATA_STATUS_VALUES와 "
             "SERVING_CONTRACT.md 2절을 같이 고쳐라"
         )
-    return out.reindex(columns=OUTPUT_COLS)
+    return out
+
+
+def to_congestion_table(
+    predicted: pd.DataFrame,
+    segments: list[dict],
+    capacity: dict,
+    calibration: pd.DataFrame,
+    thresholds: list[float],
+    holiday_fallback: str | None = HOLIDAY_FALLBACK_DAY_TYPE,
+) -> pd.DataFrame:
+    """승하차 예측 → 30분 보정 혼잡도·등급·상태 표(OUTPUT_COLS).
+
+    `holiday_fallback=None`으로 부르면 146 이전 동작(1~8호선 공휴일 전체가 `no_calibration`)이 나온다 —
+    전후 비교용이다(`validation/CROWD/congestion-criteria-check/diagnose.py`).
+
+    모델 예측이 음수인 셀은 그 타깃의 lookup 값(`{target}_lookup`)으로 대체한다(197 B-2) — 145
+    `family-check/RESULTS.md` 7절에서 모델이 음수를 낸 셀은 lookup이 더 정확했다(RMSE `no_lag`
+    90.46→69.85, `d7_only` 53.86→27.18). lookup도 없거나(NaN) 음수면 최종 하한으로 0을 쓴다
+    (lookup 자체가 음수일 수는 없으니 이 경로는 사실상 "lookup 결측" 케이스다). 대체 여부는 `pred_source`
+    (`model`/`lookup_negative`)로 노출한다 — 인원 ≥ 0은 물리 제약이라 대체 자체는 원칙 8("값을 채우지
+    않는다")과 무관하고, 여전히 채우지 않는 것은 `congestion_pct`·`grade`의 NaN(배율표·기준선 결측)뿐이다.
+    """
+    return _congestion_table_full(
+        predicted, segments, capacity, calibration, thresholds, holiday_fallback
+    ).reindex(columns=OUTPUT_COLS)
+
+
+def to_train_table(
+    full_table: pd.DataFrame,
+    timetable: pd.DataFrame,
+    segments: list[dict],
+    calibration: pd.DataFrame,
+    thresholds: list[float],
+    *,
+    mix_h0: float | None = MIX_H0_DEFAULT,
+    mix_h1: float = MIX_H1_DEFAULT,
+) -> tuple[pd.DataFrame, dict]:
+    """슬롯 표(`_congestion_table_full`의 대상 날짜 한 날치 결과) → 열차·노드 표(239, 옵션).
+
+    `RESOLUTION_LADDER.md` §1.1·§3 L4·L5가 설계한 분해를 그대로 코드로 잇는다 — **예측이 아니라
+    분해**라 새 정보를 만들지 않는다(원칙 4·8). `full_table`은 대상 날짜 하나짜리
+    `_congestion_table_full` 출력(`segment`·`day_type`·`calibration_fallback` 등 reindex 이전
+    컬럼이 남아 있어야 한다), `timetable`은 `timetable.load_timetable` 출력(전 요일유형),
+    `calibration`은 배율표(1층 `split_hourly_to_30min`의 30분 비중 산출에 쓰인다).
+
+    단계:
+    1. `segment_links`로 위상(`adjacency`·`link_segments`)을 먼저 얻는다. 대상 날짜의 패널
+       요일유형을 시각표 요일유형으로 바꿔(`timetable.timetable_day_type`) 그 요일유형 시각표만
+       남기고, `disaggregate.train_trajectory`로 열차 궤적(런·직전/다음 역)을 구한 뒤
+       `timetable.assign_links`로 정차마다 실제 링크(`link_id`)를 배정한다 — 강동처럼 한 역이
+       여러 세그먼트에 걸칠 때 그 열차가 실제로 지나온·갈 세그먼트로 미리 하나만 고르는 것이다
+       (135 버그 수정: 예전에는 링크를 정하기 *전에* 슬롯을 배분해 여러 세그먼트가 열차 수·질량을
+       나눠 가졌다). 링크가 아예 안 잡히는 행(토폴로지 결번)은 버리고 `stats["trains_without_link"]`
+       로 센다.
+    2. 슬롯 재차인원 `onboard_30min_est = congestion_pct/100 × train_capacity × n_trains`를
+       만든다(88의 정의 그대로 — 공식 혼잡도는 "그 슬롯 열차들의 평균"이다). `n_trains`는 이제
+       `timetable.trains_per_slot(..., extra_key=("link_id",))`로 **링크별로** 센다 — 링크가 다르면
+       같은 역·방향·슬롯이라도 다른 슬롯으로 취급해야 그 링크를 실제로 지나는 열차 수만 반영한다.
+       열차가 없는 슬롯은 `n_trains`가 NaN이라 이 값도 NaN이고, 뒤에서 그 슬롯은 배분 대상에서
+       빠진다(`stats["slots_without_trains"]`로 셀 수를 남긴다 — 채우지 않는다, 원칙 8).
+    3. `disaggregate.allocate_to_trains`에 `extra_key=("link_id",)`를 주어 슬롯 재차인원을
+       열차에 배분하고(2층, 링크별로 몫·질량을 따로 보존), `disaggregate.node_states`로 열차
+       궤적을 역(노드) 관점으로 재색인한다(L5). 1단계에서 이미 링크를 하나로 정했으므로
+       `node_states`의 중복 해소(`_resolve_link_duplicates`)는 안전망으로만 작동한다(정상 입력에서는
+       중복이 없다). `assign_links`가 매긴 `link_ambiguous`(`_link_ambiguous_assign`로 임시 보관)와
+       `node_states`가 매긴 `link_ambiguous`를 OR로 합쳐 최종 컬럼을 만든다 — 둘 중 하나라도
+       모호했으면 숨기지 않는다(원칙 8).
+    4. 방향 없는 역 단위 30분 승하차(1층, `disaggregate.split_hourly_to_30min`)를
+       `disaggregate.allocate_flows_to_trains`로 같은 슬롯의 모든 방향·열차에 나눈다. 1~8호선
+       공휴일처럼 그 날짜 요일유형이 배율표에 없으면(`calibration["day_type"]`에 없으면) 비중
+       조회에서만 `timetable_day_type`로 변환한 요일유형(예: 일요일)을 빌려 쓴다 —
+       `congestion.HOLIDAY_FALLBACK_DAY_TYPE`과 같은 대체를 30분 비중 쪽에도 적용하는 것이다.
+    5. `to_station_no`(= `next_station_no`)·`pass_time`(= `arrival_time`)·`grade_dep`을 붙이고
+       `TRAIN_OUTPUT_COLS`로 추린 뒤 (line, station_no, direction, pass_time) 순으로 정렬한다.
+
+    NaN은 상속만 한다 — 배율표 결측으로 슬롯 혼잡도가 NaN이면 그 슬롯의 모든 열차가
+    `load_dep_est`·`grade_dep` NaN이고, `data_status`·`pred_source`는 슬롯 표 값을 그대로 쓴다.
+
+    반환: `(train_tbl, stats)`. `stats`는 `train_rows`·`headway_long_rows`·`slots_without_trains`
+    ·`train_mass_gap`(이제 `[date, station_no, direction, link_id, time_slot_30min]`별 슬롯
+    재차인원 합과 열차 배분 합의 최대 절대오차, 링크별로 따로 잰다 — 질량 보존 확인용)
+    ·`link_ambiguous_rows`·`trains_without_link`(토폴로지에 링크가 안 잡혀 버려진 열차-정차 행 수).
+    """
+    day_type_values = full_table["day_type"].dropna().unique()
+    if len(day_type_values) != 1:
+        raise ValueError(
+            f"full_table의 day_type이 대상 날짜 하나에 값 {len(day_type_values)}개다: "
+            f"{sorted(day_type_values)} — to_train_table은 한 날짜치 슬롯 표만 받는다"
+        )
+    day_type = day_type_values[0]
+    day_type_tt = timetable_day_type(day_type)
+    tt = timetable[timetable["day_type"] == day_type_tt]
+
+    _, link_segments = segment_links(segments)
+    # 도착 재차 이어붙임은 "연속 인접"이 아니라 "같은 세그먼트"면 허용한다 — 급행·정차 행 결측으로
+    # 역을 건너뛴 열차도 사람을 싣고 가기 때문(`timetable.segment_pairs` docstring).
+    adjacency = segment_pairs(segments)
+    traj = assign_links(train_trajectory(tt), link_segments)
+    trains_without_link = int(traj["link_id"].isna().sum())
+    traj = traj.dropna(subset=["link_id"]).reset_index(drop=True)
+
+    n_trains = trains_per_slot(traj, extra_key=("link_id",))
+
+    slot_loads = full_table[
+        [
+            "date",
+            "station_no",
+            "station_name",
+            "line",
+            "direction",
+            "segment",
+            "time_slot_30min",
+            "congestion_pct",
+            "train_capacity",
+            "data_status",
+            "pred_source",
+        ]
+    ].copy()
+    slot_loads["day_type"] = day_type_tt
+    slot_loads["link_id"] = slot_loads["line"] + "/" + slot_loads["segment"]
+    slot_loads = slot_loads.merge(
+        n_trains,
+        on=["station_no", "direction", "day_type", "link_id", "time_slot_30min"],
+        how="left",
+    )
+    slot_loads["onboard_30min_est"] = (
+        slot_loads["congestion_pct"] / 100.0 * slot_loads["train_capacity"] * slot_loads["n_trains"]
+    )
+    slots_without_trains = int(
+        (slot_loads["n_trains"].isna() & slot_loads["congestion_pct"].notna()).sum()
+    )
+
+    train_rows = allocate_to_trains(
+        slot_loads,
+        traj,
+        load_col="onboard_30min_est",
+        mix_h0=mix_h0,
+        mix_h1=mix_h1,
+        extra_key=("link_id",),
+    )
+    # allocate_to_trains는 배분에 필요한 컬럼만 돌려준다 — 급행 여부·링크 모호 플래그는 궤적
+    # 표(1단계에서 링크까지 정한 `traj`)에서 다시 붙인다(`DATA_ENGINE/eda/build_load_by_train.build`
+    # 와 같은 처리를 링크 단위로 확장한 것).
+    extra_cols = traj[
+        [
+            "station_no",
+            "direction",
+            "day_type",
+            "link_id",
+            "train_id",
+            "arrival_time",
+            "express",
+            "link_ambiguous",
+        ]
+    ].rename(columns={"link_ambiguous": "_link_ambiguous_assign"})
+    train_rows = train_rows.merge(
+        extra_cols,
+        on=["station_no", "direction", "day_type", "link_id", "train_id", "arrival_time"],
+        how="left",
+    )
+
+    node_rows = node_states(
+        train_rows, adjacency=adjacency, link_segments=link_segments, link_col="link_id"
+    )
+    # assign_links(1단계, 궤적 기반)와 node_states(안전망, 값 기반) 어느 쪽이 모호하다고 봤든
+    # 숨기지 않는다(원칙 8) — OR로 합치고 임시 컬럼은 버린다.
+    node_rows["link_ambiguous"] = node_rows["link_ambiguous"] | node_rows[
+        "_link_ambiguous_assign"
+    ].fillna(False)
+    node_rows = node_rows.drop(columns=["_link_ambiguous_assign"])
+
+    station_hour = (
+        full_table[["date", "station_no", "time_slot", "boarding_pred", "alighting_pred"]]
+        .drop_duplicates(subset=["date", "station_no", "time_slot"])
+        .rename(columns={"boarding_pred": "boarding", "alighting_pred": "alighting"})
+    )
+    cal_day_types = set(calibration["day_type"].dropna().unique())
+    station_hour["day_type"] = day_type if day_type in cal_day_types else day_type_tt
+    slot_flows = split_hourly_to_30min(
+        station_hour, calibration, value_cols=("boarding", "alighting")
+    )
+    flow_rows = allocate_flows_to_trains(slot_flows, node_rows, rule="share")
+
+    flow_rows["grade_dep"] = grade(flow_rows["load_dep_est"], thresholds)
+    flow_rows["to_station_no"] = flow_rows["next_station_no"].astype("Int64")
+    flow_rows["prev_station_no"] = flow_rows["prev_station_no"].astype("Int64")
+    flow_rows["run_id"] = flow_rows["run_id"].astype(int)
+    flow_rows["pass_time"] = flow_rows["arrival_time"]
+
+    train_tbl = (
+        flow_rows.reindex(columns=TRAIN_OUTPUT_COLS)
+        .sort_values(["line", "station_no", "direction", "pass_time"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+
+    # 링크(`link_id`)까지 키에 넣어야 강동처럼 한 역에 세그먼트가 겹칠 때도 각 링크의 질량을
+    # 따로 확인할 수 있다 — 링크 없이 역·방향·슬롯만으로 인덱싱하면 세그먼트 수만큼 중복된
+    # 인덱스끼리 빼는 꼴이 되어 오차가 부풀려진다(135 버그).
+    dep_sum = flow_rows.groupby(
+        ["date", "station_no", "direction", "link_id", "time_slot_30min"], observed=True
+    )["onboard_dep_est"].sum()
+    slot_totals = slot_loads.set_index(
+        ["date", "station_no", "direction", "link_id", "time_slot_30min"]
+    )["onboard_30min_est"]
+    mass_diff = (dep_sum - slot_totals).dropna()
+    train_mass_gap = float(mass_diff.abs().max()) if len(mass_diff) else 0.0
+
+    stats = {
+        "train_rows": len(train_tbl),
+        "headway_long_rows": int(train_tbl["headway_long"].sum()),
+        "slots_without_trains": slots_without_trains,
+        "train_mass_gap": train_mass_gap,
+        "link_ambiguous_rows": int(train_tbl["link_ambiguous"].sum()),
+        "trains_without_link": trains_without_link,
+    }
+    return train_tbl, stats
 
 
 def validated_meta(meta: dict) -> dict:
@@ -530,6 +809,7 @@ def run(
     predictor_kind: str | None = None,
     out_dir: Path | None = None,
     use_recent: bool = True,
+    train_table: bool | None = None,
 ) -> list[Path]:
     settings = get_settings()
     out_dir = Path(out_dir or settings.crowd_serving_dir)
@@ -552,6 +832,14 @@ def run(
     calibration = pd.read_parquet(CROWD_PROCESSED / CALIBRATION_NAME)
     thresholds = settings.grade_thresholds
 
+    # 239: 열차·노드 표는 기본 꺼짐(설정값) — CLI(`--trains`/`--no-trains`)가 명시하면 그것을 따른다.
+    use_trains = settings.crowd_train_table if train_table is None else train_table
+    timetable = None
+    timetable_ver: str | None = None
+    if use_trains:
+        timetable = load_timetable(settings.crowd_timetable_path)
+        timetable_ver = timetable_version(settings.crowd_timetable_path)
+
     # --predictor CLI가 명시되면 라우팅을 건너뛰고 그 kind 하나로 전 날짜를 예측한다(디버그·재현용).
     # CLI가 없으면(None) settings.crowd_predictor 기본값 "auto"는 라우팅에 맡긴다는 뜻이다 — 누군가
     # .env에서 그 값을 다른 kind로 고정해 뒀다면 그것도 명시적 override로 본다.
@@ -572,9 +860,38 @@ def run(
         predicted, meta = predict_day(
             get_predictor, panel, d, segments, holidays, events, override_kind=override_kind
         )
-        table = to_congestion_table(predicted, segments, capacity, calibration, thresholds)
+        full = _congestion_table_full(predicted, segments, capacity, calibration, thresholds)
+        table = full.reindex(columns=OUTPUT_COLS)
         path = out_dir / f"predictions_{d:%Y-%m-%d}.parquet"
         _atomic_write(lambda p, table=table: table.to_parquet(p, index=False), path)
+
+        train_meta = {
+            "train_table": bool(use_trains),
+            "timetable_version": timetable_ver,
+            "train_rows": None,
+            "headway_long_rows": None,
+            "train_mass_gap": None,
+        }
+        if use_trains:
+            train_tbl, tstats = to_train_table(full, timetable, segments, calibration, thresholds)
+            train_path = out_dir / f"predictions_train_{d:%Y-%m-%d}.parquet"
+            _atomic_write(
+                lambda p, train_tbl=train_tbl: train_tbl.to_parquet(p, index=False), train_path
+            )
+            train_meta.update(
+                {
+                    "train_rows": tstats["train_rows"],
+                    "headway_long_rows": tstats["headway_long_rows"],
+                    "train_mass_gap": tstats["train_mass_gap"],
+                }
+            )
+            print(
+                f"[배치] {d:%Y-%m-%d} → {train_path.name} ({tstats['train_rows']:,}행, "
+                f"headway_long {tstats['headway_long_rows']}, "
+                f"mass_gap {tstats['train_mass_gap']:.6f})",
+                flush=True,
+            )
+
         meta.update(
             {
                 "recent_dates_available": recent_dates,
@@ -592,6 +909,7 @@ def run(
                     else None
                 ),
                 "topology_gaps": gaps.to_dict("records") if len(gaps) else [],
+                **train_meta,
                 "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
             }
         )
@@ -621,6 +939,19 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--no-recent", action="store_true", help="D−1 수집 파일을 이어붙이지 않는다(패널만)"
     )
+    ap.add_argument(
+        "--trains",
+        dest="trains",
+        action="store_true",
+        default=None,
+        help="열차·노드 표(predictions_train_*.parquet)도 산출한다(기본: settings.crowd_train_table)",
+    )
+    ap.add_argument(
+        "--no-trains",
+        dest="trains",
+        action="store_false",
+        help="열차·노드 표를 산출하지 않는다(설정값이 켜져 있어도 이번 실행만 끈다)",
+    )
     args = ap.parse_args(argv)
 
     today = pd.Timestamp.now().normalize()
@@ -636,6 +967,7 @@ def main(argv: list[str] | None = None) -> None:
         args.predictor,
         Path(args.out_dir) if args.out_dir else None,
         use_recent=not args.no_recent,
+        train_table=args.trains,
     )
 
 
