@@ -1,14 +1,18 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bus;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.subway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
@@ -87,5 +91,34 @@ class KShortestPathFinder213Test {
                     .collect(Collectors.joining("|"));
             assertTrue(signatures.add(sig), "중복 후보: " + sig);
         }
+    }
+
+    @Test
+    @DisplayName("234-T56: K경로 BUS 누적 공통 노선 소진 시 환승 위치를 재집계한다")
+    void t234_K경로_BUS누적교집합소진_환승재집계() {
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("A", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("B", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("C", 3, 37.5000, 127.0100)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("B", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("C", 2, 37.5000, 127.0100),
+                        new BusEdgeBuilder.RouteStop("D", 3, 37.5000, 127.0150))));
+        TransferRule rule = new TransferRule(180).withTable(Map.of(
+                new TransferRule.TransferKey("B", "108", "BUS"), 500,
+                new TransferRule.TransferKey("C", "108", "143"), 240));
+        RouteGraph graph = graphOf(
+                subway("A", "D", "L1", 50),
+                bus("A", "B", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID, 100),
+                bus("B", "C", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID, 100),
+                bus("C", "D", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID, 100));
+
+        List<FoundPath> paths = new KShortestPathFinder(rule, index).findK(graph, "A", "D", 2);
+
+        assertEquals(2, paths.size());
+        assertEquals(List.of("A", "B", "C", "D"), paths.get(1).stations());
+        assertEquals(540, paths.get(1).totalSec());
+        assertEquals(1, paths.get(1).transferCount());
     }
 }

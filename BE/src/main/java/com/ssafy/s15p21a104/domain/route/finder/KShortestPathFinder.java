@@ -218,15 +218,16 @@ public final class KShortestPathFinder {
             if (junction.transfer()) {
                 totalSec += transferRule.transferCost(
                         first.fromNode(), junctionKeptLines, firstOptions);
-            } else {
+            } else if (lastOptions.size() == 1 && firstOptions.size() == 1) {
                 // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
                 // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일.
+                String nextLine = firstOptions.iterator().next();
                 TransferRule.TransferDecision legacy = TransferRule.decide(
-                        singleOrNull(junctionKeptLines), last.mode(), singleOrNull(lastOptions),
-                        first.mode(), first.routeId());
+                        singleOrNull(junctionKeptLines), last.mode(), lastOptions.iterator().next(),
+                        first.mode(), nextLine);
                 if (legacy.transfer()) {
                     totalSec += transferRule.costWithStation(
-                            0, first.fromNode(), legacy.costLine(), first.routeId());
+                            0, first.fromNode(), legacy.costLine(), nextLine);
                 }
             }
         }
@@ -241,10 +242,10 @@ public final class KShortestPathFinder {
                 TransferRule.TransferDecision decision = TransferRule.decideLines(
                         keptLines, prevMode, prevOptions, edge.mode(), options);
                 boolean transfer = decision.transfer();
-                if (!transfer) {
+                if (!transfer && prevOptions.size() == 1 && options.size() == 1) {
                     transfer = TransferRule.decide(
-                            singleOrNull(keptLines), prevMode, singleOrNull(prevOptions),
-                            edge.mode(), edge.routeId()).transfer();
+                            singleOrNull(keptLines), prevMode, prevOptions.iterator().next(),
+                            edge.mode(), options.iterator().next()).transfer();
                 }
                 if (transfer) {
                     transfers++;

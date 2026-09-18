@@ -110,15 +110,16 @@ public final class ShortestPathFinder {
                 if (decision.transfer()) {
                     nextCost += transferRule.transferCost(
                             current.node(), current.keptLine(), options);
-                } else {
+                } else if (current.arrivedOptions().size() == 1 && options.size() == 1) {
                     // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
                     // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일.
+                    String nextLine = options.iterator().next();
                     TransferRule.TransferDecision legacy = TransferRule.decide(
                             singleOrNull(current.keptLine()), current.arrivalMode(),
-                            singleOrNull(current.arrivedOptions()), edge.mode(), edge.routeId());
+                            current.arrivedOptions().iterator().next(), edge.mode(), nextLine);
                     if (legacy.transfer()) {
                         nextCost += transferRule.costWithStation(
-                                0, current.node(), legacy.costLine(), edge.routeId());
+                                0, current.node(), legacy.costLine(), nextLine);
                     }
                 }
                 Set<String> nextKept = TransferRule.keptTransitLines(
@@ -173,10 +174,10 @@ public final class ShortestPathFinder {
                 TransferRule.TransferDecision decision = TransferRule.decideLines(
                         kept, prevMode, prevOptions, edge.mode(), options);
                 boolean transfer = decision.transfer();
-                if (!transfer) {
+                if (!transfer && prevOptions.size() == 1 && options.size() == 1) {
                     transfer = TransferRule.decide(
-                            singleOrNull(kept), prevMode, singleOrNull(prevOptions),
-                            edge.mode(), edge.routeId()).transfer();
+                            singleOrNull(kept), prevMode, prevOptions.iterator().next(),
+                            edge.mode(), options.iterator().next()).transfer();
                 }
                 if (transfer) {
                     transfers++;

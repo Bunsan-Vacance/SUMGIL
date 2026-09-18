@@ -51,4 +51,25 @@ class TransferRuleSet234Test {
 
         assertEquals(new TransferRule.TransferDecision(false, null), d);
     }
+
+    @Test
+    @DisplayName("234-T14: BUS 연속은 누적 교집합을 유지하고 소진 시 현재 노선으로 재설정한다")
+    void t14_BUS누적교집합_유지와재설정() {
+        Set<String> kept = TransferRule.keptTransitLines(
+                Set.of(), TravelMode.BUS, Set.of("108"));
+        assertEquals(Set.of("108"), kept);
+
+        kept = TransferRule.keptTransitLines(
+                kept, TravelMode.BUS, Set.of("108", "143"));
+        assertEquals(Set.of("108"), kept);
+
+        TransferRule.TransferDecision decision = TransferRule.decideLines(
+                kept, TravelMode.BUS, Set.of("108", "143"),
+                TravelMode.BUS, Set.of("143"));
+        assertTrue(decision.transfer());
+
+        kept = TransferRule.keptTransitLines(
+                kept, TravelMode.BUS, Set.of("143"));
+        assertEquals(Set.of("143"), kept);
+    }
 }

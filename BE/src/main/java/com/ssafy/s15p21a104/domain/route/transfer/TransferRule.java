@@ -205,15 +205,24 @@ public class TransferRule {
     }
 
     /**
-     * 직전 대중교통 노선 집합을 갱신한다(S15P21A104-234). 대중교통 구간을 지나면 그 구간의
-     * 운행 노선 집합으로, 그 외 수단(WALK·BIKE)이면 그대로 둔다.
+     * 환승 없이 현재까지 이어서 탈 수 있는 대중교통 노선 집합을 갱신한다(S15P21A104-234).
+     * 비대중교통 구간에서는 기존 집합을 유지하고, 첫 대중교통 구간에서는 현재 옵션을 쓴다.
+     * 이후에는 교집합을 누적하며, 교집합이 비면 환승 경계 뒤 새 탑승으로 보고 현재 옵션으로
+     * 다시 시작한다.
      */
     public static Set<String> keptTransitLines(
             Set<String> kept, TravelMode mode, Set<String> options) {
+        Set<String> keptSafe = kept == null ? Set.of() : Set.copyOf(kept);
         if (!isTransit(mode)) {
-            return kept == null ? Set.of() : kept;
+            return keptSafe;
         }
-        return options == null ? Set.of() : Set.copyOf(options);
+        Set<String> optionsSafe = options == null ? Set.of() : Set.copyOf(options);
+        if (keptSafe.isEmpty()) {
+            return optionsSafe;
+        }
+        Set<String> intersection = new java.util.HashSet<>(keptSafe);
+        intersection.retainAll(optionsSafe);
+        return intersection.isEmpty() ? optionsSafe : Set.copyOf(intersection);
     }
 
     /**
