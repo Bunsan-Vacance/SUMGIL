@@ -596,6 +596,19 @@ data/BIKE/raw/realtime/latest_stock.parquet
 KST naive datetime으로 저장한다. 같은 대여소의 이전 값은 더 최신 `updated_at` 이벤트로만
 갱신된다.
 
+`weather.nowcast`도 raw snapshot 저장 후 공통 최신 날씨 파일을 갱신한다.
+
+```text
+data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet
+```
+
+컬럼은 `nx`, `ny`, `weather_source`, `category`, `base_datetime`,
+`forecast_datetime`, `weather_value`, `source_generated_at`, `ingested_at`,
+`event_id`다. 시각은 KST naive로 저장한다. 격자·관측/예보 종류·category별로
+가장 최근 발표 시각의 값만 유지하며, 예보는 해당 발표의 유효 시각별 값을 모두
+유지한다. 늦게 도착한 이전 발표는 최신값을 덮지 않는다. BIKE 전용
+`latest_weather.parquet`과는 별개의 공통 파일이다.
+
 ### 날씨 Kafka 입력 계약 (2026-09-18 확인)
 
 J15A104A의 최근 Kafka 날씨 snapshot을 확인한 결과, `weather.nowcast`의 envelope

@@ -13,6 +13,7 @@ from DATA_ENGINE.stream.kafka_sink import (
     update_bike_latest_stock,
     write_events,
 )
+from DATA_ENGINE.stream.weather_latest import latest_weather_path
 
 
 def _event(
@@ -105,11 +106,12 @@ def test_write_be_sample_events_to_topic_partitions(tmp_path):
         tmp_path / "data/EXTERNAL/weather/raw/nowcast/dt=2026-09-14/hh=12",
         tmp_path / "data/BIKE/raw/realtime/dt=2026-09-14/hh=09",
         tmp_path / "data/BIKE/raw/realtime",
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast",
     }
 
     rows = []
     for path in paths:
-        if path.name == "latest_stock.parquet":
+        if path.name in {"latest_stock.parquet", "latest_by_grid.parquet"}:
             continue
         rows.extend(pd.read_parquet(path).to_dict("records"))
 
@@ -118,6 +120,9 @@ def test_write_be_sample_events_to_topic_partitions(tmp_path):
     assert by_source["weather.nowcast"]["entity_id"] == "60:127:PTY"
     assert by_source["subway.arrival"]["entity_id"] == "1009000937"
     assert json.loads(by_source["subway.arrival"]["payload_json"])["statnNm"] == "둔촌오륜"
+    weather = pd.read_parquet(latest_weather_path(ai_root=tmp_path))
+    assert weather.loc[0, "weather_source"] == "observed"
+    assert weather.loc[0, "category"] == "PTY"
 
 
 def test_dedupe_events_keeps_first_event_id():
