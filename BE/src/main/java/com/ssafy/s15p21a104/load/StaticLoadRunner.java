@@ -33,6 +33,7 @@ import com.ssafy.s15p21a104.load.subway.StationNameNormalizer;
 import com.ssafy.s15p21a104.load.subway.StationRow;
 import com.ssafy.s15p21a104.load.subway.SubwayGraph;
 import com.ssafy.s15p21a104.load.subway.SubwayGraphBuilder;
+import com.ssafy.s15p21a104.load.subway.TagoTimetableParser;
 import com.ssafy.s15p21a104.load.subway.TrainTimetableParser;
 import com.ssafy.s15p21a104.load.subway.TransferParser;
 import com.ssafy.s15p21a104.load.subway.TransferRecord;
@@ -78,6 +79,11 @@ public class StaticLoadRunner implements ApplicationRunner {
 
     // 원천 파일명 (출처·갱신일은 각 폴더 README). 새 배포분을 받으면 여기와 README 를 함께 바꾼다.
     static final String TIMETABLE_FILE = "seoul-train-timetable_20260616.csv.gz";
+    /**
+     * TAGO 지하철정보(공공데이터포털 15098554) 역별 시각표 — 열차운행시각표가 덮지 않는 9개 노선의 wait_sec 원천 (S15P21A104-243).
+     * BE/scripts/data/tago-timetable-fetch.mjs 산출물. 열차 번호가 없어 구간 소요(travel_sec)는 못 만들고 슬롯별 대기만 붙인다.
+     */
+    static final String TAGO_TIMETABLE_FILE = "tago-timetable_20260918.csv";
     /** 국토교통부 도시철도 전체노선(15122916). 시각표 밖 노선의 후보 목록과 역 목록 대조용 — 인접 관계는 여기서 뽑지 않는다(지선 순번 중복). */
     static final String URBAN_LINES_FILE = "molit-urban-lines_20251211.csv";
     /** 전국도시철도역사정보표준데이터(15013205). 코레일·사철 역의 좌표(국가철도공단 역위치 파일이 없는 노선)와 역번호(station-ids 정본). */
@@ -182,8 +188,20 @@ public class StaticLoadRunner implements ApplicationRunner {
         List<StationCoord> coords = readCoords(normalizer);
         logWarnings("환승 파싱", transferParser.warnings());
 
+        // 2-1) TAGO 역별 시각표 → KTDB 거리 구간의 슬롯 대기 (243). 시각표 노선의 키는 건드리지 않는다(putIfAbsent).
+        //      travel_sec 은 여전히 거리 ÷ 표정속도(source=avg)이고 wait_sec 만 실제 시각표 기반이 된다 — load-subway.md 참고.
+        long tagoStarted = System.nanoTime();
+        var tagoParser = new TagoTimetableParser(normalizer);
+        TagoTimetableParser.Result tago = tagoParser.parse(csv(SUBWAY_DIR, TAGO_TIMETABLE_FILE).rows(), distanceSegments);
+        var ts = tago.stats();
+        log.info("TAGO 시각표: {} 행 · 대기 붙인 방향 엣지 {}/{} · 노선 {} · 출발 없음 {} · 종착 행 {} · 행선지 미해결 {} (U/D 다수결로 살림 {}) · 버림 {} ({} ms)",
+                ts.rows(), ts.edgesCovered(), ts.edgesTotal(), ts.lineIds(), ts.noDeparture(), ts.terminalHere(),
+                ts.unresolvedTerminal(), ts.fallbackUpDown(), ts.dropped(), elapsedMs(tagoStarted));
+        logWarnings("TAGO 시각표 파싱", tagoParser.warnings());
+
         List<DirectedSegment> directed = tt.segments();
-        Map<String, SlotWaits> waits = tt.slotWaits();
+        Map<String, SlotWaits> waits = new LinkedHashMap<>(tt.slotWaits());
+        tago.slotWaits().forEach(waits::putIfAbsent);
         if (!props.region().isEmpty()) {
             directed = directed.stream().filter(s -> props.region().contains(s.lineId())).toList();
             waits = waits.entrySet().stream().filter(e -> props.region().contains(e.getKey().substring(0, e.getKey().indexOf('|'))))
