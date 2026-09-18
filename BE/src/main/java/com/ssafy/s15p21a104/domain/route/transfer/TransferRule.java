@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.domain.route.transfer;
 
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -201,6 +202,59 @@ public class TransferRule {
             return new TransferDecision(true, prevLine);
         }
         return new TransferDecision(false, null);
+    }
+
+    /**
+     * 직전 대중교통 노선 집합을 갱신한다(S15P21A104-234). 대중교통 구간을 지나면 그 구간의
+     * 운행 노선 집합으로, 그 외 수단(WALK·BIKE)이면 그대로 둔다.
+     */
+    public static Set<String> keptTransitLines(
+            Set<String> kept, TravelMode mode, Set<String> options) {
+        if (!isTransit(mode)) {
+            return kept == null ? Set.of() : kept;
+        }
+        return options == null ? Set.of() : Set.copyOf(options);
+    }
+
+    /**
+     * 환승 여부를 노선 집합 교집합으로 판정한다(S15P21A104-234). 연속 탑승 구간에 공통
+     * 노선이 없으면 환승이다 (같은 정류장 108→143 포함). 첫 탑승(kept 비어 있음)은 아니다.
+     * 기존 문자열 `decide`는 SUBWAY 등 단일 노선 경로에서 그대로 쓴다.
+     */
+    public static TransferDecision decideLines(
+            Set<String> kept, TravelMode prevMode, Set<String> prevOptions,
+            TravelMode nextMode, Set<String> nextOptions) {
+        Set<String> keptSafe = kept == null ? Set.of() : kept;
+        Set<String> nextSafe = nextOptions == null ? Set.of() : nextOptions;
+        if (prevMode != null && isTransit(nextMode) && !keptSafe.isEmpty() && !nextSafe.isEmpty()) {
+            for (String line : nextSafe) {
+                if (keptSafe.contains(line)) {
+                    return new TransferDecision(false, null);
+                }
+            }
+            return new TransferDecision(true, null);
+        }
+        return new TransferDecision(false, null);
+    }
+
+    /**
+     * 경계 환승 비용. 후보 쌍 중 실측 최소값, 전부 miss면 상수(Q3 결정).
+     */
+    public long transferCost(String stationId, Set<String> fromLines, Set<String> toLines) {
+        long best = defaultSec;
+        boolean found = false;
+        if (fromLines != null && toLines != null && stationId != null) {
+            for (String from : fromLines) {
+                for (String to : toLines) {
+                    Integer measured = transferTimes.get(new TransferKey(stationId, from, to));
+                    if (measured != null && (!found || measured < best)) {
+                        best = measured;
+                        found = true;
+                    }
+                }
+            }
+        }
+        return best;
     }
 
     /**
