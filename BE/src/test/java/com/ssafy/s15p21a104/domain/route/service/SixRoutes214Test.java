@@ -9,10 +9,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
-import com.ssafy.s15p21a104.domain.congestion.entity.Congestion;
-import com.ssafy.s15p21a104.domain.congestion.entity.CongestionId;
-import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
-import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
+import com.ssafy.s15p21a104.domain.congestion.entity.CongestionPred;
+import com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository;
 import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -23,7 +21,6 @@ import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import java.math.BigDecimal;
-import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,14 +47,14 @@ class SixRoutes214Test {
     private RouteGraphRegistry graphRegistry;
 
     @Mock
-    private CongestionRepository congestionRepository;
+    private CongestionPredRepository congestionPredRepository;
 
     private RouteSearchService routeSearchService;
 
     @BeforeEach
     void setUp() {
         Map<String, Station> stations = new HashMap<>();
-        for (String id : List.of("A", "B", "C", "D", "E", "R1")) {
+        for (String id : List.of("501", "502", "503", "504", "505", "R1")) {
             stations.put(id, RouteTestFixtures.mockStation(id, id + "역"));
         }
         for (Map.Entry<String, Station> entry : stations.entrySet()) {
@@ -65,7 +62,7 @@ class SixRoutes214Test {
                     .thenReturn(Optional.of(entry.getValue()));
         }
         Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
-        for (String id : List.of("A", "B", "C", "D", "E", "R1")) {
+        for (String id : List.of("501", "502", "503", "504", "505", "R1")) {
             infos.put(id, new RouteMapper.StationInfo(id, id + "역", 37.5, 127.0));
         }
         lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
@@ -74,26 +71,28 @@ class SixRoutes214Test {
         lenient().when(graphRegistry.bikeStock()).thenReturn(Map.of());
         // 6개 서로 다른 경로: 직통 4개 + 혼합 2개.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
-                subway("A", "C", "L1", 900),
-                subway("A", "B", "L2", 200),
-                subway("B", "C", "L2", 200),
-                subway("A", "D", "L3", 300),
-                subway("D", "C", "L3", 300),
-                subway("A", "E", "L4", 250),
-                subway("E", "C", "L4", 250),
-                bike("A", "R1", 250),
-                bike("R1", "C", 250),
-                bike("B", "R1", 100)));
+                subway("501", "503", "L1", 900),
+                subway("501", "502", "L2", 200),
+                subway("502", "503", "L2", 200),
+                subway("501", "504", "L3", 300),
+                subway("504", "503", "L3", 300),
+                subway("501", "505", "L4", 250),
+                subway("505", "503", "L4", 250),
+                bike("501", "R1", 250),
+                bike("R1", "503", 250),
+                bike("502", "R1", 100)));
         lenient().when(graphRegistry.graphFor(
                 org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenAnswer(invocation -> graphRegistry.graph());
-        lenient().when(congestionRepository
-                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
-                                any(), any(), any(), any()))
+        // 158(통지 05 S-1): 링크 단위 조회로 대체 — lineId(routeId)로 구분한다.
+        // 이 그래프의 링크는 전부 역번호 오름차순(501→50x)이라 방향은 항상 "상선".
+        lenient().when(congestionPredRepository
+                        .findById_PredDateAndId_FromStationIdAndId_ToStationIdAndId_LineIdAndId_DirectionAndId_TimeSlot(
+                                any(), any(), any(), any(), any(), any()))
                 .thenAnswer(invocation -> {
-                    String targetId = invocation.getArgument(1);
+                    String lineId = invocation.getArgument(3);
                     // L1 가장 쾌적, L4·L3 중간, L2 혼잡.
-                    BigDecimal level = switch (targetId) {
+                    BigDecimal level = switch (lineId) {
                         case "L1" -> BigDecimal.valueOf(1.0);
                         case "L4" -> BigDecimal.valueOf(3.0);
                         case "L3" -> BigDecimal.valueOf(5.0);
@@ -103,7 +102,7 @@ class SixRoutes214Test {
                     if (level == null) {
                         return Optional.empty();
                     }
-                    return Optional.of(mockCongestion(targetId, level));
+                    return Optional.of(mockCongestionPred(level));
                 });
 
         routeSearchService = new RouteSearchService(
@@ -111,13 +110,13 @@ class SixRoutes214Test {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                congestionRepository);
+                RouteTestFixtures.noopCongestionRepository(), congestionPredRepository);
     }
 
     @Test
     @DisplayName("214-T1: 속도 3 + 혼잡 3, 총 6개가 순서대로 나온다")
     void t1_속도3_혼잡3_6개() {
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("501", "503", null, null, null);
 
         assertEquals(6, result.size());
         // 속도 3: 시간순.
@@ -136,22 +135,18 @@ class SixRoutes214Test {
     @DisplayName("214-T2: 후보 부족하면 있는 만큼만 나온다")
     void t2_후보부족_있는만큼() {
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
-                subway("A", "C", "L1", 900)));
+                subway("501", "503", "L1", 900)));
 
-        List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
+        List<RouteSearchResponse> result = routeSearchService.search("501", "503", null, null, null);
 
         assertTrue(result.size() >= 1);
         assertTrue(result.size() <= 6);
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
     }
 
-    private Congestion mockCongestion(String targetId, BigDecimal level) {
-        Congestion congestion = mock(Congestion.class);
-        lenient().when(congestion.getId())
-                .thenReturn(new CongestionId(CongestionTarget.LINE, targetId, 0, 0));
-        lenient().when(congestion.getLevel()).thenReturn(level);
-        lenient().when(congestion.getSource()).thenReturn("stat");
-        lenient().when(congestion.getUpdatedAt()).thenReturn(OffsetDateTime.now());
-        return congestion;
+    private CongestionPred mockCongestionPred(BigDecimal level) {
+        CongestionPred pred = mock(CongestionPred.class);
+        lenient().when(pred.getLevel()).thenReturn(level);
+        return pred;
     }
 }
