@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
@@ -36,6 +37,30 @@ public final class RouteCandidateFinder {
     private final Set<String> rentalIds;
     private final Map<String, RouteMapper.StationInfo> stationInfos;
     private final Supplier<Map<String, Integer>> bikeStock;
+    private final BusRouteIndex busRouteIndex;
+
+    /**
+     * @param transferRule 환승 비용 규칙
+     * @param transferTimes 환승 실측표
+     * @param rentalIds 대여소 ID 집합
+     * @param stationInfos 역 표시 정보
+     * @param bikeStock 대여소별 예상 재고 공급자
+     * @param busRouteIndex 정규 BUS 구간 운행 노선 인덱스(234). null이면 routeId 폴백
+     */
+    public RouteCandidateFinder(
+            TransferRule transferRule,
+            Map<TransferRule.TransferKey, Integer> transferTimes,
+            Set<String> rentalIds,
+            Map<String, RouteMapper.StationInfo> stationInfos,
+            Supplier<Map<String, Integer>> bikeStock,
+            BusRouteIndex busRouteIndex) {
+        this.transferRule = transferRule;
+        this.transferTimes = transferTimes;
+        this.rentalIds = rentalIds;
+        this.stationInfos = stationInfos;
+        this.bikeStock = bikeStock;
+        this.busRouteIndex = busRouteIndex;
+    }
 
     /**
      * @param transferRule 환승 비용 규칙
@@ -50,11 +75,7 @@ public final class RouteCandidateFinder {
             Set<String> rentalIds,
             Map<String, RouteMapper.StationInfo> stationInfos,
             Supplier<Map<String, Integer>> bikeStock) {
-        this.transferRule = transferRule;
-        this.transferTimes = transferTimes;
-        this.rentalIds = rentalIds;
-        this.stationInfos = stationInfos;
-        this.bikeStock = bikeStock;
+        this(transferRule, transferTimes, rentalIds, stationInfos, bikeStock, null);
     }
 
     /**
@@ -86,7 +107,7 @@ public final class RouteCandidateFinder {
         TransferRule rule = transferRule.withTable(transferTimes);
 
         List<FoundPath> paths =
-                new KShortestPathFinder(rule).findK(graph, originStationId, destStationId, maxCandidates);
+                new KShortestPathFinder(rule, busRouteIndex).findK(graph, originStationId, destStationId, maxCandidates);
 
         Map<String, RouteSearchResponse> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {
@@ -112,31 +133,45 @@ public final class RouteCandidateFinder {
                     edge.fromNode(), edge.toNode(), edge.routeId(), seconds,
                     edge.mode()));
         }
-        // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다 (TransferRule 1곳, 232).
-        // WALK를 지나도 유지된 대중교통 노선으로 비교한다.
+        // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다 (TransferRule 1곳, 232·234).
+        // WALK를 지나도 유지된 대중교통 노선 집합으로 비교한다.
         List<Long> transferSecs = new ArrayList<>();
-        String kept = null;
+        Set<String> kept = Set.of();
+        String keptStr = null;
         TravelMode prevMode = null;
-        String prevLine = null;
+        Set<String> prevOptions = Set.of();
         for (Edge edge : found.edges()) {
+            Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
             if (prevMode != null) {
-                TransferRule.TransferDecision decision = TransferRule.decide(
-                        kept, prevMode, prevLine, edge.mode(), edge.routeId());
+                TransferRule.TransferDecision decision = TransferRule.decideLines(
+                        kept, prevMode, prevOptions, edge.mode(), options);
                 if (decision.transfer()) {
-                    transferSecs.add(rule.costWithStation(
-                            0, edge.fromNode(), decision.costLine(), edge.routeId()));
+                    transferSecs.add(rule.transferCost(edge.fromNode(), kept, options));
+                } else if (prevOptions.size() == 1 && options.size() == 1) {
+                    // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
+                    // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일.
+                    TransferRule.TransferDecision legacy = TransferRule.decide(
+                            keptStr, prevMode, prevOptions.iterator().next(),
+                            edge.mode(), options.iterator().next());
+                    if (legacy.transfer()) {
+                        transferSecs.add(rule.costWithStation(
+                                0, edge.fromNode(), legacy.costLine(), options.iterator().next()));
+                    }
                 }
             }
-            kept = TransferRule.keptTransitLine(kept, edge.mode(), edge.routeId());
+            prevOptions = options;
+            kept = TransferRule.keptTransitLines(kept, edge.mode(), options);
+            keptStr = TransferRule.keptTransitLine(keptStr, edge.mode(), edge.routeId());
             prevMode = edge.mode();
-            prevLine = edge.routeId();
         }
         // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤
         // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.
+        // 인덱스 전달(234 C1·I2): 매퍼가 같은 교집합 규칙으로 BUS 분리를 해야
+        // transferSecs 개수와 경계가 일치한다. null이면 routeId 폴백(기존 동일).
         Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
                 new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
                 stationInfos, RouteType.SHORTEST, RouteSource.ALGORITHM,
-                transferSecs, rentalIds);
+                transferSecs, rentalIds, busRouteIndex);
         return response.filter(r -> BikeStockGate.passesEdges(
                 found.edges().stream().map(Edge::fromNode).toList(),
                 found.edges().stream().map(Edge::mode).toList(),

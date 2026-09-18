@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 /**
  * 인메모리 유향 그래프 최단 경로 1개(K=1) 탐색(Dijkstra, 우선순위 큐).
@@ -21,17 +23,29 @@ import java.util.PriorityQueue;
  * 그대로 쓰고, 환승 비용 값·판정은 96 산출물({@link TransferRule})에 위임한다(중복 정의 없음).
  *
  * <p>환승 상수가 현재 노선에 따라 달라지므로 탐색 상태는 (역, 현재 노선) 쌍으로 둔다.
- * 출발 직후 첫 엣지는 환승이 아니다. 가중치가 음이 아니므로 반환 경로는 재방문 없는 단순 경로이다.
+ * 정규 BUS 구간은 인덱스의 운행 노선 집합으로 비교한다(S15P21A104-234) — 같은 정류장
+ * 108→143처럼 겹치는 노선이 있으면 환승이 아니다. 출발 직후 첫 엣지는 환승이 아니다.
+ * 가중치가 음이 아니므로 반환 경로는 재방문 없는 단순 경로이다.
  */
 public final class ShortestPathFinder {
 
     private final TransferRule transferRule;
+    private final BusRouteIndex busRouteIndex;
 
     /**
      * @param transferRule 환승 비용 규칙(96). 상수 값·판정 함수의 정본
      */
     public ShortestPathFinder(TransferRule transferRule) {
+        this(transferRule, null);
+    }
+
+    /**
+     * @param transferRule 환승 비용 규칙(96). 상수 값·판정 함수의 정본
+     * @param busRouteIndex 정규 BUS 구간 운행 노선 인덱스(234). null이면 routeId 폴백
+     */
+    public ShortestPathFinder(TransferRule transferRule, BusRouteIndex busRouteIndex) {
         this.transferRule = Objects.requireNonNull(transferRule, "transferRule");
+        this.busRouteIndex = busRouteIndex;
     }
 
     /**
@@ -52,9 +66,9 @@ public final class ShortestPathFinder {
             throw new DomainException(ErrorType.STATION_NOT_FOUND);
         }
 
-        // dist: 역 → ((도착 노선, 유지 노선) → 최소 비용). prev도 같은 키.
-        // 유지 노선(keptLine)을 키에 넣는다(232) — 같은 역·같은 도착 노선이라도
-        // 직전 대중교통이 다르면 이후 환승 비용이 달라진다.
+        // dist: 역 → ((도착 노선, 유지 노선 집합) → 최소 비용). prev도 같은 키.
+        // 유지 노선 집합(kept)을 키에 넣는다(232·234) — 같은 역·같은 도착 노선이라도
+        // 직전 대중교통 집합이 다르면 이후 환승 비용이 달라진다.
         Map<String, Map<StateKey, Long>> dist = new HashMap<>();
         Map<String, Map<StateKey, Previous>> prev = new HashMap<>();
         PriorityQueue<State> queue = new PriorityQueue<>(Comparator.comparingLong(State::cost));
@@ -65,13 +79,14 @@ public final class ShortestPathFinder {
             long cost = transferRule.costWithStation(
                     edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode())
                     + edge.waitSec();
-            String kept = TransferRule.keptTransitLine(null, edge.mode(), edge.routeId());
+            Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
+            Set<String> kept = TransferRule.keptTransitLines(Set.of(), edge.mode(), options);
             StateKey key = new StateKey(edge.routeId(), kept);
             if (cost < costOf(dist, edge.toNode(), key)) {
                 setCost(dist, edge.toNode(), key, cost);
                 prev.computeIfAbsent(edge.toNode(), k -> new HashMap<>())
-                        .put(key, new Previous(originStationId, null, null, null, edge));
-                queue.add(new State(cost, edge.toNode(), edge.routeId(), edge.mode(), kept));
+                        .put(key, new Previous(originStationId, null, null, Set.of(), edge));
+                queue.add(new State(cost, edge.toNode(), edge.routeId(), edge.mode(), kept, options));
             }
         }
 
@@ -85,25 +100,38 @@ public final class ShortestPathFinder {
                 return buildPath(prev, originStationId, current);
             }
             for (Edge edge : graph.outgoingEdges(current.node())) {
-                // 환승 판정은 TransferRule 1곳으로 통일한다(232).
-                // WALK를 지나도 유지된 대중교통 노선으로 비교한다.
-                TransferRule.TransferDecision decision = TransferRule.decide(
-                        current.keptLine(), current.arrivalMode(), current.line(),
-                        edge.mode(), edge.routeId());
+                // 환승 판정은 TransferRule 1곳으로 통일한다(232·234).
+                // WALK를 지나도 유지된 대중교통 노선 집합으로 비교한다.
+                Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
+                TransferRule.TransferDecision decision = TransferRule.decideLines(
+                        current.keptLine(), current.arrivalMode(), current.arrivedOptions(),
+                        edge.mode(), options);
                 long nextCost = current.cost() + edge.travelSec();
                 if (decision.transfer()) {
-                    nextCost += transferRule.costWithStation(
-                            0, current.node(), decision.costLine(), edge.routeId());
+                    nextCost += transferRule.transferCost(
+                            current.node(), current.keptLine(), options);
+                } else if (current.arrivedOptions().size() == 1 && options.size() == 1) {
+                    // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
+                    // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일.
+                    String nextLine = options.iterator().next();
+                    TransferRule.TransferDecision legacy = TransferRule.decide(
+                            singleOrNull(current.keptLine()), current.arrivalMode(),
+                            current.arrivedOptions().iterator().next(), edge.mode(), nextLine);
+                    if (legacy.transfer()) {
+                        nextCost += transferRule.costWithStation(
+                                0, current.node(), legacy.costLine(), nextLine);
+                    }
                 }
-                String nextKept = TransferRule.keptTransitLine(
-                        current.keptLine(), edge.mode(), edge.routeId());
+                Set<String> nextKept = TransferRule.keptTransitLines(
+                        current.keptLine(), edge.mode(), options);
                 StateKey nextKey = new StateKey(edge.routeId(), nextKept);
                 if (nextCost < costOf(dist, edge.toNode(), nextKey)) {
                     setCost(dist, edge.toNode(), nextKey, nextCost);
                     prev.computeIfAbsent(edge.toNode(), k -> new HashMap<>())
                             .put(nextKey, new Previous(current.node(), current.line(),
                                     current.arrivalMode(), current.keptLine(), edge));
-                    queue.add(new State(nextCost, edge.toNode(), edge.routeId(), edge.mode(), nextKept));
+                    queue.add(new State(nextCost, edge.toNode(), edge.routeId(),
+                            edge.mode(), nextKept, options));
                 }
             }
         }
@@ -136,24 +164,39 @@ public final class ShortestPathFinder {
         }
 
         int transfers = 0;
-        String kept = null;
+        Set<String> kept = Set.of();
         TravelMode prevMode = null;
-        String prevLine = null;
+        Set<String> prevOptions = Set.of();
         for (Edge edge : edges) {
-            // 환승 집계도 TransferRule 1곳으로 통일한다(232).
+            // 환승 집계도 TransferRule 1곳으로 통일한다(232·234).
+            Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
             if (prevMode != null) {
-                TransferRule.TransferDecision decision = TransferRule.decide(
-                        kept, prevMode, prevLine, edge.mode(), edge.routeId());
-                if (decision.transfer()) {
+                TransferRule.TransferDecision decision = TransferRule.decideLines(
+                        kept, prevMode, prevOptions, edge.mode(), options);
+                boolean transfer = decision.transfer();
+                if (!transfer && prevOptions.size() == 1 && options.size() == 1) {
+                    transfer = TransferRule.decide(
+                            singleOrNull(kept), prevMode, prevOptions.iterator().next(),
+                            edge.mode(), options.iterator().next()).transfer();
+                }
+                if (transfer) {
                     transfers++;
                 }
             }
-            kept = TransferRule.keptTransitLine(kept, edge.mode(), edge.routeId());
+            prevOptions = options;
+            kept = TransferRule.keptTransitLines(kept, edge.mode(), options);
             prevMode = edge.mode();
-            prevLine = edge.routeId();
         }
 
         return new FoundPath(List.copyOf(stations), List.copyOf(edges), arrival.cost(), transfers);
+    }
+
+    /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용. */
+    private static String singleOrNull(Set<String> lines) {
+        if (lines == null || lines.size() != 1) {
+            return null;
+        }
+        return lines.iterator().next();
     }
 
     private Previous prevOf(Map<String, Map<StateKey, Previous>> prev, String node, StateKey key) {
@@ -173,13 +216,24 @@ public final class ShortestPathFinder {
         dist.computeIfAbsent(node, k -> new HashMap<>()).put(key, cost);
     }
 
-    private record StateKey(String line, String keptLine) {
+    private record StateKey(String line, Set<String> keptLine) {
+        StateKey {
+            keptLine = keptLine == null ? Set.of() : Set.copyOf(keptLine);
+        }
     }
 
-    private record State(long cost, String node, String line, TravelMode arrivalMode, String keptLine) {
+    private record State(long cost, String node, String line, TravelMode arrivalMode,
+                         Set<String> keptLine, Set<String> arrivedOptions) {
+        State {
+            keptLine = keptLine == null ? Set.of() : Set.copyOf(keptLine);
+            arrivedOptions = arrivedOptions == null ? Set.of() : Set.copyOf(arrivedOptions);
+        }
     }
 
     private record Previous(String fromNode, String fromLine, TravelMode fromMode,
-                              String fromKeptLine, Edge edge) {
+                              Set<String> fromKeptLine, Edge edge) {
+        Previous {
+            fromKeptLine = fromKeptLine == null ? Set.of() : Set.copyOf(fromKeptLine);
+        }
     }
 }

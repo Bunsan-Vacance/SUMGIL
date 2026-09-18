@@ -1,10 +1,13 @@
 package com.ssafy.s15p21a104.domain.route.mapper;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteOptionResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import java.util.ArrayList;
 import java.util.List;
@@ -127,6 +130,34 @@ public final class RouteMapper {
             List<Long> transferSeconds,
             Set<String> rentalIds
     ) {
+        return toResponseWithTransfers(
+                enginePath, stationsById, routeType, source, transferSeconds, rentalIds, null);
+    }
+
+    /**
+     * 엔진 경로 하나를 최종 응답 하나로 바꾼다. 노선 전환 경계마다 환승 도보 leg를 끼운다.
+     *
+     * <p>버스 구간은 정류장 쌍별 운행 노선 교집합으로 환승을 판정한다(S15P21A104-234).
+     * 같은 정류장을 지나는 108→143 연속 탑승은 환승이 아니라 1개 leg로 합친다.
+     *
+     * @param enginePath 엔진 탐색 결과(가짜 결과 주입 가능)
+     * @param stationsById 역 표시 정보(역 ID 기준)
+     * @param routeType 응답에 적을 경로 유형(호출자가 정한다)
+     * @param source 응답에 적을 출처(호출자가 주입한다)
+     * @param transferSeconds 경계 순서대로 환승 소요 초. 크기는 환승 횟수와 같아야 한다
+     * @param rentalIds 대여소 ID 집합. 빈 집합이면 기존 합침과 같다
+     * @param busRouteIndex 정류장 쌍별 버스 운행 노선. null이면 노선 ID 그대로 판정한다
+     * @return 경로가 없으면 비어 있음(상위 계층에서 빈 배열 응답으로 구분)
+     */
+    public static Optional<RouteSearchResponse> toResponseWithTransfers(
+            EnginePath enginePath,
+            Map<String, StationInfo> stationsById,
+            RouteType routeType,
+            RouteSource source,
+            List<Long> transferSeconds,
+            Set<String> rentalIds,
+            BusRouteIndex busRouteIndex
+    ) {
         List<EngineSegment> segments = validate(enginePath, stationsById, routeType, source);
         if (segments == null) {
             return Optional.empty();
@@ -143,35 +174,70 @@ public final class RouteMapper {
         }
 
         List<RouteLegResponse> legs = new ArrayList<>();
-        int start = 0;
         int boundary = 0;
-        // WALK를 지나도 유지된 대중교통 노선으로 환승을 판정한다(232).
-        String kept = null;
-        for (int i = 1; i <= segments.size(); i++) {
-            boolean routeChanged = i == segments.size()
-                    || !Objects.equals(segments.get(i).routeId(), segments.get(start).routeId());
-            boolean rentalSplit = !routeChanged && i < segments.size()
-                    && rentalIds.contains(segments.get(i).fromStationId());
-            if (!routeChanged && !rentalSplit) {
-                continue;
-            }
-            legs.add(toLeg(segments.subList(start, i), stationsById));
-            if (routeChanged && i < segments.size()) {
-                EngineSegment prev = segments.get(i - 1);
-                EngineSegment next = segments.get(i);
-                TransferRule.TransferDecision decision = TransferRule.decide(
-                        kept, prev.mode(), prev.routeId(), next.mode(), next.routeId());
-                if (decision.transfer()) {
-                    legs.add(transferLeg(segments.get(i).fromStationId(), stationsById,
-                            transferSeconds.get(boundary)));
-                    boundary++;
+        java.util.Set<String> kept = java.util.Set.of();
+        // 단일 노선 그래프의 기존 판정을 그대로 살리는 문자열 폴백용(234·Task 4 선례).
+        String keptStr = null;
+        // BUS 묶음의 운행 노선 교집합. BUS만 유지하고 비BUS 묶음에서는 null이다.
+        List<EngineSegment> curGroup = new ArrayList<>();
+        java.util.Set<String> running = null;
+        EngineSegment prevSeg = null;
+        java.util.Set<String> prevOpts = null;
+        for (EngineSegment s : segments) {
+            java.util.Set<String> opts = s.mode() == TravelMode.BUS
+                    ? BusRouteIndex.optionsFor(
+                            new Edge(s.fromStationId(), s.toStationId(), s.routeId(),
+                                    0, 0, s.mode()), busRouteIndex)
+                    : java.util.Set.of(s.routeId());
+            boolean groupIsBus = !curGroup.isEmpty() && curGroup.get(0).mode() == TravelMode.BUS;
+            boolean routeChanged = !curGroup.isEmpty()
+                    && !Objects.equals(s.routeId(), curGroup.get(0).routeId());
+            boolean rentalSplit = !routeChanged && !curGroup.isEmpty()
+                    && rentalIds.contains(s.fromStationId());
+            boolean busSplit = !routeChanged && !rentalSplit && groupIsBus && running != null
+                    && java.util.Collections.disjoint(running, opts);
+            if (!curGroup.isEmpty() && (routeChanged || rentalSplit || busSplit)) {
+                legs.add(toLeg(curGroup, stationsById, running));
+                if (routeChanged || busSplit) {
+                    TransferRule.TransferDecision decision = TransferRule.decideLines(
+                            kept, prevSeg.mode(), prevOpts, s.mode(), opts);
+                    if (!decision.transfer() && prevOpts.size() == 1 && opts.size() == 1) {
+                        // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE·첫 경계)는
+                        // 문자열 규칙으로 그대로 본다 — 단일 노선 그래프에서 기존과 바이트 동일.
+                        TransferRule.TransferDecision legacy = TransferRule.decide(
+                                keptStr, prevSeg.mode(), prevOpts.iterator().next(),
+                                s.mode(), opts.iterator().next());
+                        if (legacy.transfer()) {
+                            decision = legacy;
+                        }
+                    }
+                    if (decision.transfer()) {
+                        legs.add(transferLeg(s.fromStationId(), stationsById,
+                                transferSeconds.get(boundary)));
+                        boundary++;
+                    }
+                }
+                curGroup = new ArrayList<>();
+                curGroup.add(s);
+                running = s.mode() == TravelMode.BUS ? opts : null;
+            } else {
+                curGroup.add(s);
+                if (s.mode() == TravelMode.BUS) {
+                    if (running == null) {
+                        running = opts;
+                    } else {
+                        java.util.Set<String> narrowed = new java.util.HashSet<>(running);
+                        narrowed.retainAll(opts);
+                        running = java.util.Set.copyOf(narrowed);
+                    }
                 }
             }
-            for (EngineSegment segment : segments.subList(start, i)) {
-                kept = TransferRule.keptTransitLine(kept, segment.mode(), segment.routeId());
-            }
-            start = i;
+            kept = TransferRule.keptTransitLines(kept, s.mode(), opts);
+            keptStr = TransferRule.keptTransitLine(keptStr, s.mode(), s.routeId());
+            prevSeg = s;
+            prevOpts = opts;
         }
+        legs.add(toLeg(curGroup, stationsById, running));
         if (boundary != enginePath.transferCount()) {
             throw new IllegalArgumentException("환승 횟수와 노선 전환 경계가 일치하지 않는다");
         }
@@ -191,7 +257,7 @@ public final class RouteMapper {
                 info.stationId(), info.name(), info.lat(), info.lng(),
                 null, seconds / 60.0,
                 null, "unavailable",
-                null, null);
+                null, null, null);
     }
 
     private static List<EngineSegment> validate(
@@ -241,16 +307,24 @@ public final class RouteMapper {
             boolean boundary = i == segments.size()
                     || !Objects.equals(segments.get(i).routeId(), segments.get(start).routeId());
             if (boundary) {
-                legs.add(toLeg(segments.subList(start, i), stationsById));
+                legs.add(toLeg(segments.subList(start, i), stationsById, null));
                 start = i;
             }
         }
         return legs;
     }
 
-    /** 같은 노선 이동 묶음을 구간 응답 하나로 바꾼다. */
+    /**
+     * 같은 노선 이동 묶음을 구간 응답 하나로 바꾼다.
+     *
+     * @param busOptionsOrNull BUS 묶음의 운행 노선 교집합(234). BUS leg는 이름·배차 없이
+     *     ID 목록으로 그대로 싣는다(이름·배차는 {@code RouteNameResolver}가 채운다).
+     *     비어 있어도 null로 바꾸지 않는다 — 전 구간 단일 노선 없음의 정직한 신호다.
+     *     null·비BUS 묶음은 routeOptions null(기존 동일)
+     */
     private static RouteLegResponse toLeg(
-            List<EngineSegment> group, Map<String, StationInfo> stationsById) {
+            List<EngineSegment> group, Map<String, StationInfo> stationsById,
+            java.util.Set<String> busOptionsOrNull) {
         EngineSegment first = group.get(0);
         EngineSegment last = group.get(group.size() - 1);
         StationInfo from = requireStation(stationsById, first.fromStationId());
@@ -262,6 +336,11 @@ public final class RouteMapper {
             }
             sum += segment.seconds();
         }
+        List<RouteOptionResponse> routeOptions = null;
+        if (first.mode() == TravelMode.BUS && busOptionsOrNull != null) {
+            List<String> ids = busOptionsOrNull.stream().sorted().toList();
+            routeOptions = RouteOptionResponse.of(ids, Map.of(), Map.of());
+        }
         return new RouteLegResponse(
                 first.mode(),
                 from.stationId(), from.name(), from.lat(), from.lng(),
@@ -271,7 +350,7 @@ public final class RouteMapper {
                 // KTDB geometry·거리·노선명은 RouteMapper가 모른다(DB 비의존 순수 함수) —
                 // RouteSearchService가 후처리로 채운다.
                 null, "unavailable",
-                null, null
+                null, null, routeOptions
         );
     }
 

@@ -1,10 +1,14 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bike;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bus;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
@@ -165,6 +169,56 @@ class ShortestPathFinderTest {
         FoundPath path = measured.find(graph, "A", "C");
 
         assertEquals(100 + 50 + 60, path.totalSec());
+        assertEquals(1, path.transferCount());
+    }
+
+    @Test
+    @DisplayName("234-T54: BUS 누적 공통 노선 소진 시 환승 비용과 횟수를 반영한다")
+    void t234_BUS누적교집합소진_환승반영() {
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 3, 37.5000, 127.0100)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S2", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 2, 37.5000, 127.0100),
+                        new BusEdgeBuilder.RouteStop("S4", 3, 37.5000, 127.0150))));
+        RouteGraph graph = graphOf(
+                bus("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID, 100),
+                bus("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID, 100),
+                bus("S3", "S4", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID, 100));
+        TransferRule rule = new TransferRule(180).withTable(Map.of(
+                new TransferRule.TransferKey("S2", "108", "BUS"), 500,
+                new TransferRule.TransferKey("S3", "108", "143"), 240));
+        ShortestPathFinder busFinder = new ShortestPathFinder(rule, index);
+
+        FoundPath path = busFinder.find(graph, "S1", "S4");
+
+        assertEquals(1, path.transferCount());
+        assertEquals(540, path.totalSec());
+        assertEquals(List.of("S1", "S2", "S3", "S4"), path.stations());
+    }
+
+    @Test
+    @DisplayName("234-T57: 다중 노선 BUS에서 BIKE 직접 경계는 환승을 반영한다")
+    void t234_다중BUS_BIKE직접경계_환승반영() {
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S2", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 2, 37.5000, 127.0100)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S2", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 2, 37.5000, 127.0100))));
+        RouteGraph graph = graphOf(
+                bus("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID, 100),
+                bike("S3", "D", 10));
+        ShortestPathFinder busBikeFinder = new ShortestPathFinder(new TransferRule(180), index);
+
+        FoundPath path = busBikeFinder.find(graph, "S2", "D");
+
+        assertEquals(List.of("S2", "S3", "D"), path.stations());
+        assertEquals(290, path.totalSec());
         assertEquals(1, path.transferCount());
     }
 
