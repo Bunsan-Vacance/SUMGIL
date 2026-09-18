@@ -1,48 +1,98 @@
-# 배포 (S15P21A104-210 ②). main 전용, 자동 실행.
-# main push → (be-image·fe-image) → deploy-prod 순서로만 돈다.
-# 전제 3개 (⬜ 미확인 시 이 job이 실패한다 — 그때는 노드 수동 apply.sh로 전환):
+# 배포 (S15P21A104-210 ②). 배포 job은 소유 단위로 나눈다 — 트리거 = 소유자 브랜치 (Infra/k8s/CONTRACT.md §1).
+#   deploy-infra  main         Infra/k8s     클러스터 계층 (namespace·ingress-nginx·cert-manager·데이터·registry·TLS)
+#   deploy-be     develop-BE   BE/k8s/prod   BE 워크로드 (be·be-collector·be-consumer·ingress)
+#   deploy-fe     develop-FE   FE/k8s/prod   FE 워크로드
+#   deploy-ai     없음 — AI Dockerfile·이미지 미정. manifests-validate만 (뼈대).
+# 환경은 하나(namespace prod). 세 job은 resource_group prod로 직렬화된다.
+# 전제 (⬜ 미확인 시 해당 job이 실패한다 — 그때는 노드 수동 apply.sh로 전환):
 #   1. 러너에 kubeconfig (a104 호스트 직통 가정).
-#   2. GitLab 변수 5건: DB_PASSWORD·SEOUL_SUBWAY_KEY·SEOUL_API_KEY·SEOUL_BIKE_KEY·KMA_API_KEY (protected+masked).
-#   3. 러너 호스트 docker의 insecure-registry 등록.
-# 롤백: 이전 SHA로 kustomize edit 후 파이프라인 재실행 (별도 정책은 백로그 2026-09-16-deploy-strategy).
-deploy-prod:
+#   2. GitLab protected 변수 — deploy-infra: DB_PASSWORD · deploy-be: SEOUL_SUBWAY_KEY·SEOUL_API_KEY·SEOUL_BIKE_KEY·KMA_API_KEY.
+#      자기 변수가 없으면 자기 job만 before_script에서 멈춘다 (kubectl apply 전). 다른 파트 배포는 영향 없다.
+#   3. 러너 호스트 docker의 insecure-registry 등록 (이미지 job).
+# 이미지 태그: *-image가 남긴 IMAGE_TAG(short SHA)로 `kustomize edit set image` 후 apply — 태그가 바뀌어야 롤아웃이 난다
+#   (매니페스트는 IfNotPresent라 latest 재apply로는 새 코드가 뜨지 않는다).
+#   IMAGE_TAG 없으면(k8s만 변경) 라이브 Deployment의 태그를 유지하고, 그것도 없으면 latest.
+# 롤백: 이전 SHA로 같은 절차 (별도 정책은 백로그 2026-09-16-deploy-strategy).
+
+.deploy_base:
   stage: deploy
   image: alpine:3.20
   tags:
     - CI
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - "BE/**/*"
-        - "FE/**/*"
-        - "Infra/**/*"
-        - "AI/k8s/**/*"
-        - ".gitlab-ci.yml"
-        - ".gitlab/ci/*.yml"
   environment:
     name: prod
   resource_group: prod
+  variables:
+    REGISTRY_HOST: "100.103.156.53:30500"
+  before_script:
+    - apk add --no-cache kubectl kustomize
+    # Secret 실파일 렌더 (render-secrets.sh와 동일 규칙 — example 키 × 변수 값). 수정 시 스크립트와 함께 고친다.
+    # 디버그 출력(set -x) 금지. 사용: render_secret <keys.env.example> <out.env>
+    - 'render_secret() { grep -v "^#" "$1" | grep -v "^$" | cut -d= -f1 | while read -r k; do eval "v=\$$k"; test -n "$v" || { echo "$k 없음"; exit 1; }; echo "$k=$v"; done > "$2" && chmod 600 "$2"; }'
+    # 라이브 Deployment의 이미지 태그. 없으면 빈 문자열. 사용: live_tag <deployment>
+    - 'live_tag() { kubectl get "deployment/$1" -n prod -o "jsonpath={.spec.template.spec.containers[0].image}" 2>/dev/null | sed "s/.*://"; }'
+
+deploy-infra:
+  extends: .deploy_base
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - "Infra/**/*"
+        - ".gitlab/ci/deploy.yml"
   needs:
-    - job: be-image
-      optional: true
-    - job: fe-image
-      optional: true
     - job: manifests-validate
   before_script:
-    - apk add --no-cache kubectl
-    # Secret 실파일 렌더 (render-secrets.sh와 동일 규칙 — example 키 × 변수 값).
-    # 수정 시 스크립트와 함께 고친다. 디버그 출력(set -x) 금지.
-    - grep -v '^#' Infra/k8s/prod/data-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do eval "v=\$$k"; test -n "$v" || { echo "$k 없음"; exit 1; }; echo "$k=$v"; done > Infra/k8s/prod/data-secret.env
-    - grep -v '^#' BE/k8s/prod/be-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do eval "v=\$$k"; test -n "$v" || { echo "$k 없음"; exit 1; }; echo "$k=$v"; done > BE/k8s/prod/be-secret.env
-    - chmod 600 Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env
+    - !reference [.deploy_base, before_script]
+    - render_secret Infra/k8s/prod/data-secret.env.example Infra/k8s/prod/data-secret.env
   script:
-    # build job이 남긴 SHA가 있으면 그걸, 없으면 latest로 이미지 지정.
-    - TAG_BE="${IMAGE_TAG:-latest}"
     - kubectl apply -k Infra/k8s --server-side
     - kubectl rollout status deployment/cert-manager -n cert-manager --timeout=240s
     - kubectl wait --for=condition=Ready certificate/sumgil-tls -n prod --timeout=300s
-    - kubectl apply -k BE/k8s/prod --server-side
-    - kubectl apply -k FE/k8s/prod --server-side
-    - kubectl rollout status deployment/be deployment/fe -n prod --timeout=300s
   after_script:
-    - rm -f Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env
+    - rm -f Infra/k8s/prod/data-secret.env
+
+deploy-be:
+  extends: .deploy_base
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop-BE"'
+      changes:
+        - "BE/**/*"
+        - ".gitlab/ci/be.yml"
+        - ".gitlab/ci/deploy.yml"
+  needs:
+    # 소스만 바뀌면 manifests-validate가 안 돌고, k8s만 바뀌면 be-image가 안 돈다 — 둘 다 optional.
+    - job: be-image
+      optional: true
+    - job: manifests-validate
+      optional: true
+  before_script:
+    - !reference [.deploy_base, before_script]
+    - render_secret BE/k8s/prod/be-secret.env.example BE/k8s/prod/be-secret.env
+  script:
+    - TAG="${IMAGE_TAG:-$(live_tag be)}"; TAG="${TAG:-latest}"; echo "sumgil-be 태그 ${TAG}"
+    - (cd BE/k8s/prod && kustomize edit set image "sumgil-be=${REGISTRY_HOST}/sumgil-be:${TAG}")
+    - kubectl apply -k BE/k8s/prod --server-side
+    - kubectl rollout status deployment/be -n prod --timeout=300s
+    - kubectl rollout status deployment/be-collector -n prod --timeout=300s
+    - kubectl rollout status deployment/be-consumer -n prod --timeout=300s
+  after_script:
+    - rm -f BE/k8s/prod/be-secret.env
+
+deploy-fe:
+  extends: .deploy_base
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop-FE"'
+      changes:
+        - "FE/**/*"
+        - ".gitlab/ci/fe.yml"
+        - ".gitlab/ci/deploy.yml"
+  needs:
+    - job: fe-image
+      optional: true
+    - job: manifests-validate
+      optional: true
+  script:
+    - TAG="${IMAGE_TAG:-$(live_tag fe)}"; TAG="${TAG:-latest}"; echo "sumgil-fe 태그 ${TAG}"
+    - (cd FE/k8s/prod && kustomize edit set image "sumgil-fe=${REGISTRY_HOST}/sumgil-fe:${TAG}")
+    - kubectl apply -k FE/k8s/prod --server-side
+    - kubectl rollout status deployment/fe -n prod --timeout=300s
