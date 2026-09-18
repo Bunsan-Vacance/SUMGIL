@@ -226,21 +226,28 @@ public class TransferRule {
     }
 
     /**
-     * 환승 여부를 노선 집합 교집합으로 판정한다(S15P21A104-234). 연속 탑승 구간에 공통
-     * 노선이 없으면 환승이다 (같은 정류장 108→143 포함). 첫 탑승(kept 비어 있음)은 아니다.
-     * 기존 문자열 `decide`는 SUBWAY 등 단일 노선 경로에서 그대로 쓴다.
+     * 환승 여부를 노선 집합 교집합으로 판정한다(S15P21A104-234). 연속 대중교통은 누적
+     * 공통 노선이 없으면 환승이다(같은 정류장 108→143 포함). 직접 대중교통↔BIKE처럼
+     * 접근 경계가 아닌 수단 전환도 이전·다음 옵션이 서로 겹치지 않으면 환승이다.
+     * 첫 탑승과 WALK가 낀 접근 경계는 환승이 아니다.
      */
     public static TransferDecision decideLines(
             Set<String> kept, TravelMode prevMode, Set<String> prevOptions,
             TravelMode nextMode, Set<String> nextOptions) {
-        Set<String> keptSafe = kept == null ? Set.of() : kept;
-        Set<String> nextSafe = nextOptions == null ? Set.of() : nextOptions;
+        Set<String> keptSafe = kept == null ? Set.of() : Set.copyOf(kept);
+        Set<String> prevSafe = prevOptions == null ? Set.of() : Set.copyOf(prevOptions);
+        Set<String> nextSafe = nextOptions == null ? Set.of() : Set.copyOf(nextOptions);
         if (prevMode != null && isTransit(nextMode) && !keptSafe.isEmpty() && !nextSafe.isEmpty()) {
             for (String line : nextSafe) {
                 if (keptSafe.contains(line)) {
                     return new TransferDecision(false, null);
                 }
             }
+            return new TransferDecision(true, null);
+        }
+        if (prevMode != null && !prevSafe.isEmpty() && !nextSafe.isEmpty()
+                && !isAccessBoundary(prevMode, nextMode)
+                && java.util.Collections.disjoint(prevSafe, nextSafe)) {
             return new TransferDecision(true, null);
         }
         return new TransferDecision(false, null);

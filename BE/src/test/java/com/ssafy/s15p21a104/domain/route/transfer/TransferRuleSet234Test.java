@@ -72,4 +72,18 @@ class TransferRuleSet234Test {
                 kept, TravelMode.BUS, Set.of("143"));
         assertEquals(Set.of("143"), kept);
     }
+
+    @Test
+    @DisplayName("234-T15: 다중 BUS와 BIKE 직접 경계는 양방향 모두 환승이다")
+    void t15_다중BUS_BIKE직접경계_양방향환승() {
+        TransferRule.TransferDecision busToBike = TransferRule.decideLines(
+                Set.of("108"), TravelMode.BUS, Set.of("108", "143"),
+                TravelMode.BIKE, Set.of("BIKE"));
+        TransferRule.TransferDecision bikeToBus = TransferRule.decideLines(
+                Set.of(), TravelMode.BIKE, Set.of("BIKE"),
+                TravelMode.BUS, Set.of("108", "143"));
+
+        assertTrue(busToBike.transfer());
+        assertTrue(bikeToBus.transfer());
+    }
 }
