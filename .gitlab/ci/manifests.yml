@@ -1,0 +1,29 @@
+# 매니페스트 검증 (Kustomize) — manifests-validate.
+# 매니페스트 변경의 1차 방어선. 더미 Secret으로 렌더만 확인하고 값은 커밋하지 않는다.
+manifests-validate:
+  stage: test
+  image: alpine:3.20
+  tags:
+    - CI
+  rules:
+    - changes:
+        - "Infra/**/*"
+        - "BE/k8s/**/*"
+        - "FE/k8s/**/*"
+        - "AI/k8s/**/*"
+        - ".gitlab-ci.yml"
+        - ".gitlab/ci/*.yml"
+  before_script:
+    - apk add --no-cache kubectl
+    # secretGenerator가 env 파일을 요구한다. 키 목록은 *.env.example에서 뽑아 더미로 채운다
+    # (하드코딩 금지 — example이 바뀌면 검증도 자동 추종).
+    - grep -v '^#' Infra/k8s/prod/data-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do echo "$k=dummy"; done > Infra/k8s/prod/data-secret.env
+    - grep -v '^#' BE/k8s/prod/be-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do echo "$k=dummy"; done > BE/k8s/prod/be-secret.env
+    - grep -v '^#' AI/k8s/prod/ai-secret.env.example | grep -v '^$' | cut -d= -f1 | while read -r k; do echo "$k=dummy"; done > AI/k8s/prod/ai-secret.env
+  script:
+    - kubectl kustomize Infra/k8s > /dev/null
+    - kubectl kustomize BE/k8s/prod > /dev/null
+    - kubectl kustomize FE/k8s/prod > /dev/null
+    - kubectl kustomize AI/k8s/prod > /dev/null
+  after_script:
+    - rm -f Infra/k8s/prod/data-secret.env BE/k8s/prod/be-secret.env AI/k8s/prod/ai-secret.env

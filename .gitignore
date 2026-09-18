@@ -17,6 +17,9 @@ desktop.ini
 .env
 .env.*
 !.env.example
+# 통일 규칙(2026-09-16, 210): <용도>.env(커밋) / <용도>-secret.env(절대 커밋 금지) / <용도>.env.example(템플릿)
+*-secret.env
+!*.env.example
 *.pem
 *.key
 *.p12

@@ -1,11 +1,13 @@
 # Infra Kustomize 루트 (S15P21A104-124/126). 
 # - namespaces/: 앱이 사는 네임스페이스 (클러스터 스코프라 Infra 소유)
 # - ingress-nginx/: ingress 컨트롤러 (k3s 내장 Traefik은 끈다)
-# - prod/: 데이터 계층(Postgres·Redis·Kafka) + 플랫폼 서비스(Registry) — Infra 소유
+# - cert-manager/: 클러스터 내 인증서 발급 (S15P21A104-210 ④. CRD라 Certificate보다 먼저)
+# - prod/: 데이터 계층(Postgres·Redis·Kafka) + 플랫폼 서비스(Registry) + 공용 TLS 인증서 — Infra 소유
 # 앱 워크로드는 BE/k8s, FE/k8s에 있다 (소유 분리). apply 순서는 데이터 → 앱.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespaces/
   - ingress-nginx/
+  - cert-manager/
   - prod/

@@ -1,0 +1,15 @@
+# 공용 TLS 인증서 (S15P21A104-210 ④). BE·FE Ingress가 같은 Secret을 참조한다.
+# Secret은 이 Certificate가 있는 ns(prod)에 생긴다 — Ingress와 같은 ns라야 마운트된다.
+# 최초 1회는 issuerRef를 letsencrypt-staging으로 바꿔 확인 후 prod로 복귀한다 (README 절차).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sumgil-tls
+  namespace: prod
+spec:
+  secretName: sumgil-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - j15a104.p.ssafy.io

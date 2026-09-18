@@ -159,7 +159,7 @@ BE 이미지를 그대로 쓰고 프로파일만 바꾼다. `BE/k8s/**` 는 `Inf
 
 | 항목 | 값 |
 | --- | --- |
-| 매니페스트 | `BE/k8s/prod/be-collector.yaml` · `collector.env` · `.env.example` · `kustomization.yaml` |
+| 매니페스트 | `BE/k8s/prod/be-collector.yaml` · `be-config.env` · `be-secret.env.example` · `kustomization.yaml` |
 | 이미지 | `sumgil-be:latest` (같은 이미지 — 수집기 코드가 같은 jar 안에 있다) |
 | 환경 | `SPRING_PROFILES_ACTIVE=prod,collect` · `KAFKA_BOOTSTRAP_SERVERS=kafka:9092` · `be-config`(DB·Redis 포인터) · `data-secret`(DB_PASSWORD) · **`be-secret`**(`SEOUL_SUBWAY_KEY`·`SEOUL_API_KEY`·`SEOUL_BIKE_KEY`·`KMA_API_KEY`) · `COLLECT_*_WINDOW` |
 | replicas | **1** · `strategy: Recreate` — 파티션 1이고, 파드가 겹쳐 돌면 호출 예산을 두 배로 쓴다 |
@@ -172,20 +172,20 @@ Secret 이 `data-secret` 하나뿐이었다.
 
 ```bash
 # 1. 로컬 — 매니페스트 커밋 후 control-plane 으로 동기화 (워커는 레지스트리에서 이미지를 받아 소스가 필요 없다)
-NODES=a104 bash Infra/k8s/scripts/sync-to-nodes.sh
+NODES=a104 bash Infra/k8s/scripts/deploy/sync-to-nodes.sh
 
 # 2. 로컬 — 시크릿은 sync 대상에서 제외되므로 따로 올린다 (sync-to-nodes.sh 가 tar 에서 뺀다)
-scp <로컬 .env.secret> a104:~/sumgil/BE/k8s/prod/.env.secret
+scp <로컬 be-secret.env> a104:~/sumgil/BE/k8s/prod/be-secret.env
 
 # 3. 노드 — 렌더링 확인 (20분 빌드 전에 파일 문제를 먼저 잡는다). 리소스 7개 + be-secret-<해시>
 ssh a104 'cd ~/sumgil && sudo kubectl kustomize BE/k8s/prod | grep -c "^kind:"'
 
 # 4. 노드 — 이미지 빌드·push. Gradle 멀티스테이지라 오래 걸린다. 백그라운드로 띄운다
-ssh a104 'cd ~/sumgil && nohup bash Infra/k8s/scripts/build-push.sh be > /tmp/build-be.log 2>&1 & echo started'
+ssh a104 'cd ~/sumgil && nohup bash Infra/k8s/scripts/deploy/build-push.sh be > /tmp/build-be.log 2>&1 & echo started'
 ssh a104 'tail -5 /tmp/build-be.log'   # "✓ sumgil-be pushed" 면 완료
 
 # 5. 노드 — 적용. apply.sh 가 kubectl apply -k 로 폴더 전체를 적용하므로 be-collector 도 함께 만들어진다
-ssh a104 'cd ~/sumgil && bash Infra/k8s/scripts/apply.sh'
+ssh a104 'cd ~/sumgil && bash Infra/k8s/scripts/deploy/apply.sh'
 ssh a104 'sudo kubectl rollout status deployment/be-collector -n prod --timeout=180s'
 ```
 
@@ -248,8 +248,30 @@ Kafka ClusterIP 는 `10.43.134.226` 으로 이전과 같아 AI 쪽 `/etc/hosts` 
   이미 만들었다.
 - **로컬과 prod 가 같은 서울시 키를 쓴다.** 하루 1,000회 예산을 나눠 쓰므로 prod 수집기가 뜨면 로컬 수집기는
   중단한다. AI 파트도 EC2 에서 D−1 승하차를 수집하므로(S15P21A104-201) 같은 키인지 확인이 필요하다.
-- **지하철 운영 창이 `10:00-15:30` 이다.** 발표가 그 밖이면 `collector.env` 의 `COLLECT_SUBWAY_WINDOW` 를
+- **지하철 운영 창이 `10:00-15:30` 이다.** 발표가 그 밖이면 `be-config.env` 의 `COLLECT_SUBWAY_WINDOW` 를
   옮기고 다시 apply 한다. 폭(5시간 30분)은 유지해야 예산 안에 든다.
+
+### 저녁 수집기 — 둘째 키로 15:30 이후 창 (2026-09-18, 170 후속)
+
+팀원이 밤에도 작업하게 되어 둘째 인증키(다른 계정 발급)를 받았다. 코드는 소스마다 키 하나·창 하나·예산 카운터 하나라
+키를 도중에 바꿀 수 없으므로, **파드를 하나 더 띄우는 것**으로 풀었다 — `be-collector-evening.yaml`.
+
+| | 낮 `be-collector` | 저녁 `be-collector-evening` |
+| --- | --- | --- |
+| 지하철 창 | `10:00-15:30` (be-config.env) | `15:30-21:00` (Deployment env 가 덮음) |
+| 따릉이 창 | `07:00-18:00` | `18:00-24:00` (자정을 넘기지 않는다 — CallBudget 이 KST 자정에 리셋돼 다음 날 예산을 새벽에 태운다) |
+| 날씨 | `00:00-24:00` | **없음** — `be-secret` 을 통째로 물리지 않아 `KMA_API_KEY` 가 없고, 키 없는 소스는 기동 시 비활성화된다 |
+| 키 | `SEOUL_SUBWAY_KEY`·`SEOUL_BIKE_KEY` | `be-secret` 의 `SEOUL_SUBWAY_KEY_EVENING`·`SEOUL_BIKE_KEY_EVENING` 을 `secretKeyRef` 로 같은 이름에 꽂는다 |
+| 예산 | 990 / 1,000 | 지하철 990 · 따릉이 540 |
+
+- 두 창은 15:30 에서 맞닿고(종료 미포함·시작 포함) 겹치지 않는다. 같은 토픽에 쓰지만 중복 이벤트가 없다.
+- **컨슈머는 두 창의 합 `10:00-21:00` 을 본다** — `be-consumer.yaml` 의 env 가 `be-config` 값을 덮는다. 저녁 창을 옮기면 같이 바꾼다.
+- 둘째 키 두 개는 `be-secret.env.example` 에 추가했다. `render-secrets.sh` 가 example 의 키를 전부 요구하므로
+  **GitLab 변수에도 같은 이름으로 등록해야 렌더가 된다** (`register-gitlab-vars.sh` 가 example 에서 이름을 읽는다).
+  `be-secret` 내용이 바뀌어 해시 접미사가 바뀌면 낮 `be-collector` 도 한 번 재시작된다 — 15:30 이후에 적용하면 잃는 회차가 없다.
+- `apply.sh` 의 rollout 대기 목록에 없다. 적용 뒤 `kubectl rollout status deployment/be-collector-evening -n prod` 를 직접 본다.
+- 확인: 저녁 파드 로그에 `subway.arrival 운영 시간 창 15:30-21:00 — 지금 안`, 날씨는 `weather 소스 인증키가 없어 비활성화한다`.
+  Redis `subway:arrival:status` 의 `window` 가 `10:00-21:00`, 15:30 이후 `subway:arrival:{id}` TTL 이 계속 갱신되면 끝.
 
 ## 9. 밟은 함정
 
