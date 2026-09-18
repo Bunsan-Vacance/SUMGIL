@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # 239: 135 시각표 파서 산출물(공공데이터포털 15098251). 열차 표 옵션을 켰는데 이 파일이
     # 없으면 `timetable.load_timetable`이 무엇을 먼저 돌려야 하는지 알려주는 오류를 낸다.
     crowd_timetable_path: Path = AI_ROOT / "data" / "CROWD" / "interim" / "timetable_long.parquet"
+    # 244: 링크(from/to) 표(`predictions_link_{date}.parquet` + BE용 CSV) 산출 여부. 기본 False —
+    # B-5 적재 계약은 확정됐지만(`.claude/handoff/response/FROME_BE-crowd-pred-load-path.md`)
+    # 배치 스케줄이 아직 등록되지 않아, 첫 릴리스는 명시적으로 켰을 때만 만든다.
+    crowd_link_table: bool = False
 
     # ── BIKE 서빙 ──
     # bike_stock_pred 표가 놓이는 곳. CROWD와 달리 날짜별 파일이 아니라 **단일 최신 표**다
