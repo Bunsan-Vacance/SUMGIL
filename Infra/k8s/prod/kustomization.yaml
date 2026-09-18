@@ -10,9 +10,10 @@ resources:
   - redis.yaml
   - kafka.yaml
   - registry.yaml
+  - certificate.yaml
 secretGenerator:
   - name: data-secret
     envs:
-      - .env.secret
+      - data-secret.env
 generatorOptions:
   disableNameSuffixHash: true

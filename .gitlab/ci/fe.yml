@@ -1,0 +1,53 @@
+# FE CI (React 19 / TypeScript / Vite)
+# 네이밍: 파트-동작 (fe-test·fe-image; fe-check에서 개명).
+# 트리거 anchor로 MR/main/develop 분기를 한 곳에서 정의 — 경로 추가 시 한 곳만 고친다.
+.fe_test_paths: &fe_test_paths
+  - "FE/src/**/*"
+  - "FE/package.json"
+  - "FE/package-lock.json"
+  - "FE/vite.config.*"
+  - "FE/tsconfig*"
+  - ".gitlab/ci/fe.yml"
+
+# 검증: MR·main·개발브랜치에서 FE 변경 시. 매니페스트 변경은 manifests-validate가 맡는다.
+fe-test:
+  image: node:24-slim
+  tags:
+    - CI
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *fe_test_paths
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: *fe_test_paths
+    - if: '$CI_COMMIT_BRANCH =~ /^(develop-.*|feat\/.*)$/'
+      changes: *fe_test_paths
+  before_script:
+    - cd FE
+    - npm ci
+  script:
+    - npm run format:check
+    - npm test
+    - npm run build
+
+# 이미지: develop-FE에서 FE 변경 시 (소유자 브랜치 — deploy-fe가 IMAGE_TAG로 배포). VITE_*는 GitLab 변수에서 주입 (미등록 시 빌드 실패).
+# 전제: 러너 호스트 docker 접근 + insecure-registry 등록 (⬜ 첫 develop 파이프라인에서 확인).
+fe-image:
+  stage: build
+  image: docker:28
+  tags:
+    - CI
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop-FE"'
+      changes: *fe_test_paths
+  variables:
+    REGISTRY_HOST: "100.103.156.53:30500"
+  script:
+    - TAG="${CI_COMMIT_SHORT_SHA:-latest}"
+    - docker build --build-arg "VITE_API_BASE_URL=${VITE_API_BASE_URL}" --build-arg "VITE_KAKAO_MAP_APP_KEY=${VITE_KAKAO_MAP_APP_KEY}" -t "${REGISTRY_HOST}/sumgil-fe:${TAG}" FE
+    - docker push "${REGISTRY_HOST}/sumgil-fe:${TAG}"
+    - docker tag "${REGISTRY_HOST}/sumgil-fe:${TAG}" "${REGISTRY_HOST}/sumgil-fe:latest"
+    - docker push "${REGISTRY_HOST}/sumgil-fe:latest"
+    - echo "IMAGE_TAG=${TAG}" > image.env
+  artifacts:
+    reports:
+      dotenv: image.env

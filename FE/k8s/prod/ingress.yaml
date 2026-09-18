@@ -7,6 +7,10 @@ metadata:
   name: fe
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - j15a104.p.ssafy.io
+      secretName: sumgil-tls
   rules:
     - host: j15a104.p.ssafy.io
       http:

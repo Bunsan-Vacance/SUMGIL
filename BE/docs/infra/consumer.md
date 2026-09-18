@@ -296,7 +296,7 @@ COLLECT_PUBLISHER=redis SPRING_PROFILES_ACTIVE=local,collect ./gradlew bootRun
 | 파일 | 내용 |
 | --- | --- |
 | `k8s/prod/be-consumer.yaml` | Deployment. `sumgil-be:latest` 에 `SPRING_PROFILES_ACTIVE=prod,consume` |
-| `k8s/prod/consumer.env` | `KAFKA_BOOTSTRAP_SERVERS`·`CONSUME_GROUP_ID` → `be-consumer-config` |
+| `k8s/prod/be-config.env` | `KAFKA_BOOTSTRAP_SERVERS`·`CONSUME_GROUP_ID`·`COLLECT_*` → `be-config` (수집기와 같은 파일) |
 | `k8s/prod/kustomization.yaml` | 위 둘 등록 |
 
 **설계 결정**
