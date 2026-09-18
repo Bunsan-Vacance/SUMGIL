@@ -42,8 +42,8 @@ describe('경로 선택과 안내 데이터', () => {
       { ...routes[3], id: 'bus-2', modes: ['bus' as const], routeType: 'ALTERNATIVE' as const },
     ]
     expect(getRoutes(serverRoutes, ['walk', 'subway'], 'calm').map((r) => r.id)).toEqual([
-      'shortest-1',
       'low-0',
+      'shortest-1',
     ])
     expect(
       getRoutes(serverRoutes.slice(0, 2).reverse(), ['walk', 'subway'], 'fast').map((r) => r.id),

@@ -11,10 +11,10 @@ import type {
 import type { Place, Route } from '../route/types'
 import KakaoMap from './KakaoMap'
 
-const mocks = vi.hoisted(() => ({ loadKakaoMaps: vi.fn(), stock: vi.fn() }))
+const mocks = vi.hoisted(() => ({ loadKakaoMaps: vi.fn(), stock: vi.fn(), nearby: vi.fn() }))
 vi.mock('../../lib/kakao/sdk', () => ({ loadKakaoMaps: mocks.loadKakaoMaps }))
 vi.mock('../../api/repositories', () => ({
-  bikeStationRepository: null,
+  bikeStationRepository: { nearby: mocks.nearby },
   bikeStockRepository: { stock: mocks.stock },
   isBackendConfigured: false,
 }))
@@ -83,8 +83,10 @@ class FakeMap {
 }
 
 class FakeBounds {
+  static containsAll = false
+
   extend = vi.fn()
-  contain = vi.fn(() => false)
+  contain = vi.fn(() => FakeBounds.containsAll)
 }
 
 class FakeMarker {
@@ -196,6 +198,7 @@ function fakeMaps(
 function renderMap(
   options: {
     origin?: Place | null
+    destination?: Place | null
     places?: Place[]
     route?: Route | null
     onPlaceSelect?: (place: Place) => void
@@ -209,7 +212,7 @@ function renderMap(
   const rendered = render(
     <KakaoMap
       origin={options.origin === undefined ? origin : options.origin}
-      destination={null}
+      destination={options.destination === undefined ? null : options.destination}
       places={options.places}
       route={options.route}
       onPlaceSelect={options.onPlaceSelect}
@@ -226,6 +229,11 @@ function renderMap(
   }
 }
 
+function clickBikeMarker(rendered: ReturnType<typeof renderMap>, index = 0) {
+  const content = (rendered.customOverlays[index].options as { content: HTMLButtonElement }).content
+  fireEvent.click(content)
+}
+
 beforeEach(() => {
   mocks.stock.mockReset().mockResolvedValue({
     rentalId: 'ST-1',
@@ -233,6 +241,8 @@ beforeEach(() => {
     availableBikes: null,
     stockUpdatedAt: null,
   })
+  mocks.nearby.mockReset().mockResolvedValue([])
+  FakeBounds.containsAll = false
   FakeMap.instances = []
   FakeCustomOverlay.instances = []
   FakeAbstractOverlay.instances = []
@@ -258,10 +268,22 @@ describe('일반 지도 장소 마커', () => {
       dockCount: 0,
       distanceMeters: 42.5,
     }
-    renderMap({ origin: station })
+    mocks.nearby.mockResolvedValueOnce([
+      {
+        id: 'ST-0',
+        name: '대여소',
+        address: '',
+        lat: 37.5,
+        lng: 127,
+        dockCount: 0,
+        distanceMeters: 42.5,
+      },
+    ])
+    FakeBounds.containsAll = true
+    const rendered = renderMap({ origin: station })
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '출발 장소 정보' })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    await waitFor(() => expect(rendered.customOverlays).toHaveLength(1))
+    clickBikeMarker(rendered)
 
     const card = screen.getByRole('region', { name: '따릉이 실시간 재고' })
     expect(card.textContent).toContain('대여소')
@@ -278,9 +300,20 @@ describe('일반 지도 장소 마커', () => {
       lat: 37.5,
       lng: 127,
     }
-    renderMap({ origin: station })
+    mocks.nearby.mockResolvedValueOnce([
+      {
+        id: 'ST-1',
+        name: '정보 없는 대여소',
+        address: '',
+        lat: 37.5,
+        lng: 127,
+      },
+    ])
+    FakeBounds.containsAll = true
+    const rendered = renderMap({ origin: station })
 
-    fireEvent.click(await screen.findByRole('button', { name: '출발 장소 정보' }))
+    await waitFor(() => expect(rendered.customOverlays).toHaveLength(1))
+    clickBikeMarker(rendered)
 
     const card = screen.getByRole('region', { name: '따릉이 실시간 재고' })
     expect(card.textContent).toContain('정보 없는 대여소')
@@ -288,7 +321,7 @@ describe('일반 지도 장소 마커', () => {
     expect(card.textContent).not.toContain('지도 중심에서')
   })
 
-  it('마커 선택 정보를 표시하고 버튼과 Escape로 닫는다', async () => {
+  it('마커 선택 정보를 표시하고 닫기 버튼과 Escape로 닫는다', async () => {
     const { markerClickHandlers } = renderMap()
     await waitFor(() => expect(markerClickHandlers).toHaveLength(1))
 
@@ -306,7 +339,7 @@ describe('일반 지도 장소 마커', () => {
     fireEvent.click(screen.getByRole('button', { name: '장소 정보 닫기' }))
     expect(screen.queryByRole('region', { name: '선택한 장소 정보' })).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    act(() => markerClickHandlers[0]())
     expect(screen.queryByRole('region', { name: '선택한 장소 정보' })).not.toBeNull()
 
     act(() => markerClickHandlers[0]())
@@ -326,6 +359,13 @@ describe('일반 지도 장소 마커', () => {
     expect(screen.queryByRole('region', { name: '선택한 장소 정보' })).toBeNull()
     act(() => oldHandler())
     expect(screen.queryByRole('region', { name: '선택한 장소 정보' })).toBeNull()
+  })
+
+  it('출발지와 도착지 정보 바로가기 버튼을 표시하지 않는다', () => {
+    renderMap({ destination: { ...origin, id: 'destination', name: '선릉역' } })
+
+    expect(screen.queryByRole('button', { name: '출발 장소 정보' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '도착 장소 정보' })).toBeNull()
   })
 
   it('언마운트 시 marker click listener와 marker를 정리한다', async () => {
@@ -443,13 +483,13 @@ describe('일반 지도 장소 마커', () => {
     }
     const rendered = renderMap({ route })
     await waitFor(() =>
-      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(2),
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(4),
     )
     const firstSvg = document.querySelector('.route-svg-overlay') as SVGSVGElement
     expect(firstSvg.style.zIndex).toBe('5')
     expect(firstSvg.style.overflow).toBe('visible')
     expect(firstSvg.querySelectorAll('polyline')[0].getAttribute('points')).toContain('12700')
-    expect(firstSvg.querySelectorAll('polyline')[1].getAttribute('points')).toContain('12710')
+    expect(firstSvg.querySelectorAll('polyline')[2].getAttribute('points')).toContain('12710')
 
     const nextRoute: Route = {
       ...route,
@@ -459,7 +499,7 @@ describe('일반 지도 장소 마커', () => {
       <KakaoMap origin={origin} destination={null} route={nextRoute} onMessage={vi.fn()} />,
     )
     await waitFor(() =>
-      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(1),
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(2),
     )
     expect(FakeAbstractOverlay.instances[0].setMap).toHaveBeenCalledWith(null)
     expect(document.querySelectorAll('.route-svg-overlay')).toHaveLength(1)
@@ -526,11 +566,13 @@ describe('일반 지도 장소 마커', () => {
     }
     const rendered = renderMap({ route, onPlaceSelect })
     await waitFor(() =>
-      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(2),
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(4),
     )
     const routeLines = document.querySelectorAll('.route-svg-overlay polyline')
-    expect(routeLines[0].getAttribute('stroke')).toBe('#00A84D')
-    expect(routeLines[1].getAttribute('stroke')).toBe('#2f80c0')
+    expect(routeLines[0].getAttribute('stroke')).toBe('#fff')
+    expect(routeLines[1].getAttribute('stroke')).toBe('#28323c')
+    expect(routeLines[2].getAttribute('stroke')).toBe('#fff')
+    expect(routeLines[3].getAttribute('stroke')).toBe('#28323c')
     await waitFor(() => expect(rendered.customOverlays).toHaveLength(3))
     expect(
       rendered.customOverlays.every(
@@ -616,7 +658,7 @@ describe('일반 지도 장소 마커', () => {
     }
     renderMap({ route })
     await waitFor(() =>
-      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(1),
+      expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(2),
     )
     const map = FakeMap.instances[0]
     const setBoundsCalls = map.setBounds.mock.calls.length
@@ -630,6 +672,35 @@ describe('일반 지도 장소 마커', () => {
 
 describe('따릉이 재고 조회', () => {
   const bike = { ...origin, id: 'bike-station:ST-1', name: '시험 대여소', kind: '따릉이 대여소' }
+  const bikeRoute: Route = {
+    id: 'bike-stock-route',
+    label: '따릉이 경로',
+    minutes: 8,
+    transfers: 0,
+    modes: ['bike'],
+    legs: [
+      {
+        mode: 'bike',
+        title: '따릉이 이동',
+        note: '대여소에서 반납소까지',
+        minutes: 8,
+        from: {
+          id: 'bike-rental',
+          name: '시험 대여소',
+          lat: 37.498,
+          lng: 127.028,
+          rentalId: 'ST-1',
+        },
+        to: {
+          id: 'bike-return',
+          name: '두 번째',
+          lat: 37.52,
+          lng: 127.05,
+          rentalId: 'ST-2',
+        },
+      },
+    ],
+  }
   it.each([
     ['AVAILABLE', 0, '대여 가능한 자전거가 없어요.'],
     ['AVAILABLE', 7, '현재 대여할 수 있어요.'],
@@ -642,8 +713,9 @@ describe('따릉이 재고 조회', () => {
       availableBikes: count,
       stockUpdatedAt: count === null ? null : '2026-09-17T10:00:00+09:00',
     })
-    renderMap({ origin: bike })
-    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    const rendered = renderMap({ origin: bike, route: bikeRoute })
+    await waitFor(() => expect(rendered.customOverlays).toHaveLength(2))
+    clickBikeMarker(rendered)
     expect(await screen.findByText(label as string)).toBeTruthy()
     expect(mocks.stock).toHaveBeenCalledWith('ST-1', expect.any(AbortSignal))
   })
@@ -655,8 +727,9 @@ describe('따릉이 재고 조회', () => {
           resolveStock = resolve
         }),
     )
-    renderMap({ origin: bike })
-    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    const rendered = renderMap({ origin: bike, route: bikeRoute })
+    await waitFor(() => expect(rendered.customOverlays).toHaveLength(2))
+    clickBikeMarker(rendered)
     fireEvent.click(await screen.findByRole('button', { name: '다시 시도' }))
     const signal = mocks.stock.mock.calls[1][1] as AbortSignal
     fireEvent.click(screen.getByRole('button', { name: '재고 정보 닫기' }))
@@ -686,17 +759,11 @@ describe('따릉이 재고 조회', () => {
         availableBikes: 2,
         stockUpdatedAt: '2026-09-17T10:00:00+09:00',
       })
-    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
-    render(
-      <KakaoMap
-        origin={bike}
-        destination={{ ...bike, id: 'bike-station:ST-2', name: '두 번째' }}
-        onMessage={vi.fn()}
-      />,
-    )
-    fireEvent.click(screen.getByRole('button', { name: '출발 장소 정보' }))
+    const rendered = renderMap({ origin: bike, route: bikeRoute })
+    await waitFor(() => expect(rendered.customOverlays).toHaveLength(2))
+    clickBikeMarker(rendered)
     const signal = mocks.stock.mock.calls[0][1] as AbortSignal
-    fireEvent.click(screen.getByRole('button', { name: '도착 장소 정보' }))
+    clickBikeMarker(rendered, 1)
     expect(await screen.findByText('2대')).toBeTruthy()
     expect(signal.aborted).toBe(true)
     await act(async () =>

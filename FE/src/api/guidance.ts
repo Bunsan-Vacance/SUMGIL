@@ -67,6 +67,8 @@ function timestamp(value: unknown) {
   return parsed
 }
 
+const arrivalStatuses = new Set(['LIVE', 'NO_INFO', 'OUTSIDE_WINDOW', 'STALE'])
+
 function mapArrival(value: unknown): TrainArrival {
   if (!isRecord(value)) {
     throw new RepositoryError('invalid-response', '실시간 도착 정보 응답이 올바르지 않아요.')
@@ -144,10 +146,15 @@ export function createBackendGuidanceRepository(baseUrl: string): GuidanceReposi
         `${baseUrl}/api/transit/arrivals?${params.toString()}`,
         signal,
       )
-      if (!Array.isArray(data)) {
+      if (
+        !isRecord(data) ||
+        typeof data.status !== 'string' ||
+        !arrivalStatuses.has(data.status) ||
+        !Array.isArray(data.trains)
+      ) {
         throw new RepositoryError('invalid-response', '실시간 도착 정보 응답이 올바르지 않아요.')
       }
-      return data.map(mapArrival)
+      return data.trains.map(mapArrival)
     },
     async replan(request, signal) {
       if (

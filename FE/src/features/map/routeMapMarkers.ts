@@ -1,6 +1,5 @@
 import type { KakaoMapInstance, KakaoMaps, MapOverlay } from '../../lib/kakao/sdk'
 import type { GeometryLineString, Leg, Place, Route, RouteEndpoint } from '../route/types'
-import { lineColor } from '../route/lineColor'
 import { isTransitLeg, isTransferLeg } from '../route/transitions'
 
 export type RouteEndpointRole = '승차' | '환승' | '하차'
@@ -13,12 +12,14 @@ export interface RouteEndpointCandidate {
   bikeRoles?: BikeEndpointRole[]
 }
 
+export const ROUTE_LINE_COLOR = '#28323c'
+
 const ROUTE_LINE_STYLES = {
-  subway: { strokeColor: '#6379bd', strokeStyle: 'solid' },
-  bus: { strokeColor: '#2f80c0', strokeStyle: 'solid' },
-  bike: { strokeColor: '#2f7a59', strokeStyle: 'solid' },
-  walk: { strokeColor: '#6379bd', strokeStyle: 'solid' },
-  transfer: { strokeColor: '#5d6873', strokeStyle: 'dashed' },
+  subway: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  bus: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  bike: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  walk: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  transfer: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'dashed' },
 } as const
 
 export interface RouteLineEntry {
@@ -28,8 +29,6 @@ export interface RouteLineEntry {
 
 export function routeLineStyle(leg: Leg) {
   if (isTransferLeg(leg)) return ROUTE_LINE_STYLES.transfer
-  const color = lineColor(leg)
-  if (color) return { strokeColor: color, strokeStyle: 'solid' as const }
   return ROUTE_LINE_STYLES[leg.mode]
 }
 
@@ -90,18 +89,29 @@ export function createRouteSvgOverlay(
       entries.forEach(({ coordinates, style }) => {
         const path = validPath(maps, coordinates)
         if (path.length < 2) return
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
         const points = path
           .map((point) => {
             const pixel = projection.pointFromCoords(point)
             return `${pixel.x},${pixel.y}`
           })
           .join(' ')
+        const casing = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
+        casing.setAttribute('points', points)
+        casing.setAttribute('fill', 'none')
+        casing.setAttribute('stroke', '#fff')
+        casing.setAttribute('stroke-width', '8')
+        casing.setAttribute('stroke-opacity', '0.9')
+        casing.setAttribute('stroke-linecap', 'round')
+        casing.setAttribute('stroke-linejoin', 'round')
+        if (style.strokeStyle === 'dashed') casing.setAttribute('stroke-dasharray', '8 6')
+        this.element.appendChild(casing)
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
         line.setAttribute('points', points)
         line.setAttribute('fill', 'none')
         line.setAttribute('stroke', style.strokeColor)
         line.setAttribute('stroke-width', '5')
-        line.setAttribute('stroke-opacity', '0.85')
+        line.setAttribute('stroke-opacity', '0.95')
         line.setAttribute('stroke-linecap', 'round')
         line.setAttribute('stroke-linejoin', 'round')
         if (style.strokeStyle === 'dashed') line.setAttribute('stroke-dasharray', '8 6')

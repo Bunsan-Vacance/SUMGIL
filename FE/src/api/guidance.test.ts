@@ -33,15 +33,19 @@ describe('guidance repository', () => {
       status: 200,
       json: async () => ({
         success: true,
-        data: [
-          {
-            trainId: 'train-1',
-            direction: '성수 방면',
-            arrivalTime: '2026-09-17T09:42:00+09:00',
-            updatedAt: '2026-09-17T09:39:00+09:00',
-            source: 'LIVE',
-          },
-        ],
+        data: {
+          status: 'LIVE',
+          updatedAt: '2026-09-17T09:39:00+09:00',
+          trains: [
+            {
+              trainId: 'train-1',
+              direction: '성수 방면',
+              arrivalTime: '2026-09-17T09:42:00+09:00',
+              updatedAt: '2026-09-17T09:39:00+09:00',
+              source: 'LIVE',
+            },
+          ],
+        },
       }),
     }))
     vi.stubGlobal('fetch', fetchMock)
@@ -66,18 +70,89 @@ describe('guidance repository', () => {
         status: 200,
         json: async () => ({
           success: true,
-          data: [
-            {
-              trainId: 'train-1',
-              direction: '성수 방면',
-              arrivalTime: '2026-09-17T09:42:00',
-              updatedAt: '2026-09-17T09:39:00+09:00',
-              source: 'LIVE',
-            },
-          ],
+          data: {
+            status: 'LIVE',
+            updatedAt: '2026-09-17T09:39:00+09:00',
+            trains: [
+              {
+                trainId: 'train-1',
+                direction: '성수 방면',
+                arrivalTime: '2026-09-17T09:42:00',
+                updatedAt: '2026-09-17T09:39:00+09:00',
+                source: 'LIVE',
+              },
+            ],
+          },
         }),
       })),
     )
+
+    await expect(
+      createBackendGuidanceRepository('http://be.test').arrivals(
+        { stationId: '221', routeId: '1002' },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+  })
+
+  it.each(['NO_INFO', 'OUTSIDE_WINDOW', 'STALE'] as const)(
+    '%s 상태에서 빈 trains를 빈 결과로 반환한다',
+    async (status) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: { status, updatedAt: '2026-09-17T09:39:00+09:00', trains: [] },
+          }),
+        })),
+      )
+
+      await expect(
+        createBackendGuidanceRepository('http://be.test').arrivals(
+          { stationId: '221', routeId: '1002' },
+          new AbortController().signal,
+        ),
+      ).resolves.toEqual([])
+    },
+  )
+
+  it('허용되지 않은 상태나 trains가 아닌 envelope을 거부한다', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          status: 'UNKNOWN',
+          updatedAt: '2026-09-17T09:39:00+09:00',
+          trains: [] as unknown[],
+        },
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      createBackendGuidanceRepository('http://be.test').arrivals(
+        { stationId: '221', routeId: '1002' },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          status: 'LIVE',
+          updatedAt: '2026-09-17T09:39:00+09:00',
+          trains: {} as unknown as unknown[],
+        },
+      }),
+    })
 
     await expect(
       createBackendGuidanceRepository('http://be.test').arrivals(

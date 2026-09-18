@@ -211,6 +211,16 @@ describe('경로 결과 상태', () => {
     expect(setPriority).toHaveBeenCalledWith('calm')
   })
 
+  it('서버가 덜 붐비는 경로를 지정하면 혼잡도 수치 없이도 정렬 메뉴를 표시한다', () => {
+    const liveRoutes = routes.slice(0, 2).map(({ congestionPrediction: _, ...route }, index) => ({
+      ...route,
+      routeType: index === 0 ? ('LOW_CONGESTION' as const) : ('SHORTEST' as const),
+    }))
+    render(<ResultsPage {...props({ visible: liveRoutes, isLiveApi: true })} />)
+
+    expect(screen.getByRole('button', { name: '경로 정렬: 빠른 순' })).toBeTruthy()
+  })
+
   it('혼잡도 없는 결과는 예측 정보 없음을 표시하고 정렬을 숨긴다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
