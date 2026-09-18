@@ -1,0 +1,56 @@
+# AI 서빙 워크로드 — 뼈대 (S15P21A104-211). 값 미확정 부분은 ⬜, 채우지 말고 README부터 볼 것.
+# FastAPI (uvicorn app.main:app) + /health. 라우터 prefix: /bike·/crowd·/route (app/*/router.py).
+# Ingress 없음 — 외부 공개 경로 미결정 (BE가 테이블 조립이 1차 경로라 AI 직호출은 보충용).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ai
+  template:
+    metadata:
+      labels:
+        app: ai
+    spec:
+      containers:
+        - name: ai
+          # ⬜ 이미지 미빌드 (Dockerfile 미작성, 211 본작업). 이름만 예약.
+          image: sumgil-ai:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: ai-config
+            - secretRef:
+                name: ai-secret
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            # ⬜ 서빙 실측 전 가정치 (BE와 동일). 배치·모델 로딩 특성 나오면 조정.
+            requests:
+              memory: 384Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai
+spec:
+  selector:
+    app: ai
+  ports:
+    - port: 8000
+      targetPort: 8000

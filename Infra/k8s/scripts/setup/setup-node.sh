@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 노드 사전 설정 (S15P21A104-123/125). 양쪽 EC2에서 각각 실행. 멱등(재실행 안전).
 #
-#   sudo bash scripts/setup-node.sh
+#   sudo bash scripts/setup/setup-node.sh
 #
 # 하는 일:
 #   1. ufw 정책 적용(활성 고정) — 외부 허용 22/80/443, 내부 VPC VXLAN 8472만 추가.
@@ -14,8 +14,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=env.sh
-source "${SCRIPT_DIR}/env.sh"
+# shellcheck source=../env.sh
+source "${SCRIPT_DIR}/../env.sh"
 
 TARGET_USER="${SUDO_USER:-ubuntu}"
 

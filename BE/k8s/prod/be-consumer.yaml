@@ -30,14 +30,14 @@ spec:
             # be-config 의 SPRING_PROFILES_ACTIVE=prod 를 덮는다 (env 가 envFrom 보다 우선).
             - name: SPRING_PROFILES_ACTIVE
               value: prod,consume
+            # 수집 창이 낮(be-collector 10:00-15:30)·저녁(be-collector-evening 15:30-21:00) 두 파드로 갈려 있어
+            # 상태 키(subway:arrival:status)의 outside_window 판정은 두 창의 합으로 본다.
+            # be-config 의 COLLECT_SUBWAY_WINDOW(낮 창)를 덮는다 — 저녁 파드 창을 옮기면 이 값도 같이 바꾼다.
+            - name: COLLECT_SUBWAY_WINDOW
+              value: 10:00-21:00
           envFrom:
             - configMapRef:
-                name: be-config             # DB_URL·REDIS_HOST 등. consume 프로파일도 컨텍스트를 공유해 필요하다
-            - configMapRef:
-                name: be-collector-config   # COLLECT_SUBWAY_WINDOW — 상태 키 판정에 쓴다. 수집기와 같은 값이어야 해서
-                                            # 별도로 두지 않고 수집기 ConfigMap 을 그대로 물린다
-            - configMapRef:
-                name: be-consumer-config    # 컨슈머 그룹·브로커 주소 (consumer.env)
+                name: be-config             # DB_URL·COLLECT_SUBWAY_WINDOW·컨슈머 그룹 전부 여기 (be-config.env, 수집기와 같은 파일이라 값 일치 보장)
             - secretRef:
                 name: data-secret           # DB_PASSWORD (데이터 계층 소유)
           # HTTP 포트가 없어 httpGet 프로브를 걸 수 없다. v1 은 프로브 없이 두고 프로세스가 죽으면

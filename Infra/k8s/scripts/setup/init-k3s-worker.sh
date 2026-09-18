@@ -2,7 +2,7 @@
 # k3s worker (순서 1번, S15P21A104-124). node2에서 실행. VPN join 완료 전제.
 #
 # 사용법 (root 또는 sudo):
-#   sudo K3S_URL=https://<node1-VPN-IP>:6443 K3S_TOKEN=<node-token> bash scripts/init-k3s-worker.sh
+#   sudo K3S_URL=https://<node1-VPN-IP>:6443 K3S_TOKEN=<node-token> bash scripts/setup/init-k3s-worker.sh
 #
 # 환경변수:
 #   K3S_URL      필수. node1의 https://<VPN-IP>:6443.
