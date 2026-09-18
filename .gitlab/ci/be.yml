@@ -49,8 +49,8 @@ be-test:
   script:
     - ./gradlew build --no-daemon --build-cache -Dgradle.user.home=.gradle
 
-# 이미지: main에서 BE 변경 시만. SHA 태그 + latest 호환 push.
-# 전제: 러너 호스트 docker 접근 + insecure-registry 등록 (⬜ 첫 main 파이프라인에서 확인).
+# 이미지: develop-BE에서 BE 변경 시 (소유자 브랜치 — deploy-be가 IMAGE_TAG로 배포). SHA 태그 + latest 호환 push.
+# 전제: 러너 호스트 docker 접근 + insecure-registry 등록 (⬜ 첫 develop 파이프라인에서 확인).
 # 레지스트리 도달 불가 시 이 job이 실패한다 — 그때는 노드 build-push.sh로 전환.
 be-image:
   stage: build
@@ -58,7 +58,7 @@ be-image:
   tags:
     - CI
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop-BE"'
       changes: *be_test_paths
   variables:
     REGISTRY_HOST: "100.103.156.53:30500"

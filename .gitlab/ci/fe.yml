@@ -29,15 +29,15 @@ fe-test:
     - npm test
     - npm run build
 
-# 이미지: main에서 FE 변경 시만. VITE_*는 GitLab 변수에서 주입 (미등록 시 빌드 실패).
-# 전제: 러너 호스트 docker 접근 + insecure-registry 등록 (⬜ 첫 main 파이프라인에서 확인).
+# 이미지: develop-FE에서 FE 변경 시 (소유자 브랜치 — deploy-fe가 IMAGE_TAG로 배포). VITE_*는 GitLab 변수에서 주입 (미등록 시 빌드 실패).
+# 전제: 러너 호스트 docker 접근 + insecure-registry 등록 (⬜ 첫 develop 파이프라인에서 확인).
 fe-image:
   stage: build
   image: docker:28
   tags:
     - CI
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop-FE"'
       changes: *fe_test_paths
   variables:
     REGISTRY_HOST: "100.103.156.53:30500"
