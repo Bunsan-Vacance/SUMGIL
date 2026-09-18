@@ -203,7 +203,7 @@ LightGBM도 이름 정렬(`latest_artifact`)에만 기대지 않는다 — 지�
 
 | 항목 | 값 |
 | --- | --- |
-| 설정값 | `crowd_lgbm_artifact: str \| None = "festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025"` (200에서 1113 → 2024-25 판으로 교체) |\| None = "festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113"` |
+| 설정값 | `crowd_lgbm_artifact: str \| None = "festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025"` (200에서 1113 → 2024-25 판으로 교체) |
 | 가리키는 아티팩트 | `festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025` — 세트는 `festival_selflag_d1sd_d7_resid` 그대로, `train.py --mask-mode stack`으로 학습(`meta.json`에 `training.masking` 블록, `model_kind` 키는 없어 기존과 같이 `lightgbm`으로 읽힌다) |
 | 판정 근거 | 145 후속 `masking-check/RESULTS.md` 6·7·13·14절(위 표) |
 | 실패 동작 | 폴더가 없으면 `FileNotFoundError`(설정값 이름·기대 경로를 메시지에 남김), 폴더는 있는데 `meta.json`의 `model_kind`가 `lightgbm`이 아니면 `ValueError`(DL과 같은 패턴, `resolve_predictor._lightgbm_artifact`) |
