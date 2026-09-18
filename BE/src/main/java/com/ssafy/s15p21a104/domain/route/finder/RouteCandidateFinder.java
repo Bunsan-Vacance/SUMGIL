@@ -112,19 +112,24 @@ public final class RouteCandidateFinder {
                     edge.fromNode(), edge.toNode(), edge.routeId(), seconds,
                     edge.mode()));
         }
-        // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다.
-        // 접근 경계(WALK ↔ 주행)는 환승이 아니라 비용을 가산하지 않는다(213 T1).
+        // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다 (TransferRule 1곳, 232).
+        // WALK를 지나도 유지된 대중교통 노선으로 비교한다.
         List<Long> transferSecs = new ArrayList<>();
-        String currentLine = null;
-        TravelMode currentMode = null;
+        String kept = null;
+        TravelMode prevMode = null;
+        String prevLine = null;
         for (Edge edge : found.edges()) {
-            if (currentLine != null && !currentLine.equals(edge.routeId())
-                    && !TransferRule.isAccessBoundary(currentMode, edge.mode())) {
-                transferSecs.add(rule.costWithStation(
-                        0, edge.fromNode(), currentLine, edge.routeId()));
+            if (prevMode != null) {
+                TransferRule.TransferDecision decision = TransferRule.decide(
+                        kept, prevMode, prevLine, edge.mode(), edge.routeId());
+                if (decision.transfer()) {
+                    transferSecs.add(rule.costWithStation(
+                            0, edge.fromNode(), decision.costLine(), edge.routeId()));
+                }
             }
-            currentLine = edge.routeId();
-            currentMode = edge.mode();
+            kept = TransferRule.keptTransitLine(kept, edge.mode(), edge.routeId());
+            prevMode = edge.mode();
+            prevLine = edge.routeId();
         }
         // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤
         // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.

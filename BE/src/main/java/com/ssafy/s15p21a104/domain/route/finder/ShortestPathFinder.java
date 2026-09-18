@@ -52,9 +52,11 @@ public final class ShortestPathFinder {
             throw new DomainException(ErrorType.STATION_NOT_FOUND);
         }
 
-        // dist: 역 → (도착 시 노선 → 최소 비용). prev: 역 → (도착 시 노선 → 이전 상태).
-        Map<String, Map<String, Long>> dist = new HashMap<>();
-        Map<String, Map<String, Previous>> prev = new HashMap<>();
+        // dist: 역 → ((도착 노선, 유지 노선) → 최소 비용). prev도 같은 키.
+        // 유지 노선(keptLine)을 키에 넣는다(232) — 같은 역·같은 도착 노선이라도
+        // 직전 대중교통이 다르면 이후 환승 비용이 달라진다.
+        Map<String, Map<StateKey, Long>> dist = new HashMap<>();
+        Map<String, Map<StateKey, Previous>> prev = new HashMap<>();
         PriorityQueue<State> queue = new PriorityQueue<>(Comparator.comparingLong(State::cost));
 
         // 출발 직후 첫 엣지는 환승 아님(현재 노선 없음).
@@ -63,34 +65,45 @@ public final class ShortestPathFinder {
             long cost = transferRule.costWithStation(
                     edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode())
                     + edge.waitSec();
-            if (cost < costOf(dist, edge.toNode(), edge.routeId())) {
-                setCost(dist, edge.toNode(), edge.routeId(), cost);
-                prev.computeIfAbsent(edge.toNode(), key -> new HashMap<>())
-                        .put(edge.routeId(), new Previous(originStationId, null, null, edge));
-                queue.add(new State(cost, edge.toNode(), edge.routeId(), edge.mode()));
+            String kept = TransferRule.keptTransitLine(null, edge.mode(), edge.routeId());
+            StateKey key = new StateKey(edge.routeId(), kept);
+            if (cost < costOf(dist, edge.toNode(), key)) {
+                setCost(dist, edge.toNode(), key, cost);
+                prev.computeIfAbsent(edge.toNode(), k -> new HashMap<>())
+                        .put(key, new Previous(originStationId, null, null, null, edge));
+                queue.add(new State(cost, edge.toNode(), edge.routeId(), edge.mode(), kept));
             }
         }
 
         while (!queue.isEmpty()) {
             State current = queue.poll();
-            if (current.cost() != costOf(dist, current.node(), current.line())) {
+            StateKey currentKey = new StateKey(current.line(), current.keptLine());
+            if (current.cost() != costOf(dist, current.node(), currentKey)) {
                 continue;
             }
             if (current.node().equals(destStationId)) {
                 return buildPath(prev, originStationId, current);
             }
             for (Edge edge : graph.outgoingEdges(current.node())) {
-                // 환승은 현재 서 있는 역에서 일어난다. 접근 경계(WALK ↔ 주행)는
-                // 환승이 아니라 가산 없이 통과한다(213 T1). 실측 없으면 상수로 폴백한다.
-                long nextCost = current.cost() + transferRule.costWithStation(
-                        edge.travelSec(), current.node(), current.line(), edge.routeId(),
-                        current.arrivalMode(), edge.mode());
-                if (nextCost < costOf(dist, edge.toNode(), edge.routeId())) {
-                    setCost(dist, edge.toNode(), edge.routeId(), nextCost);
-                    prev.computeIfAbsent(edge.toNode(), key -> new HashMap<>())
-                            .put(edge.routeId(), new Previous(current.node(), current.line(),
-                                    current.arrivalMode(), edge));
-                    queue.add(new State(nextCost, edge.toNode(), edge.routeId(), edge.mode()));
+                // 환승 판정은 TransferRule 1곳으로 통일한다(232).
+                // WALK를 지나도 유지된 대중교통 노선으로 비교한다.
+                TransferRule.TransferDecision decision = TransferRule.decide(
+                        current.keptLine(), current.arrivalMode(), current.line(),
+                        edge.mode(), edge.routeId());
+                long nextCost = current.cost() + edge.travelSec();
+                if (decision.transfer()) {
+                    nextCost += transferRule.costWithStation(
+                            0, current.node(), decision.costLine(), edge.routeId());
+                }
+                String nextKept = TransferRule.keptTransitLine(
+                        current.keptLine(), edge.mode(), edge.routeId());
+                StateKey nextKey = new StateKey(edge.routeId(), nextKept);
+                if (nextCost < costOf(dist, edge.toNode(), nextKey)) {
+                    setCost(dist, edge.toNode(), nextKey, nextCost);
+                    prev.computeIfAbsent(edge.toNode(), k -> new HashMap<>())
+                            .put(nextKey, new Previous(current.node(), current.line(),
+                                    current.arrivalMode(), current.keptLine(), edge));
+                    queue.add(new State(nextCost, edge.toNode(), edge.routeId(), edge.mode(), nextKept));
                 }
             }
         }
@@ -98,22 +111,22 @@ public final class ShortestPathFinder {
         throw new DomainException(ErrorType.ROUTE_NOT_FOUND);
     }
 
-    private FoundPath buildPath(Map<String, Map<String, Previous>> prev,
+    private FoundPath buildPath(Map<String, Map<StateKey, Previous>> prev,
                                 String originStationId, State arrival) {
         List<Edge> edges = new ArrayList<>();
         String node = arrival.node();
-        String line = arrival.line();
+        StateKey key = new StateKey(arrival.line(), arrival.keptLine());
         while (true) {
-            Previous previous = prevOf(prev, node, line);
+            Previous previous = prevOf(prev, node, key);
             if (previous == null) {
-                throw new IllegalStateException("경로 역추적 실패: " + node + "/" + line);
+                throw new IllegalStateException("경로 역추적 실패: " + node + "/" + key);
             }
             edges.add(0, previous.edge());
             if (previous.fromNode().equals(originStationId)) {
                 break;
             }
             node = previous.fromNode();
-            line = previous.fromLine();
+            key = new StateKey(previous.fromLine(), previous.fromKeptLine());
         }
 
         List<String> stations = new ArrayList<>();
@@ -123,38 +136,50 @@ public final class ShortestPathFinder {
         }
 
         int transfers = 0;
-        for (int i = 1; i < edges.size(); i++) {
-            // 접근 경계(WALK ↔ 주행)는 환승 카운트에서 뺀다(213 T1) — 비용·leg와 일치시킨다.
-            if (!edges.get(i).routeId().equals(edges.get(i - 1).routeId())
-                    && !TransferRule.isAccessBoundary(
-                            edges.get(i - 1).mode(), edges.get(i).mode())) {
-                transfers++;
+        String kept = null;
+        TravelMode prevMode = null;
+        String prevLine = null;
+        for (Edge edge : edges) {
+            // 환승 집계도 TransferRule 1곳으로 통일한다(232).
+            if (prevMode != null) {
+                TransferRule.TransferDecision decision = TransferRule.decide(
+                        kept, prevMode, prevLine, edge.mode(), edge.routeId());
+                if (decision.transfer()) {
+                    transfers++;
+                }
             }
+            kept = TransferRule.keptTransitLine(kept, edge.mode(), edge.routeId());
+            prevMode = edge.mode();
+            prevLine = edge.routeId();
         }
 
         return new FoundPath(List.copyOf(stations), List.copyOf(edges), arrival.cost(), transfers);
     }
 
-    private Previous prevOf(Map<String, Map<String, Previous>> prev, String node, String line) {
-        Map<String, Previous> byLine = prev.get(node);
-        return byLine == null ? null : byLine.get(line);
+    private Previous prevOf(Map<String, Map<StateKey, Previous>> prev, String node, StateKey key) {
+        Map<StateKey, Previous> byKey = prev.get(node);
+        return byKey == null ? null : byKey.get(key);
     }
 
-    private long costOf(Map<String, Map<String, Long>> dist, String node, String line) {
-        Map<String, Long> byLine = dist.get(node);
-        if (byLine == null) {
+    private long costOf(Map<String, Map<StateKey, Long>> dist, String node, StateKey key) {
+        Map<StateKey, Long> byKey = dist.get(node);
+        if (byKey == null) {
             return Long.MAX_VALUE;
         }
-        return byLine.getOrDefault(line, Long.MAX_VALUE);
+        return byKey.getOrDefault(key, Long.MAX_VALUE);
     }
 
-    private void setCost(Map<String, Map<String, Long>> dist, String node, String line, long cost) {
-        dist.computeIfAbsent(node, key -> new HashMap<>()).put(line, cost);
+    private void setCost(Map<String, Map<StateKey, Long>> dist, String node, StateKey key, long cost) {
+        dist.computeIfAbsent(node, k -> new HashMap<>()).put(key, cost);
     }
 
-    private record State(long cost, String node, String line, TravelMode arrivalMode) {
+    private record StateKey(String line, String keptLine) {
     }
 
-    private record Previous(String fromNode, String fromLine, TravelMode fromMode, Edge edge) {
+    private record State(long cost, String node, String line, TravelMode arrivalMode, String keptLine) {
+    }
+
+    private record Previous(String fromNode, String fromLine, TravelMode fromMode,
+                              String fromKeptLine, Edge edge) {
     }
 }

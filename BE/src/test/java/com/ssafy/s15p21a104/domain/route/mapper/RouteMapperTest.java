@@ -173,8 +173,7 @@ class RouteMapperTest {
 
     @Test
     @DisplayName("105-T2: 환승 없으면 기존과 같은 1개 leg이다")
-    void t105_환승없음_기존동일() {
-        EnginePath enginePath = new EnginePath(List.of(
+    void t105_환승없음_기존동일() {        EnginePath enginePath = new EnginePath(List.of(
                 new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY)
         ), 300, 0);
 
@@ -185,6 +184,30 @@ class RouteMapperTest {
 
         assertEquals(1, response.legs().size());
         assertEquals(TravelMode.SUBWAY, response.legs().get(0).mode());
+    }
+
+    @Test
+    @DisplayName("232-T4: WALK 경유 노선 변경도 TRANSFER leg가 낀다")
+    void t232_도보경유_노선변경_TRANSFER() {
+        Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
+        mixed.put("W1", new StationInfo("W1", "도보점", 37.5000, 127.0045));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY),
+                new EngineSegment("1002", "W1", "WALK", 60, TravelMode.WALK),
+                new EngineSegment("W1", "1003", "7", 420, TravelMode.SUBWAY)
+        ), 960, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, mixed,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L))
+                .orElseThrow();
+
+        assertEquals(4, response.legs().size());
+        assertEquals(TravelMode.SUBWAY, response.legs().get(0).mode());
+        assertEquals(TravelMode.WALK, response.legs().get(1).mode());
+        assertEquals(TravelMode.TRANSFER, response.legs().get(2).mode());
+        assertEquals(TravelMode.SUBWAY, response.legs().get(3).mode());
+        assertEquals(180 / 60.0, response.legs().get(2).minutes(), TOLERANCE);
     }
 
     @Test
