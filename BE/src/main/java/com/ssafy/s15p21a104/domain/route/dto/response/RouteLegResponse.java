@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.dto.response;
 
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import java.util.List;
 
 public record RouteLegResponse(
         TravelMode mode,
@@ -24,6 +25,11 @@ public record RouteLegResponse(
          */
         Double distanceMeters,
         /** 사람이 읽는 노선 이름(버스 번호·지하철 노선명 등, S15P21A104-150/FE-175 항목8). 미확보면 {@code null}. */
-        String routeName
+        String routeName,
+        /**
+         * BUS leg 운행 노선 후보(S15P21A104-234). 정규 구간이라 노선 선택을 미루고 목록으로 싣는다.
+         * 비BUS leg는 null. FE 표시용이며 탐색·집계에 쓰지 않는다.
+         */
+        List<RouteOptionResponse> routeOptions
 ) {
 }

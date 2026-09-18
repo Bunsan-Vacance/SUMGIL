@@ -18,13 +18,13 @@ class BikeStockGateTest {
     private static RouteLegResponse bikeLeg(String from) {
         return new RouteLegResponse(TravelMode.BIKE,
                 from, "출발", 37.5, 127.0, "C", "도착", 37.5, 127.0,
-                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable", null, null);
+                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable", null, null, null);
     }
 
     private static RouteLegResponse subwayLeg() {
         return new RouteLegResponse(TravelMode.SUBWAY,
                 "A", "출발", 37.5, 127.0, "C", "도착", 37.5, 127.0,
-                "L1", 15.0, null, "unavailable", null, null);
+                "L1", 15.0, null, "unavailable", null, null, null);
     }
 
     @Test

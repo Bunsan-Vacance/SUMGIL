@@ -248,7 +248,7 @@ public final class RouteMapper {
                 info.stationId(), info.name(), info.lat(), info.lng(),
                 null, seconds / 60.0,
                 null, "unavailable",
-                null, null);
+                null, null, null);
     }
 
     private static List<EngineSegment> validate(
@@ -328,7 +328,7 @@ public final class RouteMapper {
                 // KTDB geometry·거리·노선명은 RouteMapper가 모른다(DB 비의존 순수 함수) —
                 // RouteSearchService가 후처리로 채운다.
                 null, "unavailable",
-                null, null
+                null, null, null
         );
     }
 

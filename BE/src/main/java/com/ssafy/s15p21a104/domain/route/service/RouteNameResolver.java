@@ -83,7 +83,7 @@ public final class RouteNameResolver {
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
                 leg.routeId(), leg.minutes(),
                 leg.geometry(), leg.geometryStatus(),
-                leg.distanceMeters(), routeName
+                leg.distanceMeters(), routeName, null
         );
     }
 }

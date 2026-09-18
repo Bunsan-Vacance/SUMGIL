@@ -21,7 +21,7 @@ class RouteScoreRanker213Test {
     private static RouteSearchResponse responseOf(String routeId, double minutes) {
         RouteLegResponse leg = new RouteLegResponse(TravelMode.SUBWAY,
                 "A", "에이역", 37.5, 127.0, "C", "씨역", 37.5, 127.01,
-                routeId, minutes, null, "unavailable", null, null);
+                routeId, minutes, null, "unavailable", null, null, null);
         return new RouteSearchResponse(RouteType.SHORTEST, minutes, List.of(leg),
                 RouteSource.ALGORITHM, null, 0);
     }
@@ -66,7 +66,7 @@ class RouteScoreRanker213Test {
     void t4_SUBWAY없음_유지() {
         RouteLegResponse leg = new RouteLegResponse(TravelMode.BIKE,
                 "A", "에이역", 37.5, 127.0, "C", "씨역", 37.5, 127.01,
-                "BIKE", 5.0, null, "unavailable", null, null);
+                "BIKE", 5.0, null, "unavailable", null, null, null);
         RouteSearchResponse bike = new RouteSearchResponse(
                 RouteType.SHORTEST, 5.0, List.of(leg), RouteSource.ALGORITHM, null, 0);
         RouteScoreRanker ranker = new RouteScoreRanker(

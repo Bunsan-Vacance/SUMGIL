@@ -183,7 +183,7 @@ public final class RouteGeometryEnhancer {
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
                 leg.routeId(), leg.minutes(),
                 geometry, "available",
-                distanceOf(geometry), leg.routeName()
+                distanceOf(geometry), leg.routeName(), null
         );
     }
 

@@ -24,7 +24,7 @@ class RouteNameAccess213Test {
         TravelMode travelMode = TravelMode.valueOf(mode);
         RouteLegResponse leg = new RouteLegResponse(travelMode,
                 "A", "에이역", 37.5, 127.0, "C", "씨역", 37.5, 127.01,
-                routeId, 5.0, null, "unavailable", null, null);
+                routeId, 5.0, null, "unavailable", null, null, null);
         return new RouteSearchResponse(RouteType.SHORTEST, 5.0, List.of(leg),
                 RouteSource.ALGORITHM, null, 0);
     }

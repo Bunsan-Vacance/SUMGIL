@@ -83,12 +83,12 @@ class CongestionScorerTest {
     private RouteLegResponse subwayLeg(String routeId, double minutes) {
         return new RouteLegResponse(
                 TravelMode.SUBWAY, "A", "에이역", 37.5, 127.0, "B", "비역", 37.51, 127.01,
-                routeId, minutes, null, "unavailable", null, null);
+                routeId, minutes, null, "unavailable", null, null, null);
     }
 
     private RouteLegResponse walkLeg(double minutes) {
         return new RouteLegResponse(
                 TravelMode.WALK, "A", "에이역", 37.5, 127.0, "B", "비역", 37.51, 127.01,
-                "WALK", minutes, null, "unavailable", null, null);
+                "WALK", minutes, null, "unavailable", null, null, null);
     }
 }
