@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.domain.route.finder;
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bike.BikeRentalEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteStopsReader;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
@@ -51,6 +52,7 @@ public class RouteGraphRegistry {
     private Map<TransferRule.TransferKey, Integer> transferTimes = Map.of();
     private java.util.Set<String> rentalIds = java.util.Set.of();
     private java.util.Set<String> stationIds = java.util.Set.of();
+    private BusRouteIndex busRouteIndex = BusRouteIndex.build(Map.of());
     private final java.util.concurrent.ConcurrentMap<String, RouteGraph> slotGraphs =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -99,7 +101,7 @@ public class RouteGraphRegistry {
             }
             List<Edge> rentalEdges = BikeRentalEdgeBuilder.build(rentals);
             Map<String, List<BusEdgeBuilder.RouteStop>> busRoutes = BusRouteStopsReader.read();
-            List<Edge> busEdges = BusEdgeBuilder.build(busRoutes);
+            List<Edge> busEdges = BusEdgeBuilder.buildCorridors(busRoutes);
             Map<String, BikeEdgeBuilder.Stop> busStops = new HashMap<>();
             for (List<BusEdgeBuilder.RouteStop> routeStops : busRoutes.values()) {
                 for (BusEdgeBuilder.RouteStop routeStop : routeStops) {
@@ -121,6 +123,7 @@ public class RouteGraphRegistry {
             this.graph = result.graph();
             this.stationInfos = Map.copyOf(infos);
             this.rentalIds = java.util.Set.copyOf(rentals.keySet());
+            this.busRouteIndex = BusRouteIndex.build(busRoutes);
             this.stationIds = java.util.Set.copyOf(stationIdSet);
             Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
             for (TransferMeta meta : transferMetaRepository.findAll()) {
@@ -237,6 +240,13 @@ public class RouteGraphRegistry {
      */
     public java.util.Set<String> stationIds() {
         return stationIds;
+    }
+
+    /**
+     * @return 정류장 쌍별 운행 노선 인덱스(S15P21A104-234). 미적재 시 빈 인덱스
+     */
+    public BusRouteIndex busRouteIndex() {
+        return busRouteIndex;
     }
 
     /**

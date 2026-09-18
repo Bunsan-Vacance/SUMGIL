@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -310,5 +312,162 @@ class RouteMapperTest {
         assertEquals(3, response.legs().size());
         assertEquals("R1", response.legs().get(1).fromNodeId());
         assertEquals("R3", response.legs().get(1).toNodeId());
+    }
+
+    @Test
+    @DisplayName("234-T52: 교집합이 비는 BUS 연속은 2개 leg + TRANSFER 1개이다")
+    void t234_분리BUS_환승분리() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050),
+                "S3", new StationInfo("S3", "정류장3", 37.5000, 127.0100));
+        // 108은 S1→S2만, 143은 S2→S3만 운행 — 같은 "BUS" routeId라도 갈아타야 한다.
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S2", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 2, 37.5000, 127.0100))));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS),
+                new EngineSegment("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS)
+        ), 660, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), Set.of(), index)
+                .orElseThrow();
+
+        assertEquals(3, response.legs().size());
+        assertEquals(TravelMode.BUS, response.legs().get(0).mode());
+        assertEquals(TravelMode.TRANSFER, response.legs().get(1).mode());
+        assertEquals(TravelMode.BUS, response.legs().get(2).mode());
+        assertEquals("S1", response.legs().get(0).fromNodeId());
+        assertEquals("S2", response.legs().get(0).toNodeId());
+        assertEquals("S2", response.legs().get(2).fromNodeId());
+        assertEquals("S3", response.legs().get(2).toNodeId());
+        assertEquals(List.of("108"), response.legs().get(0).routeOptions().stream()
+                .map(option -> option.routeId()).sorted().toList());
+        assertEquals(List.of("143"), response.legs().get(2).routeOptions().stream()
+                .map(option -> option.routeId()).sorted().toList());
+        long transfers = response.legs().stream()
+                .filter(leg -> leg.mode() == TravelMode.TRANSFER).count();
+        assertEquals(enginePath.transferCount(), transfers);
+        assertEquals(1, response.transferCount());
+    }
+
+    @Test
+    @DisplayName("234-T53: 교집합이 유지되는 BUS 연속은 TRANSFER 없이 1개 leg이다")
+    void t234_공유BUS_단일leg() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050),
+                "S3", new StationInfo("S3", "정류장3", 37.5000, 127.0100));
+        // 108·143 모두 S1→S2→S3 운행 — 환승 없이 한 번에 간다.
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 3, 37.5000, 127.0100)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 3, 37.5000, 127.0100))));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS),
+                new EngineSegment("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS)
+        ), 480, 0);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(), Set.of(), index)
+                .orElseThrow();
+
+        assertEquals(1, response.legs().size());
+        assertEquals(TravelMode.BUS, response.legs().get(0).mode());
+        assertEquals("S1", response.legs().get(0).fromNodeId());
+        assertEquals("S3", response.legs().get(0).toNodeId());
+        assertEquals(List.of("108", "143"), response.legs().get(0).routeOptions().stream()
+                .map(option -> option.routeId()).sorted().toList());
+        long transfers = response.legs().stream()
+                .filter(leg -> leg.mode() == TravelMode.TRANSFER).count();
+        assertEquals(enginePath.transferCount(), transfers);
+        assertEquals(0, response.transferCount());
+    }
+
+    @Test
+    @DisplayName("234-T55: BUS 누적 공통 노선 소진 경계에서 leg를 분리한다")
+    void t234_BUS누적교집합소진_경계분리() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050),
+                "S3", new StationInfo("S3", "정류장3", 37.5000, 127.0100),
+                "S4", new StationInfo("S4", "정류장4", 37.5000, 127.0150));
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 3, 37.5000, 127.0100)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S2", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 2, 37.5000, 127.0100),
+                        new BusEdgeBuilder.RouteStop("S4", 3, 37.5000, 127.0150))));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        100, TravelMode.BUS),
+                new EngineSegment("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        100, TravelMode.BUS),
+                new EngineSegment("S3", "S4", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        100, TravelMode.BUS)
+        ), 480, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), Set.of(), index)
+                .orElseThrow();
+
+        assertEquals(List.of(TravelMode.BUS, TravelMode.TRANSFER, TravelMode.BUS),
+                response.legs().stream().map(leg -> leg.mode()).toList());
+        assertEquals(List.of("S1", "S3", List.of("108")), List.of(
+                response.legs().get(0).fromNodeId(), response.legs().get(0).toNodeId(),
+                response.legs().get(0).routeOptions().stream().map(option -> option.routeId()).toList()));
+        assertEquals(List.of("S3", "S3"), List.of(
+                response.legs().get(1).fromNodeId(), response.legs().get(1).toNodeId()));
+        assertEquals(List.of("S3", "S4", List.of("143")), List.of(
+                response.legs().get(2).fromNodeId(), response.legs().get(2).toNodeId(),
+                response.legs().get(2).routeOptions().stream().map(option -> option.routeId()).toList()));
+        assertEquals(1, response.transferCount());
+    }
+
+    @Test
+    @DisplayName("234-T30: 같은 구간 BUS 연속은 TRANSFER 없이 1개 leg이다")
+    void t230_같은구간BUS_단일leg_비환승() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS)
+        ), 240, 0);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(), Set.of(),
+                        BusRouteIndex.build(Map.of(
+                                "108", List.of(
+                                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)),
+                                "143", List.of(
+                                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)))))
+                .orElseThrow();
+
+        assertEquals(1, response.legs().size());
+        assertEquals(TravelMode.BUS, response.legs().get(0).mode());
     }
 }

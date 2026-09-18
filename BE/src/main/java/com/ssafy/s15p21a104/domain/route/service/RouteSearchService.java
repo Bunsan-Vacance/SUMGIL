@@ -121,7 +121,8 @@ public class RouteSearchService {
                 graphRegistry.transferTimes(),
                 graphRegistry.rentalIds(),
                 graphRegistry.stationInfos(),
-                graphRegistry::bikeStock);
+                graphRegistry::bikeStock,
+                graphRegistry.busRouteIndex());
     }
 
     /** 쾌적 순위기. 혼잡도 조회 함수를 주입해 만든다. */
@@ -168,6 +169,14 @@ public class RouteSearchService {
                         names.put(busRoute.getRouteId(), busRoute.getName());
                     }
                     return names;
+                },
+                graphRegistry.busRouteIndex(),
+                ids -> {
+                    Map<String, Integer> headways = new HashMap<>();
+                    for (BusRoute busRoute : busRouteRepository.findAllById(ids)) {
+                        headways.put(busRoute.getRouteId(), busRoute.getHeadwayMin());
+                    }
+                    return headways;
                 }).withRouteNames(responses);
     }
 
@@ -239,7 +248,8 @@ public class RouteSearchService {
                 graphRegistry.transferTimes(),
                 graphRegistry.rentalIds(),
                 stationInfos,
-                graphRegistry::bikeStock);
+                graphRegistry::bikeStock,
+                graphRegistry.busRouteIndex());
         // 214: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
         List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
                 coordFinder.findCandidates(

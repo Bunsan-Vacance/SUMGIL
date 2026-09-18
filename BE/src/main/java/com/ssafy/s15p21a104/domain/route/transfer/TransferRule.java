@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.domain.route.transfer;
 
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -201,6 +202,75 @@ public class TransferRule {
             return new TransferDecision(true, prevLine);
         }
         return new TransferDecision(false, null);
+    }
+
+    /**
+     * 환승 없이 현재까지 이어서 탈 수 있는 대중교통 노선 집합을 갱신한다(S15P21A104-234).
+     * 비대중교통 구간에서는 기존 집합을 유지하고, 첫 대중교통 구간에서는 현재 옵션을 쓴다.
+     * 이후에는 교집합을 누적하며, 교집합이 비면 환승 경계 뒤 새 탑승으로 보고 현재 옵션으로
+     * 다시 시작한다.
+     */
+    public static Set<String> keptTransitLines(
+            Set<String> kept, TravelMode mode, Set<String> options) {
+        Set<String> keptSafe = kept == null ? Set.of() : Set.copyOf(kept);
+        if (!isTransit(mode)) {
+            return keptSafe;
+        }
+        Set<String> optionsSafe = options == null ? Set.of() : Set.copyOf(options);
+        if (keptSafe.isEmpty()) {
+            return optionsSafe;
+        }
+        Set<String> intersection = new java.util.HashSet<>(keptSafe);
+        intersection.retainAll(optionsSafe);
+        return intersection.isEmpty() ? optionsSafe : Set.copyOf(intersection);
+    }
+
+    /**
+     * 환승 여부를 노선 집합 교집합으로 판정한다(S15P21A104-234). 연속 대중교통은 누적
+     * 공통 노선이 없으면 환승이다(같은 정류장 108→143 포함). 직접 대중교통↔BIKE처럼
+     * 접근 경계가 아닌 수단 전환도 이전·다음 옵션이 서로 겹치지 않으면 환승이다.
+     * 첫 탑승과 WALK가 낀 접근 경계는 환승이 아니다.
+     */
+    public static TransferDecision decideLines(
+            Set<String> kept, TravelMode prevMode, Set<String> prevOptions,
+            TravelMode nextMode, Set<String> nextOptions) {
+        Set<String> keptSafe = kept == null ? Set.of() : Set.copyOf(kept);
+        Set<String> prevSafe = prevOptions == null ? Set.of() : Set.copyOf(prevOptions);
+        Set<String> nextSafe = nextOptions == null ? Set.of() : Set.copyOf(nextOptions);
+        if (prevMode != null && isTransit(nextMode) && !keptSafe.isEmpty() && !nextSafe.isEmpty()) {
+            for (String line : nextSafe) {
+                if (keptSafe.contains(line)) {
+                    return new TransferDecision(false, null);
+                }
+            }
+            return new TransferDecision(true, null);
+        }
+        if (prevMode != null && !prevSafe.isEmpty() && !nextSafe.isEmpty()
+                && !isAccessBoundary(prevMode, nextMode)
+                && java.util.Collections.disjoint(prevSafe, nextSafe)) {
+            return new TransferDecision(true, null);
+        }
+        return new TransferDecision(false, null);
+    }
+
+    /**
+     * 경계 환승 비용. 후보 쌍 중 실측 최소값, 전부 miss면 상수(Q3 결정).
+     */
+    public long transferCost(String stationId, Set<String> fromLines, Set<String> toLines) {
+        long best = defaultSec;
+        boolean found = false;
+        if (fromLines != null && toLines != null && stationId != null) {
+            for (String from : fromLines) {
+                for (String to : toLines) {
+                    Integer measured = transferTimes.get(new TransferKey(stationId, from, to));
+                    if (measured != null && (!found || measured < best)) {
+                        best = measured;
+                        found = true;
+                    }
+                }
+            }
+        }
+        return best;
     }
 
     /**

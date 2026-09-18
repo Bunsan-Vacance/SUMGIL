@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
@@ -22,13 +23,23 @@ public final class KShortestPathFinder {
 
     private final ShortestPathFinder single;
     private final TransferRule transferRule;
+    private final BusRouteIndex busRouteIndex;
 
     /**
      * @param transferRule 환승 비용 규칙. 탐색기 내부에서 공유한다
      */
     public KShortestPathFinder(TransferRule transferRule) {
+        this(transferRule, null);
+    }
+
+    /**
+     * @param transferRule 환승 비용 규칙. 탐색기 내부에서 공유한다
+     * @param busRouteIndex 정규 BUS 구간 운행 노선 인덱스(234). null이면 routeId 폴백
+     */
+    public KShortestPathFinder(TransferRule transferRule, BusRouteIndex busRouteIndex) {
         this.transferRule = transferRule;
-        this.single = new ShortestPathFinder(transferRule);
+        this.busRouteIndex = busRouteIndex;
+        this.single = new ShortestPathFinder(transferRule, busRouteIndex);
     }
 
     /**
@@ -192,37 +203,57 @@ public final class KShortestPathFinder {
         if (!rootEdges.isEmpty()) {
             totalSec += rootEdges.get(0).waitSec();
         }
-        String junctionKept = null;
+        Set<String> junctionKeptLines = Set.of();
         for (Edge edge : rootEdges) {
-            junctionKept = TransferRule.keptTransitLine(
-                    junctionKept, edge.mode(), edge.routeId());
+            junctionKeptLines = TransferRule.keptTransitLines(
+                    junctionKeptLines, edge.mode(), BusRouteIndex.optionsFor(edge, busRouteIndex));
         }
         if (!rootEdges.isEmpty() && !spur.edges().isEmpty()) {
             Edge last = rootEdges.get(rootEdges.size() - 1);
             Edge first = spur.edges().get(0);
-            TransferRule.TransferDecision junction = TransferRule.decide(
-                    junctionKept, last.mode(), last.routeId(), first.mode(), first.routeId());
+            Set<String> lastOptions = BusRouteIndex.optionsFor(last, busRouteIndex);
+            Set<String> firstOptions = BusRouteIndex.optionsFor(first, busRouteIndex);
+            TransferRule.TransferDecision junction = TransferRule.decideLines(
+                    junctionKeptLines, last.mode(), lastOptions, first.mode(), firstOptions);
             if (junction.transfer()) {
-                totalSec += transferRule.costWithStation(
-                        0, first.fromNode(), junction.costLine(), first.routeId());
+                totalSec += transferRule.transferCost(
+                        first.fromNode(), junctionKeptLines, firstOptions);
+            } else if (lastOptions.size() == 1 && firstOptions.size() == 1) {
+                // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
+                // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일.
+                String nextLine = firstOptions.iterator().next();
+                TransferRule.TransferDecision legacy = TransferRule.decide(
+                        singleOrNull(junctionKeptLines), last.mode(), lastOptions.iterator().next(),
+                        first.mode(), nextLine);
+                if (legacy.transfer()) {
+                    totalSec += transferRule.costWithStation(
+                            0, first.fromNode(), legacy.costLine(), nextLine);
+                }
             }
         }
         int transfers = 0;
-        String kept = null;
+        Set<String> keptLines = Set.of();
         com.ssafy.s15p21a104.domain.route.entity.TravelMode prevMode = null;
-        String prevLine = null;
+        Set<String> prevOptions = Set.of();
         for (Edge edge : edges) {
-            // 환승 집계도 TransferRule 1곳으로 통일한다(232).
+            // 환승 집계도 TransferRule 1곳으로 통일한다(232·234).
+            Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
             if (prevMode != null) {
-                TransferRule.TransferDecision decision = TransferRule.decide(
-                        kept, prevMode, prevLine, edge.mode(), edge.routeId());
-                if (decision.transfer()) {
+                TransferRule.TransferDecision decision = TransferRule.decideLines(
+                        keptLines, prevMode, prevOptions, edge.mode(), options);
+                boolean transfer = decision.transfer();
+                if (!transfer && prevOptions.size() == 1 && options.size() == 1) {
+                    transfer = TransferRule.decide(
+                            singleOrNull(keptLines), prevMode, prevOptions.iterator().next(),
+                            edge.mode(), options.iterator().next()).transfer();
+                }
+                if (transfer) {
                     transfers++;
                 }
             }
-            kept = TransferRule.keptTransitLine(kept, edge.mode(), edge.routeId());
+            keptLines = TransferRule.keptTransitLines(keptLines, edge.mode(), options);
             prevMode = edge.mode();
-            prevLine = edge.routeId();
+            prevOptions = options;
         }
         // spur 탐색에서 금지한 root 정점을 stations에서 빼면 edges/stations 개수가
         // 어긋날 수 있어 FoundPath 검증을 통과 못 하면 버린다.
@@ -231,6 +262,14 @@ public final class KShortestPathFinder {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용. */
+    private static String singleOrNull(Set<String> lines) {
+        if (lines == null || lines.size() != 1) {
+            return null;
+        }
+        return lines.iterator().next();
     }
 
     /** leg 서명: (수단·출발·도착·노선) 순서. 같으면 같은 경로로 본다. */
