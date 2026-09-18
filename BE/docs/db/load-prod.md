@@ -55,6 +55,7 @@ ssh -i "$PEM" "$NODE" 'sudo kubectl exec -n prod sts/postgres -- \
   psql -U sumgil -d sumgil -tAc "select version, success, description from flyway_schema_history order by installed_rank"'
 # 2026-09-14 확인: 1|t|init · 2|t|widen source columns · 3|t|rail geometry (로컬과 동일)
 # 2026-09-17 확인: 5까지 적용 완료 (+ 4|congestion level comment · 5|bike stock pred prediction source)
+# 2026-09-18 확인: 6까지 적용 완료 (+ 6|bus route headway). 로더 기동 로그도 `Successfully validated 6 migrations`
 #
 # 로더도 Flyway 를 돌린다 — FlywayConfig 에 프로파일 제한이 없어 load 프로파일로 띄워도 기동 때 마이그레이션이 적용된다.
 # 위 주석의 "로더는 스키마를 만들지 않는다" 는 코드와 다르다(2026-09-17 확인). 정책으로 읽어야 한다:
@@ -179,3 +180,16 @@ Flyway 는 `Successfully validated 3 migrations` · `Schema "public" is up to da
 재기동 필요 범위가 2-6 절 표대로 갈리는 것이 실제로 확인됐다. 역 검색·대여소 조회는 적재 직후 값이 나왔고, 경로 검색만 `kubectl rollout restart` 뒤에 살아났다. 롤링 재시작이라 중단은 없었다.
 
 **성능 수치에 대해.** 위 시간은 **1회 측정치라 `BE/docs/perf/README.md` 규약(워밍업 1회 + 5회 이상, median·p95)을 충족하지 않는다.** 기준선으로만 남기고 개선 근거로 인용하지 않는다. 특히 `edge_time` 13,332 행/초는 SSH 터널을 경유한 값이라 로컬 직결 수치와 **조건이 달라 비교 대상이 아니다** — 터널 오버헤드와 로더 성능이 섞여 있어 둘을 나란히 놓으면 잘못된 결론이 난다.
+
+## 5. 부분 적재 기록 (전체 재적재가 아닌 것)
+
+2절 절차 그대로, `--load.sources` 만 좁혀 돌린 기록이다. 상세는 각 문서에 있다.
+
+| 날짜 | 대상 | 소스 인자 | 결과 | 선행 배포 | 상세 |
+| --- | --- | --- | --- | --- | --- |
+| 2026-09-17 | `bike_stock_pred` (172) | `bikepred` | 406,656 행 | V5 — 이미지 빌드 + `be-consumer`·`be` 재시작 | [load-bikepred.md](load-bikepred.md) |
+| 2026-09-18 | `bus_route.headway_min` (228) | `busheadway` | 451 행 UPDATE · 값 있음 446 · 33 ms | V6 — 이미지는 09-17 빌드, `be-consumer` 09-17 · `be` 09-18 재시작 | [load-bus-bike.md](load-bus-bike.md) 배차간격 절 |
+
+- `busheadway` 는 `bus_route` 에 UPDATE 만 하므로 `bus` 를 함께 돌릴 필요가 없다 — 마스터 718행은 09-14 적재분 그대로다.
+- 둘 다 읽는 코드가 없거나(배차간격) Redis 를 먼저 보는(재고 예측) 열이라 적재 뒤 `be` 재기동은 필요 없었다. 2-6 절 표의 "메모리 그래프" 열(`edge_time` 등)이 바뀔 때만 재기동한다.
+- 09-18 은 로컬 Redis 없이(Docker 미기동) 로더가 정상 기동했다 — `RedisConfig` 는 템플릿만 만들고 연결은 첫 사용 때라, 2-2 절의 `REDIS_HOST` 는 자리만 채우면 된다.
