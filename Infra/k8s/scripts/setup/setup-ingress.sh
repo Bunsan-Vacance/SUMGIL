@@ -2,15 +2,15 @@
 # ingress-nginx 설치 (S15P21A104-124/126). node1(control-plane)에서 실행.
 # k3s 내장 Traefik을 끄고 ingress-nginx를 깐다. 멱등.
 #
-#   sudo bash scripts/setup-ingress.sh
+#   sudo bash scripts/setup/setup-ingress.sh
 #
 # 전제: k3s 가동 중. 이 스크립트는 node1의 /etc/rancher/k3s/config.yaml에 disable: traefik을 넣고 재시작한다.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=env.sh
-source "${SCRIPT_DIR}/env.sh"
+# shellcheck source=../env.sh
+source "${SCRIPT_DIR}/../env.sh"
 
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 CFG=/etc/rancher/k3s/config.yaml

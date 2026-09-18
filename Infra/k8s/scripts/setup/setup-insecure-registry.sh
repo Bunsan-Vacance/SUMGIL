@@ -4,15 +4,15 @@
 # /etc/rancher/k3s/registries.yaml에 둔다. 멱등(덮어쓰기).
 #
 # 사용법 (root 또는 sudo):
-#   sudo bash scripts/setup-insecure-registry.sh
+#   sudo bash scripts/setup/setup-insecure-registry.sh
 #
-# 전제: 레지스트리 Deployment 기동 후 (apply.sh).
+# 전제: 레지스트리 Deployment 기동 후 (deploy/apply.sh).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=env.sh
-source "${SCRIPT_DIR}/env.sh"
+# shellcheck source=../env.sh
+source "${SCRIPT_DIR}/../env.sh"
 
 mkdir -p /etc/rancher/k3s
 cat > /etc/rancher/k3s/registries.yaml <<EOF

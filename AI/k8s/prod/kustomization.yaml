@@ -1,0 +1,21 @@
+# AI Kustomize — 뼈대 (S15P21A104-211). namespace prod 참조 (생성은 Infra 소유).
+# 비민감 설정은 configMapGenerator(ai-config.env → ai-config).
+# 비밀은 ai-secret.env → ai-secret (gitignore *-secret.env, 키 목록은 ai-secret.env.example).
+# 데이터·모델(AI/data·AI/models)은 git 추적 제외 — 프로비저닝 방식 미결정 (⬜ README 4절).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+resources:
+  - ai.yaml
+images:
+  - name: sumgil-ai
+    newName: 100.103.156.53:30500/sumgil-ai
+    newTag: latest
+configMapGenerator:
+  - name: ai-config
+    envs:
+      - ai-config.env
+secretGenerator:
+  - name: ai-secret
+    envs:
+      - ai-secret.env
