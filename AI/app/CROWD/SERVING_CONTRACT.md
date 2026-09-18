@@ -3,14 +3,14 @@
 작성 2026-09-16 · 기준 브랜치 `feat/CROWD-serving-output-contract`(197 A·B·C부 반영) · 확인한 실제 산출물 `data/CROWD/serving/predictions_2026-09-13/14.parquet`(2026-09-17 15:24 재생성 — 200 2024-25 최종 fit 반영판)
 
 > **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
-> `batch_predict.OUTPUT_COLS`·`TRAIN_OUTPUT_COLS` · `schemas.py`의 응답 모델 · `data_status` 값 ·
-> 등급 임계값(`crowd_grade_thresholds`) · 예측기 계열 추가·교체 · 배율표 판 교체 · API 경로·파라미터.
-> 모델 성능·피처 세트는 이 문서가 아니라 `pipeline/MODEL_REGISTRY.md`에 적는다.
+> `batch_predict.OUTPUT_COLS`·`TRAIN_OUTPUT_COLS`·`LINK_OUTPUT_COLS` · `schemas.py`의 응답 모델 ·
+> `data_status` 값 · 등급 임계값(`crowd_grade_thresholds`) · 예측기 계열 추가·교체 · 배율표 판 교체 ·
+> API 경로·파라미터. 모델 성능·피처 세트는 이 문서가 아니라 `pipeline/MODEL_REGISTRY.md`에 적는다.
 >
 > **이 문서는 테스트가 강제한다**(197 C부). `test/CROWD/test_crowd_serving_contract.py`가 1절 컬럼 표·
-> 2절 상태 표·3절 메타 표·4절 경로·파라미터·응답 예시·7절 열차 표 컬럼을 각각 `OUTPUT_COLS`·
-> `DATA_STATUS_VALUES`·`META_KEYS`·OpenAPI·`schemas.py`·`TRAIN_OUTPUT_COLS`와 대조한다. 코드만
-> 고치면 CI가 막힌다.
+> 2절 상태 표·3절 메타 표·4절 경로·파라미터·응답 예시·7절 열차 표 컬럼·8절 링크 표 컬럼을 각각
+> `OUTPUT_COLS`·`DATA_STATUS_VALUES`·`META_KEYS`·OpenAPI·`schemas.py`·`TRAIN_OUTPUT_COLS`·
+> `LINK_OUTPUT_COLS`와 대조한다. 코드만 고치면 CI가 막힌다.
 >
 > **테스트가 못 막는 것 — 사람이 챙긴다.** 아래 셋은 리포 밖이거나 값이라서 CI가 잡지 못한다.
 > 1. **예시 값**(1절 실제 2행, 4절 응답 JSON) — 테스트는 키와 타입만 보고 값은 안 본다. **배치를
@@ -145,7 +145,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 
 ## 3. 배치 메타 — `.meta.json`
 
-경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다. 메타 키는 **28개**다(197까지 21개 + 200에서 이벤트 커버리지 2개 추가 + 239에서 열차·노드 표 관련 5개 추가).
+경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다. 메타 키는 **30개**다(197까지 21개 + 200에서 이벤트 커버리지 2개 추가 + 239에서 열차·노드 표 관련 5개 추가 + 244에서 링크 표 관련 2개 추가).
 
 | 키 | 예시 | 의미 |
 | --- | --- | --- |
@@ -176,7 +176,9 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `train_rows` | `105470` | (239) 열차·노드 표 행 수. `train_table=false`면 `null` |
 | `headway_long_rows` | `4279` | (239) 배차 간격이 `long_headway_min`(12분)을 넘어 균등 도착 가정이 약해진 채 배분된 열차 행 수. `train_table=false`면 `null` |
 | `train_mass_gap` | `3.6e-12` | (239) 슬롯 재차인원 합과 열차 배분 합의 최대 절대오차(질량 보존 확인, 7절). `train_table=false`면 `null` |
-| `generated_at` | `"2026-09-17T15:24:24+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함) |
+| `link_table` | `false` | (244) 링크(from/to) 표(`predictions_link_{date}.parquet` + BE CSV, 8절)를 이번에 만들었는지. 기본 `false`(설정값 `crowd_link_table`, CLI `--link-table`/`--no-link-table`로 이번 실행만 덮어쓸 수 있다) |
+| `link_csv_rows` | `21606` | (244) BE 적재용 CSV에 실제로 쓴 행 수(BE 요청 "산출 행 수" — 전송 손상 검증에 쓴다). `link_table=false`면 `null` |
+| `generated_at` | `"2026-09-17T15:24:24+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함). (244) 같은 실행에서 링크 CSV 파일명의 `_HHMMSS`도 이 시각과 같다 |
 
 ---
 
@@ -382,6 +384,60 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 (부동소수 오차 수준이어야 정상, `RESOLUTION_LADDER.md` §3 L4의 "질량 보존 오차 3.6e-12"와 같은
 성격의 수). 링크를 구분하지 않고 역·방향·슬롯만으로 재면 강동처럼 세그먼트가 겹치는 역에서
 중복된 인덱스끼리 빼는 꼴이 되어 오차가 실제보다 훨씬 크게(예: 3만대) 부풀려진다.
+
+---
+
+## 8. 링크(from/to) 표 — `predictions_link_{YYYY-MM-DD}.parquet` + BE CSV (244, 옵션)
+
+**파생 뷰다, 새 정보가 아니다**(원칙 4·8) — 슬롯 표(1절)에 이미 있는 값(`congestion_pct`·
+`data_status` 등)을 (역, 방향)마다 실제로 이어지는 다음 역(`to_station_no`)과 함께 다시 보여줄
+뿐이다. `crowd_link_table=true`(설정값, CLI `--link-table`)일 때만 만들어진다 — 기본은 꺼짐이고,
+꺼져 있으면 두 파일 모두 없다.
+
+경로: `AI/data/CROWD/serving/predictions_link_{YYYY-MM-DD}.parquet`.
+
+| 컬럼 | 타입 | 의미 | null 가능 |
+| --- | --- | --- | --- |
+| `date` | datetime64[us] | 대상 날짜(자정) | 없음 |
+| `line` | str | 호선(`"1호선"` 형식) | 있음 |
+| `from_station_no` | int64 | 링크 시작 역번호 | 없음 |
+| `to_station_no` | int64 | 링크 끝 역번호(이 표에는 종점·절단면 행 자체가 없다 — 아래 참고) | 없음 |
+| `direction` | str | `상선`/`하선`/`내선`/`외선`(2호선) | 없음 |
+| `time_slot_30min` | str | 30분 슬롯 시작 시각, `"08:30"` | 없음 |
+| `congestion_pct` | float64 | 보정 혼잡도(%). 1절과 같은 값, 같은 이름 | **있음** — 배율표 결측 |
+| `data_status` | str | 슬롯 표(2절)와 같은 값을 상속 | 없음 |
+| `pred_source` | str | 슬롯 표(`model`/`lookup_negative`)와 같은 값을 상속 | 없음 |
+| `predictor_version` | str | 슬롯 표 메타와 같은 값. **행 단위 컬럼**(라우팅이 행 단위 배정을 열어둘 수 있어 BE가 행 단위로 요청, `FROME_BE-crowd-pred-load-path.md` 1.2절) | 없음 |
+
+**경계는 조인에서 자동으로 빠진다.** `(line, segment, station_no, direction) -> to_station_no`
+대응표를 세그먼트 위상에서 한 번 만들고 슬롯 표에 **이너 조인**한다(`batch_predict.to_link_table`) —
+종점·`truncated: true` 절단면·강동 같은 분기점처럼 그 세그먼트 목록 안에 다음(또는 이전) 역이 없는
+셀은 대응이 없어 행 자체가 만들어지지 않는다. 강동(5호선)처럼 한 역이 세그먼트 여러 개(본선·
+하남선·마천지선)에 걸치면 세그먼트마다 대응표에서 독립적으로 조회되므로 최대 3개의 서로 다른
+`to_station_no`를 가진 별개 행으로 자연히 갈라진다 — 5.4절이 말하는 슬롯 표(1절)의 강동 중복
+문제가 이 표에서는 `to_station_no`로 이미 구분돼 있어 풀린다. 열차 표(7절)가 강동 같은 경우에
+`link_ambiguous`로 모호성을 표시해야 했던 것과 달리, 이 표는 그런 플래그가 아예 없다 — 슬롯
+집계 표라 여러 지선이 동시에 유효한 값이고, 열차처럼 물리적으로 한 경로만 골라야 하는 제약이
+없기 때문이다.
+
+### 8.1 BE CSV
+
+경로: `AI/data/CROWD/serving/predictions_link_{YYYY-MM-DD}_{HHMMSS}.csv`. 파일명에 생성 시각을
+넣는 이유는 같은 날짜를 다시 만들어도(배율표·모델 교체) 파일명이 겹치지 않게 하기 위해서다 —
+`_HHMMSS`는 그 실행의 `meta.generated_at`과 같은 순간이다(`FROME_BE-crowd-pred-load-path.md`
+6.3절). 헤더는 BE가 확정한 순서 그대로다(같은 문서 6.1절):
+
+```
+pred_date, line, from_station_no, to_station_no, direction, time_slot, level, data_status, pred_source, predictor_version
+```
+
+parquet 컬럼과의 대응은 이름만 바뀌고 값은 그대로다 — `date`(datetime) → `pred_date`
+(`YYYY-MM-DD` 문자열), `congestion_pct` → `level`(결측은 빈 칸), `time_slot_30min`(`"HH:MM"`) →
+`time_slot`(0~47 정수). 마지막 변환은 `index = HH*2 + (MM == 30 ? 1 : 0)`이다
+(`TO_BE-crowd-contract-answers.md` 1.3절과 완전히 같은 정의) — 예: `"00:00"→0`, `"00:30"→1`,
+`"08:30"→17`, `"23:30"→47`. `disaggregate.slot30_start_minutes`(운행일 정렬용으로 `hh<4`에 1440을
+더하는 다른 함수)를 재사용하면 `00:00`/`00:30`이 48/49가 되어 틀리므로, `batch_predict.py`는
+`_slot30_to_index`로 이 식을 직접 계산한다.
 
 ---
 
