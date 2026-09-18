@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 
 from DATA_ENGINE.monitor.check_collection_freshness import (
@@ -94,6 +95,32 @@ def test_build_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
             max_age_min=20,
         ),
     ]
+
+
+def test_freshness_kafka_mode_checks_kafka_latest_not_poller(tmp_path, capsys):
+    touch_with_age(tmp_path / "data/BIKE/raw/realtime/latest.parquet", 4, time.time())
+    touch_with_age(tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest.parquet", 4, time.time())
+
+    assert main(["--ai-root", str(tmp_path), "--weather-source", "kafka"]) == 1
+    assert "latest_by_grid.parquet" in capsys.readouterr().out
+
+    touch_with_age(
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet",
+        60,
+        time.time(),
+    )
+    assert main(["--ai-root", str(tmp_path), "--weather-source", "kafka"]) == 0
+
+
+def test_freshness_kafka_mode_rejects_stale_latest(tmp_path):
+    touch_with_age(tmp_path / "data/BIKE/raw/realtime/latest.parquet", 4, time.time())
+    touch_with_age(
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet",
+        95,
+        time.time(),
+    )
+
+    assert main(["--ai-root", str(tmp_path), "--weather-source", "kafka"]) == 1
 
 
 def test_check_freshness_returns_all_results(tmp_path):
@@ -271,6 +298,25 @@ def test_build_partition_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
             min_count=5,
         ),
     ]
+
+
+def test_partition_kafka_mode_counts_only_kafka_snapshots(tmp_path):
+    slot = completed_hour_slots(1)[0]
+    bike = tmp_path / "data/BIKE/raw/realtime"
+    weather = tmp_path / "data/EXTERNAL/weather/raw/nowcast"
+    create_snapshots(bike, slot, count=10)
+    weather_slot = partition_path(weather, slot)
+    weather_slot.mkdir(parents=True)
+    pd.DataFrame({"category": ["T1H"]}).to_parquet(
+        weather_slot / "snapshot_poller.parquet", index=False
+    )
+
+    assert partition_main(["--ai-root", str(tmp_path), "--weather-source", "kafka"]) == 1
+
+    pd.DataFrame({"kafka_topic": ["weather.nowcast"]}).to_parquet(
+        weather_slot / "snapshot_kafka.parquet", index=False
+    )
+    assert partition_main(["--ai-root", str(tmp_path), "--weather-source", "kafka"]) == 0
 
 
 def test_partition_main_returns_zero_when_all_partitions_meet_minimum(tmp_path, capsys):
