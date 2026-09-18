@@ -60,6 +60,11 @@ def _panel(days=10):
                         "festival_short_count": 0,
                         "festival_long_count": 0,
                         "festival_min_duration_days": np.nan,
+                        "temp_c": 10.0,
+                        "precip_mm": 0.0,
+                        "wind_ms": 1.0,
+                        "humidity_pct": 50.0,
+                        "snow_cm": 0.0,
                     }
                 )
     return pd.DataFrame(rows)

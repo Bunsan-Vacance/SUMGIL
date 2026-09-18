@@ -31,6 +31,14 @@ lookup은 그룹과 무관하게 전역 하나다(키에 station_no가 이미 �
 기본값을 정하므로, 마스킹 실험 폴더가 그 자리에 섞이면 이름 운으로 프로덕션 기본값이
 실험 아티팩트로 바뀔 수 있다.
 
+## 연도 표본 가중 학습(227)
+
+lookup(요일유형×역×시간대 평균)과 잔차 LightGBM은 연도·추세 항이 없어, 학습 창을 2022~로
+넓히면 옛 연도로 끌린 평균이 된다. `--year-weights`(예: `"2022:0.25,2023:0.5,2024:1.0"`)로
+연도별 표본 가중을 lookup 가중 평균과 LightGBM `sample_weight` 양쪽에 **같은 값**으로 준다.
+파생 캐시(시차 잔차)는 lookup 값에 의존하므로 가중 lookup으로 만든 파생은 평탄 lookup 파생과
+다르다 — `--derived-cache`를 따로 지정해야 한다(`--panel` 가드와 같은 자리에 있다).
+
 실행:
     cd AI
     python -m app.CROWD.pipeline.train --feature-set festival_all_derived_resid
@@ -113,6 +121,61 @@ STACK_WEIGHTS = {"d7_only": 0.5, "no_lag": 0.3, "d1_only": 0.2}
 REPLACE_WEIGHTS = {"full": 0.5, "d7_only": 0.25, "no_lag": 0.15, "d1_only": 0.10}
 
 
+# ── 연도 표본 가중(227) ──
+
+
+def parse_year_weights(text: str | None) -> dict[int, float] | None:
+    """`--year-weights` CLI 값 파싱. `"2022:0.25,2023:0.5"` → `{2022: 0.25, 2023: 0.5}`.
+
+    `None`이거나 빈 문자열이면 `None`(가중 없음). 형식 오류·가중치 0 이하·연도 중복은
+    CLI 입력 검증이라 `SystemExit`로 바로 멈춘다(무엇이 잘못됐는지 한국어로 알린다).
+    """
+    if not text or not text.strip():
+        return None
+    weights: dict[int, float] = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        year_str, sep, weight_str = part.partition(":")
+        if not sep:
+            raise SystemExit(
+                f"--year-weights 형식이 잘못됐다(예: '2022:0.25,2023:0.5') — "
+                f"콜론(:)이 없다: {part!r}"
+            )
+        try:
+            year = int(year_str.strip())
+        except ValueError as exc:
+            raise SystemExit(f"--year-weights의 연도를 정수로 읽을 수 없다: {year_str!r}") from exc
+        try:
+            weight = float(weight_str.strip())
+        except ValueError as exc:
+            raise SystemExit(
+                f"--year-weights의 가중치를 숫자로 읽을 수 없다: {weight_str!r}"
+            ) from exc
+        if weight <= 0:
+            raise SystemExit(f"--year-weights의 가중치는 0보다 커야 한다 — {year}:{weight}")
+        if year in weights:
+            raise SystemExit(f"--year-weights에 연도 {year}가 중복됐다")
+        weights[year] = weight
+    return weights or None
+
+
+def year_weights_label(year_weights: dict[int, float] | None) -> str:
+    """캐시 메타·아티팩트 meta에 쓰는 정규형 — 연도 오름차순 `"2022:0.25,2023:0.5"`. 없으면 `"none"`."""
+    if not year_weights:
+        return "none"
+    return ",".join(f"{year}:{year_weights[year]}" for year in sorted(year_weights))
+
+
+def year_weight_series(dates: pd.Series, year_weights: dict[int, float] | None) -> pd.Series:
+    """날짜별 연도 가중 — `year_weights`에 없는 연도는 1.0. `dates.index`를 그대로 유지한다."""
+    years = pd.to_datetime(dates).dt.year
+    if not year_weights:
+        return pd.Series(1.0, index=dates.index, dtype="float64")
+    return years.map(lambda y: float(year_weights.get(int(y), 1.0))).astype("float64")
+
+
 def apply_masking(
     train: pd.DataFrame, feature_cols: Sequence[str], spec: MaskingSpec
 ) -> tuple[pd.DataFrame, dict]:
@@ -156,11 +219,16 @@ def _augment(
     return apply_masking(train, FEATURE_SETS[feature_set], masking)
 
 
-def _fit_lgbm(X: pd.DataFrame, y: pd.Series, params: dict):
+def _fit_lgbm(
+    X: pd.DataFrame,
+    y: pd.Series,
+    params: dict,
+    sample_weight: np.ndarray | pd.Series | None = None,
+):
     from lightgbm import LGBMRegressor
 
     model = LGBMRegressor(**params)
-    model.fit(X, y)
+    model.fit(X, y, sample_weight=sample_weight)  # None이면 지금과 동일(lightgbm이 허용)
     return model
 
 
@@ -175,6 +243,7 @@ def train_models(
     params: dict | None = None,
     group_col: str | None = None,
     masking: MaskingSpec | None = None,
+    year_weights: dict[int, float] | None = None,
 ) -> dict[str, dict[str, object]]:
     """잔차 모델을 타깃별(·그룹별)로 fit한다. 반환: {target: {group_key: booster}}.
 
@@ -182,11 +251,16 @@ def train_models(
     다시 계산한 뒤 fit한다(잔차는 승하차·lookup 키에만 의존해 증강된 프레임에도 그대로
     유효하고, 그룹 마스크도 증강 후 행 수에 맞춰 다시 만들어야 한다). `masking=None`이면
     오늘과 동일하게 동작한다.
+
+    `year_weights`(227)는 `_augment` **뒤**의 `train["date"]`로 가중을 계산한다 — stack
+    증강의 마스킹 사본도 원본과 같은 날짜를 그대로 가지므로 자연히 같은 연도 가중을 받는다.
+    `year_weights=None`이면 `sample_weight=None`으로 지금과 동일하게 fit한다.
     """
     params = {**DEFAULT_PARAMS, **(params or {})}
     train, _ = _augment(train, feature_set, masking)
     resid = lookup.residuals(train)
     X = build_matrix(train, feature_set)
+    weights = year_weight_series(train["date"], year_weights).to_numpy() if year_weights else None
     groups = [None] if group_col is None else sorted(train[group_col].dropna().unique())
 
     models: dict[str, dict[str, object]] = {}
@@ -197,7 +271,8 @@ def train_models(
             mask = (
                 np.ones(len(train), dtype=bool) if g is None else (train[group_col] == g).to_numpy()
             )
-            models[target][_group_key(g)] = _fit_lgbm(X[mask], y[mask], params)
+            sw = weights[mask] if weights is not None else None
+            models[target][_group_key(g)] = _fit_lgbm(X[mask], y[mask], params, sample_weight=sw)
     return models
 
 
@@ -235,6 +310,7 @@ def run(
     events_path: Path | None = None,
     derived_cache: Path | None = None,
     name: str | None = None,
+    year_weights: dict[int, float] | None = None,
 ) -> Path:
     """패널 로딩 → lookup fit → 파생 → (선택) 마스킹 증강 → 잔차 모델 fit → 아티팩트 저장.
 
@@ -251,6 +327,15 @@ def run(
             "predictor.latest_artifact가 이름 정렬로 auto 기본값을 고르므로 프로덕션이 바뀔 수 있다. "
             "--out-root models/CROWD/_experiments/<실험명> 을 준다(채택 시에만 승격)"
         )
+    if year_weights is not None and derived_cache is None:
+        raise SystemExit(
+            "--year-weights는 --derived-cache를 따로 줘야 한다 — 가중 lookup으로 기본 캐시"
+            "(crowd_panel_derived_2024_2025)를 덮어쓴다"
+        )
+
+    resolved_panel = panel_path or (CROWD_PROCESSED / PANEL_NAME)
+    resolved_events = events_path or (CROWD_PROCESSED / EVENTS_NAME)
+    resolved_cache = derived_cache or DERIVED_CACHE
 
     load_kwargs: dict[str, Path] = {}
     if panel_path is not None:
@@ -259,12 +344,15 @@ def run(
         load_kwargs["events_path"] = events_path
     panel = load_panel(with_events=True, **load_kwargs)
     train_raw, _ = time_split(panel, split_date)
-    lookup = DayTypeLookupBaseline().fit(train_raw)
+    lookup_weights = year_weight_series(train_raw["date"], year_weights) if year_weights else None
+    lookup = DayTypeLookupBaseline().fit(train_raw, weights=lookup_weights)
     derived = load_or_build_derived(
         panel,
         lookup,
-        cache_path=derived_cache or DERIVED_CACHE,
-        panel_path=panel_path or (CROWD_PROCESSED / PANEL_NAME),
+        cache_path=resolved_cache,
+        panel_path=resolved_panel,
+        lookup_weights=year_weights_label(year_weights),
+        events_path=resolved_events,
     )
     train, _ = time_split(derived, split_date)
 
@@ -272,12 +360,9 @@ def run(
     # 반영하게 하고, train_models에는 이미 증강된 프레임을 masking=None으로 넘겨
     # 이중 증강을 막는다.
     train, mask_summary = _augment(train, feature_set, masking)
-    models = train_models(train, lookup, feature_set, params, group_col)
+    models = train_models(train, lookup, feature_set, params, group_col, year_weights=year_weights)
 
     stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M")
-    resolved_panel = panel_path or (CROWD_PROCESSED / PANEL_NAME)
-    resolved_events = events_path or (CROWD_PROCESSED / EVENTS_NAME)
-    resolved_cache = derived_cache or DERIVED_CACHE
     meta = {
         "feature_set": feature_set,
         "feature_columns": FEATURE_SETS[feature_set],
@@ -294,6 +379,7 @@ def run(
         "created_at": stamp,
         "training": {
             "masking": mask_summary,
+            "year_weights": year_weights_label(year_weights) if year_weights else None,
             "panel_file": Path(resolved_panel).name,
             "events_file": Path(resolved_events).name,
             "derived_cache": Path(resolved_cache).name,
@@ -342,6 +428,15 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--split-date", default=str(SPLIT_DATE.date()), help="YYYY-MM-DD")
     ap.add_argument("--out-root", default=str(MODELS_DIR))
     ap.add_argument("--name", default=None, help="아티팩트 폴더명 — 주면 스탬프 없이 그대로 쓴다")
+    ap.add_argument(
+        "--year-weights",
+        default=None,
+        help=(
+            "227 연도별 표본 가중, 예: '2022:0.25,2023:0.5,2024:1.0'(기본 없음 — 전부 1.0). "
+            "lookup 가중 평균과 LightGBM sample_weight 양쪽에 같은 값을 준다. "
+            "--derived-cache를 반드시 같이 줘야 한다(기본 캐시는 평탄 lookup 전제)"
+        ),
+    )
     args = ap.parse_args(argv)
 
     masking = None
@@ -349,6 +444,7 @@ def main(argv: list[str] | None = None) -> None:
         default_weights = STACK_WEIGHTS if args.mask_mode == "stack" else REPLACE_WEIGHTS
         weights = json.loads(args.mask_weights) if args.mask_weights else default_weights
         masking = MaskingSpec(mode=args.mask_mode, weights=weights, seed=args.mask_seed)
+    year_weights = parse_year_weights(args.year_weights)
 
     def _resolve(value: str | None, base: Path) -> Path | None:
         if value is None:
@@ -367,6 +463,7 @@ def main(argv: list[str] | None = None) -> None:
         events_path=_resolve(args.events, CROWD_PROCESSED),
         derived_cache=_resolve(args.derived_cache, CROWD_INTERIM),
         name=args.name,
+        year_weights=year_weights,
     )
 
 
