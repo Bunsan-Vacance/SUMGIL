@@ -10,6 +10,7 @@
 | --- | --- | --- | --- | --- |
 | `seoul-train-timetable_20260616.csv.gz` | 공공데이터포털 [15098251 서울교통공사_서울 도시철도 열차운행시각표](https://www.data.go.kr/data/15098251/fileData.do) | 2026-06-16 | 424,264 | **1~9호선 `edge_time` 의 정본**(코레일 운행 구간 포함 — 1호선 K열차 837대·4호선 K열차 184대가 들어 있다). 열차별 역 도착·출발 시각 → 완행 열차 정차 순서로 방향 있는 구간 896개(`travel_sec` 중앙값, `source=timetable`) + 요일 3종 × 30분 슬롯별 `wait_sec`. `station`·`line` 도 여기서 |
 | `../railgeometry/ktdb-rail-link_2024.csv` (읽기만) | KTDB 철도망 링크 (63 에서 도입, 전국 1,728개) | 2024 | 224 (수도권 9노선) | **시각표 밖 노선 9개(경의중앙 1063 · 수인분당 1075 · 경춘 1067 · 경강 1081 · 서해 1093 · 공항철도 1065 · 신분당 1077 · 우이신설 1092 · 신림 1094)의 인접 구간·선로 거리 정본** (S15P21A104-113). 링크 1개 = 인접 역 1쌍, `length_km` → `edge_time`(`source=avg`, 거리 ÷ 노선별 표정속도, 양방향, `wait_sec` 0). 국가철도공단 역간거리 파일은 앞·뒤 거리 열이 뒤섞여 있어(경의중앙 76쌍 중 47 불일치, 경강 성남 22.1 km) 쓰지 않는다 |
+| `tago-timetable_20260918.csv` | 공공데이터포털 [15098554 국토교통부_(TAGO)_지하철정보](https://www.data.go.kr/data/15098554/openapi.do) 역별 시간표(`GetSubwaySttnAcctoSchdulList`)를 `scripts/data/tago-timetable-fetch.mjs` 로 232(역×노선) × 요일 3 × 방향 2 = 1,392콜 받아 합친 것 (S15P21A104-243) | 2026-09-18 15:2x~16:3x KST 호출 | 95,105 | **시각표 밖 9개 노선의 `edge_time.wait_sec`.** 열 `line_id · station_id · station_name · tago_station_id · daily_type(01 평일·02 토·03 휴일) · up_down(U/D) · end_station_nm · dep_time(HHmmss) · arr_time`. 행 1개 = 역 1개에서 행선지로 떠나는 열차 1대. 열차 번호가 없어 `travel_sec` 은 만들지 않는다. 경춘선은 25역 중 5역만 행이 온다(TAGO 쪽 결손) |
 | `molit-urban-lines_20251211.csv` | 공공데이터포털 [15122916 국토교통부_도시철도 전체노선](https://www.data.go.kr/data/15122916/fileData.do) | 2025-12-11 | 1,103 (수도권 802) | 시각표 밖 노선의 **후보 목록과 역 목록 대조**. `권역·권역명·철도운영기관명·노선명·순번·역명`. 순번이 지선에서 중복돼(경의중앙 21 수색·신촌, 경춘 5 광운대·망우) 인접 관계는 여기서 뽑지 않는다 — KTDB 링크가 만든 역 집합과 비교해 어느 한쪽에만 있는 역을 경고한다(서해선 원종은 KTDB 에만) |
 | `kric-station-standard_20260630.csv` | [전국도시철도역사정보표준데이터](https://www.data.go.kr/data/15013205/standard.do) (공공데이터포털 15013205, 배포는 [철도 데이터 포털](https://data.kric.go.kr/rips/M_01_01/detail.do?id=32) XLSX → `scripts/data/xlsx-to-csv.mjs`) | 2026-06-30 | 1,099 (수도권 788) | 코레일·사철 역의 **역번호**(`station-ids.csv` 의 station_id 정본: 청량리 1014·판교 1501·신사 D004·서울 A01) 와 **좌표 3순위**(국가철도공단 역위치 파일이 없는 경춘·경강·서해·공항·신분당·우이신설·신림). `역번호·역사명·노선번호·노선명·…·역위도·역경도·운영기관명`. 노선번호 I4108(경의중앙)·I4105(분당)·I28K1(수인)·I41K2(경춘)·I41K5(경강)·I41WS(서해)·I28A1(공항)·I11D1(신분당)·L11UI(우이신설)·L11SL(신림) → line_id, 경원선 I4102 처럼 서비스 노선이 여럿인 물리 선로 코드는 이름으로만 대조 |
 | `seoulmetro-transfer_20250331.csv` | 서울 열린데이터광장 [OA-13290 서울교통공사 환승역거리 소요시간 정보](https://data.seoul.go.kr/dataList/OA-13290/F/1/datasetView.do) | 2025-03-31 | 140 | 1~8호선 환승역 74개의 노선 쌍별 도보 초 → `transfer_meta`(`source=extract`). 보행속도 1.2 m/s 기준 |
@@ -79,6 +80,7 @@
 | --- | --- |
 | `station-aliases.csv` | 원천마다 다른 역명 표기 → 정본 표기. 정본은 **최신 공식 이름**(서울교통공사 좌표 파일·실시간 API 쪽: "서울", "총신대입구", "신내", "자양") |
 | `ktdb-link-overrides.csv` | KTDB 링크 예외 (`출발역, 도착역, line_ids, 거리_km, 근거`). `거리_km` 이 비어 있으면 서비스 노선명 없는 물리 링크에 노선을 붙이고(상봉~광운대 → 경춘, 가좌~신촌 → 경의중앙), 있으면 KTDB 에 없는 링크를 그 거리로 만든다. 이미 링크가 있는 구간에 거리를 적으면 KTDB 값을 두고 경고한다 |
+| `tago-station-ids.csv` | 우리 (station_id, line_id) ↔ TAGO `subwayStationId`(예 `MTRKRK4K125` 양정 경의중앙) 매핑 232행 (`station_id, name, line_id, tago_station_id, tago_route_name`). `tago-timetable-fetch.mjs` A 단계가 `station-ids.csv` 의 9개 노선 역 이름으로 역 검색(210콜)해 만든다. 같은 이름의 다른 도시 역·대상 밖 노선은 `subwayRouteName` 으로 걸렀다. 못 찾은 1건: 신길온천(수인분당). 파일이 있으면 다음 수집은 이 매핑을 재사용한다(`--refresh-stations` 로 다시 받음) |
 | `line-speeds.csv` | 노선별 표정속도 (`line_id, mps, 근거`). 공표 소요시간 ÷ KTDB 경로 거리: 경강 19.4(판교~여주 48분) · 경춘 16.4 · 공항철도 16.3(일반열차 66분) · 신분당 14.0(강남~광교 37분) · 서해 11.6 · 수인분당 10.9 · 경의중앙 9.9 · 우이신설 8.0 · 신림 7.8. 표에 없는 노선은 9.2 |
 | `station-ids.csv` | **물리 역 ID 의 정본** (`station_id, name, codes, source`, 564행). `station_id` = 서울교통공사 역번호(노선별 역사코드 최솟값, 앞 0 제거: 서울 150, 시청 151, 강남 222)가 있으면 그것, 코레일·사철 전용 역은 **표준데이터 역번호**(청량리 1014·판교 1501·신사 D004·서울 A01, `source=standard`, 158행). 어느 쪽에도 없는 역만 9001 대(`source=assigned` — 도라산 9013·양원 9014). 환승역은 한 행에 노선별 코드를 모두 적는다(왕십리 `1002:0208;1005:2541;1075:1013;1063:1013`). 로더는 (정규화 역명, 노선) → ID 를 이 표로만 정하고 **표에 없는 역이 나오면 적재를 멈춘다**. 개명은 `name` 만 바꾼다(ID 유지). 초안은 `scripts/data/station-ids-bootstrap.mjs`, 113 의 확장은 `scripts/data/station-ids-extend.mjs`(표준데이터·전체노선을 읽어 기존 ID 는 그대로 두고 새 행을 덧붙인다. 같은 이름의 기존 역과 같은 물리 역인지는 표준데이터 역번호·환승노선명·좌표 500 m 로 판정) 로 만들었다. 동명이역은 같은 이름의 행을 둘 두고 `codes` 의 노선으로 가른다 — 신촌(2호선 240·경의중앙 1252), 양평(5호선 2523·경의중앙 1217) |
 
@@ -107,6 +109,11 @@ node BE/scripts/data/xlsx-to-csv.mjs std.xlsx BE/src/main/resources/data/subway/
 # 새 역이 생겼으면 역 ID 표를 늘린다 (기존 ID 는 바뀌지 않는다)
 node BE/scripts/data/station-ids-extend.mjs --ids …/conf/station-ids.csv --standard …/kric-station-standard_YYYYMMDD.csv \
   --lines …/molit-urban-lines_YYYYMMDD.csv --aliases …/conf/station-aliases.csv --extra "원종:1093" --out …/conf/station-ids.csv
+
+# TAGO 역별 시각표 (15098554, BE/.env 의 DATA_GO_KR_KEY 로 활용신청 승인 필요 · 10,000/일). --dry-run 으로 호출 수를 먼저 본다
+node BE/scripts/data/tago-timetable-fetch.mjs --dry-run
+node BE/scripts/data/tago-timetable-fetch.mjs        # conf/tago-station-ids.csv 재사용 + tago-timetable_<오늘>.csv. 끊기면 다시 실행해 이어받는다
+# StaticLoadRunner.TAGO_TIMETABLE_FILE 과 이 표를 갱신한다
 ```
 
 ## 알려진 빈 곳 (채워 넣지 않고 비워 둔 것)
@@ -114,7 +121,7 @@ node BE/scripts/data/station-ids-extend.mjs --ids …/conf/station-ids.csv --sta
 - **좌표 출처가 섞여 있다**: 서울교통공사 역사 좌표 228 · 국가철도공단 역위치 244 · 표준데이터 92(다수결로 대체된 값 포함) · KTDB 선로 노드 0. 어느 역이 어느 출처인지는 적재 로그 "역 좌표 출처" 줄에 나온다. 출처 컬럼(`coord_source`)은 스키마 변경이라 후속.
 - **다수결은 세 원천이 다 있는 역만 판정한다.** 표준데이터에 없는 역(도라산·양원)이나 국가철도공단·표준데이터 중 하나만 있는 역은 `resolve` 의 5 km 규칙만 적용된다 — 500 m~5 km 오기는 "유지, 검토 필요" 경고로 남는다. 적재 로그 "좌표 교차검증" 줄에서 확인한다.
 - **다수결이 이름의 첫 표준데이터 행만 참조한다.** 동명이역(신촌·양평)에서 파일 순서가 바뀌면 오판할 수 있다. 2026-09-10 실측은 신촌 0 m · 양평 0 m · 서울 245 m · 김포공항 25 m · 청량리 0 m · 왕십리 138 m 로 전부 임계값 안이지만, 표준데이터 새 배포분을 받으면 대체 목록(적재 로그)을 확인한다.
-- **시각표 밖 노선 9개는 `wait_sec = 0`** 이다(배차 원천 없음). 탐색이 대기를 더하기 시작하면 이 노선의 환승 대기는 0 으로 계산된다. TAGO 지하철정보 API(15098554) 활용신청 뒤 시각표를 받으면 같은 키를 `timetable` 이 덮는다 — 후속.
+- ~~**시각표 밖 노선 9개는 `wait_sec = 0`** 이다~~ → 243(2026-09-18)부터 TAGO 역별 시각표(`tago-timetable_20260918.csv`)로 채운다. **여전히 0 인 곳**: TAGO 에 시각표가 없는 경춘선 20역(청량리·회기·중랑·금곡·상천만 있음)·경의중앙 용산·금릉·도라산·수인분당 신길온천에서 출발하는 엣지. `travel_sec` 은 열차 번호가 없어 그대로 거리 기반(`source=avg`)이다. 토요일은 우이신설 외 8개 노선이 TAGO 에서 휴일(03)과 묶여 와서 휴일 시각표를 쓴다.
 - **새 노선의 환승 도보 실측이 없다**: 왕십리·공덕·홍대입구·청량리·선릉·강남·판교 등 새로 환승역이 된 곳의 `transfer_meta` 행은 원천이 없어 넣지 않는다. 탐색은 180초 상수로 폴백한다(9호선·코레일 환승과 같은 처리).
 - **GTX-A·인천1·2·의정부·에버라인·김포골드·자기부상(97역)은 적재하지 않는다**: 실시간 API subwayId 가 없어 `line_id` 를 정할 수 없다. GTX-A 는 코드 확인 뒤 후속. 전체노선 파일에는 다 있어 적재 로그가 "line_id 가 없는 노선 7개 건너뜀" 으로 알린다.
 - **도라산·양원은 표준데이터에 없다**: 역번호를 임시 부여(9013·9014)했다. 표준데이터 다음 배포분에 들어오면 이관한다.
