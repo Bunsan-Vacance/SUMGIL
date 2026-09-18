@@ -21,7 +21,7 @@ class CacheKeysTest {
     @Test
     @DisplayName("TTL 은 수집 주기보다 길다 — 짧으면 수집이 멀쩡해도 주기마다 키가 사라진다")
     void TTL_은_수집_주기보다_길다() {
-        // 수집 주기: 따릉이 120초 · 지하철 60초 (BE/k8s/prod/collector.env, S15P21A104-170)
+        // 수집 주기: 따릉이 120초 · 지하철 60초 (BE/k8s/prod/be-config.env, S15P21A104-170)
         Duration bikeInterval = Duration.ofSeconds(120);
         Duration subwayInterval = Duration.ofSeconds(60);
 

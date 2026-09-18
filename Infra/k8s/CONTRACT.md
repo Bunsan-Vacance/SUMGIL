@@ -11,9 +11,11 @@
 | 데이터 계층 (Postgres·Redis·Kafka) | 플랫폼(리드) | `Infra/k8s/prod/` |
 | 플랫폼 서비스 (Registry·Ingress 컨트롤러·Namespace) | 플랫폼(리드) | `Infra/k8s/` |
 
-- 개발자는 `k8s/**`를 수정하지 않는다. 계약값 변경은 플랫폼에 요청한다.
+- 개발자는 볼륨·네트워크·StatefulSet 같은 클러스터 자원을 함부로 수정하지 않는다.
+  Deployment·Service 같은 파트 매니페스트는 문서 갱신을 전제로 각 파트가 작성할 수 있다.
+  계약값 변경은 플랫폼에 요청한다.
 - 매니페스트 커밋은 플랫폼(리드)이 한다.
-- 매니페스트는 앱 저장소 `k8s/`에 둔다 (ArgoCD 추적 경로).
+- 매니페스트는 앱 저장소 `k8s/`에 둔다. 배포는 수동 apply (GitOps 미도입).
 - **데이터 계층은 어떤 앱에도 의존하지 않는다.** 의존 방향은 `앱 → 데이터`. 데이터 계층은 자기 자격증명·스토리지를 소유하고 앱의 Secret·설정을 읽지 않는다.
 
 ## 2. 앱 계약값
@@ -54,12 +56,15 @@
 
 | 구분 | 파일 | 주입 | 키 |
 |---|---|---|---|
-| 비민감(앱) | `BE/k8s/prod/config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
-| 비밀(데이터) | 데이터 계층 소유 `Infra/k8s/prod/.env.secret` (gitignore) | Secret `data-secret` | `DB_PASSWORD` |
-| 비밀(앱) | 필요 시 `BE/k8s/prod/.env.secret` (gitignore) | Secret `be-secret` (추가 시) | 앱 고유 비밀만 (현재 없음) |
+| 비민감(앱) | `BE/k8s/prod/be-config.env` (커밋) | ConfigMap `be-config` | `DB_URL` `DB_USERNAME` `REDIS_HOST` `REDIS_PORT` `APP_CORS_ALLOWED_ORIGINS` |
+| 비밀(데이터) | 데이터 계층 소유 `Infra/k8s/prod/data-secret.env` (gitignore) | Secret `data-secret` | `DB_PASSWORD` |
+| 비밀(앱) | `BE/k8s/prod/be-secret.env` (gitignore) | Secret `be-secret` | 앱 고유 비밀 (수집기·BE 공용) |
 
+- 파일명 규칙(210): `<용도>.env` (커밋: `be-config.env` — 수집기·컨슈머 키 포함 단일 파일),
+  비밀은 `<용도>-secret.env` (`be-secret.env`·`data-secret.env`, gitignore `*-secret.env` 적용).
+  빈 템플릿은 `<용도>.env.example` (`be-secret.env.example`·`data-secret.env.example`).
 - `DB_PASSWORD`는 **데이터 계층이 소유**한다(`data-secret`). Postgres와 앱이 각자 이 Secret을 소비한다 — 앱이 데이터에 의존하는 방향을 지킨다.
-- 앱은 데이터 접속 포인터(`DB_URL`·`REDIS_HOST`)를 자기 `config.env`에서 유지한다.
+- 앱은 데이터 접속 포인터(`DB_URL`·`REDIS_HOST`)를 자기 `be-config.env`에서 유지한다.
 
 - FE는 배포 런타임 환경변수가 없다 (`VITE_*`는 빌드 타임).
 - 배포용과 로컬용(`BE/.env`)은 별개다.
