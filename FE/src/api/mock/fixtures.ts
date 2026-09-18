@@ -14,32 +14,104 @@ export const places: Place[] = [
   { id: 'exit', name: '도곡역 1번 출구', address: '서울 강남구 도곡동', kind: '출구' },
   { id: 'bike', name: '도곡역 대여소', address: '도곡역에서 150m', kind: '대여소' },
 ]
+const railEndpoints = {
+  origin: { id: 'origin', name: '멀티캠퍼스 역삼', lat: 37.50162, lng: 127.03944 },
+  yeoksam: { id: 'yeoksam', name: '역삼역', lat: 37.50065, lng: 127.03653 },
+  seolleung: { id: 'seolleung', name: '선릉역', lat: 37.5045, lng: 127.0489 },
+  dogok: { id: 'dogok', name: '도곡역', lat: 37.49096, lng: 127.05502 },
+  exit: { id: 'exit', name: '도곡역 1번 출구', lat: 37.4914, lng: 127.0554 },
+} as const
 const railLegs = (quiet: boolean): Leg[] => [
   {
     mode: 'walk',
     title: '역삼역까지 걸어요',
     note: '2호선 개찰구 · 약 260m',
     minutes: quiet ? 5 : 4,
+    from: railEndpoints.origin,
+    to: railEndpoints.yeoksam,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.03944, 37.50162],
+          [127.03653, 37.50065],
+        ],
+      ],
+    },
   },
   {
     mode: 'subway',
     title: '2호선 잠실·성수 방면',
     note: '역삼역 → 선릉역',
     minutes: quiet ? 3 : 2,
+    routeId: '1002',
+    segmentCongestionGrade: quiet ? 'RELAXED' : 'CONGESTED',
+    from: railEndpoints.yeoksam,
+    to: railEndpoints.seolleung,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.03653, 37.50065],
+          [127.0489, 37.5045],
+        ],
+      ],
+    },
   },
   {
     mode: 'walk',
     title: quiet ? '선릉역의 덜 붐비는 통로로 환승' : '선릉역에서 환승',
     note: '수인분당선 수원 방면 승강장',
     minutes: quiet ? 3 : 2,
+    transfer: true,
+    from: railEndpoints.seolleung,
+    to: railEndpoints.seolleung,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.0489, 37.5045],
+          [127.0492, 37.5047],
+        ],
+      ],
+    },
   },
   {
     mode: 'subway',
     title: '수인분당선 수원 방면',
     note: '선릉역 → 한티역 → 도곡역',
     minutes: quiet ? 6 : 5,
+    routeId: '1075',
+    segmentCongestionGrade: quiet ? 'NORMAL' : 'SATURATED',
+    from: railEndpoints.seolleung,
+    to: railEndpoints.dogok,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.0489, 37.5045],
+          [127.05502, 37.49096],
+        ],
+      ],
+    },
   },
-  { mode: 'walk', title: '도곡역 출구로 이동', note: '도착 지점까지 걸어요', minutes: 2 },
+  {
+    mode: 'walk',
+    title: '도곡역 출구로 이동',
+    note: '도착 지점까지 걸어요',
+    minutes: 2,
+    from: railEndpoints.dogok,
+    to: railEndpoints.exit,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.05502, 37.49096],
+          [127.0554, 37.4914],
+        ],
+      ],
+    },
+  },
 ]
 export const routes: Route[] = [
   {

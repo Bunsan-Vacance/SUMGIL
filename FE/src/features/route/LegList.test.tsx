@@ -6,7 +6,7 @@ import type { Route } from './types'
 import LegList from './LegList'
 
 describe('구간 이동 안내', () => {
-  it('구간 거리와 혼잡도 미제공 상태를 함께 표시한다', () => {
+  it('구간 거리와 화면 확인용 혼잡도 숫자를 함께 표시한다', () => {
     const route: Route = {
       id: 'route',
       label: '빠른 경로',
@@ -29,7 +29,7 @@ describe('구간 이동 안내', () => {
     render(<LegList route={route} />)
 
     expect(screen.getByText('도보 · 거리 준비중입니다')).toBeTruthy()
-    expect(screen.getByText('2호선 · 1.2km · 출발역 통계: 예측 정보 없음')).toBeTruthy()
+    expect(screen.getByText('2호선 · 1.2km · 구간 예상 혼잡도 20%')).toBeTruthy()
   })
 
   it('원본 구간 인덱스의 현재 단계에 aria-current와 텍스트를 표시한다', () => {

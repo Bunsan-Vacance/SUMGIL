@@ -411,12 +411,14 @@ export function useKakaoMap(
     })
     const hasLegGeometry = route.legs.some((leg) => leg.geometry?.coordinates.length)
     const lineEntries: RouteLineEntry[] = hasLegGeometry
-      ? route.legs.flatMap((leg) =>
-          (leg.geometry?.coordinates || []).map((coordinates) => ({
-            coordinates,
-            style: routeLineStyle(leg),
-          })),
-        )
+      ? route.legs.flatMap((leg) => {
+          const coordinates = leg.geometry?.coordinates || []
+          const lineParts =
+            leg.mode === 'walk' || leg.mode === 'bike' ? [coordinates.flat()] : coordinates
+          return lineParts
+            .filter((part) => part.length)
+            .map((part) => ({ coordinates: part, style: routeLineStyle(leg) }))
+        })
       : (route.geometry?.coordinates || []).map((coordinates) => ({
           coordinates,
           style: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
@@ -439,6 +441,12 @@ export function useKakaoMap(
       pointCount += path.length
       validLineCount += 1
     })
+    if (pointCount > 1) {
+      routeBoundsRef.current = bounds
+      instance.setBounds(bounds, 40, 35, 35, 35)
+    } else if (pointCount === 1) {
+      routeBoundsRef.current = bounds
+    }
     if (validLineCount) routeLinesRef.current = createRouteSvgOverlay(maps, instance, lineEntries)
     routeBikeStationOverlaysRef.current = bikeStationsVisible
       ? bikeCandidates.map((candidate) =>
@@ -465,12 +473,6 @@ export function useKakaoMap(
       .map((candidate) =>
         createRouteEndpointOverlay(maps, instance, candidate, (place) => placeRef.current?.(place)),
       )
-    if (pointCount > 1) {
-      routeBoundsRef.current = bounds
-      instance.setBounds(bounds, 40, 35, 35, 35)
-    } else if (pointCount === 1) {
-      routeBoundsRef.current = bounds
-    }
     return () => {
       routeLinesRef.current?.destroy()
       routeLinesRef.current = null

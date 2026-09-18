@@ -7,6 +7,13 @@ import { getRoutes } from './selectors'
 import { tripReducer, type TripState } from './tripReducer'
 import type { Mode, Place, Priority, Route } from './types'
 
+const PREVIEW_CONGESTION_PREDICTION = {
+  congestionPercent: 68,
+  congestionGrade: 'MEDIUM',
+  dataStatus: 'AVAILABLE',
+  predictionBasis: 'RECENT_7D',
+} satisfies NonNullable<Route['congestionPrediction']>
+
 function withWalk(selected: Mode[]) {
   return [...new Set<Mode>(['walk', ...selected])]
 }
@@ -68,7 +75,16 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
         { origin, destination, modes, priority: priorityRef.current, departedAt },
         pending.signal,
       )
-      if (!pending.signal.aborted) dispatch({ type: 'loaded', routes: candidates })
+      if (!pending.signal.aborted) {
+        const displayCandidates = import.meta.env.DEV
+          ? candidates.map((route) =>
+              route.congestionPrediction
+                ? route
+                : { ...route, congestionPrediction: PREVIEW_CONGESTION_PREDICTION },
+            )
+          : candidates
+        dispatch({ type: 'loaded', routes: displayCandidates })
+      }
     } catch (error: unknown) {
       if (!pending.signal.aborted) {
         dispatch({

@@ -11,7 +11,11 @@ import type {
 import type { Place, Route } from '../route/types'
 import KakaoMap from './KakaoMap'
 
-const mocks = vi.hoisted(() => ({ loadKakaoMaps: vi.fn(), stock: vi.fn(), nearby: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  loadKakaoMaps: vi.fn(),
+  stock: vi.fn(),
+  nearby: vi.fn(),
+}))
 vi.mock('../../lib/kakao/sdk', () => ({ loadKakaoMaps: mocks.loadKakaoMaps }))
 vi.mock('../../api/repositories', () => ({
   bikeStationRepository: { nearby: mocks.nearby },
@@ -60,6 +64,7 @@ class FakeLatLng {
 
 class FakeMap {
   static instances: FakeMap[] = []
+  static boundsApplied = false
 
   constructor() {
     FakeMap.instances.push(this)
@@ -68,15 +73,26 @@ class FakeMap {
   getCenter = vi.fn(() => new FakeLatLng(37.5, 127) as never)
   getLevel = vi.fn(() => 5)
   getProjection = vi.fn(() => ({
-    pointFromCoords: (point: FakeLatLng) => ({
-      x: point.getLng() * 100,
-      y: point.getLat() * 100,
+    pointFromCoords: (point: FakeLatLng) =>
+      FakeMap.boundsApplied
+        ? {
+            x: Math.round((point.getLng() - 127) * 1000 + 220),
+            y: Math.round((point.getLat() - 37.5) * 1000 + 110),
+          }
+        : {
+            x: -4,
+            y: -37,
+          },
+    containerPointFromCoords: () => ({
+      x: 0,
+      y: 0,
     }),
-    containerPointFromCoords: () => ({ x: 0, y: 0 }),
   }))
   setCenter = vi.fn()
   setLevel = vi.fn()
-  setBounds = vi.fn()
+  setBounds = vi.fn(() => {
+    FakeMap.boundsApplied = true
+  })
   panTo = vi.fn()
   relayout = vi.fn()
   getBounds = vi.fn(() => new FakeBounds())
@@ -244,6 +260,7 @@ beforeEach(() => {
   mocks.nearby.mockReset().mockResolvedValue([])
   FakeBounds.containsAll = false
   FakeMap.instances = []
+  FakeMap.boundsApplied = false
   FakeCustomOverlay.instances = []
   FakeAbstractOverlay.instances = []
   FakeResizeObserver.callbacks = []
@@ -252,6 +269,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  history.replaceState(null, '', '#home')
   vi.unstubAllGlobals()
   vi.clearAllMocks()
 })
@@ -488,8 +506,8 @@ describe('일반 지도 장소 마커', () => {
     const firstSvg = document.querySelector('.route-svg-overlay') as SVGSVGElement
     expect(firstSvg.style.zIndex).toBe('5')
     expect(firstSvg.style.overflow).toBe('visible')
-    expect(firstSvg.querySelectorAll('polyline')[0].getAttribute('points')).toContain('12700')
-    expect(firstSvg.querySelectorAll('polyline')[2].getAttribute('points')).toContain('12710')
+    expect(firstSvg.querySelectorAll('polyline')[0].getAttribute('points')).toBe('220,110 230,120')
+    expect(firstSvg.querySelectorAll('polyline')[2].getAttribute('points')).toBe('320,210 330,220')
 
     const nextRoute: Route = {
       ...route,
@@ -516,7 +534,64 @@ describe('일반 지도 장소 마커', () => {
     expect(document.querySelectorAll('.route-svg-overlay')).toHaveLength(0)
   })
 
-  it('구간별 geometry 선 색상과 승차·환승·하차 marker를 관리한다', async () => {
+  it('leg geometry의 여러 선 조각을 하나의 polyline으로 이어 그린다', async () => {
+    const route: Route = {
+      id: 'route-leg-geometry',
+      label: '도보 경로',
+      minutes: 5,
+      transfers: 0,
+      modes: ['walk'],
+      legs: [
+        {
+          mode: 'walk',
+          title: '도보',
+          note: '도보',
+          minutes: 5,
+          geometry: {
+            type: 'MultiLineString',
+            coordinates: [
+              [
+                [127, 37.5],
+                [127.01, 37.51],
+              ],
+              [
+                [127.02, 37.52],
+                [127.03, 37.53],
+              ],
+            ],
+          },
+        },
+      ],
+    }
+    const rendered = renderMap({ route })
+
+    await waitFor(() => {
+      const lines = document.querySelectorAll('.route-svg-overlay polyline')
+      expect(lines).toHaveLength(2)
+      expect(lines[0].getAttribute('points')).toBe('220,110 230,120 240,130 250,140')
+    })
+
+    for (const mode of ['subway', 'bus'] as const) {
+      rendered.rerender(
+        <KakaoMap
+          origin={origin}
+          destination={null}
+          route={{
+            ...route,
+            id: `route-${mode}-geometry`,
+            modes: [mode],
+            legs: route.legs.map((leg) => ({ ...leg, mode })),
+          }}
+          onMessage={vi.fn()}
+        />,
+      )
+      await waitFor(() =>
+        expect(document.querySelectorAll('.route-svg-overlay polyline')).toHaveLength(4),
+      )
+    }
+  })
+
+  it('지하철 geometry에 mock 혼잡 색상과 승차·환승·하차 marker를 관리한다', async () => {
     const onPlaceSelect = vi.fn()
     const transfer = { id: 'transfer', name: '환승역', lat: 37.51, lng: 127.04 }
     const route: Route = {
@@ -570,9 +645,13 @@ describe('일반 지도 장소 마커', () => {
     )
     const routeLines = document.querySelectorAll('.route-svg-overlay polyline')
     expect(routeLines[0].getAttribute('stroke')).toBe('#fff')
-    expect(routeLines[1].getAttribute('stroke')).toBe('#28323c')
+    expect(routeLines[0].getAttribute('stroke-width')).toBe('12')
+    expect(routeLines[1].getAttribute('stroke')).toBe('#1d4ed8')
+    expect(routeLines[1].getAttribute('stroke-width')).toBe('8')
     expect(routeLines[2].getAttribute('stroke')).toBe('#fff')
-    expect(routeLines[3].getAttribute('stroke')).toBe('#28323c')
+    expect(routeLines[2].getAttribute('stroke-width')).toBe('12')
+    expect(routeLines[3].getAttribute('stroke')).toBe('#15803d')
+    expect(routeLines[3].getAttribute('stroke-width')).toBe('8')
     await waitFor(() => expect(rendered.customOverlays).toHaveLength(3))
     expect(
       rendered.customOverlays.every(
@@ -590,6 +669,108 @@ describe('일반 지도 장소 마커', () => {
 
     rendered.unmount()
     rendered.customOverlays.forEach((overlay) => expect(overlay.setMap).toHaveBeenCalledWith(null))
+  })
+
+  it('화면 확인용 mock level을 등급으로 보완해 실제 경로 선 색상에 반영한다', async () => {
+    const route: Route = {
+      id: 'route-preview-congestion',
+      label: '혼잡도 시안 경로',
+      minutes: 14,
+      transfers: 0,
+      modes: ['subway'],
+      legs: Array.from({ length: 4 }, (_, index) => ({
+        mode: index % 2 === 0 ? ('subway' as const) : ('bus' as const),
+        title: `구간 ${index + 1}`,
+        note: '시안 구간',
+        minutes: 3,
+        geometry: {
+          type: 'MultiLineString' as const,
+          coordinates: [
+            [
+              [127.03 + index * 0.01, 37.5 + index * 0.01],
+              [127.04 + index * 0.01, 37.51 + index * 0.01],
+            ],
+          ],
+        },
+      })),
+    }
+    renderMap({ route })
+
+    await waitFor(() => {
+      const lines = document.querySelectorAll('.route-svg-overlay polyline')
+      expect(lines).toHaveLength(8)
+      expect(
+        Array.from(lines)
+          .filter((_, index) => index % 2 === 1)
+          .map((line) => line.getAttribute('stroke')),
+      ).toEqual(['#1d4ed8', '#15803d', '#b91c1c', '#7e22ce'])
+    })
+  })
+
+  it('선택 경로에 구간 등급이 있으면 네 단계 범례를 표시한다', () => {
+    renderMap({
+      route: {
+        id: 'route-congestion',
+        label: '혼잡도 경로',
+        minutes: 8,
+        transfers: 0,
+        modes: ['subway'],
+        legs: [
+          {
+            mode: 'subway',
+            title: '2호선',
+            note: '2호선',
+            minutes: 8,
+            segmentCongestionGrade: 'SATURATED',
+          },
+        ],
+      },
+    })
+
+    const legend = screen.getByRole('group', { name: '구간 혼잡도 범례' })
+    expect(legend.textContent).toBe('여유보통혼잡포화')
+  })
+
+  it('개발용 혼잡도 미리보기는 지도 연결 전에도 구간 색을 보여준다', async () => {
+    history.replaceState(null, '', '?preview=congestion#detail')
+    mocks.loadKakaoMaps.mockRejectedValueOnce(new Error('카카오 키 없음'))
+    renderMap({
+      route: {
+        id: 'route-preview',
+        label: '혼잡도 시안 경로',
+        minutes: 8,
+        transfers: 0,
+        modes: ['subway'],
+        legs: [
+          {
+            mode: 'subway',
+            title: '2호선',
+            note: '역삼역 → 선릉역',
+            minutes: 8,
+            segmentCongestionGrade: 'CONGESTED',
+            geometry: {
+              type: 'MultiLineString',
+              coordinates: [
+                [
+                  [127.03, 37.5],
+                  [127.04, 37.51],
+                ],
+              ],
+            },
+          },
+        ],
+      },
+    })
+
+    const preview = screen.getByRole('img', { name: '혼잡도 경로 시안 지도' })
+    expect(preview.querySelector('.congestion-preview-line')?.getAttribute('data-grade')).toBe(
+      'CONGESTED',
+    )
+    expect(preview.querySelector('.congestion-preview-line')?.getAttribute('stroke')).toBe(
+      '#b91c1c',
+    )
+    expect(screen.getByText('시안 지도 · 카카오 지도 연결 전')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('지도를 불러오지 못했어요')).toBeTruthy())
   })
 
   it('자전거 경계 marker는 일반 대여소 아이콘으로 만들고 경로 해제 시 정리한다', async () => {

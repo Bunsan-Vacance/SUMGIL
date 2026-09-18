@@ -31,6 +31,23 @@ function deferred<T>() {
 }
 
 describe('경로 검색 요청 수명', () => {
+  it('개발 화면에서 예측값 없는 실제 경로에만 route-level mock을 보완한다', async () => {
+    const routeWithoutPrediction = { ...routes[0], congestionPrediction: undefined }
+    const repository: RouteRepository = { search: vi.fn(async () => [routeWithoutPrediction]) }
+    const { result } = renderHook(() => useTrip(loadedTrip, repository))
+
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+
+    expect(result.current.selected?.congestionPrediction).toEqual({
+      congestionPercent: 68,
+      congestionGrade: 'MEDIUM',
+      dataStatus: 'AVAILABLE',
+      predictionBasis: 'RECENT_7D',
+    })
+  })
+
   it('쾌적 전환은 같은 조건으로 재조회하고 서버의 첫 후보를 선택한다', async () => {
     const serverRoutes = [
       { ...routes[1], routeType: 'LOW_CONGESTION' as const, minutes: 30 },

@@ -1,7 +1,6 @@
-import { ArrowLeftRight, ChevronRight, UsersRound } from 'lucide-react'
+import { ArrowLeftRight, ChevronRight } from 'lucide-react'
 import {
   clockTime,
-  congestionBasisText,
   congestionGradeText,
   congestionPredictionFor,
   routeArrival,
@@ -11,6 +10,7 @@ import type { Route } from './types'
 import { compactLegs } from './LegList'
 import { modeIcons } from './ModeIcon'
 import { lineColor, lineTextColor } from './lineColor'
+import { segmentCongestionPresentation, withSegmentCongestionPreview } from './segmentCongestion'
 import { isTransferLeg, transitionLabel } from './transitions'
 
 export default function RouteCard({
@@ -24,7 +24,8 @@ export default function RouteCard({
   busVariantCount?: number
   onDetail: () => void
 }) {
-  const displayLegs = compactLegs(route.legs)
+  const displayLegs = compactLegs(withSegmentCongestionPreview(route.legs))
+  const hasCongestion = displayLegs.some((leg) => leg.segmentCongestionGrade)
   const departure = clockTime(route.departedAt)
   const arrival = routeArrival(route.minutes, route.departedAt)
   const finalLeg = displayLegs.at(-1)
@@ -41,14 +42,10 @@ export default function RouteCard({
     busVariantCount && busVariantCount > 1 ? `버스 ${busVariantCount}개 선택 가능` : null,
   ].filter((fact): fact is string => fact !== null)
   const prediction = congestionPredictionFor(route)
+  const congestionGrade = prediction ? congestionGradeText(prediction.congestionGrade) : undefined
   const congestionLabel = prediction
-    ? `혼잡도 예상 ${prediction.congestionPercent}%${
-        congestionGradeText(prediction.congestionGrade)
-          ? ` · ${congestionGradeText(prediction.congestionGrade)}`
-          : ''
-      }`
+    ? `혼잡도 예상 ${prediction.congestionPercent}%${congestionGrade ? ` · ${congestionGrade}` : ''}`
     : '예측 정보 없음'
-  const congestion = prediction ? congestionLabel : undefined
 
   return (
     <button
@@ -68,35 +65,62 @@ export default function RouteCard({
       <span className="route-card-topline">
         <span className="route-badge">{route.label}</span>
         <span className="route-card-actions">
-          {route.source && (
-            <span className="route-source">{route.source === 'MOCK' ? '샘플' : '경로 정보'}</span>
-          )}
-          {congestion && (
-            <span className="route-card-congestion">
-              <UsersRound size={14} aria-hidden="true" />
-              {congestion}
-            </span>
-          )}
+          {route.source === 'MOCK' && <span className="route-source">샘플</span>}
           <ChevronRight className="route-card-chevron" size={20} aria-hidden="true" />
         </span>
       </span>
-      <span className="route-time">
-        <span>
-          <b>{roundMinutes(route.minutes)}</b>분
+      <span className="route-card-main">
+        <span className="route-card-details">
+          <span className="route-time">
+            <span>
+              <b>{roundMinutes(route.minutes)}</b>분
+            </span>
+            <small>{departure ? `${departure} → ${arrival}` : '출발 시각 준비중입니다'}</small>
+          </span>
+          <span className="route-facts">{facts.join(' · ')}</span>
         </span>
-        <small>{departure ? `${departure} → ${arrival}` : '출발 시각 준비중입니다'}</small>
-      </span>
-      <span className="route-facts">{facts.join(' · ')}</span>
-      {prediction ? (
-        <span className="route-comfort">
-          {congestionBasisText(prediction.predictionBasis) && (
-            <small>{congestionBasisText(prediction.predictionBasis)}</small>
+        <span className="route-card-prediction" aria-label={congestionLabel}>
+          {prediction ? (
+            <>
+              <small>혼잡도 예상</small>
+              <strong>{prediction.congestionPercent}%</strong>
+              {congestionGrade && <span>{congestionGrade}</span>}
+            </>
+          ) : (
+            <span>예측 정보 없음</span>
           )}
         </span>
-      ) : (
-        <span className="route-comfort">예측 정보 없음</span>
-      )}
+      </span>
       {comparison && <span className="route-comparison">{comparison}</span>}
+      {hasCongestion && (
+        <span className="route-segment-labels" aria-label="구간별 혼잡도">
+          {displayLegs.map((leg, index) => {
+            const congestion = segmentCongestionPresentation(leg.segmentCongestionGrade)
+            const from = leg.from?.name || leg.title.split(' → ')[0]
+            const to = leg.to?.name || leg.title.split(' → ').at(-1)
+            const segment = [from, to].filter(Boolean).join(' → ') || leg.title
+            return (
+              <span
+                className="route-segment-label"
+                key={index}
+                style={{ flexGrow: leg.minutes, color: congestion?.color }}
+                title={
+                  congestion
+                    ? `${segment} 구간 혼잡도 ${congestion.label}`
+                    : `${segment} 구간 혼잡도 정보 없음`
+                }
+                aria-label={
+                  congestion
+                    ? `${segment} 구간 혼잡도 ${congestion.label}`
+                    : `${segment} 구간 혼잡도 정보 없음`
+                }
+              >
+                {congestion?.label || ''}
+              </span>
+            )
+          })}
+        </span>
+      )}
       <span className="mode-strip" aria-label="구간별 이동 시간">
         {displayLegs.map((leg, index) => {
           const transfer = isTransferLeg(leg)

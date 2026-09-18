@@ -4,7 +4,13 @@ import { createPortal } from 'react-dom'
 import BottomSheet from '../../components/BottomSheet'
 import { bikeStockRepository } from '../../api/repositories'
 import type { BikeStock } from '../../api/contracts'
+import { isCongestionPreview } from '../../app/preview'
 import type { Place, Route } from '../route/types'
+import {
+  SEGMENT_CONGESTION_LEVELS,
+  segmentCongestionPresentation,
+  withSegmentCongestionPreview,
+} from '../route/segmentCongestion'
 import { useKakaoMap } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
 
@@ -24,6 +30,98 @@ function stockUpdatedLabel(value: string | null) {
         minute: '2-digit',
       })
     : value
+}
+
+function congestionPreviewPoint(
+  coordinate: [number, number],
+  bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number },
+) {
+  const width = 390
+  const height = 520
+  const padding = 34
+  const x =
+    padding +
+    ((coordinate[0] - bounds.minLng) / (bounds.maxLng - bounds.minLng || 1)) * (width - padding * 2)
+  const y =
+    padding +
+    ((bounds.maxLat - coordinate[1]) / (bounds.maxLat - bounds.minLat || 1)) *
+      (height - padding * 2)
+  return `${x.toFixed(1)},${y.toFixed(1)}`
+}
+
+function CongestionPreviewMap({ route }: { route: Route }) {
+  const entries = route.legs.flatMap((leg) =>
+    (leg.geometry?.coordinates || []).map((coordinates) => ({ leg, coordinates })),
+  )
+  const points = entries.flatMap(({ coordinates }) => coordinates)
+  if (!points.length) return null
+  const bounds = {
+    minLng: Math.min(...points.map(([lng]) => lng)),
+    maxLng: Math.max(...points.map(([lng]) => lng)),
+    minLat: Math.min(...points.map(([, lat]) => lat)),
+    maxLat: Math.max(...points.map(([, lat]) => lat)),
+  }
+  const point = (coordinate: [number, number]) => congestionPreviewPoint(coordinate, bounds)
+  const endpointPoints = entries.flatMap(({ leg, coordinates }) => {
+    const first = coordinates[0]
+    const last = coordinates.at(-1)
+    if (!first || !last) return []
+    return [
+      { leg, coordinate: first },
+      { leg, coordinate: last },
+    ]
+  })
+  const labels = [
+    { label: '출발', coordinate: endpointPoints[0]?.coordinate },
+    ...route.legs
+      .filter((leg) => leg.transfer)
+      .map((leg) => ({ label: '환승', coordinate: leg.geometry?.coordinates[0]?.[0] })),
+    { label: '도착', coordinate: endpointPoints.at(-1)?.coordinate },
+  ].filter(
+    (marker): marker is { label: string; coordinate: [number, number] } => !!marker.coordinate,
+  )
+
+  return (
+    <div className="congestion-preview-map" data-preview="congestion">
+      <svg viewBox="0 0 390 520" role="img" aria-label="혼잡도 경로 시안 지도">
+        <rect width="390" height="520" fill="#e9eee8" />
+        <path className="congestion-preview-road" d="M-20 120 410 430 M-20 430 410 100" />
+        <path className="congestion-preview-road secondary" d="M90 -20 300 540 M280 -20 80 540" />
+        {entries.map(({ leg, coordinates }, index) => {
+          const points = coordinates.map(point).join(' ')
+          const congestion = segmentCongestionPresentation(leg.segmentCongestionGrade)
+          const color = congestion?.color || '#708078'
+          return (
+            <g key={`${leg.title}-${index}`}>
+              <polyline className="congestion-preview-casing" points={points} />
+              <polyline
+                className="congestion-preview-line"
+                data-grade={leg.segmentCongestionGrade || 'NEUTRAL'}
+                points={points}
+                stroke={color}
+                strokeDasharray={leg.transfer ? '8 7' : undefined}
+              />
+            </g>
+          )
+        })}
+        {labels.map(({ label, coordinate }, index) => (
+          <g key={`${label}-${index}`} className="congestion-preview-marker">
+            <circle
+              cx={point(coordinate).split(',')[0]}
+              cy={point(coordinate).split(',')[1]}
+              r="7"
+            />
+            <text x={point(coordinate).split(',')[0]} y={point(coordinate).split(',')[1]} dy="-12">
+              {label}
+            </text>
+          </g>
+        ))}
+        <text className="congestion-preview-caption" x="16" y="500">
+          시안 지도 · 카카오 지도 연결 전
+        </text>
+      </svg>
+    </div>
+  )
 }
 
 function BikeStockSheet({
@@ -151,6 +249,13 @@ export default function KakaoMap({
   const mapPlaces = places ?? routePlaces
   const mapFocus = focusedPlace === undefined ? selectedPlace : focusedPlace
   const showSelectedPlaceInfo = showPlaceInfo && selectedPlace
+  const effectiveRoute = useMemo(() => {
+    if (!route) return null
+    return {
+      ...route,
+      legs: withSegmentCongestionPreview(route.legs),
+    }
+  }, [route])
   const closeBikeStock = () => {
     stockAbortRef.current?.abort()
     stockAbortRef.current = null
@@ -204,10 +309,12 @@ export default function KakaoMap({
     mapPlaces,
     mapFocus,
     places === undefined ? null : mapFocus,
-    route,
+    effectiveRoute,
     bikeStationsVisible,
   )
   const { locating, locate } = useCurrentLocation(showPosition, onMessage, locationScope)
+  const showCongestionPreview =
+    status !== 'ready' && Boolean(effectiveRoute) && isCongestionPreview(location.search)
   useEffect(() => {
     setSelectedPlace(null)
     closeBikeStock()
@@ -224,6 +331,7 @@ export default function KakaoMap({
   return (
     <div className="kakao-map-wrap">
       <div ref={container} className="kakao-map-canvas" aria-label="카카오 지도" />
+      {showCongestionPreview && effectiveRoute && <CongestionPreviewMap route={effectiveRoute} />}
       <button
         type="button"
         className="map-bike-toggle"
@@ -236,8 +344,21 @@ export default function KakaoMap({
           <Bike size={14} strokeWidth={2.4} />
         </span>
       </button>
+      {effectiveRoute?.legs.some((leg) => leg.segmentCongestionGrade) && (
+        <div className="map-congestion-legend" role="group" aria-label="구간 혼잡도 범례">
+          {SEGMENT_CONGESTION_LEVELS.map((level) => (
+            <span className="map-congestion-legend-item" key={level.grade}>
+              <i aria-hidden="true" style={{ backgroundColor: level.color }} />
+              {level.label}
+            </span>
+          ))}
+        </div>
+      )}
       {status !== 'ready' && (
-        <div className="map-state" role="status">
+        <div
+          className={`map-state${showCongestionPreview ? ' congestion-preview-state' : ''}`}
+          role="status"
+        >
           <p>{status === 'loading' ? '지도를 불러오고 있어요' : '지도를 불러오지 못했어요'}</p>
           {status === 'error' && (
             <button className="secondary" onClick={retry}>

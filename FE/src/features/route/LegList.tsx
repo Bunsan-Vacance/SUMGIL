@@ -2,7 +2,7 @@ import type { Leg, Route } from './types'
 import { modeIcons } from './ModeIcon'
 import { roundMinutes } from './selectors'
 import { lineColor } from './lineColor'
-import { useRouteCongestion } from './useCongestion'
+import { segmentCongestionLevelForIndex, withSegmentCongestionPreview } from './segmentCongestion'
 import { transitionLabel } from './transitions'
 
 function formatDistance(distanceMeters?: number) {
@@ -11,9 +11,8 @@ function formatDistance(distanceMeters?: number) {
   return `${(distanceMeters / 1000).toFixed(distanceMeters >= 10000 ? 0 : 1)}km`
 }
 
-function formatCongestion(level?: number) {
-  if (level === undefined) return '출발역 통계: 예측 정보 없음'
-  return `출발역 통계 기준 예상 혼잡도 ${Number.isInteger(level) ? level : level.toFixed(1)}%`
+function formatCongestion(level: number) {
+  return `구간 예상 혼잡도 ${level}%`
 }
 
 export function compactLegs(legs: Leg[]) {
@@ -27,7 +26,9 @@ export function compactLegs(legs: Leg[]) {
         !previous.leg.transitionType &&
         !leg.transitionType &&
         previous.leg.mode === leg.mode &&
-        previous.leg.routeId === leg.routeId
+        previous.leg.routeId === leg.routeId &&
+        previous.leg.segmentCongestionGrade === undefined &&
+        leg.segmentCongestionGrade === undefined
       ) {
         const from = previous.leg.from?.name || previous.leg.title.split(' → ')[0]
         const to = leg.to?.name || leg.title.split(' → ').at(-1)
@@ -59,13 +60,17 @@ export default function LegList({
   /** Index in the original route.leg list, even when a compact list is rendered. */
   activeIndex?: number
 }) {
-  const legs = compact && activeIndex === undefined ? compactLegs(route.legs) : route.legs
-  const congestion = useRouteCongestion(legs, route.departedAt)
+  const previewLegs = withSegmentCongestionPreview(route.legs)
+  const legs = compact && activeIndex === undefined ? compactLegs(previewLegs) : previewLegs
+  let transitIndex = 0
   return (
     <ol className="leg-list">
       {legs.map((leg, index) => {
         const Icon = modeIcons[leg.mode]
-        const legCongestion = leg.mode === 'subway' ? congestion[index] : undefined
+        const legCongestionLevel =
+          (leg.mode === 'subway' || leg.mode === 'bus') && !leg.transfer
+            ? segmentCongestionLevelForIndex(transitIndex++)
+            : undefined
         return (
           <li
             key={index}
@@ -83,7 +88,7 @@ export default function LegList({
               <p>
                 {leg.note} · {formatDistance(leg.distanceMeters)}
                 {transitionLabel(leg.transitionType) && ` · ${transitionLabel(leg.transitionType)}`}
-                {legCongestion && <> · {formatCongestion(legCongestion.level)}</>}
+                {legCongestionLevel !== undefined && ` · ${formatCongestion(legCongestionLevel)}`}
               </p>
             </div>
             <span>{roundMinutes(leg.minutes)}분</span>
