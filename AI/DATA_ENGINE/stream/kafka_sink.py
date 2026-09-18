@@ -13,6 +13,7 @@ import pandas as pd
 
 from DATA_ENGINE.collect.common import AI_ROOT, KST, save_latest_parquet
 from DATA_ENGINE.stream.kafka_events import KafkaEvent
+from DATA_ENGINE.stream.weather_bike_adapter import update_bike_weather
 from DATA_ENGINE.stream.weather_latest import update_weather_latest
 
 TOPIC_BASE_DIRS = {
@@ -151,4 +152,7 @@ def write_events(events: list[KafkaEvent], *, ai_root: Path = AI_ROOT) -> list[P
     weather_path = update_weather_latest(events, ai_root=ai_root)
     if weather_path is not None:
         paths.append(weather_path)
+        bike_weather_path = update_bike_weather(ai_root=ai_root)
+        if bike_weather_path is not None:
+            paths.append(bike_weather_path)
     return paths

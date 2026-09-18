@@ -609,6 +609,21 @@ data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet
 유지한다. 늦게 도착한 이전 발표는 최신값을 덮지 않는다. BIKE 전용
 `latest_weather.parquet`과는 별개의 공통 파일이다.
 
+BIKE ETA 서빙용 어댑터는 공통 파일에서 대표 격자 `(60, 127)`의 동일한
+`base_datetime`에 해당하는 실황 `T1H`와 `RN1`만 선택해 다음 파일을 갱신한다.
+
+```text
+data/EXTERNAL/weather/raw/nowcast/latest_weather.parquet
+```
+
+이 파일은 단일 행의 `temp`, `is_rain`, `updated_at` 컬럼을 갖는다.
+`is_rain`은 학습 데이터와 동일하게 `RN1 > 0`으로 정의하고, `updated_at`은
+파일 저장/수집 시각이 아닌 실제 관측 시각(KST naive)이다. 두 항목이 같은
+관측 시각에 모두 없거나 숫자로 해석할 수 없으면 이전 파일을 유지한다.
+Kafka 발행이 약 60분 간격인 현 상태에서 BIKE의 15분 신선도 기준을 그대로
+적용하면 정상 수집 중에도 폴백이 발생하므로, BIKE 설정과 운영 관측을 함께
+검토해야 한다. 공통 파일은 BIKE 전용 포맷으로 바꾸지 않는다.
+
 ### 날씨 Kafka 입력 계약 (2026-09-18 확인)
 
 J15A104A의 최근 Kafka 날씨 snapshot을 확인한 결과, `weather.nowcast`의 envelope
