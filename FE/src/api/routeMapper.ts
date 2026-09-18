@@ -84,7 +84,7 @@ function endpointCoordinate(value: unknown, min: number, max: number) {
   if (!finite(value, min, max)) {
     throw new RepositoryError('invalid-response', '경로 지점 좌표 응답이 올바르지 않아요.')
   }
-  return value
+  return value as number
 }
 
 function mapEndpoint(
