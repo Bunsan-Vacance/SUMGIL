@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -74,6 +75,26 @@ def raw_frame() -> pd.DataFrame:
     )
 
 
+def kafka_frame(*, collected_at="2026-09-13T01:14:00+09:00") -> pd.DataFrame:
+    payloads = [
+        {"baseDate": "20260913", "baseTime": "0100", "category": "T1H", "nx": 60,
+         "ny": 127, "obsrValue": "24.1"},
+        {"baseDate": "20260913", "baseTime": "0100", "category": "RN1", "nx": 60,
+         "ny": 127, "obsrValue": "0"},
+        {"baseDate": "20260913", "baseTime": "0130", "fcstDate": "20260913",
+         "fcstTime": "0200", "category": "T1H", "nx": 60, "ny": 127,
+         "fcstValue": "25"},
+        {"baseDate": "20260913", "baseTime": "0130", "fcstDate": "20260913",
+         "fcstTime": "0200", "category": "REH", "nx": 60, "ny": 127,
+         "fcstValue": "70"},
+    ]
+    return pd.DataFrame(
+        [{"source": "weather.nowcast", "payload_json": json.dumps(payload),
+          "poll_run_at": collected_at, "ingested_at": collected_at}
+         for payload in payloads]
+    )
+
+
 def test_snapshot_files_returns_sorted_snapshot_paths(tmp_path):
     base = tmp_path / "raw"
     second = base / "dt=2026-09-13" / "hh=02" / "snapshot_20260913T020200.parquet"
@@ -122,6 +143,66 @@ def test_build_weather_nowcast_features_reads_date_partition(tmp_path):
 
     assert len(df) == 2
     assert set(df["weather_source"]) == {"observed", "forecast"}
+
+
+def test_build_weather_nowcast_features_reads_kafka_only(tmp_path):
+    base = tmp_path / "raw"
+    path = base / "dt=2026-09-13" / "hh=01" / "snapshot_kafka.parquet"
+    path.parent.mkdir(parents=True)
+    kafka_frame().to_parquet(path, index=False)
+
+    df = build_weather_nowcast_features(base, "2026-09-13")
+
+    assert len(df) == 2
+    observed = df[df["weather_source"] == "observed"].iloc[0]
+    forecast = df[df["weather_source"] == "forecast"].iloc[0]
+    assert observed["t1h"] == 24.1
+    assert observed["rn1"] == 0
+    assert forecast["t1h"] == 25
+    assert forecast["reh"] == 70
+    assert forecast["forecast_datetime"].strftime("%H:%M") == "02:00"
+
+
+def test_build_weather_nowcast_features_uses_ingested_time_without_poll_run(tmp_path):
+    base = tmp_path / "raw"
+    path = base / "dt=2026-09-13" / "hh=01" / "snapshot_kafka.parquet"
+    path.parent.mkdir(parents=True)
+    frame = kafka_frame()
+    frame["poll_run_at"] = None
+    frame.to_parquet(path, index=False)
+
+    df = build_weather_nowcast_features(base, "2026-09-13")
+
+    assert len(df) == 2
+    assert set(df["collected_minute"]) == {14}
+
+
+def test_build_weather_nowcast_features_deduplicates_poller_and_kafka(tmp_path):
+    base = tmp_path / "raw" / "dt=2026-09-13" / "hh=01"
+    base.mkdir(parents=True)
+    raw_frame().to_parquet(base / "snapshot_poller.parquet", index=False)
+    kafka_frame().to_parquet(base / "snapshot_kafka.parquet", index=False)
+
+    df = build_weather_nowcast_features(base.parent.parent, "2026-09-13")
+
+    assert len(df) == 2
+    assert set(df["weather_source"]) == {"observed", "forecast"}
+    assert set(df["collected_minute"]) == {14}
+
+
+def test_build_weather_nowcast_features_skips_invalid_kafka_payload(tmp_path, caplog):
+    base = tmp_path / "raw" / "dt=2026-09-13" / "hh=01"
+    base.mkdir(parents=True)
+    invalid = kafka_frame().iloc[:1].copy()
+    invalid["payload_json"] = "not json"
+    pd.concat([kafka_frame(), invalid], ignore_index=True).to_parquet(
+        base / "snapshot_kafka.parquet", index=False
+    )
+
+    df = build_weather_nowcast_features(base.parent.parent, "2026-09-13")
+
+    assert len(df) == 2
+    assert "Skipped 1 invalid Kafka weather rows" in caplog.text
 
 
 def test_main_is_dry_run_without_yes(tmp_path, capsys):

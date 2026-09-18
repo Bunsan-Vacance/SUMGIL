@@ -323,6 +323,12 @@ collected_at, collected_date, collected_hour, collected_minute, weather_source,
 base_datetime, forecast_datetime, nx, ny, t1h, rn1, reh, wsd, pty
 ```
 
+날씨 배치는 poller raw의 평탄화된 컬럼과 Kafka raw의 `payload_json`을 함께 읽는다.
+Kafka payload의 `obsrValue`/`fcstValue`로 `observed`/`forecast`를 구분하고,
+동일 종류·발표 시각·유효 시각·격자·category가 반복되면 마지막 수집값을 사용한다.
+따라서 위 2026-09-13 행 수는 변경 전 실행 기록이며 재실행 시 결과 행 수가 줄 수 있다.
+해석할 수 없는 Kafka payload는 파일별 건수를 경고로 남기고 해당 이벤트만 건너뛴다.
+
 주기 실행은 EC2에서 수동 실행 결과를 확인한 뒤 등록한다. 예를 들어 전날 데이터 기준으로 매일
 새벽 04:10에 배치를 돌리려면 아래처럼 등록할 수 있다.
 
