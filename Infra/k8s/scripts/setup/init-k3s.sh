@@ -3,7 +3,7 @@
 # 내장 Traefik은 끄고 ingress-nginx를 쓴다 (S15P21A104-124/126). metrics-server·local-path는 내장 유지.
 #
 # 사용법 (root 또는 sudo):
-#   sudo K3S_VERSION=v1.35.8+k3s1 bash scripts/init-k3s.sh
+#   sudo K3S_VERSION=v1.35.8+k3s1 bash scripts/setup/init-k3s.sh
 #
 # 환경변수:
 #   K3S_VERSION  선택. 기본값 v1.35.8+k3s1 (착수 시점 재확인).
@@ -13,7 +13,7 @@
 #   --flannel-iface ens5  → 파드 오버레이(VXLAN)는 VPC 사설망. MTU 8951, 대용량에 유리.
 #   두 스위치는 독립이다. 관리만 VPN, 데이터는 VPC.
 #
-# ingress: --disable traefik. ingress-nginx는 `setup-ingress.sh`로 설치한다.
+# ingress: --disable traefik. ingress-nginx는 `setup/setup-ingress.sh`로 설치한다.
 
 set -euo pipefail
 
