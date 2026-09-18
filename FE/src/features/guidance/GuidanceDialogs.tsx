@@ -113,10 +113,7 @@ export default function GuidanceDialogs({
               <button className="secondary" key={arrival.trainId} onClick={() => onTrain(arrival)}>
                 <strong>{formatArrival(arrival.arrivalTime)}</strong>
                 <span>{arrival.direction}</span>
-                <small>
-                  {formatArrival(arrival.updatedAt)} 갱신
-                  {arrival.source === 'MOCK' ? ' · 샘플' : ''}
-                </small>
+                {arrival.source === 'MOCK' && <small>샘플</small>}
               </button>
             ))}
           </div>

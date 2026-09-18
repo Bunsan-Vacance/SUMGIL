@@ -13,16 +13,19 @@ function predictionPercent(route: Route, now = new Date()) {
 }
 
 export function getRoutes(routes: Route[], enabled: Mode[], priority: Priority) {
-  const compare = (a: Route, b: Route) =>
-    priority === 'calm'
-      ? predictionPercent(a) !== undefined && predictionPercent(b) !== undefined
-        ? predictionPercent(a)! - predictionPercent(b)! || a.minutes - b.minutes
-        : predictionPercent(a) !== undefined
-          ? -1
-          : predictionPercent(b) !== undefined
-            ? 1
-            : a.minutes - b.minutes
-      : a.minutes - b.minutes
+  const compare = (a: Route, b: Route) => {
+    if (priority === 'fast') return a.minutes - b.minutes
+    const aPercent = predictionPercent(a)
+    const bPercent = predictionPercent(b)
+    if (aPercent !== undefined && bPercent !== undefined) {
+      return aPercent - bPercent || a.minutes - b.minutes
+    }
+    if (aPercent !== undefined) return -1
+    if (bPercent !== undefined) return 1
+    if (a.routeType === 'LOW_CONGESTION') return -1
+    if (b.routeType === 'LOW_CONGESTION') return 1
+    return a.minutes - b.minutes
+  }
   const visible = routes.filter((route) =>
     route.modes.every((mode) => mode === 'walk' || enabled.includes(mode)),
   )

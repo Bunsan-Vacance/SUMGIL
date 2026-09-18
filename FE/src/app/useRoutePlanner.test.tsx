@@ -5,14 +5,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RouteRepository } from '../api/contracts'
 import type { GuidanceRepository, ReplanProposal } from '../api/guidance'
 import { places, routes } from '../api/mock/fixtures'
+import { GUIDANCE_STORAGE_KEY } from '../features/guidance/useGuidance'
 import { useRoutePlanner } from './useRoutePlanner'
 
 const repository: RouteRepository = { search: async () => routes }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  sessionStorage.clear()
+})
 
 describe('경로와 안내 화면의 수명', () => {
-  beforeEach(() => history.replaceState(null, '', '#home'))
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+  })
 
   const renderLoadedPlanner = async (guidanceApi?: GuidanceRepository) => {
     const rendered = renderHook(() => useRoutePlanner(repository, guidanceApi))
@@ -36,6 +43,30 @@ describe('경로와 안내 화면의 수명', () => {
     act(() => history.forward())
     await waitFor(() => expect(result.current.screen).toBe('guide'))
     expect(result.current.guidance).toMatchObject({ step: 1, train: '09:42', route: routes[0] })
+  })
+
+  it('새로고침해도 #guide에서 단계·열차·경로를 복원한다', async () => {
+    const { result, unmount } = await renderLoadedPlanner()
+    act(() => result.current.startGuide())
+    act(() => {
+      result.current.guidance.next()
+      result.current.guidance.setTrain('09:42')
+    })
+    act(() => history.replaceState(null, '', '#guide'))
+    unmount()
+
+    const remounted = renderHook(() => useRoutePlanner(repository))
+    expect(remounted.result.current.screen).toBe('guide')
+    expect(remounted.result.current.guidance).toMatchObject({
+      step: 1,
+      train: '09:42',
+      route: routes[0],
+      origin: places[0],
+      destination: places[1],
+      conditions: { modes: ['walk', 'bike', 'bus', 'subway'], priority: 'fast' },
+      completed: false,
+    })
+    remounted.unmount()
   })
 
   it('새 검색과 필터 및 경로 선택과 출발지 변경은 활성 안내 세션을 끝내지 않는다', async () => {
@@ -117,6 +148,7 @@ describe('경로와 안내 화면의 수명', () => {
     act(() => result.current.exitGuide())
 
     expect(result.current.guidance.route).toBeNull()
+    expect(sessionStorage.getItem(GUIDANCE_STORAGE_KEY)).toBeNull()
     act(() => {
       history.replaceState(null, '', '#guide')
       window.dispatchEvent(new HashChangeEvent('hashchange'))

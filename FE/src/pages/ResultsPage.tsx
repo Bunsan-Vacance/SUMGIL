@@ -79,7 +79,8 @@ export default function ResultsPage({
   const liveApi = isLiveApi ?? false
   const routeGroups = groupRoutes(visible)
   const canSortByCongestion =
-    visible.length > 1 && visible.some((route) => congestionPredictionFor(route))
+    visible.length > 1 &&
+    visible.some((route) => route.routeType === 'LOW_CONGESTION' || congestionPredictionFor(route))
   const departure = departureTime || clockTime(visible[0]?.departedAt)
   const errorTitle =
     errorCode === 'access-candidate-not-found'

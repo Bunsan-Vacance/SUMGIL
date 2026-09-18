@@ -390,45 +390,8 @@ small {
 .map-bottom-controls > * {
   pointer-events: auto;
 }
-.screen-home .map-place-shortcuts {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-.screen-home .map-place-shortcuts:focus-within {
-  top: 76px;
-  right: 12px;
-  width: auto;
-  height: auto;
-  margin: 0;
-  overflow: visible;
-  clip: auto;
-  white-space: normal;
-}
 .home-topbar[hidden] {
   display: none;
-}
-.map-place-shortcuts {
-  position: absolute;
-  top: 62px;
-  right: 12px;
-  z-index: 2;
-  display: flex;
-  gap: 6px;
-}
-.map-place-shortcuts button {
-  padding: 8px 10px;
-  color: #33435e;
-  background: white;
-  border-radius: 10px;
-  box-shadow: 0 2px 8px #26313b20;
-  font-size: 12px;
 }
 .map-place-info {
   position: static;
@@ -483,8 +446,19 @@ small {
   max-height: 55%;
   box-shadow: 0 -4px 16px #26313b20;
 }
+.bottom-sheet.map-bike-stock-sheet[data-snap='collapsed'] {
+  height: auto;
+}
+.map-bike-stock-sheet .sheet-grip {
+  height: 24px;
+  flex-basis: 24px;
+}
+.map-bike-stock-sheet .sheet-body {
+  overflow-y: hidden;
+  padding-bottom: 10px;
+}
 .bike-stock-sheet {
-  padding: 4px 0 8px;
+  padding: 0 0 8px;
 }
 .bike-stock-heading,
 .bike-stock-title {
@@ -497,27 +471,35 @@ small {
 }
 .bike-stock-title {
   min-width: 0;
-  gap: 9px;
+  gap: 8px;
 }
 .bike-stock-title > div {
   min-width: 0;
-}
-.bike-stock-title small {
-  display: block;
-  margin-bottom: 3px;
-  color: var(--muted);
 }
 .bike-stock-title h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 17px;
+}
+.bike-stock-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 5px 0 0 34px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.bike-stock-meta span + span::before {
+  content: '·';
+  margin-right: 10px;
+  color: #9aa6ae;
 }
 .bike-stock-state,
 .bike-stock-result {
-  margin-top: 16px;
-  padding: 16px;
-  border-radius: 12px;
-  background: var(--surface-soft);
+  margin-top: 12px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
   color: #43515e;
   line-height: 1.5;
 }
@@ -525,18 +507,26 @@ small {
   margin-top: 12px;
 }
 .bike-stock-result strong {
-  display: block;
+  flex-shrink: 0;
   color: var(--primary-dark);
   font-size: 32px;
   line-height: 1.1;
 }
+.bike-stock-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
 .bike-stock-result p {
-  margin-top: 5px;
+  color: #43515e;
+  font-size: 13px;
 }
 .bike-stock-result small {
   display: block;
-  margin-top: 10px;
+  margin-top: 5px;
   color: var(--muted);
+  font-size: 11px;
 }
 .bike-stock-unavailable {
   color: var(--muted);
