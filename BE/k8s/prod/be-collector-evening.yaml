@@ -1,0 +1,67 @@
+# 저녁 수집기 (S15P21A104-170 후속, 2026-09-18). be-collector 와 같은 이미지·같은 설정에 **둘째 인증키**와
+# **저녁 시간 창**만 env 로 덮어쓴 것이다. 열린데이터광장 키 하나가 하루 1,000회라 낮 창(10:00-15:30)으로
+# 예산이 끝나는데, 팀원이 발급한 둘째 키로 15:30 이후 창을 하나 더 연다.
+#
+# - 창이 겹치지 않는다. 낮 10:00-15:30(종료 미포함) · 저녁 15:30-21:00. 같은 토픽에 쓰지만 시각이 갈려 중복 이벤트가 없다.
+# - 예산 카운터(CallBudget)는 프로세스 메모리라 파드별이다. 키마다 990회씩 따로 센다.
+# - be-secret 을 통째로 물리지 않고 필요한 키 둘만 secretKeyRef 로 꺼낸다. KMA_API_KEY 가 없으므로 날씨 소스는
+#   기동 시 "인증키가 없어 비활성화" 로 빠진다 — 날씨는 낮 파드가 하루 종일 돌리고 있어 둘이 돌면 중복이다.
+# - 컨슈머의 outside_window 판정은 두 창의 합(10:00-21:00)이어야 한다 → be-consumer.yaml 의 env 참고.
+# - 새 파드는 rollout 대기 목록(apply.sh 의 be·fe)에 없다. 적용 뒤 rollout status 를 직접 본다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: be-collector-evening
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: be-collector-evening
+  template:
+    metadata:
+      labels:
+        app: be-collector-evening
+    spec:
+      containers:
+        - name: be-collector-evening
+          image: sumgil-be:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # be-config 의 SPRING_PROFILES_ACTIVE=prod 를 덮는다 (env 가 envFrom 보다 우선).
+            - name: SPRING_PROFILES_ACTIVE
+              value: prod,collect
+            # 지하철 저녁 창. 폭 5시간 30분 = 60초 × 330회차 × 3회 = 990회 (be-config.env 의 낮 창과 같은 계산).
+            # 낮 창 종료(15:30, 미포함)와 맞닿아 있어 빈 시간도 겹치는 시간도 없다.
+            - name: COLLECT_SUBWAY_WINDOW
+              value: 15:30-21:00
+            # 따릉이 저녁 창. 120초 × 6h = 180회차 × 3회 = 540회. 자정을 넘기지 않는다 —
+            # CallBudget 이 KST 자정에 0 으로 돌아가 다음 날 예산을 새벽에 미리 태우게 된다.
+            - name: COLLECT_BIKE_WINDOW
+              value: 18:00-24:00
+            # 둘째 키. be-secret 의 *_EVENING 항목을 수집기가 읽는 이름(application-collect.yml 의 key)으로 바꿔 꽂는다.
+            - name: SEOUL_SUBWAY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: be-secret
+                  key: SEOUL_SUBWAY_KEY_EVENING
+            - name: SEOUL_BIKE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: be-secret
+                  key: SEOUL_BIKE_KEY_EVENING
+          envFrom:
+            - configMapRef:
+                name: be-config             # 낮 파드와 같은 값(DB·브로커·주기·예산). 창·키만 위 env 가 덮는다
+            - secretRef:
+                name: data-secret           # DB_PASSWORD (데이터 계층 소유)
+          # HTTP 포트가 없어 httpGet 프로브를 걸 수 없다. be-collector 와 같이 프로브 없이 두고
+          # 프로세스가 죽으면 restartPolicy(Always) 로 다시 뜨게 한다.
+          resources:
+            requests:
+              memory: 384Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m

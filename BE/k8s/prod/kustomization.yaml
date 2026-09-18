@@ -11,6 +11,7 @@ resources:
   - be.yaml
   - be-collector.yaml
   - be-consumer.yaml
+  - be-collector-evening.yaml   # 둘째 키로 15:30-21:00 창 (2026-09-18, 170 후속)
   - ingress.yaml
 images:
   - name: sumgil-be

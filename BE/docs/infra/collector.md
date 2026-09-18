@@ -251,6 +251,28 @@ Kafka ClusterIP 는 `10.43.134.226` 으로 이전과 같아 AI 쪽 `/etc/hosts` 
 - **지하철 운영 창이 `10:00-15:30` 이다.** 발표가 그 밖이면 `be-config.env` 의 `COLLECT_SUBWAY_WINDOW` 를
   옮기고 다시 apply 한다. 폭(5시간 30분)은 유지해야 예산 안에 든다.
 
+### 저녁 수집기 — 둘째 키로 15:30 이후 창 (2026-09-18, 170 후속)
+
+팀원이 밤에도 작업하게 되어 둘째 인증키(다른 계정 발급)를 받았다. 코드는 소스마다 키 하나·창 하나·예산 카운터 하나라
+키를 도중에 바꿀 수 없으므로, **파드를 하나 더 띄우는 것**으로 풀었다 — `be-collector-evening.yaml`.
+
+| | 낮 `be-collector` | 저녁 `be-collector-evening` |
+| --- | --- | --- |
+| 지하철 창 | `10:00-15:30` (be-config.env) | `15:30-21:00` (Deployment env 가 덮음) |
+| 따릉이 창 | `07:00-18:00` | `18:00-24:00` (자정을 넘기지 않는다 — CallBudget 이 KST 자정에 리셋돼 다음 날 예산을 새벽에 태운다) |
+| 날씨 | `00:00-24:00` | **없음** — `be-secret` 을 통째로 물리지 않아 `KMA_API_KEY` 가 없고, 키 없는 소스는 기동 시 비활성화된다 |
+| 키 | `SEOUL_SUBWAY_KEY`·`SEOUL_BIKE_KEY` | `be-secret` 의 `SEOUL_SUBWAY_KEY_EVENING`·`SEOUL_BIKE_KEY_EVENING` 을 `secretKeyRef` 로 같은 이름에 꽂는다 |
+| 예산 | 990 / 1,000 | 지하철 990 · 따릉이 540 |
+
+- 두 창은 15:30 에서 맞닿고(종료 미포함·시작 포함) 겹치지 않는다. 같은 토픽에 쓰지만 중복 이벤트가 없다.
+- **컨슈머는 두 창의 합 `10:00-21:00` 을 본다** — `be-consumer.yaml` 의 env 가 `be-config` 값을 덮는다. 저녁 창을 옮기면 같이 바꾼다.
+- 둘째 키 두 개는 `be-secret.env.example` 에 추가했다. `render-secrets.sh` 가 example 의 키를 전부 요구하므로
+  **GitLab 변수에도 같은 이름으로 등록해야 렌더가 된다** (`register-gitlab-vars.sh` 가 example 에서 이름을 읽는다).
+  `be-secret` 내용이 바뀌어 해시 접미사가 바뀌면 낮 `be-collector` 도 한 번 재시작된다 — 15:30 이후에 적용하면 잃는 회차가 없다.
+- `apply.sh` 의 rollout 대기 목록에 없다. 적용 뒤 `kubectl rollout status deployment/be-collector-evening -n prod` 를 직접 본다.
+- 확인: 저녁 파드 로그에 `subway.arrival 운영 시간 창 15:30-21:00 — 지금 안`, 날씨는 `weather 소스 인증키가 없어 비활성화한다`.
+  Redis `subway:arrival:status` 의 `window` 가 `10:00-21:00`, 15:30 이후 `subway:arrival:{id}` TTL 이 계속 갱신되면 끝.
+
 ## 9. 밟은 함정
 
 - **`Map.copyOf` 는 null 값을 거부한다.** API 행에는 `subwayNm: null` 같은 필드가 흔해 payload 복사에 쓰면 NPE. `Collections.unmodifiableMap(new LinkedHashMap<>(…))` 로 감싼다.
