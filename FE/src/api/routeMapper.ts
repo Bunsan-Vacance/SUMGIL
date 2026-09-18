@@ -111,7 +111,15 @@ function optionalDistance(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new RepositoryError('invalid-response', '경로 거리 응답이 올바르지 않아요.')
   }
-  return value
+  return value as number
+}
+
+function optionalCongestionLevel(value: unknown) {
+  if (value === undefined || value === null) return undefined
+  if (!finite(value, 0, Number.MAX_VALUE)) {
+    throw new RepositoryError('invalid-response', '구간 혼잡도 응답이 올바르지 않아요.')
+  }
+  return value as number
 }
 
 function mapTransitionType(value: unknown): TransitionType | undefined {
@@ -203,6 +211,9 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
     const fromName = text(rawLeg.fromNodeName) || text(rawLeg.fromNodeId) || '출발 지점'
     const toName = text(rawLeg.toNodeName) || text(rawLeg.toNodeId) || '도착 지점'
     const routeId = text(rawLeg.routeId)
+    const rawCongestionLevel = optionalCongestionLevel(rawLeg.congestionLevel)
+    const segmentCongestionLevel =
+      mappedMode.mode === 'subway' || mappedMode.mode === 'bus' ? rawCongestionLevel : undefined
     const transitionType = mapTransitionType(rawLeg.transitionType)
     if (transitionType && rawLeg.mode !== 'TRANSFER') {
       throw new RepositoryError(
@@ -242,6 +253,7 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
       ...(transition ? { transitionType: transition } : {}),
       ...(geometry ? { geometry } : {}),
       ...(routeId ? { routeId } : {}),
+      ...(segmentCongestionLevel !== undefined ? { segmentCongestionLevel } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
     }

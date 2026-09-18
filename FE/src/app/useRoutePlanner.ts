@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigation } from './useNavigation'
 import { resolveScreen } from './resolveScreen'
-import { previewTrip } from './preview'
+import { previewTripFor } from './preview'
 import { useToast } from '../components/useToast'
 import { useTrip } from '../features/route/useTrip'
 import { useGuidance } from '../features/guidance/useGuidance'
@@ -42,7 +42,7 @@ export function useRoutePlanner(
 ) {
   const navigation = useNavigation()
   const { go, replace } = navigation
-  const trip = useTrip(previewTrip, repository)
+  const trip = useTrip(previewTripFor(location.search), repository)
   const guidance = useGuidance()
   const screen = resolveScreen(navigation.screen, trip, guidance)
   const { message, setMessage } = useToast()

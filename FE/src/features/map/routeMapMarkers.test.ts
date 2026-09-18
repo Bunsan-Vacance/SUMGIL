@@ -283,6 +283,27 @@ describe('경로 지도 선과 지점', () => {
     expect(
       routeLineStyle({ mode: 'walk', transfer: true, title: '', note: '', minutes: 1 }),
     ).toEqual({ strokeColor: '#28323c', strokeStyle: 'dashed' })
+    expect(
+      routeLineStyle({
+        mode: 'walk',
+        title: '',
+        note: '',
+        minutes: 1,
+        segmentCongestionLevel: 110,
+      }),
+    ).toEqual({ strokeColor: '#28323c', strokeStyle: 'solid' })
+    expect(
+      [20, 50, 80, 110].map(
+        (level) =>
+          routeLineStyle({
+            mode: 'subway',
+            title: '',
+            note: '',
+            minutes: 1,
+            segmentCongestionLevel: level,
+          }).strokeColor,
+      ),
+    ).toEqual(['#1d4ed8', '#15803d', '#b91c1c', '#7e22ce'])
 
     const place = routeEndpointPlace({
       endpoint: endpoint('raw-214', '강변', 37.5, 127.03),

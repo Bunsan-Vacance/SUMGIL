@@ -1,4 +1,4 @@
-import { places, bikeProposal } from '../api/mock/fixtures'
+import { bikeProposal, places, routes } from '../api/mock/fixtures'
 import { modes } from '../features/route/constants'
 import type { TripState } from '../features/route/tripReducer'
 // A route becomes available only after a completed search.
@@ -13,4 +13,20 @@ export const previewTrip: TripState = {
   error: '',
   errorCode: null,
 }
+
+export function isCongestionPreview(search: string, isDev = import.meta.env.DEV) {
+  return isDev && new URLSearchParams(search).get('preview') === 'congestion'
+}
+
+export function previewTripFor(search: string, isDev = import.meta.env.DEV): TripState {
+  if (!isCongestionPreview(search, isDev)) return previewTrip
+  return {
+    ...previewTrip,
+    destination: places[1],
+    candidates: routes,
+    selected: routes[0],
+    status: 'success',
+  }
+}
+
 export const previewProposal = bikeProposal
