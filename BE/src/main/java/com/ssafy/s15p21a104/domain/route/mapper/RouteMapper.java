@@ -145,6 +145,8 @@ public final class RouteMapper {
         List<RouteLegResponse> legs = new ArrayList<>();
         int start = 0;
         int boundary = 0;
+        // WALK를 지나도 유지된 대중교통 노선으로 환승을 판정한다(232).
+        String kept = null;
         for (int i = 1; i <= segments.size(); i++) {
             boolean routeChanged = i == segments.size()
                     || !Objects.equals(segments.get(i).routeId(), segments.get(start).routeId());
@@ -157,12 +159,16 @@ public final class RouteMapper {
             if (routeChanged && i < segments.size()) {
                 EngineSegment prev = segments.get(i - 1);
                 EngineSegment next = segments.get(i);
-                // 접근 경계(WALK ↔ 주행)는 환승 TRANSFER leg를 만들지 않는다(213 T1).
-                if (!TransferRule.isAccessBoundary(prev.mode(), next.mode())) {
+                TransferRule.TransferDecision decision = TransferRule.decide(
+                        kept, prev.mode(), prev.routeId(), next.mode(), next.routeId());
+                if (decision.transfer()) {
                     legs.add(transferLeg(segments.get(i).fromStationId(), stationsById,
                             transferSeconds.get(boundary)));
                     boundary++;
                 }
+            }
+            for (EngineSegment segment : segments.subList(start, i)) {
+                kept = TransferRule.keptTransitLine(kept, segment.mode(), segment.routeId());
             }
             start = i;
         }

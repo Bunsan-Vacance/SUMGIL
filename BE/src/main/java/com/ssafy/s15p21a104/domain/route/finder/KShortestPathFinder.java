@@ -185,30 +185,44 @@ public final class KShortestPathFinder {
             }
         }
         // 소요 = root 구간 순수 소요 + 첫 승차 대기(190) + spur 전체(내부 환승 포함)
-        // + root끝→spur시작 경계 환승(접근 경계 제외).
+        // + root끝→spur시작 경계 환승(노선유지 판정, 232).
         // root 비어 있으면 spur.totalSec에 첫 승차 대기가 이미 포함돼 있다.
         long totalSec = rootEdges.stream().mapToLong(e -> (long) e.travelSec()).sum()
                 + spur.totalSec();
         if (!rootEdges.isEmpty()) {
             totalSec += rootEdges.get(0).waitSec();
         }
+        String junctionKept = null;
+        for (Edge edge : rootEdges) {
+            junctionKept = TransferRule.keptTransitLine(
+                    junctionKept, edge.mode(), edge.routeId());
+        }
         if (!rootEdges.isEmpty() && !spur.edges().isEmpty()) {
             Edge last = rootEdges.get(rootEdges.size() - 1);
             Edge first = spur.edges().get(0);
-            if (!last.routeId().equals(first.routeId())
-                    && !TransferRule.isAccessBoundary(last.mode(), first.mode())) {
+            TransferRule.TransferDecision junction = TransferRule.decide(
+                    junctionKept, last.mode(), last.routeId(), first.mode(), first.routeId());
+            if (junction.transfer()) {
                 totalSec += transferRule.costWithStation(
-                        0, first.fromNode(), last.routeId(), first.routeId(),
-                        last.mode(), first.mode());
+                        0, first.fromNode(), junction.costLine(), first.routeId());
             }
         }
         int transfers = 0;
-        for (int i = 1; i < edges.size(); i++) {
-            if (!edges.get(i).routeId().equals(edges.get(i - 1).routeId())
-                    && !TransferRule.isAccessBoundary(
-                            edges.get(i - 1).mode(), edges.get(i).mode())) {
-                transfers++;
+        String kept = null;
+        com.ssafy.s15p21a104.domain.route.entity.TravelMode prevMode = null;
+        String prevLine = null;
+        for (Edge edge : edges) {
+            // 환승 집계도 TransferRule 1곳으로 통일한다(232).
+            if (prevMode != null) {
+                TransferRule.TransferDecision decision = TransferRule.decide(
+                        kept, prevMode, prevLine, edge.mode(), edge.routeId());
+                if (decision.transfer()) {
+                    transfers++;
+                }
             }
+            kept = TransferRule.keptTransitLine(kept, edge.mode(), edge.routeId());
+            prevMode = edge.mode();
+            prevLine = edge.routeId();
         }
         // spur 탐색에서 금지한 root 정점을 stations에서 빼면 edges/stations 개수가
         // 어긋날 수 있어 FoundPath 검증을 통과 못 하면 버린다.

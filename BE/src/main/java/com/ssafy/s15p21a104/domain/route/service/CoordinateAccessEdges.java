@@ -35,20 +35,27 @@ public final class CoordinateAccessEdges {
      * 실제 그래프에 연결돼 있지 않은 정점(좌표만 있고 고립된 경우)은 후보에서 뺀다 — 접근은
      * 됐는데 그 다음이 막힌 후보를 만들지 않기 위함이다.
      *
+     * <p>최근접 역 최소 1곳을 보장한다(S15P21A104-231). 정류장 밀집지에서 거리순 절단으로
+     * 역이 탈락하면 역 직결 탐색 자체가 일어나지 않으므로, 역 1곳을 먼저 확보하고 나머지를
+     * 거리순으로 채운다. 전체 상한은 그대로 둔다.
+     *
      * @param placeNodeId 이 좌표를 나타낼 임시 노드 ID
      * @param placeLat 좌표 위도
      * @param placeLng 좌표 경도
      * @param stationInfos 역·정류장·대여소 좌표 전체(그래프 레지스트리 원본)
      * @param graph 실제 연결 여부 확인용 그래프(임시 엣지 추가 전)
      * @param outgoing true면 좌표→후보 방향(출발지), false면 후보→좌표 방향(도착지)
+     * @param stationIds 역 ID 집합. null 허용
      * @return 임시 WALK 엣지 목록. 반경 안 후보가 없으면 빈 목록
      */
     public static List<Edge> accessEdges(
             String placeNodeId, double placeLat, double placeLng,
-            Map<String, RouteMapper.StationInfo> stationInfos, RouteGraph graph, boolean outgoing) {
+            Map<String, RouteMapper.StationInfo> stationInfos, RouteGraph graph, boolean outgoing,
+            java.util.Set<String> stationIds) {
         record Candidate(String nodeId, double distanceM) {
         }
-        List<Candidate> candidates = new ArrayList<>();
+        List<Candidate> stations = new ArrayList<>();
+        List<Candidate> others = new ArrayList<>();
         for (RouteMapper.StationInfo info : stationInfos.values()) {
             if (info.lat() == null || info.lng() == null || !graph.containsNode(info.stationId())) {
                 continue;
@@ -57,12 +64,32 @@ public final class CoordinateAccessEdges {
             if (distanceM > ACCESS_RADIUS_M) {
                 continue;
             }
-            candidates.add(new Candidate(info.stationId(), distanceM));
+            Candidate candidate = new Candidate(info.stationId(), distanceM);
+            if (stationIds != null && stationIds.contains(info.stationId())) {
+                stations.add(candidate);
+            } else {
+                others.add(candidate);
+            }
         }
-        candidates.sort(Comparator.comparingDouble(Candidate::distanceM));
+        stations.sort(Comparator.comparingDouble(Candidate::distanceM));
+        others.sort(Comparator.comparingDouble(Candidate::distanceM));
+
+        List<Candidate> picked = new ArrayList<>();
+        if (!stations.isEmpty()) {
+            picked.add(stations.get(0));
+        }
+        for (Candidate candidate : others) {
+            if (picked.size() >= MAX_ACCESS_CANDIDATES) {
+                break;
+            }
+            picked.add(candidate);
+        }
+        for (int i = 1; i < stations.size() && picked.size() < MAX_ACCESS_CANDIDATES; i++) {
+            picked.add(stations.get(i));
+        }
 
         List<Edge> edges = new ArrayList<>();
-        for (Candidate candidate : candidates.subList(0, Math.min(MAX_ACCESS_CANDIDATES, candidates.size()))) {
+        for (Candidate candidate : picked) {
             int sec = (int) Math.round(candidate.distanceM() / WalkEdgeBuilder.METERS_PER_SEC);
             edges.add(outgoing
                     ? new Edge(placeNodeId, candidate.nodeId(), WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK)
