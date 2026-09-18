@@ -1,7 +1,7 @@
 # 실시간 컨슈머 (S15P21A104-171)
 
-> **진행 중.** Kafka → Redis 반영. 반영기·배선·왕복 IT 까지 돼 있고 **prod 배포는 아직이다.**
-> 수집기(프로듀서) 쪽은 [collector.md](collector.md), 이벤트 계약은 [kafka.md](kafka.md) 5절.
+> **prod 에서 돌고 있다** — 2026-09-16 13:2x 기동(7절), 같은 날 15:2x 도착예정시각 배포(10절), 09-17·09-18 이미지 갱신 재시작.
+> Kafka → Redis 반영. 수집기(프로듀서) 쪽은 [collector.md](collector.md), 이벤트 계약은 [kafka.md](kafka.md) 5절.
 
 컨슈머 그룹은 **`be-redis`** 다. AI Spark 용 **`ai-spark`** 와 따로 둔다 — 그룹이 같으면 카프카가 메시지를 나눠 줘서
 한쪽이 받은 것을 다른 쪽이 못 받는다. 그룹이 다르면 같은 이벤트를 양쪽이 각자 처음부터 읽는다 ([kafka.md](kafka.md) 5절).
@@ -331,8 +331,10 @@ COLLECT_PUBLISHER=redis SPRING_PROFILES_ACTIVE=local,collect ./gradlew bootRun
 
 ## 7. prod 배포
 
-> **아직 배포하지 않았다.** `BE/k8s/` 는 플랫폼 소유라 적용 전에 리드 승인이 필요하다 (173 은 1회성 예외였다).
-> 매니페스트는 작성·렌더링 확인까지 돼 있다.
+> **2026-09-16 13:2x 배포 완료.** 적용 결과는 9절, 도착예정시각 재배포는 10절. `BE/k8s/` 는 플랫폼 소유라
+> 적용 전에 리드 승인을 받았다. 아래 표는 develop-BE 의 매니페스트 기준이다 — **prod 에 실제 적용된 구조는
+> `feat/INFRA-prod-rebuild`(210) 것**으로, `consumer.env`·`collector.env` 가 `be-config.env` 하나로 합쳐져 있고
+> Deployment 는 `be-config` 만 물린다(2026-09-18 확인). 두 구조는 rebuild 가 main·develop-BE 로 들어올 때 합쳐진다.
 
 | 파일 | 내용 |
 | --- | --- |
