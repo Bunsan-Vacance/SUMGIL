@@ -8,13 +8,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 from app.BIKE import service
+from app.BIKE.pipeline import calendar
 from app.BIKE.pipeline.predictor_eta import ModelUnavailable, round_horizon
 from app.main import app
 
@@ -220,6 +221,36 @@ def test_stale_weather_falls_back_to_none(fake_predictor, live_dir, weather_dir)
     assert predictor.calls[0]["weather"] is None
 
 
+def test_weather_within_150min_staleness_threshold_is_used(fake_predictor, live_dir, weather_dir):
+    """날씨 수집기 실측 지연(최대 129.6분)과 비슷한 값 — 150분(9,000초) 기준 안이라 정상 전달돼야 한다."""
+    predictor = fake_predictor(net_flow=1.0)
+    live_dir(current_stock=5, updated_at=NOW)
+    weather_dir(temp=5.0, is_rain=False, updated_at=NOW - timedelta(minutes=130))
+
+    service.predict_eta_stock("ST-1", eta_minutes=10, now=NOW)
+
+    assert predictor.calls[0]["weather"] == {"temp": 5.0, "is_rain": False}
+
+
+def test_weather_beyond_150min_staleness_threshold_falls_back_to_none(
+    fake_predictor, live_dir, weather_dir
+):
+    predictor = fake_predictor(net_flow=1.0)
+    live_dir(current_stock=5, updated_at=NOW)
+    weather_dir(temp=5.0, is_rain=False, updated_at=NOW - timedelta(minutes=151))
+
+    service.predict_eta_stock("ST-1", eta_minutes=10, now=NOW)
+
+    assert predictor.calls[0]["weather"] is None
+
+
+def test_now_kst_returns_naive_datetime():
+    """AI EC2 실제 OS 시간대(UTC)와 무관하게 tzinfo 없는 KST 벽시계 값을 돌려줘야 한다 —
+    재고·날씨 updated_at(KST 저장)과 비교 가능한 형태."""
+    result = calendar.now_kst()
+    assert result.tzinfo is None
+
+
 def test_live_stock_missing_raises(fake_predictor, tmp_path, monkeypatch):
     fake_predictor(net_flow=1.0)
     missing_path = tmp_path / "does_not_exist.parquet"
@@ -260,7 +291,7 @@ def test_midnight_rollover_changes_dow_type(fake_predictor, live_dir):
 def test_http_happy_path_returns_200(fake_predictor, live_dir, monkeypatch):
     fake_predictor(net_flow=3.0)
     live_dir(current_stock=5, updated_at=NOW)
-    monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda: pd.Timestamp(NOW)))
+    monkeypatch.setattr(calendar, "now_kst", lambda: NOW)
 
     r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
 
@@ -285,7 +316,7 @@ def test_http_missing_live_stock_returns_404(fake_predictor, tmp_path, monkeypat
 
 def test_http_model_unavailable_returns_503(raising_predictor, live_dir, monkeypatch):
     live_dir(current_stock=5, updated_at=NOW)
-    monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda: pd.Timestamp(NOW)))
+    monkeypatch.setattr(calendar, "now_kst", lambda: NOW)
 
     r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
 
@@ -308,7 +339,7 @@ def test_http_eta_minutes_beyond_30_still_returns_200_with_model_horizon_min_cap
     라벨(arrival_dow_type/arrival_time_slot)은 근사 없이 실제 요청 eta_minutes로 계산된다."""
     fake_predictor(net_flow=2.0, horizon_min_used=30)
     live_dir(current_stock=5, updated_at=NOW)
-    monkeypatch.setattr(pd.Timestamp, "now", staticmethod(lambda: pd.Timestamp(NOW)))
+    monkeypatch.setattr(calendar, "now_kst", lambda: NOW)
 
     r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 1440})
 

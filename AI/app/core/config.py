@@ -80,8 +80,10 @@ class Settings(BaseSettings):
     bike_live_weather_path: Path = (
         AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw" / "nowcast" / "latest_weather.parquet"
     )
-    # 재고(5분)보다 날씨는 천천히 바뀌므로 여유 있게 잡은 보관 기준(초).
-    bike_live_weather_max_staleness_seconds: float = 900.0
+    # 날씨 수집기는 약 1시간 간격 실행. 실측(관측 70회) 결과 다음 관측 직전 기존값 나이가
+    # 최대 129.6분이었고 120분 기준으로도 22/69 구간이 폴백에 걸려, 실제 수집 주기 대비
+    # 20분 여유를 둔 150분(9,000초)으로 잡았다 — 운영 초기값이며 지연 기록을 보고 재조정한다.
+    bike_live_weather_max_staleness_seconds: float = 9000.0
 
     @property
     def grade_thresholds(self) -> list[float]:

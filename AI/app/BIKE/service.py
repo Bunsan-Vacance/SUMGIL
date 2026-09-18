@@ -276,7 +276,7 @@ def _predict_eta_stock_avg_delta(
     """
     settings = get_settings()
     if now is None:
-        now = pd.Timestamp.now()
+        now = calendar.now_kst()
     arrival = now + timedelta(minutes=eta_minutes)
 
     live_stock = _read_live_stock(rental_id, now, settings)
@@ -333,10 +333,14 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
     확률(`p_empty`/`p_full`)은 모델 아티팩트 디렉터리에 이진분류 booster
     (`model_is_empty.txt`/`model_is_full.txt`, S15P21A104-160 Phase 6)가 있을 때만 채워지고,
     없으면 `None`이다 — `predictor_eta.LightGBMEtaPredictor`가 그 판단을 담당한다.
+
+    `now`를 안 넘기면 `calendar.now_kst()`로 구한다 — `pd.Timestamp.now()`를 직접 쓰면
+    AI EC2의 실제 OS 시간대(UTC)가 그대로 나와서 KST로 저장된 재고·날씨 `updated_at`과
+    9시간 어긋난다(재고·날씨 신선도 체크와 모델 시간 피처가 전부 이 값을 쓰므로 영향이 크다).
     """
     settings = get_settings()
     if now is None:
-        now = pd.Timestamp.now()
+        now = calendar.now_kst()
     arrival = now + timedelta(minutes=eta_minutes)
 
     live = _read_live_stock_with_age(rental_id, now, settings)
