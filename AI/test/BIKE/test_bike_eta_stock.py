@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.BIKE import service
 from app.BIKE.pipeline import calendar
-from app.BIKE.pipeline.predictor_eta import ModelUnavailable, round_horizon
+from app.BIKE.pipeline.predictor_eta import ModelUnavailable, UnknownStation, round_horizon
 from app.main import app
 
 client = TestClient(app)
@@ -67,6 +67,34 @@ class FakeEtaPredictor:
 class RaisingEtaPredictor:
     def predict_delta(self, *args, **kwargs):
         raise ModelUnavailable("모델 아티팩트 로딩 실패(테스트)")
+
+
+class GlobalFallbackEtaPredictor:
+    """predict_delta()는 학습 시점에 없는 역이라 UnknownStation을 던지고,
+    predict_global_fallback()만 정상 동작하는 가짜 — service.py의 예외 분기를 검증한다."""
+
+    def __init__(self, net_flow: float = 0.5, horizon_min_used: int = 30) -> None:
+        self.net_flow = net_flow
+        self.horizon_min_used = horizon_min_used
+
+    def predict_delta(self, *args, **kwargs):
+        raise UnknownStation("ST-1 — 학습 시점 목록에 없는 역(테스트)")
+
+    def predict_global_fallback(self, eta_minutes):
+        return {
+            "net_flow": self.net_flow,
+            "horizon_min_used": self.horizon_min_used,
+            "p_empty": None,
+            "p_full": None,
+        }
+
+
+@pytest.fixture
+def global_fallback_predictor(monkeypatch):
+    predictor = GlobalFallbackEtaPredictor(net_flow=0.5, horizon_min_used=30)
+    monkeypatch.setattr(service, "_eta_predictor", predictor)
+    monkeypatch.setattr(service, "get_eta_predictor", lambda settings=None: predictor)
+    return predictor
 
 
 @pytest.fixture
@@ -277,6 +305,21 @@ def test_model_unavailable_raises(raising_predictor, live_dir):
         service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
 
 
+def test_unknown_station_falls_back_to_global_average_not_error(
+    global_fallback_predictor, live_dir
+):
+    """학습 시점에 없는 역은 에러가 아니라 전역 평균 폴백으로 200을 낸다(503 아님)."""
+    live_dir(current_stock=5, updated_at=NOW)
+
+    result = service.predict_eta_stock("ST-1", eta_minutes=15, now=NOW)
+
+    assert result["predicted_stock"] == 5.5  # 5 + 0.5(전역 평균 net_flow)
+    assert result["p_empty"] is None
+    assert result["p_full"] is None
+    assert result["source"] == "lightgbm_global_fallback"
+    assert result["model_horizon_min"] == 30
+
+
 def test_midnight_rollover_changes_dow_type(fake_predictor, live_dir):
     fake_predictor(net_flow=2.0)
     live_dir(current_stock=4, updated_at=SATURDAY_NIGHT)
@@ -321,6 +364,16 @@ def test_http_model_unavailable_returns_503(raising_predictor, live_dir, monkeyp
     r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
 
     assert r.status_code == 503
+
+
+def test_http_unknown_station_returns_200_not_503(global_fallback_predictor, live_dir, monkeypatch):
+    live_dir(current_stock=5, updated_at=NOW)
+    monkeypatch.setattr(calendar, "now_kst", lambda: NOW)
+
+    r = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15})
+
+    assert r.status_code == 200
+    assert r.json()["source"] == "lightgbm_global_fallback"
 
 
 def test_http_eta_minutes_out_of_range_returns_422(fake_predictor, live_dir):

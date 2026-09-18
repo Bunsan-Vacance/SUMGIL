@@ -19,6 +19,7 @@ from app.BIKE.pipeline import calendar
 from app.BIKE.pipeline.predictor_eta import (  # noqa: F401 - router.py가 service.ModelUnavailable로 씀
     LightGBMEtaPredictor,
     ModelUnavailable,
+    UnknownStation,
 )
 from app.core.config import Settings, get_settings
 
@@ -337,6 +338,11 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
     `now`를 안 넘기면 `calendar.now_kst()`로 구한다 — `pd.Timestamp.now()`를 직접 쓰면
     AI EC2의 실제 OS 시간대(UTC)가 그대로 나와서 KST로 저장된 재고·날씨 `updated_at`과
     9시간 어긋난다(재고·날씨 신선도 체크와 모델 시간 피처가 전부 이 값을 쓰므로 영향이 크다).
+
+    역이 학습 시점 목록에 없으면(`UnknownStation`, 신규 개설 대여소 등) 503으로 에러 내지
+    않고 `predict_global_fallback()`(station 무관 전역 평균)으로 200을 준다 —
+    `source`가 `lightgbm_global_fallback`으로 구분된다. 모델 아티팩트 자체가 망가진
+    `ModelUnavailable`은 여전히 진짜 장애라 그대로 올려서 503으로 드러낸다.
     """
     settings = get_settings()
     if now is None:
@@ -350,9 +356,15 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
 
     weather = _read_live_weather(now, settings)
 
-    result = get_eta_predictor().predict_delta(
-        rental_id, live_stock, eta_minutes, now, anchor_age_minutes, weather
-    )
+    predictor = get_eta_predictor()
+    try:
+        result = predictor.predict_delta(
+            rental_id, live_stock, eta_minutes, now, anchor_age_minutes, weather
+        )
+        source = "lightgbm"
+    except UnknownStation:
+        result = predictor.predict_global_fallback(eta_minutes)
+        source = "lightgbm_global_fallback"
     predicted_stock = max(0.0, live_stock + result["net_flow"])
 
     holidays = calendar.get_holidays_cached()
@@ -367,6 +379,6 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
         "p_full": result.get("p_full"),
         "arrival_dow_type": arr_dow,
         "arrival_time_slot": arr_slot,
-        "source": "lightgbm",
+        "source": source,
         "model_horizon_min": result["horizon_min_used"],
     }

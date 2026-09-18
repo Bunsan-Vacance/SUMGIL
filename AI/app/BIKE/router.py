@@ -12,6 +12,10 @@ ETL 패턴) — 이 둘은 로컬 검증·시연(-83)용 병행 계층이다.
 전혀 안 읽는다. 이 호출이 실패(404/503)하면 BE는 자체 DB의 배치 통계로 폴백한다 —
 그래서 실패는 애매하게 감추지 않고 명확한 상태코드로 드러낸다.
 
+**학습 시점에 없던 역(신규 개설 대여소 등)은 503이 아니다** — `service.py`가
+`UnknownStation`을 잡아서 station 무관 전역 평균으로 200을 준다(`source:
+lightgbm_global_fallback`). 503은 모델 아티팩트 파일 자체가 망가진 진짜 장애일 때만 난다.
+
 `eta_minutes`가 학습 horizon 상한(30분)을 넘어도 거부하지 않는다 — `predictor_eta.round_horizon()`이
 가장 가까운 학습 horizon(5·10·15·30)으로 근사해서 그대로 예측값을 낸다(30 초과는 전부 30으로 근사).
 도착 시점 라벨(`arrival_dow_type`/`arrival_time_slot`)은 근사 없이 요청받은 `eta_minutes` 그대로

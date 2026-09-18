@@ -24,6 +24,11 @@
 피처 조립 규칙은 `build_full_station_netflow.py`(원본 학습 데이터 생성 스크립트)의
 컬럼 정의를 그대로 따른다 — anchor(현재 시각) 기준이라 target 시각 재계산이 필요 없다
 (날짜축 멀티소스 모델과 다른 점).
+
+`ModelUnavailable`(진짜 장애, 503)과 `UnknownStation`(학습 시점에 없던 역, 정상적인
+엣지케이스)을 구분한다 — 후자는 `service.py`가 잡아서 `predict_global_fallback()`
+(station 무관 전역 평균, `HistoricalProfileBuilder.global_` 재사용)으로 200 응답을 대신
+준다(S15P21A104-160 후속).
 """
 
 from __future__ import annotations
@@ -44,7 +49,13 @@ FULL_MODEL_FILENAME = "model_is_full.txt"
 
 
 class ModelUnavailable(RuntimeError):
-    """모델 아티팩트를 못 읽었거나, 역이 학습 당시 station_code 목록에 없음."""
+    """모델 아티팩트 파일 자체를 못 읽음 — 진짜 장애, 503으로 그대로 드러낸다."""
+
+
+class UnknownStation(RuntimeError):
+    """역이 학습 시점 station_code/rack_count 목록에 없음 — 시스템 장애가 아니라 신규
+    개설 대여소 등에서 정상적으로 생기는 상황이다. `service.py`가 이걸 잡아서
+    `predict_global_fallback()`으로 전역 평균 응답을 대신 준다(S15P21A104-160 후속)."""
 
 
 def round_horizon(eta_minutes: int, choices: tuple[int, ...] = HORIZON_CHOICES) -> int:
@@ -98,7 +109,7 @@ class LightGBMEtaPredictor:
         weather: dict | None,
     ) -> tuple[pd.DataFrame, int]:
         if rental_id not in self._rack_count.index:
-            raise ModelUnavailable(f"{rental_id} — 학습 시점 rack_count 목록에 없는 역")
+            raise UnknownStation(f"{rental_id} — 학습 시점 rack_count 목록에 없는 역")
         rack_count = float(self._rack_count.loc[rental_id])
 
         horizon_min = round_horizon(eta_minutes)
@@ -136,7 +147,7 @@ class LightGBMEtaPredictor:
         frame = self._profile.transform(frame)
         code = frame["od_station_id"].astype(self._station_dtype).cat.codes.iloc[0]
         if code == -1:
-            raise ModelUnavailable(f"{rental_id} — 학습 시점 station_code 목록에 없는 역")
+            raise UnknownStation(f"{rental_id} — 학습 시점 station_code 목록에 없는 역")
         frame["station_code"] = code
         return frame, horizon_min
 
@@ -162,4 +173,25 @@ class LightGBMEtaPredictor:
             "horizon_min_used": horizon_min,
             "p_empty": p_empty,
             "p_full": p_full,
+        }
+
+    def predict_global_fallback(self, eta_minutes: int) -> dict:
+        """학습 시점에 없던 역(`UnknownStation`)용 전역 평균 폴백.
+
+        `HistoricalProfileBuilder`가 이미 만들어 저장해둔 `global_` 티어
+        (`PROFILE_KEYS_GLOBAL = ["horizon_min"]` — station·요일·시간대 무관, horizon만으로
+        집계한 전체 평균)를 그대로 조회한다. 새 학습·새 아티팩트가 필요 없다. `p_empty`/
+        `p_full`은 분류기도 station_code가 있어야 도는 구조라 마찬가지로 못 내므로 `None`
+        (기존 "분류기 아티팩트 없음=null" 관례와 일관).
+        """
+        self.ensure_loaded()
+        horizon_min = round_horizon(eta_minutes)
+        global_profile = self._profile.global_
+        row = global_profile.loc[global_profile["horizon_min"] == horizon_min]
+        net_flow = float(row["historical_net_flow_mean"].iloc[0]) if len(row) else 0.0
+        return {
+            "net_flow": net_flow,
+            "horizon_min_used": horizon_min,
+            "p_empty": None,
+            "p_full": None,
         }
