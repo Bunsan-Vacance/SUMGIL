@@ -265,24 +265,24 @@ describe('경로 지도 선과 지점', () => {
 
   it('이동수단별 선 스타일과 사용자 표시용 지점 정보를 제공한다', () => {
     expect(routeLineStyle({ mode: 'subway', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#6379bd',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(routeLineStyle({ mode: 'bus', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#2f80c0',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(routeLineStyle({ mode: 'bike', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#2f7a59',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(routeLineStyle({ mode: 'walk', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#6379bd',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(
       routeLineStyle({ mode: 'walk', transfer: true, title: '', note: '', minutes: 1 }),
-    ).toEqual({ strokeColor: '#5d6873', strokeStyle: 'dashed' })
+    ).toEqual({ strokeColor: '#28323c', strokeStyle: 'dashed' })
 
     const place = routeEndpointPlace({
       endpoint: endpoint('raw-214', '강변', 37.5, 127.03),

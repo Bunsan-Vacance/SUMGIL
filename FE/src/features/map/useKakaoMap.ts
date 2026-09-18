@@ -25,6 +25,7 @@ import {
   getRouteEndpointCandidates,
   routeEndpointPlace,
   routeLineStyle,
+  ROUTE_LINE_COLOR,
   type RouteLineEntry,
   type RouteSvgOverlay,
   type RouteEndpointCandidate,
@@ -418,7 +419,7 @@ export function useKakaoMap(
         )
       : (route.geometry?.coordinates || []).map((coordinates) => ({
           coordinates,
-          style: { strokeColor: '#6379bd', strokeStyle: 'solid' },
+          style: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
         }))
     let validLineCount = 0
     lineEntries.forEach(({ coordinates }) => {

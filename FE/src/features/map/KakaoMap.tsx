@@ -54,7 +54,6 @@ function BikeStockSheet({
               <Bike size={15} />
             </span>
             <div>
-              <small>따릉이 대여소</small>
               <h2>{station.name}</h2>
             </div>
           </div>
@@ -62,13 +61,14 @@ function BikeStockSheet({
             <X size={17} />
           </button>
         </header>
-        {station.address && <p>{station.address}</p>}
-        <div className="map-place-info-meta">
-          {station.dockCount !== undefined && <span>거치대 총 {station.dockCount}개</span>}
-          {station.distanceMeters !== undefined && (
-            <span>조회한 지도 중심에서 {Math.round(station.distanceMeters)}m</span>
-          )}
-        </div>
+        {(station.dockCount !== undefined || station.distanceMeters !== undefined) && (
+          <div className="bike-stock-meta">
+            {station.dockCount !== undefined && <span>거치대 총 {station.dockCount}개</span>}
+            {station.distanceMeters !== undefined && (
+              <span>조회한 지도 중심에서 {Math.round(station.distanceMeters)}m</span>
+            )}
+          </div>
+        )}
         {state === 'loading' && (
           <p className="bike-stock-state" role="status">
             실시간 재고를 확인하고 있어요…
@@ -90,19 +90,19 @@ function BikeStockSheet({
         {state === 'success' && stock && (
           <div className={`bike-stock-result bike-stock-${stock.status.toLowerCase()}`}>
             {stock.status === 'AVAILABLE' && stock.availableBikes !== null ? (
-              <>
+              <div className="bike-stock-summary">
                 <strong>{stock.availableBikes}대</strong>
                 <p>
                   {stock.availableBikes === 0
                     ? '대여 가능한 자전거가 없어요.'
                     : '현재 대여할 수 있어요.'}
                 </p>
-              </>
+              </div>
             ) : stock.status === 'STALE' && stock.availableBikes !== null ? (
-              <>
+              <div className="bike-stock-summary">
                 <strong>{stock.availableBikes}대</strong>
                 <p>마지막 확인 재고예요. 최신 정보가 아닐 수 있어요.</p>
-              </>
+              </div>
             ) : (
               <p>현재 실시간 재고를 확인할 수 없어요.</p>
             )}
@@ -298,20 +298,6 @@ export default function KakaoMap({
           </section>
         )}
       </div>
-      {showPlaceInfo && (
-        <div className="map-place-shortcuts" aria-label="지도 장소 정보">
-          {origin && (
-            <button type="button" onClick={() => selectPlace(origin)}>
-              출발 장소 정보
-            </button>
-          )}
-          {destination && (
-            <button type="button" onClick={() => selectPlace(destination)}>
-              도착 장소 정보
-            </button>
-          )}
-        </div>
-      )}
       {bikeStockStation &&
         createPortal(
           <BikeStockSheet
