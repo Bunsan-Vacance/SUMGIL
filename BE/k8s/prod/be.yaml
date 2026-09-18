@@ -4,7 +4,9 @@ kind: Deployment
 metadata:
   name: be
 spec:
-  replicas: 2
+  # replicas 1 고정 (S15P21A104-210). EC2 2대 + 데이터 계층 상주라 여유 없음.
+  # 롤아웃 중 잠깐 끊긴다 (RollingUpdate 기본값). 무중단이 필요해지면 2와 함께 올린다.
+  replicas: 1
   selector:
     matchLabels:
       app: be
@@ -16,6 +18,8 @@ spec:
       containers:
         - name: be
           image: sumgil-be:latest
+          # SHA 태그는 불변이라 재pull이 필요 없다. :latest는 호환용으로만 push된다.
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           envFrom:

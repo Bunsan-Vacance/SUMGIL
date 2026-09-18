@@ -1,0 +1,74 @@
+# BE CI (Java 21 / Spring Boot 4.1.1 / Gradle)
+# 네이밍: 파트-동작 (be-test·be-image). 트리거 anchor는 루트 guard와 공유하지 않고 파일 내에서 정의.
+.be_test_paths: &be_test_paths
+  - "BE/src/**/*"
+  - "BE/build.gradle"
+  - "BE/settings.gradle"
+  - "BE/gradle/**/*"
+  - "BE/gradlew*"
+  - ".gitlab/ci/be.yml"
+
+# 검증: MR·main·개발브랜치에서 BE 소스 변경 시. 매니페스트 변경은 manifests-validate가 맡는다.
+be-test:
+  stage: test
+  image: eclipse-temurin:21-jdk-jammy
+  tags:
+    - CI
+  rules:
+    - changes: *be_test_paths
+  services:
+    # ⚠️ alias를 이미지 이름(postgres/redis)과 같게 두면 러너가 자동 생성하는 별칭과
+    #    충돌해 "alias is already in use"로 skip되고, 그 결과 호스트명이 해석되지 않아
+    #    DB 연결이 실패한다. 충돌 없는 이름을 쓴다.
+    - name: postgres:16
+      alias: db
+    - name: redis:7
+      alias: cache
+  variables:
+    # postgres 서비스 컨테이너가 읽는 값. 여기서 DB·계정이 만들어진다.
+    POSTGRES_DB: sumgil
+    POSTGRES_USER: sumgil
+    POSTGRES_PASSWORD: sumgil1234
+  cache:
+    key: "be-gradle-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - BE/.gradle/
+  before_script:
+    - cd BE
+    - chmod +x gradlew
+    # application.yml은 DB_URL/DB_USERNAME/DB_PASSWORD/REDIS_HOST/REDIS_PORT를
+    # 환경변수로 읽는다 (비밀번호를 yml에 직접 쓰지 않는 팀 규칙 — BE/README.md 9절).
+    # 값은 위 POSTGRES_*에서 파생시켜 서비스가 실제로 만든 DB·계정과 어긋나지 않게 한다.
+    - export DB_URL="jdbc:postgresql://db:5432/${POSTGRES_DB}"
+    - export DB_USERNAME="$POSTGRES_USER" DB_PASSWORD="$POSTGRES_PASSWORD"
+    - export REDIS_HOST=cache REDIS_PORT=6379
+    # 서비스 준비 확인. 여기서 끊으면 원인이 "DB/Redis 연결"임이 분명해진다.
+    # (없으면 Hibernate가 dialect 결정 실패로 죽어 원인 파악이 어렵다)
+    - 'timeout 30 bash -c "until (echo > /dev/tcp/db/5432) 2>/dev/null; do sleep 1; done" || { echo "TCP 연결 실패 - db:5432"; exit 1; }'
+    - 'timeout 30 bash -c "until (echo > /dev/tcp/cache/6379) 2>/dev/null; do sleep 1; done" || { echo "TCP 연결 실패 - cache:6379"; exit 1; }'
+  script:
+    - ./gradlew build --no-daemon --build-cache -Dgradle.user.home=.gradle
+
+# 이미지: develop-BE에서 BE 변경 시 (소유자 브랜치 — deploy-be가 IMAGE_TAG로 배포). SHA 태그 + latest 호환 push.
+# 전제: 러너 호스트 docker 접근 + insecure-registry 등록 (⬜ 첫 develop 파이프라인에서 확인).
+# 레지스트리 도달 불가 시 이 job이 실패한다 — 그때는 노드 build-push.sh로 전환.
+be-image:
+  stage: build
+  image: docker:28
+  tags:
+    - CI
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop-BE"'
+      changes: *be_test_paths
+  variables:
+    REGISTRY_HOST: "100.103.156.53:30500"
+  script:
+    - TAG="${CI_COMMIT_SHORT_SHA:-latest}"
+    - docker build -t "${REGISTRY_HOST}/sumgil-be:${TAG}" BE
+    - docker push "${REGISTRY_HOST}/sumgil-be:${TAG}"
+    - docker tag "${REGISTRY_HOST}/sumgil-be:${TAG}" "${REGISTRY_HOST}/sumgil-be:latest"
+    - docker push "${REGISTRY_HOST}/sumgil-be:latest"
+    - echo "IMAGE_TAG=${TAG}" > image.env
+  artifacts:
+    reports:
+      dotenv: image.env
