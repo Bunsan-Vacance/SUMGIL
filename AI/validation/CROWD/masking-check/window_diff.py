@@ -146,7 +146,13 @@ def _assert_paired(
 
 # ── 표 W: 쌍(paired) 날짜 블록 부트스트랩 ──
 def window_diff_table(
-    base: pd.DataFrame, other: pd.DataFrame, scenario: str, n_boot: int, seed: int
+    base: pd.DataFrame,
+    other: pd.DataFrame,
+    scenario: str,
+    n_boot: int,
+    seed: int,
+    base_label: str = "base",
+    other_label: str = "other",
 ) -> pd.DataFrame:
     """시나리오 하나의 base·other 손실에서 계열별 RMSE·MAE 쌍차이 표를 낸다.
 
@@ -155,12 +161,27 @@ def window_diff_table(
     동시에 계산한다 — 그래야 둘의 차이가 "그 재표본이 쉬웠는가"를 상쇄한 쌍(paired)
     비교가 된다. `stat-model-check/evaluate.py`의 `table_a`·`table_b`와 같은 벡터화 방식
     (날짜별 SSE·SAE·n을 `n_dates` 길이 벡터로 펼쳐 부트스트랩 행렬과 내적)이다.
+
+    두 윈도우의 계열 집합이 다르면(예: 한쪽만 GRU 시드가 있다) 죽지 않고 **교집합**만
+    비교하며, 어느 한쪽에만 있어 빠진 계열은 `[안내]`로 알린다(227).
     """
     base_series = {c.split("__", 1)[1] for c in base.columns if c.startswith("sse__")}
     other_series = {c.split("__", 1)[1] for c in other.columns if c.startswith("sse__")}
     series_names = sorted(base_series & other_series)
     if not series_names:
         raise SystemExit(f"[{scenario}] 두 윈도우가 공유하는 계열이 없다.")
+    only_base = base_series - other_series
+    only_other = other_series - base_series
+    if only_base:
+        print(
+            f"[안내] [{scenario}] {base_label}에만 있는 계열(비교에서 제외): {sorted(only_base)}",
+            flush=True,
+        )
+    if only_other:
+        print(
+            f"[안내] [{scenario}] {other_label}에만 있는 계열(비교에서 제외): {sorted(only_other)}",
+            flush=True,
+        )
 
     merged = base.merge(other, on=KEY, how="inner", suffixes=("_base", "_other"))
     dates = np.sort(merged["date"].unique())
@@ -261,7 +282,9 @@ def run(args: argparse.Namespace) -> pd.DataFrame:
         base = _load_losses(args.base, sc)
         other = _load_losses(args.other, sc)
         _assert_paired(base, other, args.base, args.other)
-        tbl = window_diff_table(base, other, sc, args.n_boot, args.seed)
+        tbl = window_diff_table(
+            base, other, sc, args.n_boot, args.seed, base_label=args.base, other_label=args.other
+        )
         tables.append(tbl)
 
         tot = tbl[tbl["axis"] == "전체"].sort_values(["series", "target"])

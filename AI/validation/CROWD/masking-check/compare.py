@@ -43,6 +43,16 @@
    CI 상한이 0을 넘거나 point diff가 −2%p 이상(GRU보다 크게 나쁘지 않다).
 4. **기간 재현** — `--window w2023`(다른 패널·파생 캐시)에서도 1~3의 부호(방향)가 유지된다.
 
+## 연도 표본 가중·기상 실험 세트(227)
+
+- `--year-weights`: `train.py --year-weights`와 같은 형식으로 `prepare()`의 단독 lookup을 같은
+  가중으로 fit한다. 가중이 있으면 그 가중으로 만든 `--derived-cache`가 미리 있어야 한다(없으면
+  `load_derived_slim`의 캐시 미스 폴백이 기본 패널로 평탄 파생을 다시 만들어 버린다).
+- `--no-gru`: GRU 예측·표 B2·`--gru-baseline` 검증을 전부 생략한다(GRU 아티팩트 없이 마스킹
+  후보끼리만, 또는 기상 후보를 빠르게 확인할 때).
+- `--extra-cols`: `evaluate_dl.DERIVED_COLS` 뒤에 열을 추가해 읽는다 — 기상 후보(`features.WEATHER_COLS`)
+  처럼 배포 세트에 없는 열로 학습한 아티팩트를 평가할 때 `build_matrix`가 `KeyError`로 죽지 않게 한다.
+
 ## 실행
 
 아티팩트가 하이픈 폴더에 있어 파일 경로로 돈다(`family-check`와 같은 사정).
@@ -116,6 +126,7 @@ from app.CROWD.pipeline.dl.train_dl import resolve_device
 from app.CROWD.pipeline.features import FEATURE_SETS
 from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
 from app.CROWD.pipeline.predictor import latest_artifact
+from app.CROWD.pipeline.train import parse_year_weights, year_weight_series, year_weights_label
 
 EVAL_START = pd.Timestamp("2025-01-01")
 DEPLOY_SET = evaluate_dl.DEPLOY_SET
@@ -146,6 +157,13 @@ def _git_commit() -> str:
         return "unknown"
 
 
+def _columns_with_extra(base: list[str], extra: list[str]) -> list[str]:
+    """`base` 뒤에 `extra`를 중복 없이 순서대로 붙인다(`--extra-cols`, 기상 후보 등)."""
+    seen = set(base)
+    added = [c for c in extra if not (c in seen or seen.add(c))]
+    return base + added
+
+
 # ── 준비 ──
 def prepare(args) -> dict:
     t0 = time.time()
@@ -159,8 +177,19 @@ def prepare(args) -> dict:
     )
     panel = load_panel(with_events=True, panel_path=panel_path, events_path=events_path)
     train_raw, _ = time_split(panel)
-    lookup = DayTypeLookupBaseline().fit(train_raw)
+    year_weights = parse_year_weights(args.year_weights)
+    # 가중 lookup은 `--derived-cache`(train.py --year-weights가 만든 것)가 미리 있어야 한다 —
+    # `load_derived_slim`의 캐시 미스 폴백이 기본 패널로 평탄 파생을 다시 만들어 버리기 때문이다.
+    if year_weights and not (
+        args.derived_cache and _resolve_path(args.derived_cache, CROWD_INTERIM).exists()
+    ):
+        raise SystemExit(
+            "가중 lookup 비교는 train.py --year-weights가 만든 파생 캐시가 미리 있어야 한다"
+        )
+    weights = year_weight_series(train_raw["date"], year_weights) if year_weights else None
+    lookup = DayTypeLookupBaseline().fit(train_raw, weights=weights)
 
+    cols = _columns_with_extra(evaluate_dl.DERIVED_COLS, args.extra_cols)
     cache_path = None
     if args.derived_cache:
         cache_path = _resolve_path(args.derived_cache, CROWD_INTERIM)
@@ -169,9 +198,9 @@ def prepare(args) -> dict:
         # 그래서 비기본 패널에서는 캐시가 이미 있어야 한다(train.py가 만든다) — 없으면 바로 멈춘다.
         if not cache_path.exists():
             raise SystemExit(f"파생 캐시가 없다: {cache_path} — train.py로 먼저 만들 것.")
-        derived = load_derived_slim(columns=evaluate_dl.DERIVED_COLS, cache_path=cache_path)
+        derived = load_derived_slim(columns=cols, cache_path=cache_path)
     else:
-        derived = load_derived_slim(columns=evaluate_dl.DERIVED_COLS)
+        derived = load_derived_slim(columns=cols)
 
     train = derived[derived["date"] < EVAL_START]
     test = derived[derived["date"] >= EVAL_START]
@@ -201,6 +230,7 @@ def prepare(args) -> dict:
         "panel_path": panel_path,
         "events_path": events_path,
         "cache_path": cache_path,
+        "year_weights": year_weights,
     }
 
 
@@ -229,6 +259,9 @@ def series_predictions(args, data: dict) -> tuple[dict, dict[str, str]]:
         for sc, frame in evaluate_dl.lgb_predictions(artifact, test, scenarios).items():
             aligned[(series_name, sc)] = evaluate_dl.align(test, frame)
 
+    if args.no_gru:  # GRU 예측·기준 검증을 통째로 건너뛴다
+        return aligned, artifacts
+
     device = resolve_device(args.device)
     gru_paths = args.gru or {
         name: MODELS_DIR / folder for name, folder in family_compare.GRU_SEEDS.items()
@@ -254,12 +287,15 @@ def series_predictions(args, data: dict) -> tuple[dict, dict[str, str]]:
 # ── 시나리오별 표(A · B · B2) + 손실 저장 ──
 def compare_tables(
     args, common, common_lookup, aligned, finite, masked_names, out_dir: Path
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
     """시나리오마다 표 A(lookup 대비)·B(LightGBM 쌍차이)·B2(마스킹 후보 대 GRU 기준 쌍차이)를 낸다.
 
     `family_compare.scenario_frame`으로 만든 시나리오별 프레임에서 날짜별 손실 충분통계
     (`losses_<시나리오>.parquet`)도 같이 저장한다 — 다음에 후보를 더할 때 예측을 다시 만들지 않아도
     되게 하려는 것이다(`AI/CLAUDE.md` "실험 실행 효율").
+
+    `--no-gru`면 `aligned`에 GRU 계열이 없어 B2(GRU 기준 쌍차이)를 낼 수 없다 — 그 표는
+    `None`으로 돌려준다(호출부가 결과 표에서 뺀다).
     """
     a_all, b_all, b2_all = [], [], []
     for sc in args.scenarios:
@@ -271,12 +307,8 @@ def compare_tables(
         b = stat_eval.table_b(
             losses, [n for n in candidates if n != "lightgbm"], args.n_boot, args.seed
         ).assign(scenario=sc)
-        b2 = stat_eval.table_b(
-            losses, masked_names, args.n_boot, args.seed, baseline=args.gru_baseline
-        ).assign(scenario=sc)
         a_all.append(a)
         b_all.append(b)
-        b2_all.append(b2)
 
         tot = a[a["axis"] == "전체"].set_index(["series", "target"])
         for n in candidates:
@@ -287,6 +319,13 @@ def compare_tables(
                 f"[{tot.loc[(n, 'alighting'), 'RMSE_CI_low']:+.2f}]",
                 flush=True,
             )
+
+        if args.no_gru:
+            continue
+        b2 = stat_eval.table_b(
+            losses, masked_names, args.n_boot, args.seed, baseline=args.gru_baseline
+        ).assign(scenario=sc)
+        b2_all.append(b2)
         diff_col = f"point_diff_RMSE_%p(계열-{args.gru_baseline})"
         tot_b2 = b2[b2["axis"] == "전체"].set_index(["series", "target"])
         for n in masked_names:
@@ -301,7 +340,7 @@ def compare_tables(
     return (
         pd.concat(a_all, ignore_index=True),
         pd.concat(b_all, ignore_index=True),
-        pd.concat(b2_all, ignore_index=True),
+        pd.concat(b2_all, ignore_index=True) if b2_all else None,
     )
 
 
@@ -322,12 +361,10 @@ def run(args) -> dict[str, pd.DataFrame]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     a, b, b2 = compare_tables(args, common, common_lookup, aligned, finite, masked_names, out_dir)
-    tables = {
-        "A_lookup_대비_개선율_CI": a,
-        "B_lightgbm_쌍차이": b,
-        "B2_masked_GRU쌍차이": b2,
-        "C_발산처리_적용행": treatment,
-    }
+    tables = {"A_lookup_대비_개선율_CI": a, "B_lightgbm_쌍차이": b}
+    if b2 is not None:
+        tables["B2_masked_GRU쌍차이"] = b2
+    tables["C_발산처리_적용행"] = treatment
     for sc in args.grades or []:
         g = family_compare.grade_table(common, common_lookup, aligned, finite, sc)
         if g is not None:
@@ -344,6 +381,11 @@ def run(args) -> dict[str, pd.DataFrame]:
         "scenarios": ",".join(args.scenarios),
         "artifacts": json.dumps(artifacts, ensure_ascii=False),
         "treatment": args.treatment,
+        "year_weights": (
+            year_weights_label(data["year_weights"]) if data["year_weights"] else "none"
+        ),
+        "no_gru": args.no_gru,
+        "extra_cols": ",".join(args.extra_cols) if args.extra_cols else "none",
     }
     for title, tbl in tables.items():
         tbl = tbl.assign(**conditions)
@@ -352,11 +394,12 @@ def run(args) -> dict[str, pd.DataFrame]:
         print(f"\n### {title}\n{tbl.round(3).to_string(index=False)}")
 
     if args.out:
+        gru_note = "GRU 생략(--no-gru)" if args.no_gru else f"GRU 기준 `{args.gru_baseline}`"
         head = (
             f"윈도우: `{args.window}` · 발산 처리 `{args.treatment}` · "
             f"부트스트랩 {args.n_boot}회(seed {args.seed}) · 시나리오 {args.scenarios} · "
-            f"GRU 기준 `{args.gru_baseline}` · 커밋 `{conditions['git_commit']}` · "
-            f"아티팩트 {artifacts}\n"
+            f"{gru_note} · 연도 가중 `{conditions['year_weights']}` · "
+            f"커밋 `{conditions['git_commit']}` · 아티팩트 {artifacts}\n"
         )
         chunks = [head] + [
             f"### {title}\n\n{stat_eval.to_markdown(tbl.round(3))}\n"
@@ -373,7 +416,14 @@ def main(argv: list[str] | None = None) -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--window", required=True, help="출력 폴더 라벨(예: w2024, w2023, smoke)")
-    ap.add_argument("--lightgbm", default=None, help="현행 배포 LightGBM 아티팩트(생략 시 최신)")
+    ap.add_argument(
+        "--lightgbm",
+        default=None,
+        help=(
+            "현행 배포 LightGBM 아티팩트. 생략 시 latest_artifact — 지금은 `…_train2024-2025`"
+            "(2025 포함 학습)라 2025 평가에 누수된다. 창 비교에서는 반드시 명시."
+        ),
+    )
     ap.add_argument(
         "--masked",
         nargs="+",
@@ -414,6 +464,23 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument(
         "--grades", nargs="+", default=None, help="등급 일치율을 낼 시나리오들(예: full)"
+    )
+    ap.add_argument(
+        "--year-weights",
+        default=None,
+        help=(
+            "227 연도별 표본 가중(train.py --year-weights와 같은 형식). 주면 그 가중으로 만든 "
+            "--derived-cache가 미리 있어야 한다(캐시 미스 폴백이 평탄 파생을 만들기 때문)"
+        ),
+    )
+    ap.add_argument(
+        "--no-gru", action="store_true", help="GRU 계열 예측·표 B2·GRU 기준 검사를 전부 생략"
+    )
+    ap.add_argument(
+        "--extra-cols",
+        nargs="*",
+        default=[],
+        help="파생 캐시에서 추가로 읽을 열(예: 기상 후보 5열) — evaluate_dl.DERIVED_COLS 뒤에 붙는다",
     )
     ap.add_argument("--out", default=None, help="표를 마크다운으로 저장할 경로")
     args = ap.parse_args(argv)

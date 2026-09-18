@@ -31,6 +31,18 @@
     cd AI
     python -m DATA_ENGINE.eda.build_crowd_panel
     python -m DATA_ENGINE.eda.build_crowd_panel --start 2023-01-01 --end 2023-12-31
+
+**구간을 넓혀 새 패널을 지을 때는 이벤트 가공을 먼저 다시 돌린다**(227에서 두 번 겪었다):
+    python -m DATA_ENGINE.eda.parsers_festival          # 축제 원천 CSV(연도별) → interim
+    python -m DATA_ENGINE.eda.parsers_sports            # KBO·K리그 원문 → interim
+    python -m DATA_ENGINE.eda.join_kbo_attendance
+    python -m DATA_ENGINE.eda.filter_kleague_seoul_metro
+    python -m DATA_ENGINE.eda.map_events_to_stations --panel crowd_panel_<시작>_<끝>.parquet
+`map_events_to_stations`만 돌리면 옛 interim/processed 표를 그대로 써서, 원문은 있어도 새 연도의
+경기·축제가 0(결측이 0으로)으로 들어간다. 145 후속에서 2023 경기가 전부 0으로, 227에서 2022 축제가
+38건으로 들어간 뒤 파서 재실행으로 각각 534경기·804건으로 채워졌다. 재가공은 기존 연도의 값도
+바꿀 수 있으니(축제 파일 간 중복 — `validation/CROWD/train-window-check/RESULTS.md` 1.2절) 배포
+이벤트 표를 다시 만들 때는 변경 폭을 먼저 잰다.
 """
 
 from __future__ import annotations
