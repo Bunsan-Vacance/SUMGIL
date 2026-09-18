@@ -590,6 +590,33 @@ data/BIKE/raw/realtime/latest_stock.parquet
 KST naive datetime으로 저장한다. 같은 대여소의 이전 값은 더 최신 `updated_at` 이벤트로만
 갱신된다.
 
+### 날씨 Kafka 입력 계약 (2026-09-18 확인)
+
+J15A104A의 최근 Kafka 날씨 snapshot을 확인한 결과, `weather.nowcast`의 envelope
+`source`는 관측과 예보 모두 동일하다. 종류는 `payload_json`의 값 필드로 구분한다.
+
+| 종류 | payload 필드 | 값 필드 | 기준 시각 |
+| --- | --- | --- | --- |
+| 실황 `observed` | `baseDate`, `baseTime`, `category`, `nx`, `ny`, `obsrValue` | `obsrValue` | `baseDate` + `baseTime` |
+| 예보 `forecast` | `baseDate`, `baseTime`, `fcstDate`, `fcstTime`, `category`, `nx`, `ny`, `fcstValue` | `fcstValue` | 발표: `baseDate` + `baseTime`; 유효: `fcstDate` + `fcstTime` |
+
+확인한 category는 `T1H`, `RN1`, `REH`, `WSD`, `PTY`이며, 샘플의 격자는
+`nx=60, ny=127` 한 곳이다. 이는 현재 샘플의 사실이지 producer가 항상 한 격자만
+발행한다는 계약은 아니다. 공통 산출물은 격자와 관측/예보 종류, 발표/유효 시각을
+보존해야 한다. 기존 poller raw는 이 필드가 평탄화되어 있고 `source`가
+`observed`/`forecast`인 반면, Kafka raw는 `payload_json` 안에 필드가 있으며
+envelope `source`가 `weather.nowcast`다. 현재 날씨 배치는 평탄화된 poller 형식만
+받으므로 Kafka raw를 그대로 입력할 수 없다.
+
+최근 서버 snapshot의 서로 다른 `poll_run_at` 간격은 약 60분이었다. BIKE 서빙의
+15분 신선도 기준을 Kafka 발행 간격에 그대로 적용하면 정상 수집 중에도 오래된 값으로
+판정될 수 있다. 구현 전 다음 정책을 확정한다.
+
+- 동일 관측이 poller와 Kafka 양쪽에 있거나 Kafka에서 재전송될 때의 중복 키와 우선순위.
+- BIKE가 사용할 실황 `observed`의 대표 격자와 `RN1`/`PTY` 기반 강수 판정, 결측 처리.
+- 신선도를 관측 시각, 수집 시각, 최신 파일 갱신 시각 중 어디에 적용할지와 허용 지연.
+  값의 관측 시각을 파일 갱신 시각으로 대체해 신선해 보이게 만들지 않는다.
+
 서버에서 수동 확인:
 
 ```bash
