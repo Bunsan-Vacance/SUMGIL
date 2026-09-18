@@ -58,6 +58,7 @@ lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 �
     python -m app.CROWD.pipeline.batch_predict --date 2026-01-05 --predictor lookup
     python -m app.CROWD.pipeline.batch_predict --today --tomorrow             # 운영
     python -m app.CROWD.pipeline.batch_predict --date 2025-06-02 --trains    # 열차·노드 표도 산출(239, 옵션)
+    python -m app.CROWD.pipeline.batch_predict --date 2025-06-02 --link-table # 링크(from/to) 표도 산출(244, 옵션)
 
 ## 열차·노드 표(239, 옵션) — `predictions_train_{date}.parquet`
 
@@ -67,6 +68,19 @@ lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 �
 않는다. 기본은 꺼짐 — BE 적재 경로가 정해지기 전까지 기존 산출물·메타 값을 바꾸지 않는다. 컬럼·
 메타 키는 `SERVING_CONTRACT.md` 7절·3절, 구현은 `to_train_table`(`timetable.py`·`disaggregate.py`
 3층 함수를 잇는다).
+
+## 링크(from/to) 표(244, 옵션) — `predictions_link_{date}.parquet` + BE CSV
+
+`settings.crowd_link_table`(또는 `--link-table`/`--no-link-table`)를 켜면 슬롯 표에 (line, segment,
+station_no, direction) → `to_station_no` 대응(세그먼트 위상에서 한 번만 계산)을 이너 조인해 링크
+단위 표를 추가로 만들고, BE 적재용 CSV(`predictions_link_{date}_{HHMMSS}.csv`)도 같이 쓴다. **이것도
+예측이 아니라 분해다**(`RESOLUTION_LADDER.md` §1.1·§4) — 이너 조인이라 세그먼트 경계(종점·절단면)는
+대응이 없어 자동으로 빠지고, 강동처럼 한 역이 여러 세그먼트에 걸치면 세그먼트마다 다른
+`to_station_no`를 갖는 별개 행으로 남아 5.4절 강동 중복 문제가 자연히 풀린다 — 열차 표(239)의
+`link_ambiguous` 같은 모호성 플래그가 이 표에는 없다(슬롯 집계 표라 여러 지선이 동시에 유효하다).
+기본은 꺼짐 — B-5 적재 계약(`.claude/handoff/response/FROME_BE-crowd-pred-load-path.md`)은 확정됐지만
+배치 스케줄이 아직 등록되지 않았다. 컬럼·메타 키는 `SERVING_CONTRACT.md` 8절·3절, 구현은
+`to_link_table`·`write_link_csv`.
 """
 
 from __future__ import annotations
@@ -85,6 +99,9 @@ from app.core.config import get_settings
 from app.CROWD.pipeline import routing
 from app.CROWD.pipeline.calendar import attach_calendar, holiday_coverage_end, load_holidays
 from app.CROWD.pipeline.congestion import (
+    ASCENDING,
+    CIRCULAR_LABELS,
+    DESCENDING,
     HOLIDAY_FALLBACK_DAY_TYPE,
     apply_calibration,
     grade,
@@ -147,7 +164,8 @@ DATA_STATUS_VALUES = (
 API_ONLY_DATA_STATUS = ("no_data",)
 
 # `.meta.json`에 실리는 키와 그 순서. `predict_day`가 만드는 앞쪽 13개 + `run`이 덧붙이는
-# 15개(200에서 8→10, 239에서 열차·노드 표 메타 5개를 `generated_at` 앞에 추가해 10→15).
+# 17개(200에서 8→10, 239에서 열차·노드 표 메타 5개를 `generated_at` 앞에 추가해 10→15, 244에서
+# 링크 표 메타 2개를 같은 자리에 추가해 15→17).
 META_KEYS = (
     "target_date",
     "in_panel",
@@ -176,6 +194,8 @@ META_KEYS = (
     "train_rows",
     "headway_long_rows",
     "train_mass_gap",
+    "link_table",
+    "link_csv_rows",
     "generated_at",
 )
 
@@ -233,6 +253,23 @@ TRAIN_OUTPUT_COLS = [
     "data_status",
     "pred_source",
     "train_capacity",
+]
+
+# 244 — 링크(from/to) 표(`predictions_link_{date}.parquet` + BE CSV, 옵션)의 컬럼과 순서.
+# `SERVING_CONTRACT.md` 8절과 짝이고 `test_crowd_serving_contract.test_link_output_columns_match_contract_table`가
+# 대조한다. `congestion_pct`는 parquet에서 이 이름 그대로다 — `level`로의 개명과 `time_slot`
+# 0-47 인덱스 변환은 `write_link_csv`(BE CSV 전용)에서만 일어난다.
+LINK_OUTPUT_COLS = [
+    "date",
+    "line",
+    "from_station_no",
+    "to_station_no",
+    "direction",
+    "time_slot_30min",
+    "congestion_pct",
+    "data_status",
+    "pred_source",
+    "predictor_version",
 ]
 
 
@@ -737,6 +774,134 @@ def to_train_table(
     return train_tbl, stats
 
 
+def _link_targets(segments: list[dict]) -> pd.DataFrame:
+    """세그먼트 위상 → `(line, segment, station_no, direction) -> to_station_no` 대응표(244).
+
+    선형(비순환) 세그먼트에서 `역 목록[i]`의 `하선`(오름차순)은 `역 목록[i+1]`로, `상선`(내림차순)은
+    `역 목록[i-1]`로 가는 링크다. `i+1`·`i-1`이 없는 경계(진짜 종점이든 `truncated: true`
+    절단면이든 강동처럼 그 세그먼트 목록이 거기서 끝나는 분기점이든)는 대응이 없어 행을 만들지
+    않는다 — 그 셀은 재귀식이 구조적으로 0을 내는 세그먼트 국소 인공물이라 링크로 못 쓴다
+    (`congestion.truncated_boundary_cells` docstring 참고). 순환 세그먼트는 모든 역이 다음
+    (`(i+1) % n`)·이전(`(i-1) % n`)을 다 가져 경계가 없고, 오름차순 인덱스 쪽 타깃은
+    `CIRCULAR_LABELS[ASCENDING]`("내선"), 내림차순 쪽은 `CIRCULAR_LABELS[DESCENDING]`("외선")
+    라벨을 받는다. `segment_loads`와 같은 기준으로 역이 2개 미만인 세그먼트는 건너뛴다.
+    """
+    rows: list[tuple[str, str, int, str, int]] = []
+    for seg in segments:
+        stations = seg["stations"]
+        n = len(stations)
+        if n < 2:
+            continue
+        line = seg["line"]
+        segment = seg["segment"]
+        if seg.get("circular"):
+            asc_label = CIRCULAR_LABELS[ASCENDING]
+            desc_label = CIRCULAR_LABELS[DESCENDING]
+            for i in range(n):
+                rows.append((line, segment, stations[i], asc_label, stations[(i + 1) % n]))
+                rows.append((line, segment, stations[i], desc_label, stations[(i - 1) % n]))
+        else:
+            for i in range(n - 1):
+                rows.append((line, segment, stations[i], ASCENDING, stations[i + 1]))
+            for i in range(1, n):
+                rows.append((line, segment, stations[i], DESCENDING, stations[i - 1]))
+    return pd.DataFrame(
+        rows, columns=["line", "segment", "station_no", "direction", "to_station_no"]
+    )
+
+
+def to_link_table(
+    full_table: pd.DataFrame, segments: list[dict], predictor_version: str
+) -> tuple[pd.DataFrame, dict]:
+    """슬롯 표(`_congestion_table_full`의 대상 날짜 한 날치 결과) → 링크(from/to) 표(244, 옵션).
+
+    **파생 뷰다, 새 정보가 아니다** — `full_table`에 이미 있는 값(`congestion_pct`·`data_status`
+    등)을 링크 단위로 다시 보여줄 뿐이다(`RESOLUTION_LADDER.md` §1.1·§4, 원칙 4·8). 세그먼트
+    위상에서 `_link_targets`로 `(line, segment, station_no, direction) -> to_station_no`
+    대응표를 한 번 만들고, 그 표를 슬롯 표에 **이너 조인**한다 — 이 한 번의 조인이 세 가지를
+    동시에 한다: (a) 실제 링크마다 `to_station_no`를 붙이고, (b) 대응이 없는 경계 셀(종점·절단면·
+    분기점)을 별도 처리 없이 행 자체를 만들지 않아 걸러내고, (c) 강동처럼 한 역이 세그먼트
+    여러 개에 걸치는 경우도 세그먼트마다 대응표에서 독립적으로 조회되므로 세그먼트 수만큼
+    (서로 다른 `to_station_no`를 가진) 별개 행으로 자연히 갈라져 모호성 플래그 없이 중복 키
+    문제가 풀린다(열차 표 239가 `link_ambiguous`로 표시해야 했던 것과 다르다 — 여기는 슬롯
+    집계 표라 지선들이 동시에 유효한 값이기 때문이다).
+
+    `predictor_version`은 `full_table`에 없는 컬럼이라(호출자 `run()`이 `meta["predictor_version"]`을
+    스칼라로 넘긴다) 행 단위 컬럼으로 그대로 붙인다 — BE가 이 컬럼을 행 단위로 요청했다
+    (`FROME_BE-crowd-pred-load-path.md` 1.2절).
+
+    반환: `(link_tbl, stats)`. `stats`는 `link_rows`(출력 행 수), `boundary_dropped_keys`(대응표에
+    타깃이 없어 걸러진 `(line, segment, station_no, direction)` 키 조합 수 — 슬롯 수가 아니라
+    **키** 단위로 센다, 슬롯마다 같은 경계가 반복되므로 행 수를 그대로 쓰면 슬롯 수만큼 부풀려진다),
+    `distinct_links`(날짜와 무관하게 존재하는 고유 물리 링크 수).
+    """
+    targets = _link_targets(segments)
+    key_cols = ["line", "segment", "station_no", "direction"]
+    merged = full_table.merge(targets, on=key_cols, how="inner")
+    merged = merged.rename(columns={"station_no": "from_station_no"})
+    merged["predictor_version"] = predictor_version
+    link_tbl = (
+        merged.reindex(columns=LINK_OUTPUT_COLS)
+        .sort_values(["line", "from_station_no", "direction", "time_slot_30min"], kind="mergesort")
+        .reset_index(drop=True)
+    )
+
+    dropped_keys = (
+        full_table[key_cols]
+        .drop_duplicates()
+        .merge(targets[key_cols].drop_duplicates(), how="left", indicator=True)
+    )
+    stats = {
+        "link_rows": len(link_tbl),
+        "boundary_dropped_keys": int((dropped_keys["_merge"] == "left_only").sum()),
+        "distinct_links": len(
+            merged[["line", "from_station_no", "to_station_no", "direction"]].drop_duplicates()
+        ),
+    }
+    return link_tbl, stats
+
+
+def _slot30_to_index(slot30: str) -> int:
+    """`"HH:MM"` 30분 슬롯 문자열 → BE가 쓰는 0~47 인덱스(244).
+
+    `index = HH*2 + (MM == 30 ? 1 : 0)`을 직접 계산한다 — `disaggregate.slot30_start_minutes`를
+    재사용하지 않는다. 그 함수는 `hh < 4`인 슬롯에 1440분을 더해 운행일(다음날 새벽) 기준으로
+    정렬하는 용도라 `00:00`/`00:30`이 48/49가 되어 여기서 BE가 기대하는 0/1과 어긋난다
+    (`TO_BE-crowd-contract-answers.md` 1.3절, `FROME_BE-crowd-pred-load-path.md` 6.1절).
+    """
+    hh, mm = int(slot30[:2]), int(slot30[3:5])
+    return hh * 2 + (1 if mm == 30 else 0)
+
+
+def write_link_csv(link_table: pd.DataFrame, path: Path) -> int:
+    """링크 표 → BE 적재용 CSV(244). BE가 확정한 헤더 순서 그대로 쓴다.
+
+    (`FROME_BE-crowd-pred-load-path.md` 6.1절: `pred_date, line, from_station_no, to_station_no,
+    direction, time_slot, level, data_status, pred_source, predictor_version`). `date`는
+    `YYYY-MM-DD` 문자열(`pred_date`)로, `time_slot_30min`은 `_slot30_to_index`로 0~47 정수
+    (`time_slot`)로, `congestion_pct`는 `level`로 이름만 바뀐다 — 값 자체(NaN 포함)는 그대로다.
+    NaN인 `level`은 `to_csv` 기본 동작대로 빈 칸으로 쓰인다(BE가 요청한 표현, 6.1절).
+    `_atomic_write`로 원자적으로 쓰고 실제로 쓴 행 수를 돌려준다 — 이 값이 `.meta.json`의
+    `link_csv_rows`(BE 6.2절 "산출 행 수" 요청)로 그대로 들어간다.
+    """
+    frame = pd.DataFrame(
+        {
+            "pred_date": link_table["date"].dt.strftime("%Y-%m-%d"),
+            "line": link_table["line"],
+            "from_station_no": link_table["from_station_no"],
+            "to_station_no": link_table["to_station_no"],
+            "direction": link_table["direction"],
+            "time_slot": link_table["time_slot_30min"].map(_slot30_to_index),
+            "level": link_table["congestion_pct"],
+            "data_status": link_table["data_status"],
+            "pred_source": link_table["pred_source"],
+            "predictor_version": link_table["predictor_version"],
+        }
+    )
+    _atomic_write(lambda p: frame.to_csv(p, index=False, encoding="utf-8"), path)
+    return len(frame)
+
+
 def validated_meta(meta: dict) -> dict:
     """`.meta.json`에 쓸 메타를 명세 키(`META_KEYS`)에 맞춰 검증·정렬한다.
 
@@ -810,6 +975,7 @@ def run(
     out_dir: Path | None = None,
     use_recent: bool = True,
     train_table: bool | None = None,
+    link_table: bool | None = None,
 ) -> list[Path]:
     settings = get_settings()
     out_dir = Path(out_dir or settings.crowd_serving_dir)
@@ -839,6 +1005,10 @@ def run(
     if use_trains:
         timetable = load_timetable(settings.crowd_timetable_path)
         timetable_ver = timetable_version(settings.crowd_timetable_path)
+
+    # 244: 링크(from/to) 표도 기본 꺼짐(설정값) — CLI(`--link-table`/`--no-link-table`)가
+    # 명시하면 그것을 따른다.
+    use_links = settings.crowd_link_table if link_table is None else link_table
 
     # --predictor CLI가 명시되면 라우팅을 건너뛰고 그 kind 하나로 전 날짜를 예측한다(디버그·재현용).
     # CLI가 없으면(None) settings.crowd_predictor 기본값 "auto"는 라우팅에 맡긴다는 뜻이다 — 누군가
@@ -892,6 +1062,27 @@ def run(
                 flush=True,
             )
 
+        # 244: CSV 파일명 타임스탬프와 meta.generated_at이 같은 순간을 가리켜야 한다(BE가
+        # `meta.generated_at`으로 재적재를 판정하므로, 두 값이 다르면 판정이 어긋난다).
+        now = datetime.now(UTC).astimezone()
+
+        link_meta = {"link_table": bool(use_links), "link_csv_rows": None}
+        if use_links:
+            link_tbl, lstats = to_link_table(full, segments, meta["predictor_version"])
+            link_path = out_dir / f"predictions_link_{d:%Y-%m-%d}.parquet"
+            _atomic_write(
+                lambda p, link_tbl=link_tbl: link_tbl.to_parquet(p, index=False), link_path
+            )
+            csv_path = out_dir / f"predictions_link_{d:%Y-%m-%d}_{now:%H%M%S}.csv"
+            csv_rows = write_link_csv(link_tbl, csv_path)
+            link_meta["link_csv_rows"] = csv_rows
+            print(
+                f"[배치] {d:%Y-%m-%d} → {csv_path.name} ({lstats['link_rows']:,}행, "
+                f"boundary_dropped_keys {lstats['boundary_dropped_keys']}, "
+                f"distinct_links {lstats['distinct_links']})",
+                flush=True,
+            )
+
         meta.update(
             {
                 "recent_dates_available": recent_dates,
@@ -910,7 +1101,8 @@ def run(
                 ),
                 "topology_gaps": gaps.to_dict("records") if len(gaps) else [],
                 **train_meta,
-                "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+                **link_meta,
+                "generated_at": now.isoformat(timespec="seconds"),
             }
         )
         meta_text = json.dumps(validated_meta(meta), ensure_ascii=False, indent=1, default=str)
@@ -952,6 +1144,22 @@ def main(argv: list[str] | None = None) -> None:
         action="store_false",
         help="열차·노드 표를 산출하지 않는다(설정값이 켜져 있어도 이번 실행만 끈다)",
     )
+    ap.add_argument(
+        "--link-table",
+        dest="link_table",
+        action="store_true",
+        default=None,
+        help=(
+            "링크(from/to) 표(predictions_link_*.parquet + BE CSV)도 산출한다"
+            "(기본: settings.crowd_link_table)"
+        ),
+    )
+    ap.add_argument(
+        "--no-link-table",
+        dest="link_table",
+        action="store_false",
+        help="링크(from/to) 표를 산출하지 않는다(설정값이 켜져 있어도 이번 실행만 끈다)",
+    )
     args = ap.parse_args(argv)
 
     today = pd.Timestamp.now().normalize()
@@ -968,6 +1176,7 @@ def main(argv: list[str] | None = None) -> None:
         Path(args.out_dir) if args.out_dir else None,
         use_recent=not args.no_recent,
         train_table=args.trains,
+        link_table=args.link_table,
     )
 
 
