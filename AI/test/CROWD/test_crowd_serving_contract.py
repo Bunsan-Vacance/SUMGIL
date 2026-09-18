@@ -35,6 +35,7 @@ from app.CROWD.pipeline.batch_predict import (
     DATA_STATUS_VALUES,
     META_KEYS,
     OUTPUT_COLS,
+    TRAIN_OUTPUT_COLS,
 )
 from app.main import app
 
@@ -127,6 +128,14 @@ def test_grade_thresholds_table_matches_settings():
 def test_meta_key_table_matches_meta_keys():
     """`META_KEYS`와 3절 메타 표가 순서까지 같아야 한다(`validated_meta`가 이 순서로 쓴다)."""
     assert first_cells(section("3")) == list(META_KEYS)
+
+
+# --- 7절: 열차·노드 표 ------------------------------------------------------------
+
+
+def test_train_output_columns_match_contract_table():
+    """`TRAIN_OUTPUT_COLS`와 7절 컬럼 표가 순서까지 같아야 한다(239)."""
+    assert first_cells(section("7")) == TRAIN_OUTPUT_COLS
 
 
 # --- 4절: API ------------------------------------------------------------------
