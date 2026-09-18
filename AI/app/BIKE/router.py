@@ -11,6 +11,12 @@ ETL 패턴) — 이 둘은 로컬 검증·시연(-83)용 병행 계층이다.
 직접 예측한 순증감으로 도착 시점 재고를 계산해서 즉시 반환한다 — 배치표는 이 경로에서
 전혀 안 읽는다. 이 호출이 실패(404/503)하면 BE는 자체 DB의 배치 통계로 폴백한다 —
 그래서 실패는 애매하게 감추지 않고 명확한 상태코드로 드러낸다.
+
+`eta_minutes`가 학습 horizon 상한(30분)을 넘어도 거부하지 않는다 — `predictor_eta.round_horizon()`이
+가장 가까운 학습 horizon(5·10·15·30)으로 근사해서 그대로 예측값을 낸다(30 초과는 전부 30으로 근사).
+도착 시점 라벨(`arrival_dow_type`/`arrival_time_slot`)은 근사 없이 요청받은 `eta_minutes` 그대로
+계산된다 — 근사되는 건 재고 예측치뿐이다. 상한 1440분(24시간)은 명백히 잘못된 입력만 걸러내는
+용도다.
 """
 
 from __future__ import annotations
@@ -28,7 +34,14 @@ DowTypeQ = Annotated[
     int | None, Query(ge=0, le=2, description="0 평일 / 1 토 / 2 일·공휴일. 생략 시 전부")
 ]
 
-EtaMinutesQ = Annotated[int, Query(ge=0, le=30, description="도착까지 예상 분(0~30)")]
+EtaMinutesQ = Annotated[
+    int,
+    Query(
+        ge=0,
+        le=1440,
+        description="도착까지 예상 분. 30분 초과 요청은 30분 기준 예측값을 그대로 반환한다",
+    ),
+]
 
 
 def _no_table() -> HTTPException:
