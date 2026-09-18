@@ -93,7 +93,8 @@ class BusCorridorService234Test {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
     }
 
     private static String corridorOf(RouteSearchResponse response) {

@@ -103,20 +103,32 @@ public final class RouteCandidateFinder {
      */
     public List<RouteSearchResponse> findCandidates(
             RouteGraph graph, String originStationId, String destStationId, int maxCandidates) {
+        return findCandidatesWithPaths(graph, originStationId, destStationId, maxCandidates).stream()
+                .map(ScoredCandidate::response)
+                .toList();
+    }
+
+    /**
+     * {@link #findCandidates}와 같은 후보를, 링크 단위 혼잡도 스코어링(S-1)이 쓸 수 있게
+     * 원본 {@link FoundPath}와 같이 돌려준다(S15P21A104-158).
+     */
+    public List<ScoredCandidate> findCandidatesWithPaths(
+            RouteGraph graph, String originStationId, String destStationId, int maxCandidates) {
         // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(transferTimes);
 
         List<FoundPath> paths =
                 new KShortestPathFinder(rule, busRouteIndex).findK(graph, originStationId, destStationId, maxCandidates);
 
-        Map<String, RouteSearchResponse> byLegSignature = new LinkedHashMap<>();
+        Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {
             toCandidate(found, rule)
-                    .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
+                    .ifPresent(candidate -> byLegSignature.putIfAbsent(
+                            legSignature(candidate), new ScoredCandidate(candidate, found)));
         }
 
         return byLegSignature.values().stream()
-                .sorted(Comparator.comparingDouble(RouteSearchResponse::totalMinutes))
+                .sorted(Comparator.comparingDouble(sc -> sc.response().totalMinutes()))
                 .limit(maxCandidates)
                 .toList();
     }
@@ -223,6 +235,21 @@ public final class RouteCandidateFinder {
         }
         return candidates.stream()
                 .filter(candidate -> candidate.legs().stream()
+                        .allMatch(leg -> isAlwaysAllowed(leg.mode()) || modes.contains(leg.mode())))
+                .toList();
+    }
+
+    /**
+     * {@link #filterByModes}와 같은 규칙을 {@link ScoredCandidate} 목록에 적용한다
+     * (S15P21A104-158 — 링크 단위 혼잡도 스코어링이 원본 경로를 계속 들고 있어야 해서).
+     */
+    public static List<ScoredCandidate> filterScoredByModes(
+            List<ScoredCandidate> candidates, List<TravelMode> modes) {
+        if (modes == null || modes.isEmpty()) {
+            return candidates;
+        }
+        return candidates.stream()
+                .filter(sc -> sc.response().legs().stream()
                         .allMatch(leg -> isAlwaysAllowed(leg.mode()) || modes.contains(leg.mode())))
                 .toList();
     }

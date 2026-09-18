@@ -56,7 +56,8 @@ class SlotSearch190Test {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
 
         // 평일 오전 8:10 → 슬롯(0,16) → 500초.
         List<RouteSearchResponse> peak = service.search(
@@ -85,7 +86,8 @@ class SlotSearch190Test {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
 
         // 일요일 오후 → 슬롯 행 없음 → default 100초.
         List<RouteSearchResponse> result = service.search(
