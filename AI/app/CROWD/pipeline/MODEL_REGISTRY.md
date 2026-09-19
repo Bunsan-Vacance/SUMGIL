@@ -327,6 +327,12 @@ L5) — 새 정보를 만들지 않으므로 정확도 판정·아티팩트 추�
 `app/CROWD/pipeline/RESOLUTION_LADDER.md`(§1.1·§3 L4·L5), 산출물 계약은 `SERVING_CONTRACT.md`
 7절에 있다.
 
+**링크(from/to) 표(244)도 같은 이유로 분해 뷰이지 새 모델이 아니다.** 세그먼트 위상에서 만든
+`(line, segment, station_no, direction) -> to_station_no` 대응표를 슬롯 표(L3)에 이너 조인해
+링크 단위로 다시 보여줄 뿐, 값을 새로 만들거나 추정하지 않는다 — 그래서 정확도 판정·아티팩트
+추적 대상이 아닌 것도 열차·노드 표와 같다. 옵션 `settings.crowd_link_table`(기본 `false`)로
+켜고, 설계 근거는 `SERVING_CONTRACT.md` 8절·`app/CROWD/pipeline/RESOLUTION_LADDER.md`(§1.1·§4).
+
 ## 6. 이 코드들이 바뀌는 경우
 
 - 세트 정의가 바뀌면 `FEATURE_SETS`에 **새 이름을 추가**하고 옛 이름은 남긴다(기록·재현). 파생 규칙이 바뀌면 `DERIVED_VERSION`을 올린다.

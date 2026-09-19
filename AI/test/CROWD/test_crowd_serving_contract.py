@@ -33,6 +33,7 @@ from app.CROWD import schemas
 from app.CROWD.pipeline.batch_predict import (
     API_ONLY_DATA_STATUS,
     DATA_STATUS_VALUES,
+    LINK_OUTPUT_COLS,
     META_KEYS,
     OUTPUT_COLS,
     TRAIN_OUTPUT_COLS,
@@ -136,6 +137,14 @@ def test_meta_key_table_matches_meta_keys():
 def test_train_output_columns_match_contract_table():
     """`TRAIN_OUTPUT_COLS`와 7절 컬럼 표가 순서까지 같아야 한다(239)."""
     assert first_cells(section("7")) == TRAIN_OUTPUT_COLS
+
+
+# --- 8절: 링크(from/to) 표 -------------------------------------------------------
+
+
+def test_link_output_columns_match_contract_table():
+    """`LINK_OUTPUT_COLS`와 8절 컬럼 표가 순서까지 같아야 한다(244)."""
+    assert first_cells(section("8")) == LINK_OUTPUT_COLS
 
 
 # --- 4절: API ------------------------------------------------------------------
