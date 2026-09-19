@@ -32,14 +32,14 @@ import pandas as pd
 AI_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(AI_ROOT))
 
-from app.BIKE.pipeline.calendar import load_holidays  # noqa: E402
-from app.BIKE.pipeline.dataset import (  # noqa: E402
+from app.BIKE.pipeline.calendar import load_holidays
+from app.BIKE.pipeline.dataset import (
     load_paths,
     monthly_paths,
     scan_station_ids,
 )
-from app.BIKE.pipeline.external_features import attach_weather, load_weather  # noqa: E402
-from app.BIKE.pipeline.features import (  # noqa: E402
+from app.BIKE.pipeline.external_features import attach_weather, load_weather
+from app.BIKE.pipeline.features import (
     BASE_FEATURE_COLS,
     MODEL_FEATURE_COLS_V4_WEATHER,
     TARGET_COL,
@@ -47,7 +47,7 @@ from app.BIKE.pipeline.features import (  # noqa: E402
     apply_station_code,
     build_station_dtype,
 )
-from app.BIKE.pipeline.train import _attach_holiday_flag  # noqa: E402
+from app.BIKE.pipeline.train import _attach_holiday_flag
 
 BASE_READ_COLS = ["od_station_id", "date", *BASE_FEATURE_COLS, TARGET_COL]
 TRAIN_READ_COLS = [*BASE_READ_COLS, "target_rent_count", "target_return_count"]
@@ -93,7 +93,9 @@ def fit_binary(train_df, valid_df, target_col: str, random_state: int = 42):
     x_train, y_train = make_xy_binary(train_df, target_col)
     x_valid, y_valid = make_xy_binary(valid_df, target_col)
     pos_rate = y_train.mean()
-    print(f"  [{target_col}] train 양성비율 {pos_rate:.4%} ({int(y_train.sum()):,}/{len(y_train):,})")
+    print(
+        f"  [{target_col}] train 양성비율 {pos_rate:.4%} ({int(y_train.sum()):,}/{len(y_train):,})"
+    )
 
     model = LGBMClassifier(
         objective="binary",
