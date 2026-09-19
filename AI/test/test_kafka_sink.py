@@ -145,6 +145,21 @@ def test_write_events_dedupes_event_id_within_batch(tmp_path):
     assert df.loc[0, "event_id"] == first.event_id
 
 
+def test_write_events_keeps_distinct_flushes_in_same_partition(tmp_path):
+    first = _event("subway.arrival", "1009000937")
+    second = _event("subway.arrival", "1009000938")
+
+    first_path = write_events([first], ai_root=tmp_path)[0]
+    second_path = write_events([second], ai_root=tmp_path)[0]
+
+    assert first_path != second_path
+    assert first_path.name.startswith("snapshot_20260914T090000_")
+    assert pd.read_parquet(first_path)["event_id"].tolist() == [first.event_id]
+    assert pd.read_parquet(second_path)["event_id"].tolist() == [second.event_id]
+    assert write_events([first], ai_root=tmp_path)[0] == first_path
+    assert not list(first_path.parent.glob("*.tmp"))
+
+
 def test_update_bike_latest_stock_writes_station_snapshot(tmp_path):
     event = _event(
         "bike.stock",

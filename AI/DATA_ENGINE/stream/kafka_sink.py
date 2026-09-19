@@ -6,6 +6,7 @@ import json
 import os
 from collections import defaultdict
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -37,10 +38,12 @@ def base_dir_for_topic(topic: str, ai_root: Path = AI_ROOT) -> Path:
     return Path(ai_root) / relative
 
 
-def _snapshot_path(base_dir: Path, partition_time: datetime) -> Path:
+def _snapshot_path(base_dir: Path, partition_time: datetime, events: list[KafkaEvent]) -> Path:
     out_dir = base_dir / f"dt={partition_time:%Y-%m-%d}" / f"hh={partition_time:%H}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"snapshot_{partition_time:%Y%m%dT%H%M%S}_{os.getpid()}.parquet"
+    event_ids = "\n".join(sorted(event.event_id for event in events))
+    digest = sha256(event_ids.encode("utf-8")).hexdigest()[:16]
+    filename = f"snapshot_{partition_time:%Y%m%dT%H%M%S}_{digest}.parquet"
     return out_dir / filename
 
 
@@ -142,9 +145,14 @@ def write_events(events: list[KafkaEvent], *, ai_root: Path = AI_ROOT) -> list[P
     paths: list[Path] = []
     for (topic, partition_time), batch in sorted(grouped.items(), key=lambda x: x[0]):
         base_dir = base_dir_for_topic(topic, ai_root=ai_root)
-        path = _snapshot_path(base_dir, partition_time)
+        path = _snapshot_path(base_dir, partition_time, batch)
         frame = pd.DataFrame([event.to_record() for event in batch])
-        frame.to_parquet(path, index=False)
+        tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            frame.to_parquet(tmp_path, index=False)
+            os.replace(tmp_path, path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
         paths.append(path)
     latest_path = update_bike_latest_stock(events, ai_root=ai_root)
     if latest_path is not None:
