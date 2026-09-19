@@ -59,6 +59,7 @@ lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 �
     python -m app.CROWD.pipeline.batch_predict --today --tomorrow             # 운영
     python -m app.CROWD.pipeline.batch_predict --date 2025-06-02 --trains    # 열차·노드 표도 산출(239, 옵션)
     python -m app.CROWD.pipeline.batch_predict --date 2025-06-02 --link-table # 링크(from/to) 표도 산출(244, 옵션)
+    python -m app.CROWD.pipeline.batch_predict --date 2025-06-02 --no-line9   # 9호선 lookup 편입 끄기(기본 켜짐)
 
 ## 열차·노드 표(239, 옵션) — `predictions_train_{date}.parquet`
 
@@ -68,6 +69,20 @@ lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 �
 않는다. 기본은 꺼짐 — BE 적재 경로가 정해지기 전까지 기존 산출물·메타 값을 바꾸지 않는다. 컬럼·
 메타 키는 `SERVING_CONTRACT.md` 7절·3절, 구현은 `to_train_table`(`timetable.py`·`disaggregate.py`
 3층 함수를 잇는다).
+
+## 9호선 2·3단계 — lookup 기준선 전용 편입
+
+9호선 2·3단계 13역(언주 4126~중앙보훈병원 4138)은 `settings.crowd_line9_serving`(기본 켜짐,
+CLI `--line9`/`--no-line9`)이 켜져 있으면 슬롯·링크 표에 들어간다. **모델 추론에는 절대 넣지
+않는다** — `station_no`가 학습 패널(1~8호선)에 0건이라 모델(`features.CATEGORICAL_COLS`)
+기준으로는 미학습 범주가 되기 때문이다. 대신 `dataset.load_line9_panel`이 읽는 전용 패널
+(`crowd_panel_line9_2025_2026.parquet`)에 `DayTypeLookupBaseline`을 그 자체로 fit해
+day_type×station_no×time_slot 평균만으로 예측한다(`predict_line9_day`) — 라우팅·시차·이벤트
+피처가 전혀 없다. 이 13역은 D−1 실시간 승하차 원천도 없어(`SERVING_CONTRACT.md` 노선 커버리지
+절) `lag1d_available`과 무관하게 항상 이 경로를 탄다. 결과 행은 `pred_source="lookup_line9"`로
+구분되고(`_congestion_table_full`), 토폴로지(`line_topology.yaml`의 9호선 "2·3단계" 세그먼트)가
+패널에 들어오면서 `resolved_segments`가 그 세그먼트를 자동으로 채워 링크(from/to) 표(244)에도
+같은 방식으로 편입된다 — 종합운동장(4130)↔봉은사(4129) 같은 링크가 별도 코드 없이 나온다.
 
 ## 링크(from/to) 표(244, 옵션) — `predictions_link_{date}.parquet` + BE CSV
 
@@ -112,6 +127,7 @@ from app.CROWD.pipeline.dataset import (
     CROWD_PROCESSED,
     EVENT_COUNT_COLS,
     extend_panel_with_recent,
+    load_line9_panel,
     load_panel,
     load_recent_long,
     resolved_segments,
@@ -126,7 +142,7 @@ from app.CROWD.pipeline.disaggregate import (
     train_trajectory,
 )
 from app.CROWD.pipeline.features import SLOT_ORDER
-from app.CROWD.pipeline.lookup import TARGETS
+from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
 from app.CROWD.pipeline.predictor import (
     Predictor,
     artifact_kind,
@@ -163,9 +179,17 @@ DATA_STATUS_VALUES = (
 # 표에는 없고 API에서만 나타나는 상태(그 날짜 표가 아직 없음 -> 404).
 API_ONLY_DATA_STATUS = ("no_data",)
 
+# 9호선 2·3단계 전용 표시값(위 "9호선 2·3단계" 절). 모델을 타지 않는 행이라 `pred_source`로
+# 구분하고, `predictor_version`도 모델 아티팩트 이름이 아니라 lookup 판을 적는다 — 링크 표의
+# `predictor_version`은 BE가 **행 단위**로 요청한 컬럼이라(`SERVING_CONTRACT.md` 8절) 모델
+# 버전을 그대로 흘리면 "lightgbm이 만든 행"이라고 잘못 알려주게 된다.
+LINE9_PRED_SOURCE = "lookup_line9"
+LINE9_PREDICTOR_VERSION = "lookup:line9_2025_2026"
+
 # `.meta.json`에 실리는 키와 그 순서. `predict_day`가 만드는 앞쪽 13개 + `run`이 덧붙이는
-# 17개(200에서 8→10, 239에서 열차·노드 표 메타 5개를 `generated_at` 앞에 추가해 10→15, 244에서
-# 링크 표 메타 2개를 같은 자리에 추가해 15→17).
+# 19개(200에서 8→10, 239에서 열차·노드 표 메타 5개를 `generated_at` 앞에 추가해 10→15, 244에서
+# 링크 표 메타 2개를 같은 자리에 추가해 15→17, 9호선 lookup 편입에서 메타 2개를 같은 자리에
+# 추가해 17→19).
 META_KEYS = (
     "target_date",
     "in_panel",
@@ -196,6 +220,8 @@ META_KEYS = (
     "train_mass_gap",
     "link_table",
     "link_csv_rows",
+    "line9_included",
+    "line9_rows",
     "generated_at",
 )
 
@@ -471,6 +497,48 @@ def predict_day(
     return out, meta
 
 
+def predict_line9_day(
+    line9_panel: pd.DataFrame,
+    line9_lookup: DayTypeLookupBaseline,
+    target_date: pd.Timestamp,
+    holidays: pd.DataFrame,
+) -> pd.DataFrame:
+    """9호선 2·3단계 13역의 그 날 승하차 — **lookup 기준선만** 쓴다(모델에 절대 넣지 않는다).
+
+    `predict_day`(라우팅 → 예측기 → 이력 창 → 이벤트)와 짝이지만 훨씬 단순하다 — station_no가
+    학습 패널에 0건이라 모델(`features.CATEGORICAL_COLS`)에 넣으면 미학습 범주가 되므로,
+    day_type×station_no×time_slot 조회 하나로 끝낸다. 라우팅·시차 피처·이벤트가 없어 이력
+    창도 필요 없다(9호선은 D−1 실시간 승하차 원천도 없다, `SERVING_CONTRACT.md` 노선 커버리지
+    절). `line9_lookup`은 호출자(`run`)가 `line9_panel` 전체로 한 번 fit해 날짜마다 재사용한다.
+
+    패널에 그 날짜가 있으면(2024-12-31~2026-01-31, 재현용) 실측 행을 그대로 쓰고, 없으면
+    (실제 운영일) 13역 × 20슬롯 골격을 만들어 날짜만으로 day_type을 계산한다 — lookup 조회는
+    day_type만 있으면 되므로 골격에 이벤트·기상 컬럼을 채울 필요가 없다.
+    """
+    target_date = pd.Timestamp(target_date).normalize()
+    existing = line9_panel[line9_panel["date"] == target_date]
+    if len(existing):
+        target = existing.copy()
+    else:
+        grid = station_table(line9_panel).merge(
+            pd.DataFrame({"time_slot": SLOT_ORDER}), how="cross"
+        )
+        grid["date"] = target_date
+        grid = attach_calendar(grid, holidays)
+        for t in TARGETS:
+            grid[t] = np.nan
+        target = grid
+
+    pred = line9_lookup.predict(target)
+    out = target[
+        ["date", "station_no", "station_name", "line", "time_slot", "day_type", *TARGETS]
+    ].copy()
+    for t in TARGETS:
+        out[f"{t}_lookup"] = pred[t].to_numpy()
+        out[f"{t}_pred"] = pred[t].to_numpy()
+    return out
+
+
 def _congestion_table_full(
     predicted: pd.DataFrame,
     segments: list[dict],
@@ -499,6 +567,13 @@ def _congestion_table_full(
         was_negative |= negative
     # 출력 *_pred도 같은 board[t] 값을 그대로 쓴다(per_row) — 대체를 두 번 계산하지 않는다.
     board["pred_source"] = np.where(was_negative.to_numpy(), "lookup_negative", "model")
+    # 9호선 2·3단계는 애초에 모델에 넣지 않고 lookup만 쓰므로(위 "9호선 2·3단계" 절), 음수
+    # 대체가 있었든 없었든 항상 `lookup_line9`로 구분한다 — `board["line"]`은 predicted(입력)의
+    # 값이라 아래 recursive_congestion 이후에는 세그먼트(`seg["line"]`) 값으로 덮이므로 여기서
+    # 미리 확정해 둔다.
+    board["pred_source"] = np.where(
+        board["line"].to_numpy() == "9호선", LINE9_PRED_SOURCE, board["pred_source"]
+    )
     raw = recursive_congestion(board, segments, capacity)
     day_type = predicted[["date", "station_no", "day_type"]].drop_duplicates(["date", "station_no"])
     raw = raw.merge(day_type, on=["date", "station_no"], how="left")
@@ -827,8 +902,10 @@ def to_link_table(
     집계 표라 지선들이 동시에 유효한 값이기 때문이다).
 
     `predictor_version`은 `full_table`에 없는 컬럼이라(호출자 `run()`이 `meta["predictor_version"]`을
-    스칼라로 넘긴다) 행 단위 컬럼으로 그대로 붙인다 — BE가 이 컬럼을 행 단위로 요청했다
-    (`FROME_BE-crowd-pred-load-path.md` 1.2절).
+    스칼라로 넘긴다) 행 단위 컬럼으로 붙인다 — BE가 이 컬럼을 행 단위로 요청했다
+    (`FROME_BE-crowd-pred-load-path.md` 1.2절). **9호선 2·3단계 행만 예외로
+    `LINE9_PREDICTOR_VERSION`을 쓴다** — 그 행은 모델을 타지 않으므로(`pred_source ==
+    LINE9_PRED_SOURCE`) 모델 아티팩트 이름을 그대로 흘리면 BE에 잘못된 출처를 알려주게 된다.
 
     반환: `(link_tbl, stats)`. `stats`는 `link_rows`(출력 행 수), `boundary_dropped_keys`(대응표에
     타깃이 없어 걸러진 `(line, segment, station_no, direction)` 키 조합 수 — 슬롯 수가 아니라
@@ -839,7 +916,11 @@ def to_link_table(
     key_cols = ["line", "segment", "station_no", "direction"]
     merged = full_table.merge(targets, on=key_cols, how="inner")
     merged = merged.rename(columns={"station_no": "from_station_no"})
-    merged["predictor_version"] = predictor_version
+    merged["predictor_version"] = np.where(
+        merged["pred_source"].to_numpy() == LINE9_PRED_SOURCE,
+        LINE9_PREDICTOR_VERSION,
+        predictor_version,
+    )
     link_tbl = (
         merged.reindex(columns=LINK_OUTPUT_COLS)
         .sort_values(["line", "from_station_no", "direction", "time_slot_30min"], kind="mergesort")
@@ -976,6 +1057,7 @@ def run(
     use_recent: bool = True,
     train_table: bool | None = None,
     link_table: bool | None = None,
+    line9: bool | None = None,
 ) -> list[Path]:
     settings = get_settings()
     out_dir = Path(out_dir or settings.crowd_serving_dir)
@@ -993,7 +1075,26 @@ def run(
             f"[배치] 최근 실측 {len(recent_dates)}일 이어붙임: {recent_dates[:1]} ~ {recent_dates[-1:]}",
             flush=True,
         )
-    segments, gaps = resolved_segments(panel)
+
+    # 9호선 2·3단계 — lookup 기준선 전용(위 모듈 docstring "9호선 2·3단계" 절). 기본 켜짐(설정값)
+    # — CLI(`--line9`/`--no-line9`)가 명시하면 그것을 따른다. `line9_panel`은 모델 패널(`panel`)과
+    # 절대 합치지 않는다 — station_no가 학습 패널에 0건이라 모델에 들어가면 미학습 범주가 된다.
+    use_line9 = settings.crowd_line9_serving if line9 is None else line9
+    line9_panel = load_line9_panel() if use_line9 else None
+    line9_lookup = DayTypeLookupBaseline().fit(line9_panel) if line9_panel is not None else None
+
+    # `resolved_segments`는 station_no 집합만 본다 — 9호선 역번호를 이 집합에 넣으면(모델 패널
+    # 자체는 안 건드린다) `line_topology.yaml`의 "9호선 2·3단계" 세그먼트가 자동으로 채워져
+    # 재귀식(`_congestion_table_full`)·링크 표(`to_link_table`) 양쪽에 그대로 편입된다. 9호선
+    # station_no는 어차피 패널(`panel`)의 model 입력에는 없으므로(아래 predict_day 호출은 여전히
+    # `panel`만 쓴다) 인접역·환승 피처(`adjacency.build_transfer_map`)는 실제 데이터가 있는 행에만
+    # 조인돼 기존 1~8호선 모델 결과에는 영향이 없다.
+    station_source = (
+        panel
+        if line9_panel is None
+        else pd.concat([panel[["station_no"]], line9_panel[["station_no"]]], ignore_index=True)
+    )
+    segments, gaps = resolved_segments(station_source)
     capacity = load_capacity()
     calibration = pd.read_parquet(CROWD_PROCESSED / CALIBRATION_NAME)
     thresholds = settings.grade_thresholds
@@ -1030,8 +1131,14 @@ def run(
         predicted, meta = predict_day(
             get_predictor, panel, d, segments, holidays, events, override_kind=override_kind
         )
-        full = _congestion_table_full(predicted, segments, capacity, calibration, thresholds)
+        if line9_panel is not None:
+            predicted_line9 = predict_line9_day(line9_panel, line9_lookup, d, holidays)
+            predicted_all = pd.concat([predicted, predicted_line9], ignore_index=True, sort=False)
+        else:
+            predicted_all = predicted
+        full = _congestion_table_full(predicted_all, segments, capacity, calibration, thresholds)
         table = full.reindex(columns=OUTPUT_COLS)
+        line9_rows = int((table["line"] == "9호선").sum())
         path = out_dir / f"predictions_{d:%Y-%m-%d}.parquet"
         _atomic_write(lambda p, table=table: table.to_parquet(p, index=False), path)
 
@@ -1102,6 +1209,8 @@ def run(
                 "topology_gaps": gaps.to_dict("records") if len(gaps) else [],
                 **train_meta,
                 **link_meta,
+                "line9_included": bool(use_line9),
+                "line9_rows": line9_rows,
                 "generated_at": now.isoformat(timespec="seconds"),
             }
         )
@@ -1160,6 +1269,22 @@ def main(argv: list[str] | None = None) -> None:
         action="store_false",
         help="링크(from/to) 표를 산출하지 않는다(설정값이 켜져 있어도 이번 실행만 끈다)",
     )
+    ap.add_argument(
+        "--line9",
+        dest="line9",
+        action="store_true",
+        default=None,
+        help=(
+            "9호선 2·3단계 13역을 lookup 기준선으로 편입한다(모델에는 넣지 않는다, "
+            "기본: settings.crowd_line9_serving)"
+        ),
+    )
+    ap.add_argument(
+        "--no-line9",
+        dest="line9",
+        action="store_false",
+        help="9호선 편입을 끈다(설정값이 켜져 있어도 이번 실행만 끈다)",
+    )
     args = ap.parse_args(argv)
 
     today = pd.Timestamp.now().normalize()
@@ -1177,6 +1302,7 @@ def main(argv: list[str] | None = None) -> None:
         use_recent=not args.no_recent,
         train_table=args.trains,
         link_table=args.link_table,
+        line9=args.line9,
     )
 
 

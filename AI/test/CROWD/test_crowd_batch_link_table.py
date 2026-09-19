@@ -9,7 +9,8 @@
 세그먼트는 모든 역이 양방향 타깃을 가져 행이 하나도 빠지지 않는지, (3) 강동류 분기점에서 세그먼트
 수만큼 서로 다른 `to_station_no`를 가진 별개 행이 나오고 `link_ambiguous` 컬럼 자체가 없는지,
 (4) 배율표 결측(NaN) 행도 실제 이웃이 있으면 버려지지 않는지, (5) `write_link_csv`가 BE가 확정한
-헤더·슬롯 인덱스·결측 표현으로 CSV를 쓰는지, (6) `validated_meta`가 새 메타 키 2개를 요구하는지다.
+헤더·슬롯 인덱스·결측 표현으로 CSV를 쓰는지, (6) `validated_meta`가 새 메타 키 2개를 요구하는지,
+(7) 9호선 2·3단계 행이 `pred_source`·`predictor_version` 양쪽에서 모델 행과 구분되는지다.
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ import pandas as pd
 import pytest
 
 from app.CROWD.pipeline.batch_predict import (
+    LINE9_PRED_SOURCE,
+    LINE9_PREDICTOR_VERSION,
     META_KEYS,
     _congestion_table_full,
     _slot30_to_index,
@@ -347,3 +350,88 @@ def test_validated_meta_accepts_link_table_keys_and_rejects_missing_one():
     del missing_other["link_table"]
     with pytest.raises(RuntimeError):
         validated_meta(missing_other)
+
+
+# ── 7. 9호선 2·3단계 — lookup 전용 행의 출처 표시 ──
+# 역 목록을 **역번호 내림차순**으로 둔다: `line_topology.yaml`의 9호선이 그렇게 돼 있어서
+# "리스트상 다음"(= ASCENDING = 하선)이 역번호 감소 방향이 된다. 실측 산출물에서
+# 종합운동장(4130) → 봉은사(4129)가 하선으로 나오는 것과 같은 배치다.
+LINE9_STATIONS = [4130, 4129, 4128]
+LINE9_CAPACITY = {"car_capacity": 160, "cars_per_train": {"9호선": 6}}
+
+
+def _line9_segments() -> list[dict]:
+    return [{"line": "9호선", "segment": "2·3단계", "stations": LINE9_STATIONS}]
+
+
+def _line9_predicted() -> pd.DataFrame:
+    """`alighting_pred`에 음수를 하나 심는다 — 음수 대체(`lookup_negative`)와 9호선 표시가
+    부딪칠 때 9호선 쪽이 이겨야 한다(둘 다 lookup이지만 출처가 다르다)."""
+    return pd.DataFrame(
+        {
+            "date": DATE,
+            "station_no": LINE9_STATIONS,
+            "station_name": ["종합운동장", "봉은사", "삼성중앙"],
+            "line": "9호선",
+            "time_slot": "08-09",
+            "day_type": "평일",
+            "boarding": [200.0, 120.0, 90.0],
+            "alighting": [10.0, 80.0, 60.0],
+            "boarding_pred": [200.0, 120.0, 90.0],
+            "alighting_pred": [10.0, -5.0, 60.0],
+            "boarding_lookup": [190.0, 115.0, 85.0],
+            "alighting_lookup": [12.0, 75.0, 55.0],
+        }
+    )
+
+
+def _line9_calibration() -> pd.DataFrame:
+    rows = []
+    for s in LINE9_STATIONS:
+        for d in (ASCENDING, DESCENDING):
+            for slot in ("08:00", "08:30"):
+                rows.append(
+                    {
+                        "station_no": s,
+                        "direction": d,
+                        "day_type": "평일",
+                        "time_slot": slot,
+                        "ratio": 0.3,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def line9_full() -> pd.DataFrame:
+    return _congestion_table_full(
+        _line9_predicted(), _line9_segments(), LINE9_CAPACITY, _line9_calibration(), [50.0, 100.0]
+    )
+
+
+def test_line9_rows_are_marked_lookup_line9_even_when_negative_substituted(line9_full):
+    """9호선 행은 음수 대체 여부와 무관하게 전부 `lookup_line9`다 — 모델을 타지 않으니까."""
+    assert (line9_full["pred_source"] == LINE9_PRED_SOURCE).all()
+    assert "lookup_negative" not in set(line9_full["pred_source"])
+    assert "model" not in set(line9_full["pred_source"])
+
+
+def test_line9_link_rows_carry_lookup_version_not_model_artifact(line9_full):
+    """링크 표의 `predictor_version`은 행 단위다 — 9호선 행에 모델 아티팩트 이름이 새면 안 된다."""
+    link_tbl, _ = to_link_table(line9_full, _line9_segments(), "lightgbm:test")
+    assert len(link_tbl)
+    assert (link_tbl["predictor_version"] == LINE9_PREDICTOR_VERSION).all()
+    assert "lightgbm:test" not in set(link_tbl["predictor_version"])
+    # 내림차순 목록이라 "다음 역"이 역번호 감소 방향(하선)이다 — 실측 4130→4129 하선과 같다.
+    got = {(r.from_station_no, r.direction, r.to_station_no) for r in link_tbl.itertuples()}
+    assert (4130, ASCENDING, 4129) in got
+
+
+def test_link_predictor_version_is_per_row_when_lines_are_mixed(full, line9_full):
+    """1~8호선과 9호선이 한 표에 섞여도 각 행이 자기 출처를 갖는다(스칼라 브로드캐스트 아님)."""
+    mixed = pd.concat([full, line9_full], ignore_index=True, sort=False)
+    segments = _segments() + _line9_segments()
+    link_tbl, _ = to_link_table(mixed, segments, "lightgbm:test")
+    by_line = link_tbl.groupby("line")["predictor_version"].unique()
+    assert list(by_line["1호선"]) == ["lightgbm:test"]
+    assert list(by_line["9호선"]) == [LINE9_PREDICTOR_VERSION]

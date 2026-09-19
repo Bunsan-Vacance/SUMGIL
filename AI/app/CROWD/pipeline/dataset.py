@@ -29,6 +29,13 @@ CROWD_INTERIM = AI_ROOT / "data" / "CROWD" / "interim"
 PANEL_NAME = "crowd_panel_2024_2025.parquet"
 EVENTS_NAME = "crowd_station_events_2024_2025.parquet"
 DERIVED_CACHE = CROWD_INTERIM / "crowd_panel_derived_2024_2025.parquet"
+# 9호선 2·3단계 13역(언주 4126~중앙보훈병원 4138) 승하차 패널. `DATA_ENGINE/eda/
+# build_crowd_line9_panel.py`가 메인 패널과 같은 20슬롯·운행일 격자로 재배치해 둔 것이라
+# 스키마는 호환되지만 날짜 범위(2024-12-31~2026-01-31)·이벤트 컬럼 유무가 다르다.
+# **이 패널은 학습에 쓰지 않는다** — `load_panel`이 읽는 메인 패널과 합치지 않는다. 배치
+# 서빙에서 lookup 기준선 전용으로만 읽는다(`batch_predict.predict_line9_day`) — station_no가
+# 학습 패널에 0건이라 모델(`features.CATEGORICAL_COLS`)에 넣으면 미학습 범주가 되기 때문이다.
+LINE9_PANEL_NAME = "crowd_panel_line9_2025_2026.parquet"
 # D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`)가 쌓는 최근 승하차 롱 포맷. 학습 패널과 별개.
 RECENT_LONG_PATH = CROWD_INTERIM / "crowd_recent_ridership_long.parquet"
 
@@ -51,6 +58,15 @@ def load_panel(
             if col in panel.columns:
                 panel[col] = panel[col].fillna(0).astype(int)
     return panel.reset_index(drop=True)
+
+
+def load_line9_panel(panel_path: Path = CROWD_PROCESSED / LINE9_PANEL_NAME) -> pd.DataFrame:
+    """9호선 2·3단계 13역 패널을 그대로 읽는다. 이벤트 컬럼이 없고(모델에 안 넣으므로 불필요),
+    타깃(NaN) 행도 버리지 않는다 — `DayTypeLookupBaseline.fit`의 groupby 평균이 타깃별로
+    NaN을 알아서 건너뛰므로, `load_panel`처럼 행 자체를 지우면 남은 타깃(예: boarding)의
+    표본만 줄어든다.
+    """
+    return pd.read_parquet(panel_path)
 
 
 def load_recent_long(path: Path = RECENT_LONG_PATH) -> pd.DataFrame | None:
