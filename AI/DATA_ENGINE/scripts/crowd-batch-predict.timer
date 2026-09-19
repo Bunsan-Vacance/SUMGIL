@@ -1,0 +1,29 @@
+# crowd-batch-predict.service 를 매일 09:30(Asia/Seoul)에 띄우는 타이머.
+#
+# 09:30인 이유:
+#   1. D−1 승하차 수집기(subway-ridership-daily.timer, 09:00 + 최대 5분 랜덤 지연)가 끝난
+#      뒤라야 전날 실측이 이어붙어 lag1d_available: true(가용성 full)가 된다.
+#   2. 서버의 기존 일정(bike-avg 03:00, Drive 업로드 12:10, 리텐션 13:00, 배치 13:10,
+#      품질검사 13:30)과 겹치지 않는다.
+#   3. BE(이원빈)가 09:30 배치 시각을 수용했다.
+#
+# Asia/Seoul을 반드시 명시하는 이유: 서버 TZ가 UTC라 생략하면 9시간 어긋난다(143 타이머가
+# 이걸 빠뜨린 전례가 있다).
+#
+# Persistent=true인 이유: 서버가 꺼져 있던 회차도 켜지면 바로 실행한다.
+#
+# D−1 수집이 09:00에 실패해 d7_only로 돌 수 있다 — 그때는 13:00 재수집 뒤
+# `sudo systemctl start crowd-batch-predict.service`로 수동 재실행하면 같은 날짜 표가 새
+# generated_at으로 다시 만들어진다(2차 자동 실행은 필요가 확인된 뒤에 OnCalendar 한 줄로 추가한다).
+
+[Unit]
+Description=Run CROWD congestion batch prediction daily
+
+[Timer]
+OnCalendar=*-*-* 09:30:00 Asia/Seoul
+Persistent=true
+RandomizedDelaySec=300
+Unit=crowd-batch-predict.service
+
+[Install]
+WantedBy=timers.target

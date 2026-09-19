@@ -161,7 +161,7 @@ cd AI
 python -m app.CROWD.pipeline.train
 
 # 배치 추론 — data/CROWD/serving/predictions_YYYY-MM-DD.parquet + .meta.json
-python -m app.CROWD.pipeline.batch_predict --today --tomorrow          # 운영
+python -m app.CROWD.pipeline.batch_predict --today --tomorrow --link-table  # 운영(BE 적재용 링크 CSV까지 산출)
 python -m app.CROWD.pipeline.batch_predict --date 2025-06-02           # 패널 안 날짜(재현·검증)
 python -m app.CROWD.pipeline.batch_predict --date 2026-01-05 --predictor lookup   # 기준선만
 
@@ -196,8 +196,13 @@ uvicorn app.main:app --port 8000
   [`validation/CROWD/calibration-refit/RESULTS.md`](validation/CROWD/calibration-refit/RESULTS.md)(199).
 - 미래 날짜는 달력(요일유형)·이벤트 골격 위에 최근 7일 시차로 예측한다. 최근 7일 실측은 패널(2025-12까지) 뒤에
   D−1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`, 매일 09:00·13:00)가 쌓은 파일을 이어붙여 채운다(143).
-  전날 실측이 없으면 `lag1d_available=false`로 표시되고, 이력이 하나도 없으면 LightGBM 대신 lookup으로 예측한다
-  (`predictor_fallback="no_history"`) — 시차가 전부 비면 LightGBM이 lookup보다 나쁘기 때문이다.
+  전날 실측이 없으면 `lag1d_available=false`로 표시되고, 어떤 예측기를 쓸지는 가용성 4단
+  (`full`/`d1_only`/`d7_only`/`no_lag`)에 따라 `pipeline/routing.py`의 `POLICY`가 정한다 — `d1_only`만 GRU고
+  나머지 셋은 결측 시나리오를 학습 때부터 본 마스킹 LightGBM이다(145 후속 `masking-check/RESULTS.md` 14절).
+  **이력이 전무할 때 lookup으로 강제 대체하던 옛 동작은 197에서 없어졌다** — `predictor_fallback`은 BE 계약
+  유지를 위해 키만 남고 값은 항상 `null`이다(`SERVING_CONTRACT.md` 3절).
+- 서버에서는 이 명령을 `crowd-batch-predict.timer`(매일 09:30 KST)가 돌리며, 설정·확인 절차는
+  [`DATA_ENGINE/README.md`](DATA_ENGINE/README.md)의 "CROWD 혼잡도 예측 배치" 절에 있다.
 
 ### BIKE avg 배치 표의 시간 구간
 

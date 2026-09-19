@@ -100,6 +100,9 @@ install_service "subway-ridership-daily.service" "subway-ridership-daily.service
 install_service "subway-ridership-daily.timer" "subway-ridership-daily.timer"
 install_service "bike-avg-batch.service" "bike-avg-batch.service"
 install_service "bike-avg-batch.timer" "bike-avg-batch.timer"
+# 245: CROWD 혼잡도 예측 배치 — crowd-batch-predict.timer 가 매일 09:30(Asia/Seoul)에 띄운다.
+install_service "crowd-batch-predict.service" "crowd-batch-predict.service"
+install_service "crowd-batch-predict.timer" "crowd-batch-predict.timer"
 
 sudo systemctl daemon-reload
 
@@ -108,10 +111,12 @@ if [[ "${ENABLE_NOW}" -eq 1 ]]; then
   sudo systemctl enable --now weather-nowcast-poller.service
   sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl enable --now bike-avg-batch.timer
+  sudo systemctl enable --now crowd-batch-predict.timer
   sudo systemctl status --no-pager bike-realtime-poller.service
   sudo systemctl status --no-pager weather-nowcast-poller.service
   sudo systemctl list-timers --no-pager subway-ridership-daily.timer
   sudo systemctl list-timers --no-pager bike-avg-batch.timer
+  sudo systemctl list-timers --no-pager crowd-batch-predict.timer
 else
   cat <<'EOF'
 
@@ -122,9 +127,11 @@ else
   sudo systemctl enable --now weather-nowcast-poller.service
   sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl enable --now bike-avg-batch.timer
+  sudo systemctl enable --now crowd-batch-predict.timer
   sudo systemctl status bike-realtime-poller.service
   sudo systemctl status weather-nowcast-poller.service
   sudo systemctl list-timers subway-ridership-daily.timer
   sudo systemctl list-timers bike-avg-batch.timer
+  sudo systemctl list-timers crowd-batch-predict.timer
 EOF
 fi
