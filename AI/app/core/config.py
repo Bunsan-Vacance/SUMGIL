@@ -73,6 +73,43 @@ class Settings(BaseSettings):
     # 이 시간(초)보다 오래된 updated_at은 신뢰하지 않고 "없음"으로 취급한다.
     bike_live_stock_max_staleness_seconds: float = 300.0
 
+    # ── BIKE D-1/D-7 lag (LightGBM anchor+horizon 서빙용, Phase 2) ──
+    # snapshot_stock_history.py(30분마다)가 쌓는 일별 관측 로그.
+    bike_stock_history_dir: Path = AI_ROOT / "data" / "BIKE" / "raw" / "realtime" / "stock_history"
+    # update_lag_lookup.py(하루 1회)가 위 로그를 집계해 만드는 표 — lag_features.attach_lag()가
+    # 그대로 읽을 수 있는 스키마(od_station_id·lag_date·lag_time_slot·lag_stock)를 쓴다.
+    bike_lag_lookup_path: Path = (
+        AI_ROOT / "data" / "BIKE" / "raw" / "realtime" / "lag_lookup_live.parquet"
+    )
+    # D-7까지만 있으면 되므로 여유를 조금 둔 보관 기간(일). 이보다 오래된 관측 로그·lookup
+    # 행은 update_lag_lookup.py가 정리한다.
+    bike_lag_lookup_retention_days: int = 10
+
+    # ── BIKE 실시간 예측 모델(anchor+horizon LightGBM, S15P21A104-160 Phase 5~6) ──
+    # train.py --feature-set v4_weather --train-empty-full 로 만든 아티팩트. station_categories.json이
+    # 저장된 버전이어야 한다(2026-09-17 이전 아티팩트는 이 파일이 없어 못 씀).
+    # 2026-09-17 20:37 아티팩트부터 model_is_empty.txt/model_is_full.txt(p_empty/p_full
+    # 분류기, S15P21A104-160 Phase 6)가 같이 들어있다 — 이전 아티팩트는 회귀만 있고
+    # 없어도 predictor_eta.LightGBMEtaPredictor가 없는 파일로 판단해 p_empty/p_full만 None으로 둔다.
+    # 회귀는 이전 아티팩트(45% 샘플)보다 전체 데이터로 다시 학습돼 소폭 개선됐다
+    # (valid MAE 1.4797->1.4741, R² 0.3319->0.3364) — validation/BYC/eta-empty-full-check/RESULTS.md.
+    bike_eta_model_dir: Path = AI_ROOT / "models" / "BIKE" / "v4-weather-final_20260917-2037"
+    # 역별 rack_count 룩업(학습 원본 대신 미리 뽑아둔 작은 파일) —
+    # validation/BYC/anchor-horizon-feature-check/src/build_station_master.py가 만듦.
+    bike_station_master_path: Path = (
+        AI_ROOT / "data" / "EXTERNAL" / "station" / "processed" / "station_master.parquet"
+    )
+    # 날씨 실시간 스냅샷(팀원이 별도로 구축 중) — weather.nowcast Kafka 토픽을
+    # bike.stock처럼 최신 스냅샷화한 결과. 없거나 오래되면 자동으로 temp=0/is_rain=False로
+    # 폴백하므로, 이 계약(경로·컬럼)만 맞으면 코드 변경 없이 연결된다.
+    bike_live_weather_path: Path = (
+        AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw" / "nowcast" / "latest_weather.parquet"
+    )
+    # 날씨 수집기는 약 1시간 간격 실행. 실측(관측 70회) 결과 다음 관측 직전 기존값 나이가
+    # 최대 129.6분이었고 120분 기준으로도 22/69 구간이 폴백에 걸려, 실제 수집 주기 대비
+    # 20분 여유를 둔 150분(9,000초)으로 잡았다 — 운영 초기값이며 지연 기록을 보고 재조정한다.
+    bike_live_weather_max_staleness_seconds: float = 9000.0
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]

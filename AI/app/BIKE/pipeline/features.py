@@ -52,6 +52,56 @@ HISTORICAL_FEATURE_COLS = [*PROFILE_STAT_COLS, "historical_profile_fallback_leve
 FEATURE_COLS = [*BASE_FEATURE_COLS, *HISTORICAL_FEATURE_COLS, "is_holiday"]
 MODEL_FEATURE_COLS = [*FEATURE_COLS, "station_code"]
 
+# ── v4: + KBO·D-1/D-7 lag (성능 고도화, S15P21A104-160) ──
+# 검증 결과(2026-09-16, v4-kbo-lag_20260916-1651 vs v3-holiday-tuned_20260913-1558, 같은
+# train/valid/test 분할) KBO+lag를 같이 넣었더니 MAE/RMSE/R² 전부 v3보다 근소하게
+# 나빠졌다 — anchor+horizon 모델은 이미 stock_anchor_hour(실시간 재고)가 있어서, 그
+# 신호가 없던 날짜축 모델과 달리 D-1/D-7 lag의 추가 기여가 거의 없었던 것으로 보인다.
+# KBO와 lag를 같이 묶어 테스트해서 둘 중 뭐가 원인인지는 분리 안 됨 — 이 세트는 채택 안
+# 하고 기록용으로만 남긴다.
+KBO_LAG_FEATURE_COLS = [
+    "is_kbo_game_jamsil",
+    "lag1d_stock",
+    "lag1d_stock_available",
+    "lag7d_stock",
+    "lag7d_stock_available",
+]
+FEATURE_COLS_V4 = [*FEATURE_COLS, *KBO_LAG_FEATURE_COLS]
+MODEL_FEATURE_COLS_V4 = [*FEATURE_COLS_V4, "station_code"]
+
+# ── v4_weather: + 날씨(is_rain·temp) (성능 고도화, S15P21A104-160) ──
+# 검증 결과(2026-09-16, v4-weather_20260916-1725 vs v3-holiday-tuned_20260913-1558, 같은
+# train/valid/test 분할, validation/BYC/anchor-horizon-feature-check/RESULTS.md) v3 대비
+# MAE/RMSE/R² 전부, 모든 split(valid·202507·202508·202509)에서 일관되게 개선 — **채택**.
+# KBO_LAG(위)와 독립적으로 검증했다(한 번에 묶으면 원인 구분이 안 됨, KBO_LAG가 그 실수).
+# ASOS 실측이 학습·평가 기간을 이미 커버해서 오프라인 학습은 문제없지만, 실시간 서빙에
+# 쓰려면 weather.nowcast Kafka 토픽을 bike.stock처럼 최신 스냅샷화하는 별도 인프라가
+# 아직 필요하다(미착수).
+WEATHER_FEATURE_COLS = ["is_rain", "temp"]
+FEATURE_COLS_V4_WEATHER = [*FEATURE_COLS, *WEATHER_FEATURE_COLS]
+MODEL_FEATURE_COLS_V4_WEATHER = [*FEATURE_COLS_V4_WEATHER, "station_code"]
+
+# ── v4_distance: + 역 정적 거리(지하철·버스 도보거리) (성능 고도화, S15P21A104-160) ──
+# 검증 결과(2026-09-17, v4-distance_20260917-0830 vs v3-holiday-tuned_20260913-1558, 같은
+# train/valid/test 분할, validation/BYC/anchor-horizon-feature-check/RESULTS.md) v3 대비
+# RMSE·R²는 근소하게 개선되지만 MAE는 근소하게 악화 — 지표마다 방향이 다르고 크기도
+# 작아 노이즈 수준으로 판단, **기각**. Phase 3(510개 역, OSRM)에서 나온 "효과 없음"
+# 결론이 전체 역(2,583개)·하버사인 거리로도 재현됐다.
+# 시간축이 없는 역 단위 정적 피처라 station_code처럼 od_station_id로 조인만 하면 된다.
+# Phase 3(validation/BYC/phase3-station-static)에서 OSRM으로 510개 역만 커버했던 걸
+# 전체 역(~2,583개)으로 확장해야 해서, 로컬에 OSRM 서버가 없는 대신 하버사인(직선거리)으로
+# 대체했다(validation/BYC/anchor-horizon-feature-check/src/build_full_station_distance.py).
+DISTANCE_FEATURE_COLS = ["dist_subway_m", "dist_bus_m"]
+FEATURE_COLS_V4_DISTANCE = [*FEATURE_COLS, *DISTANCE_FEATURE_COLS]
+MODEL_FEATURE_COLS_V4_DISTANCE = [*FEATURE_COLS_V4_DISTANCE, "station_code"]
+
+FEATURE_SETS = {
+    "v3": MODEL_FEATURE_COLS,
+    "v4_kbo_lag": MODEL_FEATURE_COLS_V4,
+    "v4_weather": MODEL_FEATURE_COLS_V4_WEATHER,
+    "v4_distance": MODEL_FEATURE_COLS_V4_DISTANCE,
+}
+
 TARGET_COL = "target_net_flow"
 HORIZONS = [5, 10, 15, 30]
 
@@ -97,8 +147,34 @@ def apply_station_code(
     return df
 
 
-def make_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    return df[MODEL_FEATURE_COLS].fillna(0), df[TARGET_COL].fillna(0)
+def make_xy(
+    df: pd.DataFrame, feature_cols: list[str] = MODEL_FEATURE_COLS
+) -> tuple[pd.DataFrame, pd.Series]:
+    """`.fillna(0)`이 lag1d_stock/lag7d_stock 결측(D-1/D-7 경계 밖)에도 그대로 적용된다 —
+    별도 fallback 값을 채우지 않고 0 + `_available=0` 플래그 조합으로 "정보 없음"을
+    표현한다(원칙 8: 표본 없는 곳에 그럴듯한 값을 채우지 않는다)."""
+    return df[feature_cols].fillna(0), df[TARGET_COL].fillna(0)
+
+
+def attach_anchor_time_slot(df: pd.DataFrame) -> pd.DataFrame:
+    """anchor(hour·minute) 기준 30분 time_slot(0~47) — D-1/D-7 lag 조인 키로 쓴다.
+
+    v3/v4 데이터셋의 hour·minute·date는 base_time(anchor) 그대로다(target이 아님,
+    `train.py`의 `_attach_holiday_flag`도 같은 전제) — 그래서 날짜축 멀티소스 모델의
+    `compute_target_time_features`와 달리 target 시각을 다시 계산할 필요가 없다.
+    """
+    df = df.copy()
+    df["time_slot"] = df["hour"] * 2 + (df["minute"] >= 30).astype("int8")
+    return df
+
+
+def attach_distance(df: pd.DataFrame, distance: pd.DataFrame) -> pd.DataFrame:
+    """역 정적 거리 피처(`DISTANCE_FEATURE_COLS`)를 `od_station_id` 기준으로 붙인다.
+
+    시간축이 없는 station 단위 정적 피처라 단순 left join이면 된다. `distance`에
+    없는 역(좌표 매칭 실패 등)은 NaN으로 남고, `make_xy()`의 `fillna(0)`이 처리한다.
+    """
+    return df.merge(distance, on="od_station_id", how="left")
 
 
 class HistoricalProfileBuilder:
