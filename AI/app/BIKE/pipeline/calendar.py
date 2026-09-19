@@ -11,8 +11,11 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+KST = ZoneInfo("Asia/Seoul")
 
 AI_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_HOLIDAY_PATH = (
@@ -83,6 +86,18 @@ def dow_type_for_date(when: date, holidays: pd.DataFrame) -> int:
         return 2
 
     return 0
+
+
+def now_kst() -> datetime:
+    """서버 로컬 시간대와 무관하게 KST 기준 naive datetime을 돌려준다.
+
+    이 앱의 모든 시각 비교(재고·날씨 신선도, 도착 시점 라벨, 모델 시간 피처)는 KST
+    벽시계 기준이라는 전제 위에서 동작한다. 그런데 AI EC2의 실제 OS 시간대는 UTC다
+    (로컬 개발 PC는 보통 KST라 이 차이가 로컬 테스트에서는 안 드러난다) — `datetime.now()`나
+    `pd.Timestamp.now()`를 직접 쓰면 서버에서는 9시간 어긋난 값이 나온다. 반드시 이 함수를
+    거쳐서 `now`를 구한다.
+    """
+    return datetime.now(KST).replace(tzinfo=None)
 
 
 def dow_type_and_time_slot(when: datetime, holidays: pd.DataFrame) -> tuple[int, int]:

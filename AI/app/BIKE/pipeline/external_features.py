@@ -115,3 +115,41 @@ def attach_external(
         jamsil_dates
     )
     return df
+
+
+def attach_kbo(
+    df: pd.DataFrame,
+    jamsil_dates: set,
+    jamsil_stations: set,
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """`is_kbo_game_jamsil`만 붙인다(날씨 없이) — v4 anchor+horizon 피처셋(S15P21A104-160)용.
+
+    `attach_external()`과 판정 로직은 같지만 날씨 병합이 빠져 있다 — 실시간 날씨 소스가
+    없어도(Phase D 갭) 그대로 쓸 수 있게 하려고 분리했다.
+    """
+    df = df.copy()
+    df["is_kbo_game_jamsil"] = (
+        df["od_station_id"].isin(jamsil_stations) & df[date_col].isin(jamsil_dates)
+    ).astype("int8")
+    return df
+
+
+def attach_weather(
+    df: pd.DataFrame,
+    weather: pd.DataFrame,
+    date_col: str = "date",
+    hour_col: str = "hour",
+) -> pd.DataFrame:
+    """`is_rain`/`temp`만 붙인다(KBO·공휴일 없이) — v4_weather 피처셋(S15P21A104-160)용.
+
+    `attach_external()`과 병합 로직은 같다(anchor 기준, 30분 이내 근사 허용). ASOS는
+    2024~2025 학습·평가 기간을 이미 커버하므로 오프라인 학습/검증엔 그대로 쓸 수 있다 —
+    다만 실시간 서빙에 쓰려면 `weather.nowcast` Kafka 토픽을 `bike.stock`처럼 최신
+    스냅샷화하는 별도 작업이 먼저 필요하다(효과 검증되면 착수).
+    """
+    df = df.merge(weather, left_on=[date_col, hour_col], right_on=["date", "hour"], how="left")
+    # ASOS 실측 범위 밖 날짜는 매칭이 안 돼 NaN이 섞이는데, bool 컬럼에 NaN이 들어가면
+    # dtype이 object로 깨져서 LightGBM이 거부한다 — fillna 뒤 명시 캐스팅한다.
+    df["is_rain"] = df["is_rain"].fillna(False).astype("int8")
+    return df
