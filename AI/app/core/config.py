@@ -124,6 +124,17 @@ class Settings(BaseSettings):
     # 같은 이동 중 재안내 팝업이 반복해서 뜨는 것을 막는다.
     time_trigger_cooldown_sec: float = 600.0
 
+    # ── TIME 규칙 기준선 점수식(203) ──
+    # ⚠️ 트리거 임계값과 같은 처지의 **잠정값**이다. 실제 후보 분포를 보지 못했다.
+    # score = 잔여소요(분) + 환승당 페널티 + 혼잡 페널티. 작을수록 좋다.
+    #
+    # 환승 페널티 4분: 환승은 계단·대기라 같은 4분이어도 앉아 가는 4분보다 부담이 크다는
+    # 통념을 옮긴 값일 뿐 측정값이 아니다.
+    time_score_transfer_penalty_min: float = 4.0
+    # 혼잡 1등급당 페널티 3분. 재안내의 목적이 혼잡 회피라 0이면 안 되지만, 너무 크면
+    # 20분 돌아가는 경로를 "덜 혼잡하니까"로 고르게 된다.
+    time_score_congestion_penalty_min: float = 3.0
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]
