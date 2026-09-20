@@ -109,12 +109,13 @@ class RouteSearchComfortPriorityTest {
         List<RouteSearchResponse> result = routeSearchService.search(
                 "501", "503", null, RoutePriority.COMFORT, null);
 
-        // 214 순서표: 0-2 속도, 3-5 혼잡. 혼잡 데이터 있는 SUBWAY 후보가 혼잡 3 맨 앞에 온다.
-        // 이 그래프는 후보 2개라 six = 속도 2 + 혼잡 1 = 3개. LOW_CONGESTION은 2번이다.
-        assertEquals(3, result.size());
+        // 214 순서표: 0-2 속도, 3-5 혼잡. 같은 후보가 속도·혼잡에 모두 뽑히면 한 번만 두고
+        // 혼잡 라벨(LOW_CONGESTION)로 승격한다(S15P21A104-215 후속 — 완전 중복 제거).
+        // 이 그래프는 후보 2개라 결과는 [자전거 SHORTEST, 지하철 LOW_CONGESTION] 2개다.
+        assertEquals(2, result.size());
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
-        assertEquals(RouteType.LOW_CONGESTION, result.get(2).routeType());
-        assertTrue(result.get(2).legs().stream().anyMatch(leg -> leg.mode() == TravelMode.SUBWAY));
+        assertEquals(RouteType.LOW_CONGESTION, result.get(1).routeType());
+        assertTrue(result.get(1).legs().stream().anyMatch(leg -> leg.mode() == TravelMode.SUBWAY));
     }
 
     @Test

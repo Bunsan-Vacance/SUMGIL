@@ -109,14 +109,16 @@ public class RouteSearchService {
                         slotGraph, originStationId, destStationId, MAX_CANDIDATES, modes),
                 modes);
         List<RouteSearchResponse> filtered = scoredCandidates.stream().map(ScoredCandidate::response).toList();
-        List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
+        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(filtered);
+        List<RouteSearchResponse> speed = ranked.stream()
                 .limit(SPEED_ROUTES)
                 .toList();
         // 158(통지 05 S-1): 링크 단위·통과 시각 슬롯 기반. 노선 단위 topCalm은 더 안 쓴다.
         List<RouteSearchResponse> calm = scoreRanker().topCalmByLink(
                 scoredCandidates, effectiveDepartureTime, congestionPredLookup(), CALM_ROUTES);
-        List<RouteSearchResponse> six = new java.util.ArrayList<>(speed);
-        six.addAll(calm);
+        // 완전 중복(속도∩혼잡)·유사경로(탄 것만 비교) 제거 후 부족분은 전체 후보에서 채운다.
+        List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
+                speed, calm, ranked, SPEED_ROUTES + CALM_ROUTES);
         // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
         return withRouteNames(withGeometryAll(six));
     }
@@ -279,14 +281,14 @@ public class RouteSearchService {
                 coordFinder.findCandidates(
                         augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES, request.modes()),
                 request.modes());
-        List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
+        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(filtered);
+        List<RouteSearchResponse> speed = ranked.stream()
                 .limit(SPEED_ROUTES)
                 .toList();
         List<RouteSearchResponse> calm = scoreRanker().topCalm(
-                RouteCandidateFinder.relabelByRank(filtered),
-                departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
-        List<RouteSearchResponse> six = new java.util.ArrayList<>(speed);
-        six.addAll(calm);
+                ranked, departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
+        List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
+                speed, calm, ranked, SPEED_ROUTES + CALM_ROUTES);
         return withRouteNames(withGeometryAll(six));
     }
 
