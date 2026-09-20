@@ -14,6 +14,12 @@ function formatCongestion(level: number) {
   return `구간 예상 혼잡도 ${level}%`
 }
 
+function sameBusOptions(left: Leg, right: Leg) {
+  if (left.busRouteOptions === undefined && right.busRouteOptions === undefined) return true
+  if (!left.busRouteOptions || !right.busRouteOptions) return false
+  return JSON.stringify(left.busRouteOptions) === JSON.stringify(right.busRouteOptions)
+}
+
 export function compactLegs(legs: Leg[]) {
   return legs
     .reduce<Array<{ leg: Leg; count: number }>>((groups, leg) => {
@@ -26,6 +32,7 @@ export function compactLegs(legs: Leg[]) {
         !leg.transitionType &&
         previous.leg.mode === leg.mode &&
         previous.leg.routeId === leg.routeId &&
+        sameBusOptions(previous.leg, leg) &&
         previous.leg.segmentCongestionLevel === undefined &&
         leg.segmentCongestionLevel === undefined
       ) {

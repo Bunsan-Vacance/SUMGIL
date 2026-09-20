@@ -16,12 +16,12 @@ import { isTransitLeg, isTransferLeg, transitionLabel } from './transitions'
 export default function RouteCard({
   route,
   comparison,
-  busVariantCount,
+  busOptionCount,
   onDetail,
 }: {
   route: Route
   comparison?: string
-  busVariantCount?: number
+  busOptionCount?: number
   onDetail: () => void
 }) {
   const displayLegs = compactLegs(route.legs)
@@ -41,7 +41,7 @@ export default function RouteCard({
       : null,
     `환승 ${route.transfers ? `${route.transfers}회` : '없음'}`,
     walkingMinutes ? `도보 ${roundMinutes(walkingMinutes)}분` : null,
-    busVariantCount && busVariantCount > 1 ? `버스 ${busVariantCount}개 선택 가능` : null,
+    busOptionCount && busOptionCount > 1 ? `버스 ${busOptionCount}개 노선` : null,
   ].filter((fact): fact is string => fact !== null)
   const prediction = congestionPredictionFor(route)
   const congestionGrade = prediction ? congestionGradeText(prediction.congestionGrade) : undefined

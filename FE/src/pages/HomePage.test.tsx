@@ -14,6 +14,24 @@ const origin = {
 afterEach(cleanup)
 
 describe('홈 길찾기 패널', () => {
+  it('초기 출발지는 임의의 장소 대신 선택 안내를 표시한다', () => {
+    render(
+      <HomePage
+        origin={{ id: 'empty-origin', name: '', address: '', kind: '장소' }}
+        destination={null}
+        openSearch={vi.fn()}
+        openBrowse={vi.fn()}
+        routePanelOpen
+        toggleRoutePanel={vi.fn()}
+        closeRoutePanel={vi.fn()}
+        findRoutes={vi.fn()}
+        swapPlaces={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('출발지를 검색하세요')).toBeTruthy()
+  })
+
   it('검색 버튼을 열고 길찾기 패널을 열고 닫는다', () => {
     const openBrowse = vi.fn()
     const toggleRoutePanel = vi.fn()

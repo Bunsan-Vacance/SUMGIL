@@ -1830,11 +1830,21 @@ small {
   margin-bottom: 8px;
   font-size: 14px;
 }
+.bus-options-segment + .bus-options-segment {
+  margin-top: 12px;
+}
+.bus-options-segment h4 {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
 .bus-options-list {
   display: grid;
   gap: 7px;
 }
-.bus-options-list button {
+.bus-options-list button,
+.bus-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1852,10 +1862,16 @@ small {
   color: var(--primary-dark);
   background: var(--primary-soft);
 }
-.bus-options-list button > span {
+.bus-options-list button > span,
+.bus-option > span {
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
+}
+.bus-options-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 .route-legs {
   margin-top: 18px;

@@ -67,7 +67,7 @@ export default function HomePage({
             type="button"
             className="swap-button"
             aria-label="출발지와 도착지 교환"
-            disabled={!destination}
+            disabled={!destination || !origin.name}
             onClick={swapPlaces}
           >
             <ArrowDownUp size={19} />
@@ -76,7 +76,9 @@ export default function HomePage({
             <button type="button" onClick={() => openSearch('origin')}>
               <span className="dot start" />
               <small>출발</small>
-              <strong>{origin.name}</strong>
+              <strong className={!origin.name ? 'muted' : ''}>
+                {origin.name || '출발지를 검색하세요'}
+              </strong>
               <Pencil size={16} />
             </button>
             <button type="button" onClick={() => openSearch('destination')}>

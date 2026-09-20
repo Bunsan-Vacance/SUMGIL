@@ -1,4 +1,4 @@
-import type { Leg, Route, RouteEndpoint } from './types'
+import type { BusRouteOption, Leg, Route, RouteEndpoint } from './types'
 
 export interface RouteGroup {
   representative: Route
@@ -69,6 +69,25 @@ export function busLabels(route: Route) {
 
 export function formatBusLabel(label: string) {
   return /^\d+$/.test(label) ? `${label}번` : label
+}
+
+export function busOptionLabel(option: BusRouteOption) {
+  return formatBusLabel(option.routeName?.trim() || option.routeId)
+}
+
+export function busLegOptions(route: Route) {
+  return route.legs
+    .map((leg, index) => ({ leg, index, options: leg.busRouteOptions }))
+    .filter(
+      (entry): entry is { leg: Leg; index: number; options: BusRouteOption[] } =>
+        entry.leg.mode === 'bus' && entry.options !== undefined,
+    )
+}
+
+export function busOptionCount(route: Route) {
+  return new Set(
+    busLegOptions(route).flatMap(({ options }) => options.map((option) => option.routeId)),
+  ).size
 }
 
 export function busRouteOptions(routes: Route[]) {

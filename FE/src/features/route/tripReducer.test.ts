@@ -21,6 +21,17 @@ describe('검색 조건과 경로 선택', () => {
       status: 'idle',
     })
 
+    const destinationChanged = tripReducer(loadedTrip, {
+      type: 'destination',
+      place: places[3],
+    })
+    expect(destinationChanged).toMatchObject({
+      destination: places[3],
+      candidates: [],
+      selected: null,
+      status: 'idle',
+    })
+
     const searching = tripReducer(loadedTrip, { type: 'search', destination: places[3] })
     expect(searching).toMatchObject({
       destination: places[3],

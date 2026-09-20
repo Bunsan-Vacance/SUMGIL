@@ -39,6 +39,11 @@ export interface RouteEndpoint {
   lng?: number
   rentalId?: string
 }
+export interface BusRouteOption {
+  routeId: string
+  routeName?: string
+  headwayMin?: number
+}
 export interface Leg {
   distanceMeters?: number
   mode: Mode
@@ -48,6 +53,7 @@ export interface Leg {
   transfer?: boolean
   transitionType?: TransitionType
   routeId?: string
+  busRouteOptions?: BusRouteOption[]
   segmentCongestionLevel?: number
   from?: RouteEndpoint
   to?: RouteEndpoint
