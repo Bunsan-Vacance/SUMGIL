@@ -58,7 +58,24 @@ public final class ShortestPathFinder {
      * @throws DomainException 출발=도착({@code SAME_ORIGIN_DEST})·미등록 역({@code STATION_NOT_FOUND})·연결 불가({@code ROUTE_NOT_FOUND})
      */
     public FoundPath find(RouteGraph graph, String originStationId, String destStationId) {
+        return find(graph, originStationId, destStationId, Set.of(), Set.of());
+    }
+
+    /**
+     * 금지 엣지·금지 정점을 제외한 최단 경로 1개를 찾는다(S15P21A104-235, Yen spur용).
+     *
+     * <p>그래프를 재조립하지 않고 완화 시점에 건너뛴다. 금지 정점은 "진입 금지"다 —
+     * 도달해도 나갈 수 없어 경로가 될 수 없으므로 들어가는 엣지 자체를 버린다.
+     * 탐색 시작점은 caller가 금지 집합에서 뺀다.
+     *
+     * @param bannedEdges 진입 금지 엣지 키(출발·도착·노선)
+     * @param bannedNodes 진입 금지 정점
+     */
+    public FoundPath find(RouteGraph graph, String originStationId, String destStationId,
+                          Set<EdgeKey> bannedEdges, Set<String> bannedNodes) {
         Objects.requireNonNull(graph, "graph");
+        Objects.requireNonNull(bannedEdges, "bannedEdges");
+        Objects.requireNonNull(bannedNodes, "bannedNodes");
         if (Objects.equals(originStationId, destStationId)) {
             throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
         }
@@ -76,6 +93,9 @@ public final class ShortestPathFinder {
         // 출발 직후 첫 엣지는 환승 아님(현재 노선 없음).
         // 첫 승차 대기(waitSec)를 1회 부과한다(S15P21A104-190) — 탑승 전 대기다.
         for (Edge edge : graph.outgoingEdges(originStationId)) {
+            if (isBanned(edge, bannedEdges, bannedNodes)) {
+                continue;
+            }
             long cost = transferRule.costWithStation(
                     edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode())
                     + edge.waitSec();
@@ -100,6 +120,9 @@ public final class ShortestPathFinder {
                 return buildPath(prev, originStationId, current);
             }
             for (Edge edge : graph.outgoingEdges(current.node())) {
+                if (isBanned(edge, bannedEdges, bannedNodes)) {
+                    continue;
+                }
                 // 환승 판정은 TransferRule 1곳으로 통일한다(232·234).
                 // WALK를 지나도 유지된 대중교통 노선 집합으로 비교한다.
                 Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
@@ -191,6 +214,15 @@ public final class ShortestPathFinder {
         return new FoundPath(List.copyOf(stations), List.copyOf(edges), arrival.cost(), transfers);
     }
 
+    /** 금지 엣지(출발·도착·노선 일치)이거나 금지 정점 진입이면 true. */
+    private static boolean isBanned(Edge edge, Set<EdgeKey> bannedEdges, Set<String> bannedNodes) {
+        if (!bannedNodes.isEmpty() && bannedNodes.contains(edge.toNode())) {
+            return true;
+        }
+        return !bannedEdges.isEmpty()
+                && bannedEdges.contains(new EdgeKey(edge.fromNode(), edge.toNode(), edge.routeId()));
+    }
+
     /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용. */
     private static String singleOrNull(Set<String> lines) {
         if (lines == null || lines.size() != 1) {
@@ -216,24 +248,26 @@ public final class ShortestPathFinder {
         dist.computeIfAbsent(node, k -> new HashMap<>()).put(key, cost);
     }
 
+    // 아래 세 레코드의 집합은 호출부가 불변(optionsFor·keptTransitLines·Set.of)으로만
+    // 넘긴다 — 완화 핫패스의 방어 복사를 제거한다(S15P21A104-235).
     private record StateKey(String line, Set<String> keptLine) {
         StateKey {
-            keptLine = keptLine == null ? Set.of() : Set.copyOf(keptLine);
+            keptLine = keptLine == null ? Set.of() : keptLine;
         }
     }
 
     private record State(long cost, String node, String line, TravelMode arrivalMode,
                          Set<String> keptLine, Set<String> arrivedOptions) {
         State {
-            keptLine = keptLine == null ? Set.of() : Set.copyOf(keptLine);
-            arrivedOptions = arrivedOptions == null ? Set.of() : Set.copyOf(arrivedOptions);
+            keptLine = keptLine == null ? Set.of() : keptLine;
+            arrivedOptions = arrivedOptions == null ? Set.of() : arrivedOptions;
         }
     }
 
     private record Previous(String fromNode, String fromLine, TravelMode fromMode,
                               Set<String> fromKeptLine, Edge edge) {
         Previous {
-            fromKeptLine = fromKeptLine == null ? Set.of() : Set.copyOf(fromKeptLine);
+            fromKeptLine = fromKeptLine == null ? Set.of() : fromKeptLine;
         }
     }
 }
