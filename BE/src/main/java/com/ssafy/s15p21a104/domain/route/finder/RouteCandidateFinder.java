@@ -103,7 +103,19 @@ public final class RouteCandidateFinder {
      */
     public List<RouteSearchResponse> findCandidates(
             RouteGraph graph, String originStationId, String destStationId, int maxCandidates) {
-        return findCandidatesWithPaths(graph, originStationId, destStationId, maxCandidates).stream()
+        return findCandidates(graph, originStationId, destStationId, maxCandidates, null);
+    }
+
+    /**
+     * 허용 수단을 탐색 안에서 거르는 판(S15P21A104-215 §3.4).
+     *
+     * @param allowedModes 허용 수단. null·빈 목록이면 전체
+     */
+    public List<RouteSearchResponse> findCandidates(
+            RouteGraph graph, String originStationId, String destStationId, int maxCandidates,
+            List<TravelMode> allowedModes) {
+        return findCandidatesWithPaths(graph, originStationId, destStationId, maxCandidates, allowedModes)
+                .stream()
                 .map(ScoredCandidate::response)
                 .toList();
     }
@@ -114,11 +126,22 @@ public final class RouteCandidateFinder {
      */
     public List<ScoredCandidate> findCandidatesWithPaths(
             RouteGraph graph, String originStationId, String destStationId, int maxCandidates) {
+        return findCandidatesWithPaths(graph, originStationId, destStationId, maxCandidates, null);
+    }
+
+    /**
+     * 허용 수단을 탐색 안에서 거르는 판(S15P21A104-215 §3.4).
+     *
+     * @param allowedModes 허용 수단. null·빈 목록이면 전체
+     */
+    public List<ScoredCandidate> findCandidatesWithPaths(
+            RouteGraph graph, String originStationId, String destStationId, int maxCandidates,
+            List<TravelMode> allowedModes) {
         // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(transferTimes);
 
-        List<FoundPath> paths =
-                new KShortestPathFinder(rule, busRouteIndex).findK(graph, originStationId, destStationId, maxCandidates);
+        List<FoundPath> paths = new KShortestPathFinder(rule, busRouteIndex)
+                .findK(graph, originStationId, destStationId, maxCandidates, allowedModes);
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {

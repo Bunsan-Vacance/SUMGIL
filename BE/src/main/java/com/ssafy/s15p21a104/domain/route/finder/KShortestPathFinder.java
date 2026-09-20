@@ -57,6 +57,17 @@ public final class KShortestPathFinder {
      * @return 소요시간 오름차순 후보. 경로 없으면 빈 목록
      */
     public List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId, int k) {
+        return findK(graph, originStationId, destStationId, k, null);
+    }
+
+    /**
+     * 허용 수단을 탐색 안에서 거르는 판(S15P21A104-215 §3.4). 걸러진 수단의 간선은
+     * 아예 보지 않으므로 "지하철만" 요청이 버스 간선 비용을 지불하지 않는다.
+     *
+     * @param allowedModes 허용 수단. null·빈 목록이면 전체 허용. WALK·TRANSFER는 항상 허용
+     */
+    public List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
+                                 int k, List<TravelMode> allowedModes) {
         Objects.requireNonNull(graph, "graph");
         if (k <= 0) {
             return List.of();
@@ -74,7 +85,7 @@ public final class KShortestPathFinder {
 
         // 첫 탑승: 환승 아님, 첫 승차 대기 1회(190).
         for (Edge edge : graph.outgoingEdges(originStationId)) {
-            if (originStationId.equals(edge.toNode())) {
+            if (originStationId.equals(edge.toNode()) || !isModeAllowed(edge.mode(), allowedModes)) {
                 continue;
             }
             long cost = transferRule.costWithStation(
@@ -104,6 +115,9 @@ public final class KShortestPathFinder {
                 continue;
             }
             for (Edge edge : graph.outgoingEdges(label.node())) {
+                if (!isModeAllowed(edge.mode(), allowedModes)) {
+                    continue;
+                }
                 long targetBit = bitOf(edge.toNode());
                 if (isVisited(label, edge.toNode(), targetBit)) {
                     continue;
@@ -198,6 +212,15 @@ public final class KShortestPathFinder {
 
     private static long bitOf(String station) {
         return 1L << (station.hashCode() & 63);
+    }
+
+    /** WALK·TRANSFER는 접근·연결이라 항상 허용한다 — 응답 필터 규칙과 동일(215 §3.4). */
+    private static boolean isModeAllowed(TravelMode mode, List<TravelMode> allowedModes) {
+        if (allowedModes == null || allowedModes.isEmpty()) {
+            return true;
+        }
+        return mode == TravelMode.WALK || mode == TravelMode.TRANSFER
+                || allowedModes.contains(mode);
     }
 
     private FoundPath buildPath(Label arrival, String originStationId) {
