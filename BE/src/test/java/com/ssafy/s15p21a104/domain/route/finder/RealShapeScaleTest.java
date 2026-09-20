@@ -1,16 +1,28 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 
+import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bike.BikeRentalEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteStopsReader;
+import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
+import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
+import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
+import com.ssafy.s15p21a104.domain.route.service.RouteSearchService;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
+import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -21,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
@@ -64,6 +77,114 @@ class RealShapeScaleTest {
             }
         }
         assertTrue(graph.nodeCount() > 10_000, "실형상 그래프가 아니다");
+    }
+
+    @Test
+    @DisplayName("실형상: 대림 도보권(집)→신도림 좌표 검색 — prod 500 재현")
+    void 실형상_좌표검색() throws IOException {
+        RouteGraph graph = buildGraph();
+        BusRouteIndex index = BusRouteIndex.build(BusRouteStopsReader.read());
+        Infos infos = buildInfos();
+
+        com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry registry =
+                mock(com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry.class);
+        lenient().when(registry.graph()).thenReturn(graph);
+        lenient().when(registry.graphFor(anyInt(), anyInt())).thenReturn(graph);
+        lenient().when(registry.stationInfos()).thenReturn(Map.copyOf(infos.all));
+        lenient().when(registry.stationIds()).thenReturn(Set.copyOf(infos.stationIds));
+        lenient().when(registry.rentalIds()).thenReturn(Set.copyOf(infos.rentalIds));
+        lenient().when(registry.bikeStock()).thenReturn(Map.of());
+        lenient().when(registry.transferTimes()).thenReturn(Map.of());
+        lenient().when(registry.busRouteIndex()).thenReturn(index);
+
+        StationRepository stationRepository = mock(StationRepository.class);
+        lenient().when(stationRepository.findById(anyString())).thenAnswer(invocation ->
+                Optional.of(RouteTestFixtures.mockStation(invocation.getArgument(0), "역")));
+
+        RouteSearchService service = new RouteSearchService(
+                stationRepository, registry, new TransferRule(180),
+                new RailGeometryRegistry(null, null),
+                RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopBikeGeometryRegistry(),
+                RouteTestFixtures.noopRouteLineRepository(),
+                RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
+
+        long start = System.nanoTime();
+        List<RouteSearchResponse> responses = service.searchByCoordinate(
+                new CoordinateRouteSearchRequest(
+                        new RoutePlaceRequest(37.4895, 126.898, "home"),
+                        new RoutePlaceRequest(37.508815, 126.891222, "sindorim"),
+                        null, null, null));
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        System.out.printf("coord responses=%d %dms%n", responses.size(), ms);
+        int i = 0;
+        for (RouteSearchResponse response : responses) {
+            i++;
+            StringBuilder legs = new StringBuilder();
+            response.legs().forEach(leg -> legs.append(leg.mode()).append('(').append(leg.routeId())
+                    .append(") ").append(leg.fromNodeId()).append('>').append(leg.toNodeId())
+                    .append(" [").append(String.format("%.1f", leg.minutes())).append("m] | "));
+            System.out.printf("[%d] %s total=%.2fm transfers=%d :: %s%n",
+                    i, response.routeType(), response.totalMinutes(), response.transferCount(), legs);
+        }
+
+        // prod 500 재현 시도: 대림(233)→신도림(234) 역 검색 (좌표 아님)
+        List<RouteSearchResponse> stationResponses = service.search("233", "234", null, null, null);
+        System.out.printf("station 233->234 responses=%d%n", stationResponses.size());
+        for (RouteSearchResponse response : stationResponses) {
+            StringBuilder legs = new StringBuilder();
+            response.legs().forEach(leg -> legs.append(leg.mode()).append('(').append(leg.routeId())
+                    .append(") ").append(leg.fromNodeId()).append('>').append(leg.toNodeId())
+                    .append(" | "));
+            System.out.printf("  %s total=%.2fm :: %s%n",
+                    response.routeType(), response.totalMinutes(), legs);
+        }
+    }
+
+    /** 역·정류장·대여소 표시 정보(좌표 포함) — registry.stationInfos 대응. */
+    private static Infos buildInfos() throws IOException {
+        Infos infos = new Infos();
+        readCsv(COORDS, cells -> {
+            if (cells.length > 6) {
+                String id = cells[2].trim();
+                Double lat = parseDouble(cells[4]);
+                Double lng = parseDouble(cells[5]);
+                if (!id.isEmpty() && lat != null && lng != null) {
+                    infos.all.putIfAbsent(id, new RouteMapper.StationInfo(id, cells[3], lat, lng));
+                    infos.stationIds.add(id);
+                }
+            }
+        });
+        readCsv(BUS_STOPS, cells -> {
+            if (cells.length > 4) {
+                String id = cells[0].trim();
+                Double lat = parseDouble(cells[4]);
+                Double lng = parseDouble(cells[3]);
+                if (!id.isEmpty() && lat != null && lng != null) {
+                    infos.all.putIfAbsent(id, new RouteMapper.StationInfo(id, cells[2], lat, lng));
+                }
+            }
+        });
+        readCsv(BIKE_STATIONS, cells -> {
+            if (cells.length > 5) {
+                String id = cells[0].trim();
+                Double lat = parseDouble(cells[4]);
+                Double lng = parseDouble(cells[5]);
+                if (!id.isEmpty() && lat != null && lng != null) {
+                    infos.all.putIfAbsent(id, new RouteMapper.StationInfo(id, cells[1], lat, lng));
+                    infos.rentalIds.add(id);
+                }
+            }
+        });
+        return infos;
+    }
+
+    private static final class Infos {
+        final Map<String, RouteMapper.StationInfo> all = new LinkedHashMap<>();
+        final Set<String> stationIds = new LinkedHashSet<>();
+        final Set<String> rentalIds = new LinkedHashSet<>();
     }
 
     /** 서버 기동 로더와 같은 원천으로 버스·도보·대여·지하철 엣지를 조립한다. */
