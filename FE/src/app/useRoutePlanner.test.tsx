@@ -23,10 +23,25 @@ describe('경로와 안내 화면의 수명', () => {
 
   const renderLoadedPlanner = async (guidanceApi?: GuidanceRepository) => {
     const rendered = renderHook(() => useRoutePlanner(repository, guidanceApi))
+    act(() => rendered.result.current.trip.setOrigin(places[0]))
     act(() => rendered.result.current.findRoutes(places[1]))
     await waitFor(() => expect(rendered.result.current.trip.status).toBe('success'))
     return rendered
   }
+
+  it('출발지가 비어 있으면 목적지를 보존하고 출발지 선택으로 안내한다', () => {
+    const search = vi.fn(async () => routes)
+    const { result } = renderHook(() => useRoutePlanner({ search }))
+
+    expect(result.current.trip.origin.name).toBe('')
+    act(() => result.current.openSearch('destination'))
+    act(() => result.current.choosePlace(places[1]))
+
+    expect(result.current.screen).toBe('search')
+    expect(result.current.searchTarget).toBe('origin')
+    expect(result.current.trip.destination).toBe(places[1])
+    expect(search).not.toHaveBeenCalled()
+  })
 
   it('안내 중 뒤로 갔다가 다시 돌아와도 단계와 열차 선택을 유지한다', async () => {
     const { result } = await renderLoadedPlanner()
@@ -242,6 +257,7 @@ describe('경로와 안내 화면의 수명', () => {
       async (_request: Parameters<RouteRepository['search']>[0], _signal: AbortSignal) => routes,
     )
     const { result } = renderHook(() => useRoutePlanner({ search }))
+    act(() => result.current.trip.setOrigin(places[0]))
     act(() => result.current.findRoutes(places[1]))
     await waitFor(() => expect(result.current.trip.status).toBe('success'))
     act(() => result.current.startGuide())
@@ -290,6 +306,7 @@ describe('경로와 안내 화면의 수명', () => {
     const { result } = renderHook(() =>
       useRoutePlanner({ search: async () => [transitRoute] }, guidanceApi),
     )
+    act(() => result.current.trip.setOrigin(places[0]))
     act(() => result.current.findRoutes({ ...places[1], stationId: 'dogok' }))
     await waitFor(() => expect(result.current.trip.status).toBe('success'))
     act(() => result.current.startGuide())
@@ -322,6 +339,7 @@ describe('경로와 안내 화면의 수명', () => {
     const { result } = renderHook(() =>
       useRoutePlanner({ search: async () => [busRoute] }, { arrivals, replan: async () => [] }),
     )
+    act(() => result.current.trip.setOrigin(places[0]))
     act(() => result.current.findRoutes({ ...places[1], stationId: 'dogok' }))
     await waitFor(() => expect(result.current.trip.status).toBe('success'))
     act(() => result.current.startGuide())

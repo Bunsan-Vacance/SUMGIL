@@ -116,6 +116,10 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
       if (place.id !== state.origin.id) request.current?.abort()
       dispatch({ type: 'origin', place })
     },
+    setDestination: (place: Place) => {
+      if (place.id !== state.destination?.id) request.current?.abort()
+      dispatch({ type: 'destination', place })
+    },
     swap: () => {
       request.current?.abort()
       dispatch({ type: 'swap' })
