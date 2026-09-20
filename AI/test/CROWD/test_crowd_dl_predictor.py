@@ -14,17 +14,17 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from app.CROWD.pipeline.dl.dataset import (
+from app.CROWD.pipeline.dl.dataset import (  # noqa: E402
     EVENT_STATIC_COLS,
     RESID_COLS,
     SequencePanel,
     fit_event_stats,
     fit_scale,
 )
-from app.CROWD.pipeline.dl.train_dl import save_artifact, train_one
-from app.CROWD.pipeline.features import SLOT_ORDER
-from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline
-from app.CROWD.pipeline.predictor import OUTPUT_KEYS, build_predictor
+from app.CROWD.pipeline.dl.train_dl import save_artifact, train_one  # noqa: E402
+from app.CROWD.pipeline.features import SLOT_ORDER  # noqa: E402
+from app.CROWD.pipeline.lookup import TARGETS, DayTypeLookupBaseline  # noqa: E402
+from app.CROWD.pipeline.predictor import OUTPUT_KEYS, build_predictor  # noqa: E402
 
 STATIONS = [101, 205, 333, 404]
 DATES = pd.date_range("2024-01-01", "2024-03-31", freq="D")

@@ -24,7 +24,7 @@ AI_ROOT = Path(__file__).resolve().parents[2]
 if str(AI_ROOT) not in sys.path:
     sys.path.insert(0, str(AI_ROOT))
 
-from app.CROWD.pipeline.congestion import ASCENDING, DESCENDING
+from app.CROWD.pipeline.congestion import ASCENDING, DESCENDING  # noqa: E402
 
 _CHECK_DIR = AI_ROOT / "validation" / "CROWD" / "route-ranking-check"
 
