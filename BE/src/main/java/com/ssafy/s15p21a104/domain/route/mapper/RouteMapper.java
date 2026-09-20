@@ -176,8 +176,6 @@ public final class RouteMapper {
         List<RouteLegResponse> legs = new ArrayList<>();
         int boundary = 0;
         java.util.Set<String> kept = java.util.Set.of();
-        // 단일 노선 그래프의 기존 판정을 그대로 살리는 문자열 폴백용(234·Task 4 선례).
-        String keptStr = null;
         // BUS 묶음의 운행 노선 교집합. BUS만 유지하고 비BUS 묶음에서는 null이다.
         List<EngineSegment> curGroup = new ArrayList<>();
         java.util.Set<String> running = null;
@@ -204,8 +202,9 @@ public final class RouteMapper {
                     if (!decision.transfer() && prevOpts.size() == 1 && opts.size() == 1) {
                         // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE·첫 경계)는
                         // 문자열 규칙으로 그대로 본다 — 단일 노선 그래프에서 기존과 바이트 동일.
+                        // 입력은 집합에서 뽑은 단일 노선을 쓴다(엔진·조립기와 동일 규칙).
                         TransferRule.TransferDecision legacy = TransferRule.decide(
-                                keptStr, prevSeg.mode(), prevOpts.iterator().next(),
+                                singleOrNull(kept), prevSeg.mode(), prevOpts.iterator().next(),
                                 s.mode(), opts.iterator().next());
                         if (legacy.transfer()) {
                             decision = legacy;
@@ -233,7 +232,6 @@ public final class RouteMapper {
                 }
             }
             kept = TransferRule.keptTransitLines(kept, s.mode(), opts);
-            keptStr = TransferRule.keptTransitLine(keptStr, s.mode(), s.routeId());
             prevSeg = s;
             prevOpts = opts;
         }
@@ -245,6 +243,14 @@ public final class RouteMapper {
         double totalMinutes = enginePath.totalSeconds() / 60.0;
         return Optional.of(new RouteSearchResponse(
                 routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount()));
+    }
+
+    /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용(232). */
+    private static String singleOrNull(java.util.Set<String> lines) {
+        if (lines == null || lines.size() != 1) {
+            return null;
+        }
+        return lines.iterator().next();
     }
 
     /** 환승역 자신의 출발·도착으로 환승 도보 leg를 만든다. */
