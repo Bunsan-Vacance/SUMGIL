@@ -15,6 +15,7 @@ import com.ssafy.s15p21a104.domain.route.bus.BusRouteStopsReader;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
@@ -86,30 +87,7 @@ class RealShapeScaleTest {
         BusRouteIndex index = BusRouteIndex.build(BusRouteStopsReader.read());
         Infos infos = buildInfos();
 
-        com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry registry =
-                mock(com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry.class);
-        lenient().when(registry.graph()).thenReturn(graph);
-        lenient().when(registry.graphFor(anyInt(), anyInt())).thenReturn(graph);
-        lenient().when(registry.stationInfos()).thenReturn(Map.copyOf(infos.all));
-        lenient().when(registry.stationIds()).thenReturn(Set.copyOf(infos.stationIds));
-        lenient().when(registry.rentalIds()).thenReturn(Set.copyOf(infos.rentalIds));
-        lenient().when(registry.bikeStock()).thenReturn(Map.of());
-        lenient().when(registry.transferTimes()).thenReturn(Map.of());
-        lenient().when(registry.busRouteIndex()).thenReturn(index);
-
-        StationRepository stationRepository = mock(StationRepository.class);
-        lenient().when(stationRepository.findById(anyString())).thenAnswer(invocation ->
-                Optional.of(RouteTestFixtures.mockStation(invocation.getArgument(0), "역")));
-
-        RouteSearchService service = new RouteSearchService(
-                stationRepository, registry, new TransferRule(180),
-                new RailGeometryRegistry(null, null),
-                RouteTestFixtures.noopWalkGeometryRegistry(),
-                RouteTestFixtures.noopBikeGeometryRegistry(),
-                RouteTestFixtures.noopRouteLineRepository(),
-                RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository(),
-                RouteTestFixtures.noopCongestionPredRepository());
+        RouteSearchService service = serviceFor(graph, index, infos);
 
         long start = System.nanoTime();
         List<RouteSearchResponse> responses = service.searchByCoordinate(
@@ -143,9 +121,63 @@ class RealShapeScaleTest {
         }
     }
 
+    @Test
+    @DisplayName("실형상: 역삼 멀티캠퍼스→세종대 — 수단 추가가 기존 경로를 지우면 안 된다(빈 결과 회귀)")
+    void 실형상_역삼세종대_수단추가_빈결과_회귀() throws IOException {
+        RouteGraph graph = buildGraph();
+        BusRouteIndex index = BusRouteIndex.build(BusRouteStopsReader.read());
+        Infos infos = buildInfos();
+        RouteSearchService service = serviceFor(graph, index, infos);
+        RoutePlaceRequest origin = new RoutePlaceRequest(37.50162, 127.03944, "멀티캠퍼스 역삼");
+        RoutePlaceRequest dest = new RoutePlaceRequest(37.5514705, 127.073884, "세종대학교");
+
+        assertAtLeastOne(service, origin, dest,
+                List.of(TravelMode.WALK, TravelMode.SUBWAY), "WALK,SUBWAY");
+        assertAtLeastOne(service, origin, dest,
+                List.of(TravelMode.WALK, TravelMode.BUS, TravelMode.SUBWAY), "WALK,BUS,SUBWAY");
+        assertAtLeastOne(service, origin, dest,
+                List.of(TravelMode.WALK, TravelMode.BIKE, TravelMode.BUS, TravelMode.SUBWAY), "WALK,BIKE,BUS,SUBWAY");
+    }
+
+    private static void assertAtLeastOne(RouteSearchService service, RoutePlaceRequest origin,
+                                         RoutePlaceRequest dest, List<TravelMode> modes, String label) {
+        long start = System.nanoTime();
+        List<RouteSearchResponse> responses = service.searchByCoordinate(
+                new CoordinateRouteSearchRequest(origin, dest, modes, null, null));
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        System.out.printf("[%s] responses=%d %dms%n", label, responses.size(), ms);
+        assertTrue(!responses.isEmpty(), label + " 결과가 0건 — 수단 추가가 기존 경로를 지웠다");
+    }
+
+    private static RouteSearchService serviceFor(RouteGraph graph, BusRouteIndex index, Infos infos) {
+        com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry registry =
+                mock(com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry.class);
+        lenient().when(registry.graph()).thenReturn(graph);
+        lenient().when(registry.graphFor(anyInt(), anyInt())).thenReturn(graph);
+        lenient().when(registry.stationInfos()).thenReturn(Map.copyOf(infos.all));
+        lenient().when(registry.stationIds()).thenReturn(Set.copyOf(infos.stationIds));
+        lenient().when(registry.rentalIds()).thenReturn(Set.copyOf(infos.rentalIds));
+        lenient().when(registry.bikeStock()).thenReturn(Map.of());
+        lenient().when(registry.transferTimes()).thenReturn(Map.of());
+        lenient().when(registry.busRouteIndex()).thenReturn(index);
+
+        StationRepository stationRepository = mock(StationRepository.class);
+        lenient().when(stationRepository.findById(anyString())).thenAnswer(invocation ->
+                Optional.of(RouteTestFixtures.mockStation(invocation.getArgument(0), "역")));
+
+        return new RouteSearchService(
+                stationRepository, registry, new TransferRule(180),
+                new RailGeometryRegistry(null, null),
+                RouteTestFixtures.noopWalkGeometryRegistry(),
+                RouteTestFixtures.noopBikeGeometryRegistry(),
+                RouteTestFixtures.noopRouteLineRepository(),
+                RouteTestFixtures.noopBusRouteRepository(),
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
+    }
+
     /** 역·정류장·대여소 표시 정보(좌표 포함) — registry.stationInfos 대응. */
-    private static Infos buildInfos() throws IOException {
-        Infos infos = new Infos();
+    private static Infos buildInfos() throws IOException {        Infos infos = new Infos();
         readCsv(COORDS, cells -> {
             if (cells.length > 6) {
                 String id = cells[2].trim();

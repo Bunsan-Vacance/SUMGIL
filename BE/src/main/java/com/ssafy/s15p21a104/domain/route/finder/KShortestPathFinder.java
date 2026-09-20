@@ -14,6 +14,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.function.ToLongFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 단일 그래프 1회 K개 후보 탐색 — 정점·상태당 K 라벨 확정(S15P21A104-215).
@@ -37,6 +40,8 @@ public final class KShortestPathFinder {
 
     /** (역, 상태)당 유지 라벨 수 상한. K 전체를 상태마다 허용하면 상태 수가 K배로 불어난다. */
     static final int DEFAULT_MAX_LABELS_PER_STATE = 3;
+
+    private static final Logger log = LoggerFactory.getLogger(KShortestPathFinder.class);
 
     private final TransferRule transferRule;
     private final BusRouteIndex busRouteIndex;
@@ -78,14 +83,30 @@ public final class KShortestPathFinder {
      */
     public List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
                                  int k, List<TravelMode> allowedModes) {
-        return findK(graph, originStationId, destStationId, k, allowedModes,
-                DEFAULT_MAX_WORK, DEFAULT_MAX_LABELS_PER_STATE);
+        return findK(graph, originStationId, destStationId, k, allowedModes, null);
     }
 
-    /** 작업 상한·상태당 라벨 상한을 명시하는 판(테스트·튜닝용). */
+    /**
+     * 목적지 방향 하한(휴리스틱)까지 받는 판 — A*(경로 탐색 구조 4부 §5.2).
+     *
+     * <p>우선순위를 "지금까지 비용 + 목적지까지 남은 시간의 하한"으로 바꿔, 처리 범위를
+     * 목적지로 가는 유망한 상태 쪽으로 좁힌다. 하한이 실제 비용을 과대평가하지 않으면
+     * 최단성은 그대로다(뒤로 가는 경로도 놓치지 않는다).
+     *
+     * @param remainingLowerBound 노드 → 목적지까지 남은 시간의 하한(초). null이면 0(일반 다익스트라)
+     */
     List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
                           int k, List<TravelMode> allowedModes,
-                          long maxWork, int maxLabelsPerState) {
+                          ToLongFunction<String> remainingLowerBound) {
+        return findK(graph, originStationId, destStationId, k, allowedModes,
+                DEFAULT_MAX_WORK, DEFAULT_MAX_LABELS_PER_STATE, remainingLowerBound);
+    }
+
+    /** 작업 상한·상태당 라벨 상한까지 명시하는 판(테스트·튜닝용). */
+    List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
+                          int k, List<TravelMode> allowedModes,
+                          long maxWork, int maxLabelsPerState,
+                          ToLongFunction<String> remainingLowerBound) {
         Objects.requireNonNull(graph, "graph");
         if (k <= 0) {
             return List.of();
@@ -98,9 +119,10 @@ public final class KShortestPathFinder {
         }
         int labelCap = Math.max(1, Math.min(k, maxLabelsPerState));
         long work = 0;
+        ToLongFunction<String> lowerBound = remainingLowerBound == null ? node -> 0L : remainingLowerBound;
 
         Map<String, Map<StateKey, List<Label>>> labelsByNode = new HashMap<>();
-        PriorityQueue<Label> queue = new PriorityQueue<>(Comparator.comparingLong(Label::cost));
+        PriorityQueue<Label> queue = new PriorityQueue<>(Comparator.comparingLong(Label::priority));
         long originBit = bitOf(originStationId);
 
         // 첫 탑승: 환승 아님, 첫 승차 대기 1회(190).
@@ -109,6 +131,7 @@ public final class KShortestPathFinder {
                 continue;
             }
             if (++work >= maxWork) {
+                log.warn("탐색 작업 상한 도달(초기 확장): {}->{} maxWork={}", originStationId, destStationId, maxWork);
                 return List.of();
             }
             long cost = transferRule.costWithStation(
@@ -116,8 +139,8 @@ public final class KShortestPathFinder {
                     + edge.waitSec();
             Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
             Set<String> kept = TransferRule.keptTransitLines(Set.of(), edge.mode(), options);
-            Label label = new Label(cost, null, edge, edge.toNode(), edge.mode(), kept, options,
-                    originBit | bitOf(edge.toNode()));
+            Label label = new Label(cost + lowerBound.applyAsLong(edge.toNode()), cost, null, edge,
+                    edge.toNode(), edge.mode(), kept, options, originBit | bitOf(edge.toNode()));
             if (addLabel(labelsByNode, label, labelCap)) {
                 queue.add(label);
             }
@@ -140,6 +163,8 @@ public final class KShortestPathFinder {
             }
             for (Edge edge : graph.outgoingEdges(label.node())) {
                 if (++work >= maxWork) {
+                    log.warn("탐색 작업 상한 도달: {}->{} maxWork={} 후보={}건",
+                            originStationId, destStationId, maxWork, results.size());
                     break search;
                 }
                 if (!isModeAllowed(edge.mode(), allowedModes)) {
@@ -170,8 +195,9 @@ public final class KShortestPathFinder {
                 }
                 Set<String> nextKept = TransferRule.keptTransitLines(
                         label.keptLine(), edge.mode(), options);
-                Label child = new Label(nextCost, label, edge, edge.toNode(), edge.mode(),
-                        nextKept, options, label.seenBits() | targetBit);
+                Label child = new Label(nextCost + lowerBound.applyAsLong(edge.toNode()), nextCost,
+                        label, edge, edge.toNode(), edge.mode(), nextKept, options,
+                        label.seenBits() | targetBit);
                 if (addLabel(labelsByNode, child, labelCap)) {
                     queue.add(child);
                 }
@@ -268,7 +294,8 @@ public final class KShortestPathFinder {
         TravelMode prevMode = null;
         Set<String> prevOptions = Set.of();
         for (Edge edge : edges) {
-            // 환승 집계도 TransferRule 1곳으로 통일한다(232·234).
+            // 환승 집계는 응답 조립(RouteCandidateFinder·RouteMapper)과 같은 규칙이어야 한다 —
+            // 레거시 폴백 입력도 집합에서 뽑은 단일 노선(singleOrNull)으로 맞춘다.
             Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
             if (prevMode != null) {
                 boolean transfer = TransferRule.decideLines(
@@ -314,8 +341,10 @@ public final class KShortestPathFinder {
 
     /**
      * 확정 라벨 1개. 부모 사슬(되돌아감 확인·경로 복원)과 방문 비트(64비트 필터)를 든다.
+     * {@code priority} = 지금까지 비용 + 목적지까지 하한(A* 우선순위).
      */
-    private record Label(long cost, Label parent, Edge edge, String node, TravelMode arrivalMode,
-                         Set<String> keptLine, Set<String> arrivedOptions, long seenBits) {
+    private record Label(long priority, long cost, Label parent, Edge edge, String node,
+                         TravelMode arrivalMode, Set<String> keptLine, Set<String> arrivedOptions,
+                         long seenBits) {
     }
 }

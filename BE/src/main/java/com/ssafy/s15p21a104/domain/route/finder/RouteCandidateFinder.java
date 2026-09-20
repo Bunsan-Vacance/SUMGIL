@@ -11,6 +11,7 @@ import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.function.ToLongFunction;
 
 /**
  * 탐색→매핑 후보 조립(S15P21A104-213 T4).
@@ -140,9 +142,18 @@ public final class RouteCandidateFinder {
             List<TravelMode> allowedModes) {
         // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(transferTimes);
+        ToLongFunction<String> lowerBound = remainingLowerBound(destStationId);
 
         List<FoundPath> paths = new KShortestPathFinder(rule, busRouteIndex)
-                .findK(graph, originStationId, destStationId, maxCandidates, allowedModes);
+                .findK(graph, originStationId, destStationId, maxCandidates, allowedModes, lowerBound);
+        if (paths.isEmpty() && allowsBus(allowedModes)) {
+            // 탐색 작업 상한이 BUS 포함 탐색에서 목적지 후보를 만나기 전에 소진되면 빈 결과가 된다.
+            // 같은 조건에서 BUS만 뺀 경로는 존재할 수 있다 — 수단을 추가했다고 기존 경로가
+            // 사라지면 안 되므로(운영 빈 결과 회귀, 2026-09-20 보고) 비BUS로 제한 재탐색한다.
+            paths = new KShortestPathFinder(rule, busRouteIndex)
+                    .findK(graph, originStationId, destStationId, maxCandidates,
+                            withoutBus(allowedModes), lowerBound);
+        }
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {
@@ -173,7 +184,6 @@ public final class RouteCandidateFinder {
         // WALK를 지나도 유지된 대중교통 노선 집합으로 비교한다.
         List<Long> transferSecs = new ArrayList<>();
         Set<String> kept = Set.of();
-        String keptStr = null;
         TravelMode prevMode = null;
         Set<String> prevOptions = Set.of();
         for (Edge edge : found.edges()) {
@@ -185,9 +195,10 @@ public final class RouteCandidateFinder {
                     transferSecs.add(rule.transferCost(edge.fromNode(), kept, options));
                 } else if (prevOptions.size() == 1 && options.size() == 1) {
                     // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
-                    // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일.
+                    // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일. 입력은 집합에서
+                    // 뽑은 단일 노선을 쓴다(엔진·매퍼와 동일 규칙, 2026-09-20 불일치 수정).
                     TransferRule.TransferDecision legacy = TransferRule.decide(
-                            keptStr, prevMode, prevOptions.iterator().next(),
+                            singleOrNull(kept), prevMode, prevOptions.iterator().next(),
                             edge.mode(), options.iterator().next());
                     if (legacy.transfer()) {
                         transferSecs.add(rule.costWithStation(
@@ -197,7 +208,6 @@ public final class RouteCandidateFinder {
             }
             prevOptions = options;
             kept = TransferRule.keptTransitLines(kept, edge.mode(), options);
-            keptStr = TransferRule.keptTransitLine(keptStr, edge.mode(), edge.routeId());
             prevMode = edge.mode();
         }
         // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤
@@ -349,5 +359,52 @@ public final class RouteCandidateFinder {
                     .append(leg.fromNodeId()).append('>').append(leg.toNodeId()).append('|');
         }
         return signature.toString();
+    }
+
+    /** BUS가 허용되는 요청인지. null·빈 목록은 전체 허용이다. */
+    private static boolean allowsBus(List<TravelMode> allowedModes) {
+        return allowedModes == null || allowedModes.isEmpty() || allowedModes.contains(TravelMode.BUS);
+    }
+
+    /** BUS만 뺀 허용 수단. 전체 허용(null·빈)이면 BUS를 뺀 기본 3수단으로 좁힌다. */
+    private static List<TravelMode> withoutBus(List<TravelMode> allowedModes) {
+        if (allowedModes == null || allowedModes.isEmpty()) {
+            return List.of(TravelMode.WALK, TravelMode.SUBWAY, TravelMode.BIKE);
+        }
+        return allowedModes.stream().filter(mode -> mode != TravelMode.BUS).toList();
+    }
+
+    /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용(232). */
+    private static String singleOrNull(Set<String> lines) {
+        if (lines == null || lines.size() != 1) {
+            return null;
+        }
+        return lines.iterator().next();
+    }
+
+    /** 휴리스틱 최대 속도(m/s). 데이터의 가장 빠른 간선보다 크게 잡아 과대평가를 막는다. */
+    private static final double HEURISTIC_MAX_SPEED_MPS = 40.0;
+
+    /**
+     * 목적지까지 남은 시간의 하한(초) — 좌표 직선거리/최대 속도(경로 탐색 구조 4부 §5.2).
+     *
+     * <p>과대평가하지 않으므로 최단성은 유지되고, 처리 범위만 목적지 방향으로 좁아진다.
+     * 좌표가 없으면 0을 돌려 일반 다익스트라와 같아진다.
+     */
+    private ToLongFunction<String> remainingLowerBound(String destStationId) {
+        RouteMapper.StationInfo dest = stationInfos.get(destStationId);
+        if (dest == null || dest.lat() == null || dest.lng() == null) {
+            return node -> 0L;
+        }
+        double destLat = dest.lat();
+        double destLng = dest.lng();
+        return node -> {
+            RouteMapper.StationInfo info = stationInfos.get(node);
+            if (info == null || info.lat() == null || info.lng() == null) {
+                return 0L;
+            }
+            double meters = GeoDistance.haversineMeters(info.lat(), info.lng(), destLat, destLng);
+            return (long) (meters / HEURISTIC_MAX_SPEED_MPS);
+        };
     }
 }
