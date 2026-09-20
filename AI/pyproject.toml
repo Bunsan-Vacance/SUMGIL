@@ -1,6 +1,11 @@
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# 노트북은 실험 기록이라 lint 대상으로 삼는 실익이 적다(`validation/**`에 E402·BLE001·F401
+# 예외를 둔 것과 같은 판단). ruff가 .ipynb를 기본 검사 대상에 넣으면서 기존 노트북 12건이
+# 한꺼번에 드러났는데, 노트북은 CI 트리거 경로(`AI/**/*.py`)에도 없어서 정작 노트북을 고칠
+# 때는 검사되지 않고 무관한 .py 변경만 발목을 잡는다.
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint.per-file-ignores]
 "validation/**" = ["E402", "BLE001", "F401"]
