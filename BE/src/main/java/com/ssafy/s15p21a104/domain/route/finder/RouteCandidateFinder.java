@@ -13,6 +13,7 @@ import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -279,5 +280,74 @@ public final class RouteCandidateFinder {
 
     private static boolean isAlwaysAllowed(TravelMode mode) {
         return mode == TravelMode.WALK || mode == TravelMode.TRANSFER;
+    }
+
+    /**
+     * 속도 후보·혼잡 후보를 합치며 완전 중복과 유사경로를 제거한다(S15P21A104-215 후속).
+     *
+     * <p>제거 기준 두 단계: ① leg 서명 완전 중복(같은 응답이 속도·혼잡 양쪽에서 뽑힌 경우)
+     * ② 탄 것만 비교 서명 중복 — 도보·따릉이 접근만 다른 변형은 같은 경로로 본다
+     * (설계 3부 §4.1 "탄 것만 비교"). 부족분은 후보 풀에서 시간순으로 채운다.
+     *
+     * @param speed 시간순 상위(속도) 후보
+     * @param calm 혼잡순 상위(혼잡) 후보
+     * @param pool 전체 후보(시간순) — 부족분 채움용
+     * @param max 합칠 최대 개수
+     * @return 중복 제거된 후보 목록(속도 → 혼잡 → 풀 순서 유지)
+     */
+    public static List<RouteSearchResponse> diversify(
+            List<RouteSearchResponse> speed, List<RouteSearchResponse> calm,
+            List<RouteSearchResponse> pool, int max) {
+        List<RouteSearchResponse> selected = new ArrayList<>(max);
+        Map<String, Integer> exactIndex = new LinkedHashMap<>();
+        Set<String> transitSignatures = new HashSet<>();
+        for (List<RouteSearchResponse> group : List.of(speed, calm, pool)) {
+            for (RouteSearchResponse candidate : group) {
+                if (selected.size() >= max) {
+                    return selected;
+                }
+                Integer already = exactIndex.get(exactSignature(candidate));
+                if (already != null) {
+                    // 같은 경로가 속도·혼잡 양쪽에 뽑힌 경우 — 한 번만 두되 ALTERNATIVE면 혼잡
+                    // 라벨로 승격한다. SHORTEST(대표 카드)는 라벨을 유지한다.
+                    RouteType kept = selected.get(already).routeType();
+                    if (candidate.routeType() == RouteType.LOW_CONGESTION
+                            && kept != RouteType.LOW_CONGESTION && kept != RouteType.SHORTEST) {
+                        selected.set(already, candidate);
+                    }
+                    continue;
+                }
+                if (!transitSignatures.add(transitSignature(candidate))) {
+                    continue;
+                }
+                exactIndex.put(exactSignature(candidate), selected.size());
+                selected.add(candidate);
+            }
+        }
+        return selected;
+    }
+
+    /** leg 단위 (수단·출발·도착·노선) 전체 서명 — 같은 응답 판정. */
+    private static String exactSignature(RouteSearchResponse response) {
+        StringBuilder signature = new StringBuilder();
+        for (RouteLegResponse leg : response.legs()) {
+            signature.append(leg.mode()).append(':')
+                    .append(leg.fromNodeId()).append('>').append(leg.toNodeId()).append(':')
+                    .append(leg.routeId()).append('|');
+        }
+        return signature.toString();
+    }
+
+    /** 탄 것만 — 지하철·버스 leg의 (수단·노선·승하차 지점) 서명. 도보·따릉이·환승은 뺀다. */
+    private static String transitSignature(RouteSearchResponse response) {
+        StringBuilder signature = new StringBuilder();
+        for (RouteLegResponse leg : response.legs()) {
+            if (leg.mode() != TravelMode.SUBWAY && leg.mode() != TravelMode.BUS) {
+                continue;
+            }
+            signature.append(leg.mode()).append(':').append(leg.routeId()).append(':')
+                    .append(leg.fromNodeId()).append('>').append(leg.toNodeId()).append('|');
+        }
+        return signature.toString();
     }
 }
