@@ -14,6 +14,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 단일 그래프 1회 K개 후보 탐색 — 정점·상태당 K 라벨 확정(S15P21A104-215).
@@ -37,6 +39,8 @@ public final class KShortestPathFinder {
 
     /** (역, 상태)당 유지 라벨 수 상한. K 전체를 상태마다 허용하면 상태 수가 K배로 불어난다. */
     static final int DEFAULT_MAX_LABELS_PER_STATE = 3;
+
+    private static final Logger log = LoggerFactory.getLogger(KShortestPathFinder.class);
 
     private final TransferRule transferRule;
     private final BusRouteIndex busRouteIndex;
@@ -109,6 +113,7 @@ public final class KShortestPathFinder {
                 continue;
             }
             if (++work >= maxWork) {
+                log.warn("탐색 작업 상한 도달(초기 확장): {}->{} maxWork={}", originStationId, destStationId, maxWork);
                 return List.of();
             }
             long cost = transferRule.costWithStation(
@@ -140,6 +145,8 @@ public final class KShortestPathFinder {
             }
             for (Edge edge : graph.outgoingEdges(label.node())) {
                 if (++work >= maxWork) {
+                    log.warn("탐색 작업 상한 도달: {}->{} maxWork={} 후보={}건",
+                            originStationId, destStationId, maxWork, results.size());
                     break search;
                 }
                 if (!isModeAllowed(edge.mode(), allowedModes)) {

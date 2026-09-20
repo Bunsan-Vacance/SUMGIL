@@ -143,6 +143,13 @@ public final class RouteCandidateFinder {
 
         List<FoundPath> paths = new KShortestPathFinder(rule, busRouteIndex)
                 .findK(graph, originStationId, destStationId, maxCandidates, allowedModes);
+        if (paths.isEmpty() && allowsBus(allowedModes)) {
+            // 탐색 작업 상한이 BUS 포함 탐색에서 목적지 후보를 만나기 전에 소진되면 빈 결과가 된다.
+            // 같은 조건에서 BUS만 뺀 경로는 존재할 수 있다 — 수단을 추가했다고 기존 경로가
+            // 사라지면 안 되므로(운영 빈 결과 회귀, 2026-09-20 보고) 비BUS로 제한 재탐색한다.
+            paths = new KShortestPathFinder(rule, busRouteIndex)
+                    .findK(graph, originStationId, destStationId, maxCandidates, withoutBus(allowedModes));
+        }
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {
@@ -349,5 +356,18 @@ public final class RouteCandidateFinder {
                     .append(leg.fromNodeId()).append('>').append(leg.toNodeId()).append('|');
         }
         return signature.toString();
+    }
+
+    /** BUS가 허용되는 요청인지. null·빈 목록은 전체 허용이다. */
+    private static boolean allowsBus(List<TravelMode> allowedModes) {
+        return allowedModes == null || allowedModes.isEmpty() || allowedModes.contains(TravelMode.BUS);
+    }
+
+    /** BUS만 뺀 허용 수단. 전체 허용(null·빈)이면 BUS를 뺀 기본 3수단으로 좁힌다. */
+    private static List<TravelMode> withoutBus(List<TravelMode> allowedModes) {
+        if (allowedModes == null || allowedModes.isEmpty()) {
+            return List.of(TravelMode.WALK, TravelMode.SUBWAY, TravelMode.BIKE);
+        }
+        return allowedModes.stream().filter(mode -> mode != TravelMode.BUS).toList();
     }
 }
