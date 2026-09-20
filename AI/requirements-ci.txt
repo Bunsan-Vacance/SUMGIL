@@ -30,7 +30,10 @@ google-auth-httplib2
 google-auth-oauthlib
 
 # ── 테스트 도구 ──
-ruff
+# ruff는 버전을 고정한다. 핀이 없으면 매 파이프라인이 최신을 받아, 우리가 아무것도 안 바꿔도
+# 어느 날 갑자기 lint가 깨진다 — 실제로 .ipynb가 기본 검사 대상에 들어가면서 기존 노트북
+# 12건이 한꺼번에 터졌다. 올릴 때는 로컬에서 `ruff check .`를 먼저 돌려보고 올린다.
+ruff==0.15.22
 black
 pytest
 httpx
