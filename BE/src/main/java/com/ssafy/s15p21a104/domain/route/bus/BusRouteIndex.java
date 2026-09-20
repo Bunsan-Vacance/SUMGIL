@@ -23,8 +23,13 @@ public final class BusRouteIndex {
 
     private final Map<StopPair, List<String>> routesByPair;
 
-    private BusRouteIndex(Map<StopPair, List<String>> routesByPair) {
+    /** 구간별 불변 옵션 집합 — 완화마다 재조립하지 않도록 생성 시 1회 계산(S15P21A104-235). */
+    private final Map<StopPair, Set<String>> optionsByPair;
+
+    private BusRouteIndex(Map<StopPair, List<String>> routesByPair,
+                          Map<StopPair, Set<String>> optionsByPair) {
         this.routesByPair = Map.copyOf(routesByPair);
+        this.optionsByPair = Map.copyOf(optionsByPair);
     }
 
     /**
@@ -54,8 +59,12 @@ public final class BusRouteIndex {
             }
         }
         Map<StopPair, List<String>> done = new LinkedHashMap<>();
-        acc.forEach((pair, ids) -> done.put(pair, List.copyOf(ids)));
-        return new BusRouteIndex(done);
+        Map<StopPair, Set<String>> options = new LinkedHashMap<>();
+        acc.forEach((pair, ids) -> {
+            done.put(pair, List.copyOf(ids));
+            options.put(pair, Set.copyOf(new LinkedHashSet<>(ids)));
+        });
+        return new BusRouteIndex(done, options);
     }
 
     /** 해당 구간 운행 노선. 없으면 빈 목록 (값을 지어내지 않는다). */
@@ -73,7 +82,8 @@ public final class BusRouteIndex {
         if (edge.mode() == TravelMode.BUS
                 && BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID.equals(edge.routeId())
                 && index != null) {
-            return Set.copyOf(new LinkedHashSet<>(index.routesFor(edge.fromNode(), edge.toNode())));
+            return index.optionsByPair.getOrDefault(
+                    new StopPair(edge.fromNode(), edge.toNode()), Set.of());
         }
         return Set.of(edge.routeId());
     }
