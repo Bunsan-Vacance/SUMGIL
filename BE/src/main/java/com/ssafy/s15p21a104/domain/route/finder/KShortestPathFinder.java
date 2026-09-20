@@ -111,11 +111,11 @@ public final class KShortestPathFinder {
                     banned.add(new EdgeKey(bannedEdge.fromNode(), bannedEdge.toNode(), bannedEdge.routeId()));
                 }
             }
-            RouteGraph restricted = restrictedGraph(graph, banned,
-                    rootStations(rootEdges, origin), spurNode);
+            Set<String> bannedNodes = rootStations(rootEdges, origin);
+            bannedNodes.remove(spurNode);
             FoundPath spur;
             try {
-                spur = single.find(restricted, spurNode, dest);
+                spur = single.find(graph, spurNode, dest, banned, bannedNodes);
             } catch (RuntimeException e) {
                 continue;
             }
@@ -143,7 +143,7 @@ public final class KShortestPathFinder {
         return true;
     }
 
-    /** root 구간 정점 집합(출발역 포함, spur 노드 제외) — 루프 방지용 금지 집합. */
+    /** root 구간 정점 집합(출발역 포함) — 루프 방지용 금지 집합. caller가 spur 노드를 뺀다. */
     private Set<String> rootStations(List<Edge> rootEdges, String origin) {
         Set<String> stations = new LinkedHashSet<>();
         stations.add(origin);
@@ -151,32 +151,6 @@ public final class KShortestPathFinder {
             stations.add(edge.toNode());
         }
         return stations;
-    }
-
-    /** 금지 엣지·root 정점을 제외한 그래프를 만든다. spur 노드는 유지한다. */
-    private RouteGraph restrictedGraph(RouteGraph graph, Set<EdgeKey> banned,
-                                       Set<String> rootStations, String spurNode) {
-        Set<String> nodes = new LinkedHashSet<>(graph.nodes());
-        java.util.Map<String, List<Edge>> adjacency = new java.util.LinkedHashMap<>();
-        java.util.Map<String, Set<String>> lines = new java.util.LinkedHashMap<>();
-        for (Edge edge : graph.edges()) {
-            if (banned.contains(new EdgeKey(edge.fromNode(), edge.toNode(), edge.routeId()))) {
-                continue;
-            }
-            adjacency.computeIfAbsent(edge.fromNode(), key -> new ArrayList<>()).add(edge);
-            lines.computeIfAbsent(edge.fromNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
-            lines.computeIfAbsent(edge.toNode(), key -> new LinkedHashSet<>()).add(edge.routeId());
-        }
-        // root 정점 진입 금지: spur 탐색이 이미 지난 정점으로 루프하지 않게 한다.
-        // spur 노드 자체는 탐색 시작점이라 남긴다.
-        for (String station : rootStations) {
-            if (station.equals(spurNode)) {
-                continue;
-            }
-            adjacency.remove(station);
-            nodes.remove(station);
-        }
-        return RouteGraph.of(nodes, adjacency, lines);
     }
 
     /** root 엣지 + spur 경로를 이어붙인다. 연속성 깨지면 null. */
@@ -281,8 +255,5 @@ public final class KShortestPathFinder {
                     .append(edge.routeId()).append('|');
         }
         return signature.toString();
-    }
-
-    private record EdgeKey(String from, String to, String routeId) {
     }
 }
