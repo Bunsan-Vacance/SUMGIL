@@ -73,9 +73,13 @@ lookup 조회 실패(학습 구간에 없는 요일유형×역×시간대)와 �
 ## 9호선 2·3단계 — lookup 기준선 전용 편입
 
 9호선 2·3단계 13역(언주 4126~중앙보훈병원 4138)은 `settings.crowd_line9_serving`(기본 켜짐,
-CLI `--line9`/`--no-line9`)이 켜져 있으면 슬롯·링크 표에 들어간다. **모델 추론에는 절대 넣지
-않는다** — `station_no`가 학습 패널(1~8호선)에 0건이라 모델(`features.CATEGORICAL_COLS`)
-기준으로는 미학습 범주가 되기 때문이다. 대신 `dataset.load_line9_panel`이 읽는 전용 패널
+CLI `--line9`/`--no-line9`)이 켜져 있으면 슬롯·링크 표에 들어간다. **모델 추론에는 넣지 않는다** —
+넣어 보고 내린 판정이다. 9호선 패널을 학습 패널에 합쳐 재학습하면 `station_no`는 학습된 범주가
+되지만(즉 "미학습 범주"는 원인이 아니라 결과다), 그 모델의 9호선 `no_lag` 성능은 lookup 대비
+RMSE +0.04~0.06%에 그치고 하차 MAE는 유의하게 나빠진다
+(`validation/CROWD/line9-model-check/RESULTS.md` 3b절). 배포 피처 13개 중 6개가 시차인데
+9호선은 영구 `no_lag`이라 그 6개가 죽고, 남는 이벤트 5 + `station_no` + `time_slot`은 lookup이
+이미 조건부로 담고 있는 축이라 잔차 모델이 얹을 정보가 없다. 대신 `dataset.load_line9_panel`이 읽는 전용 패널
 (`crowd_panel_line9_2025_2026.parquet`)에 `DayTypeLookupBaseline`을 그 자체로 fit해
 day_type×station_no×time_slot 평균만으로 예측한다(`predict_line9_day`) — 라우팅·시차·이벤트
 피처가 전혀 없다. 이 13역은 D−1 실시간 승하차 원천도 없어(`SERVING_CONTRACT.md` 노선 커버리지
@@ -508,8 +512,8 @@ def predict_line9_day(
 ) -> pd.DataFrame:
     """9호선 2·3단계 13역의 그 날 승하차 — **lookup 기준선만** 쓴다(모델에 절대 넣지 않는다).
 
-    `predict_day`(라우팅 → 예측기 → 이력 창 → 이벤트)와 짝이지만 훨씬 단순하다 — station_no가
-    학습 패널에 0건이라 모델(`features.CATEGORICAL_COLS`)에 넣으면 미학습 범주가 되므로,
+    `predict_day`(라우팅 → 예측기 → 이력 창 → 이벤트)와 짝이지만 훨씬 단순하다 — 모델에 넣어
+    재학습해도 lookup을 의미 있게 넘지 못해서(`line9-model-check/RESULTS.md` 3b절)
     day_type×station_no×time_slot 조회 하나로 끝낸다. 라우팅·시차 피처·이벤트가 없어 이력
     창도 필요 없다(9호선은 D−1 실시간 승하차 원천도 없다, `SERVING_CONTRACT.md` 노선 커버리지
     절). `line9_lookup`은 호출자(`run`)가 `line9_panel` 전체로 한 번 fit해 날짜마다 재사용한다.
@@ -1119,7 +1123,7 @@ def run(
 
     # 9호선 2·3단계 — lookup 기준선 전용(위 모듈 docstring "9호선 2·3단계" 절). 기본 켜짐(설정값)
     # — CLI(`--line9`/`--no-line9`)가 명시하면 그것을 따른다. `line9_panel`은 모델 패널(`panel`)과
-    # 절대 합치지 않는다 — station_no가 학습 패널에 0건이라 모델에 들어가면 미학습 범주가 된다.
+    # 합치지 않는다 — 합쳐서 재학습해도 lookup 대비 이득이 없다(line9-model-check 3b절).
     use_line9 = settings.crowd_line9_serving if line9 is None else line9
     line9_panel = load_line9_panel() if use_line9 else None
     line9_lookup = DayTypeLookupBaseline().fit(line9_panel) if line9_panel is not None else None

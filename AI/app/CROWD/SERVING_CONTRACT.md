@@ -506,10 +506,18 @@ CSV를 쓸 때마다 **같은 basename**의 사이드카 meta를 함께 쓴다(`
 받아오는 원문의 `lineNm`에 9호선이 실리지 않아 수집 결과가 그냥 0건이다 — 이 저장소 쪽에서
 호선을 걸러낸 필터가 아니라 원천 자체의 한계다. 그래서 9호선 13역은:
 
-- **모델 추론에 절대 들어가지 않는다.** `station_no`가 학습 패널에 0건이라 모델
-  (`pipeline/features.CATEGORICAL_COLS`)에 넣으면 미학습 범주가 된다(재논의 없이 확정).
-  대신 자체 lookup 기준선(day_type×station_no×time_slot 평균, `batch_predict.predict_line9_day`)
-  으로만 예측하고 `pred_source="lookup_line9"`로 항상 구분된다(1절).
+- **모델 추론에 들어가지 않는다 — 넣어 봤고, lookup보다 낫지 않았다.** 자체 lookup 기준선
+  (day_type×station_no×time_slot 평균, `batch_predict.predict_line9_day`)으로만 예측하고
+  `pred_source="lookup_line9"`로 항상 구분된다(1절).
+  근거는 `validation/CROWD/line9-model-check/RESULTS.md`다 — 9호선 패널을 학습 패널에 합쳐
+  재학습하면 `station_no`는 학습된 범주가 되지만(그러므로 "미학습 범주"는 원인이 아니라 결과다),
+  그렇게 만든 모델의 9호선 `no_lag` 성능은 lookup 대비 RMSE **+0.04~0.06%**에 그치고
+  **하차 MAE는 −0.159% [−0.248, −0.086]로 유의하게 나빠진다**(3b절). 9호선 역에 경기·축제를
+  매핑한 이벤트 표를 따로 만들어 붙여도 결과가 같다.
+  이유는 구조적이다: 배포 피처 13개 중 6개가 시차인데 9호선은 영구 `no_lag`이라 그 6개가 전부
+  죽고, 남는 것은 이벤트 5 + `station_no` + `time_slot`뿐이다 — lookup이 이미
+  (day_type × station_no × time_slot) 평균이라 잔차 모델이 얹을 수 있는 정보가 사실상 없다.
+  **D−1 원천이 9호선까지 열리기 전에는 이 판정이 바뀌지 않는다.**
 - **`lag1d_available`과 무관하다.** 이 필드는 1~8호선 모델 라우팅(`routing.py`)이 이력
   완비 여부를 판정하는 값이라 9호선에는 애초에 적용되지 않는다 — 9호선 행은 `lag1d_available`
   값과 상관없이 항상 같은 lookup 경로를 탄다.
