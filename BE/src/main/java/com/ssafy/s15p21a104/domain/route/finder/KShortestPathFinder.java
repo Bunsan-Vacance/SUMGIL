@@ -28,6 +28,16 @@ import java.util.Set;
  */
 public final class KShortestPathFinder {
 
+    /**
+     * 한 요청 탐색의 완화(엣지 시도) 상한. 넘으면 지금까지 모은 후보로 조기 종료한다.
+     * 클라이언트가 끊겨도 계산이 무한정 CPU를 물고 늘어지지 않게 하는 안전판이다
+     * (prod 1CPU에서 러너웨이가 후속 요청을 굶기는 문제, S15P21A104-215 후속).
+     */
+    static final long DEFAULT_MAX_WORK = 1_500_000L;
+
+    /** (역, 상태)당 유지 라벨 수 상한. K 전체를 상태마다 허용하면 상태 수가 K배로 불어난다. */
+    static final int DEFAULT_MAX_LABELS_PER_STATE = 3;
+
     private final TransferRule transferRule;
     private final BusRouteIndex busRouteIndex;
 
@@ -68,6 +78,14 @@ public final class KShortestPathFinder {
      */
     public List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
                                  int k, List<TravelMode> allowedModes) {
+        return findK(graph, originStationId, destStationId, k, allowedModes,
+                DEFAULT_MAX_WORK, DEFAULT_MAX_LABELS_PER_STATE);
+    }
+
+    /** 작업 상한·상태당 라벨 상한을 명시하는 판(테스트·튜닝용). */
+    List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
+                          int k, List<TravelMode> allowedModes,
+                          long maxWork, int maxLabelsPerState) {
         Objects.requireNonNull(graph, "graph");
         if (k <= 0) {
             return List.of();
@@ -78,6 +96,8 @@ public final class KShortestPathFinder {
         if (!graph.containsNode(originStationId) || !graph.containsNode(destStationId)) {
             return List.of();
         }
+        int labelCap = Math.max(1, Math.min(k, maxLabelsPerState));
+        long work = 0;
 
         Map<String, Map<StateKey, List<Label>>> labelsByNode = new HashMap<>();
         PriorityQueue<Label> queue = new PriorityQueue<>(Comparator.comparingLong(Label::cost));
@@ -88,6 +108,9 @@ public final class KShortestPathFinder {
             if (originStationId.equals(edge.toNode()) || !isModeAllowed(edge.mode(), allowedModes)) {
                 continue;
             }
+            if (++work >= maxWork) {
+                return List.of();
+            }
             long cost = transferRule.costWithStation(
                     edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode())
                     + edge.waitSec();
@@ -95,13 +118,14 @@ public final class KShortestPathFinder {
             Set<String> kept = TransferRule.keptTransitLines(Set.of(), edge.mode(), options);
             Label label = new Label(cost, null, edge, edge.toNode(), edge.mode(), kept, options,
                     originBit | bitOf(edge.toNode()));
-            if (addLabel(labelsByNode, label, k)) {
+            if (addLabel(labelsByNode, label, labelCap)) {
                 queue.add(label);
             }
         }
 
         List<FoundPath> results = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        search:
         while (!queue.isEmpty() && results.size() < k) {
             Label label = queue.poll();
             if (!isCurrent(labelsByNode, label)) {
@@ -115,6 +139,9 @@ public final class KShortestPathFinder {
                 continue;
             }
             for (Edge edge : graph.outgoingEdges(label.node())) {
+                if (++work >= maxWork) {
+                    break search;
+                }
                 if (!isModeAllowed(edge.mode(), allowedModes)) {
                     continue;
                 }
@@ -145,7 +172,7 @@ public final class KShortestPathFinder {
                         label.keptLine(), edge.mode(), options);
                 Label child = new Label(nextCost, label, edge, edge.toNode(), edge.mode(),
                         nextKept, options, label.seenBits() | targetBit);
-                if (addLabel(labelsByNode, child, k)) {
+                if (addLabel(labelsByNode, child, labelCap)) {
                     queue.add(child);
                 }
             }
