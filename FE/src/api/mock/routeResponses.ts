@@ -235,7 +235,7 @@ export const routeSearchMockResponse = {
           toNodeName: '역삼역 버스정류장',
           toLat: null,
           toLng: null,
-          routeId: '740',
+          routeId: 'BUS',
           minutes: 7.0,
           geometry: {
             type: 'MultiLineString',
@@ -248,7 +248,11 @@ export const routeSearchMockResponse = {
           },
           geometryStatus: 'available',
           distanceMeters: 940,
-          routeName: '740',
+          routeName: null,
+          routeOptions: [
+            { routeId: '740', routeName: '740번', headwayMin: 9 },
+            { routeId: '341', routeName: '341번', headwayMin: null },
+          ],
         },
       ],
       source: 'MOCK',

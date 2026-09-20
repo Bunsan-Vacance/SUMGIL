@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Route } from './types'
-import { busLabels, busRouteOptions, formatBusLabel, groupRoutes } from './routeGrouping'
+import {
+  busLabels,
+  busLegOptions,
+  busOptionCount,
+  busOptionLabel,
+  busRouteOptions,
+  formatBusLabel,
+  groupRoutes,
+} from './routeGrouping'
 
 const endpoint = (id: string, name = id) => ({ id, name })
 function route(id: string, busId: string, busName: string, subwayId = '1002'): Route {
@@ -88,5 +96,24 @@ describe('버스 대안 경로 그룹화', () => {
     expect(formatBusLabel('420')).toBe('420번')
     expect(busLabels(first)).toEqual(['420'])
     expect(busRouteOptions([first, duplicate])).toHaveLength(1)
+  })
+
+  it('BUS leg 내부 선택지는 경로 후보와 분리해 표시용으로 읽는다', () => {
+    const current = route('current', 'BUS', '버스')
+    current.legs[2].busRouteOptions = [
+      { routeId: '420', routeName: '420번', headwayMin: 8 },
+      { routeId: 'N26' },
+    ]
+
+    expect(busLegOptions(current)).toEqual([
+      {
+        leg: current.legs[2],
+        index: 2,
+        options: current.legs[2].busRouteOptions,
+      },
+    ])
+    expect(busOptionCount(current)).toBe(2)
+    expect(busOptionLabel(current.legs[2].busRouteOptions[0])).toBe('420번')
+    expect(busOptionLabel(current.legs[2].busRouteOptions[1])).toBe('N26')
   })
 })
