@@ -106,7 +106,7 @@ public class RouteSearchService {
         // 속도 3은 시간순 상위, 혼잡 3은 혼잡순 상위(중복 가능)로 뽑는다.
         List<ScoredCandidate> scoredCandidates = RouteCandidateFinder.filterScoredByModes(
                 candidateFinder().findCandidatesWithPaths(
-                        slotGraph, originStationId, destStationId, MAX_CANDIDATES),
+                        slotGraph, originStationId, destStationId, MAX_CANDIDATES, modes),
                 modes);
         List<RouteSearchResponse> filtered = scoredCandidates.stream().map(ScoredCandidate::response).toList();
         List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
@@ -277,7 +277,7 @@ public class RouteSearchService {
         // 214: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
         List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
                 coordFinder.findCandidates(
-                        augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES),
+                        augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES, request.modes()),
                 request.modes());
         List<RouteSearchResponse> speed = RouteCandidateFinder.relabelByRank(filtered).stream()
                 .limit(SPEED_ROUTES)
