@@ -88,13 +88,16 @@ day_type×station_no×time_slot 평균만으로 예측한다(`predict_line9_day`
 
 `settings.crowd_link_table`(또는 `--link-table`/`--no-link-table`)를 켜면 슬롯 표에 (line, segment,
 station_no, direction) → `to_station_no` 대응(세그먼트 위상에서 한 번만 계산)을 이너 조인해 링크
-단위 표를 추가로 만들고, BE 적재용 CSV(`predictions_link_{date}_{HHMMSS}.csv`)도 같이 쓴다. **이것도
-예측이 아니라 분해다**(`RESOLUTION_LADDER.md` §1.1·§4) — 이너 조인이라 세그먼트 경계(종점·절단면)는
-대응이 없어 자동으로 빠지고, 강동처럼 한 역이 여러 세그먼트에 걸치면 세그먼트마다 다른
-`to_station_no`를 갖는 별개 행으로 남아 5.4절 강동 중복 문제가 자연히 풀린다 — 열차 표(239)의
-`link_ambiguous` 같은 모호성 플래그가 이 표에는 없다(슬롯 집계 표라 여러 지선이 동시에 유효하다).
-기본은 꺼짐 — B-5 적재 계약(`.claude/handoff/response/FROME_BE-crowd-pred-load-path.md`)은 확정됐지만
-배치 스케줄이 아직 등록되지 않았다. 컬럼·메타 키는 `SERVING_CONTRACT.md` 8절·3절, 구현은
+단위 표를 추가로 만들고, BE 적재용 CSV(`predictions_{date}_{HHMMSS}.csv` — parquet과 달리 `link_`
+토큰이 없다, BE가 명시적으로 요청한 이름이다)도 같이 쓴다. **이것도 예측이 아니라 분해다**
+(`RESOLUTION_LADDER.md` §1.1·§4) — 이너 조인이라 세그먼트 경계(종점·절단면)는 대응이 없어 자동으로
+빠지고, 강동처럼 한 역이 여러 세그먼트에 걸치면 세그먼트마다 다른 `to_station_no`를 갖는 별개 행으로
+남아 5.4절 강동 중복 문제가 자연히 풀린다 — 열차 표(239)의 `link_ambiguous` 같은 모호성 플래그가 이
+표에는 없다(슬롯 집계 표라 여러 지선이 동시에 유효하다). CSV마다 같은 basename의 사이드카
+`.meta.json`(`target_date`·`row_count`·`generated_at` 3키)이 같이 쓰인다 — 날짜당 하나뿐인 풍부한
+`.meta.json`(3절)은 재생성 시 덮어써져 이전 CSV와 짝이 안 맞기 때문이다(8.1절). 기본은 꺼짐 — B-5
+적재 계약(`.claude/handoff/response/FROME_BE-crowd-pred-load-path.md`)은 확정됐지만 배치 스케줄이
+아직 등록되지 않았다. 컬럼·메타 키는 `SERVING_CONTRACT.md` 8절·3절, 구현은
 `to_link_table`·`write_link_csv`.
 """
 
@@ -983,6 +986,44 @@ def write_link_csv(link_table: pd.DataFrame, path: Path) -> int:
     return len(frame)
 
 
+def link_csv_path(out_dir: Path, target_date: pd.Timestamp, generated_at: datetime) -> Path:
+    """BE 적재용 CSV 경로 — **`link_` 토큰이 없다.**
+
+    parquet(`predictions_link_{date}.parquet`)과 달리 이 이름에는 `link_`가 빠진다. 취향이 아니라
+    BE가 확정한 이름이다(`FROME_BE-crowd-pred-load-path.md` 6.3절 제안 → 이번 통지에서 재확인) —
+    BE의 fetch glob이 `predictions_*.csv`이고 파일명에서 날짜를 뽑아 쓴다. `_HHMMSS`는 같은 날짜를
+    다시 만들어도 파일명이 겹치지 않게 하려는 것이고, 그 값은 `generated_at`과 같은 순간이라
+    사이드카 meta(`write_link_csv_sidecar_meta`)·3절 meta의 `generated_at`과 일치한다.
+
+    규칙을 여기 한 곳에 모아 둔 이유는 `SERVING_CONTRACT.md` 8.1절이 BE 계약이고, 이름이 조용히
+    바뀌면 BE 로더가 파일을 못 찾거나 날짜 파싱이 깨지기 때문이다 — 테스트가 이 함수를 대조한다.
+    """
+    return out_dir / f"predictions_{target_date:%Y-%m-%d}_{generated_at:%H%M%S}.csv"
+
+
+def write_link_csv_sidecar_meta(
+    csv_path: Path, target_date: pd.Timestamp, row_count: int, generated_at: datetime
+) -> None:
+    """BE CSV(`write_link_csv`)와 짝이 되는 사이드카 meta — CSV와 같은 basename의 `.meta.json`.
+
+    날짜당 하나뿐인 풍부한 `.meta.json`(`validated_meta`, 3절)은 CSV가 `_HHMMSS`로 여러 개
+    쌓여도 재생성할 때마다 덮어써진다 — 그러면 이전 CSV는 짝 meta를 잃고, 남은 meta의
+    `link_csv_rows`는 새 CSV 것이 된다. BE의 행 수 대조(전송 손상 검증, 6.2절)가 바로 이 상황을
+    잡으려는 장치인데 그 구조로는 못 잡는다. 이 사이드카는 CSV 하나마다 독립적으로 남아 그 문제를
+    막는다 — 키는 3개만, `row_count`는 BE가 요청한 이름 그대로다.
+    """
+    payload = {
+        "target_date": pd.Timestamp(target_date).strftime("%Y-%m-%d"),
+        "row_count": row_count,
+        "generated_at": generated_at.isoformat(timespec="seconds"),
+    }
+    text = json.dumps(payload, ensure_ascii=False, indent=1)
+    _atomic_write(
+        lambda p, text=text: p.write_text(text, encoding="utf-8"),
+        csv_path.with_suffix(".meta.json"),
+    )
+
+
 def validated_meta(meta: dict) -> dict:
     """`.meta.json`에 쓸 메타를 명세 키(`META_KEYS`)에 맞춰 검증·정렬한다.
 
@@ -1180,9 +1221,10 @@ def run(
             _atomic_write(
                 lambda p, link_tbl=link_tbl: link_tbl.to_parquet(p, index=False), link_path
             )
-            csv_path = out_dir / f"predictions_link_{d:%Y-%m-%d}_{now:%H%M%S}.csv"
+            csv_path = link_csv_path(out_dir, d, now)
             csv_rows = write_link_csv(link_tbl, csv_path)
             link_meta["link_csv_rows"] = csv_rows
+            write_link_csv_sidecar_meta(csv_path, d, csv_rows, now)
             print(
                 f"[배치] {d:%Y-%m-%d} → {csv_path.name} ({lstats['link_rows']:,}행, "
                 f"boundary_dropped_keys {lstats['boundary_dropped_keys']}, "

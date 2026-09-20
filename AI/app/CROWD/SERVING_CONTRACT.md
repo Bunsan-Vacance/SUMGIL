@@ -425,9 +425,11 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 ### 8.1 BE CSV
 
-경로: `AI/data/CROWD/serving/predictions_link_{YYYY-MM-DD}_{HHMMSS}.csv`. 파일명에 생성 시각을
-넣는 이유는 같은 날짜를 다시 만들어도(배율표·모델 교체) 파일명이 겹치지 않게 하기 위해서다 —
-`_HHMMSS`는 그 실행의 `meta.generated_at`과 같은 순간이다(`FROME_BE-crowd-pred-load-path.md`
+경로: `AI/data/CROWD/serving/predictions_{YYYY-MM-DD}_{HHMMSS}.csv`. **`link_` 토큰이 없다** —
+parquet(`predictions_link_{date}.parquet`)과 이름을 다르게 가져가려는 것이 아니라 BE가 명시적으로
+요청한 이름이다(`FROME_BE-crowd-pred-load-path.md` 6.3절 제안, 이번 통지에서 재확인). 파일명에
+생성 시각을 넣는 이유는 같은 날짜를 다시 만들어도(배율표·모델 교체) 파일명이 겹치지 않게 하기
+위해서다 — `_HHMMSS`는 그 실행의 `meta.generated_at`과 같은 순간이다(`FROME_BE-crowd-pred-load-path.md`
 6.3절). 헤더는 BE가 확정한 순서 그대로다(같은 문서 6.1절):
 
 ```
@@ -442,6 +444,32 @@ parquet 컬럼과의 대응은 이름만 바뀌고 값은 그대로다 — `date
 더하는 다른 함수)를 재사용하면 `00:00`/`00:30`이 48/49가 되어 틀리므로, `batch_predict.py`는
 `_slot30_to_index`로 이 식을 직접 계산한다.
 
+### 8.2 CSV 사이드카 meta — `predictions_{YYYY-MM-DD}_{HHMMSS}.meta.json`
+
+CSV를 쓸 때마다 **같은 basename**의 사이드카 meta를 함께 쓴다(`write_link_csv_sidecar_meta`).
+키는 3개뿐이다:
+
+```json
+{"target_date": "2026-09-20", "row_count": 21684, "generated_at": "2026-09-20T13:31:39+09:00"}
+```
+
+- `target_date` — 대상 날짜(`YYYY-MM-DD`)
+- `row_count` — 그 CSV에 실제로 쓴 행 수. BE가 요청한 이름 그대로다(6.2절 "산출 행 수")
+- `generated_at` — 생성 시각(KST, ISO8601). 파일명의 `_HHMMSS`와 `predictions_{date}.meta.json`의
+  `generated_at`(3절)이 가리키는 것과 같은 순간이다
+
+(표가 아니라 목록인 이유: 8절 표의 첫 칸은 계약 테스트가 `LINK_OUTPUT_COLS`와 1:1로 대조하므로,
+링크 표 컬럼이 아닌 키를 같은 절에서 표로 쓰면 그 대조가 깨진다.)
+
+**따로 필요한 이유**: 3절의 풍부한 `.meta.json`(32키, `link_csv_rows` 포함)은 **날짜당 하나**뿐이라
+같은 날짜를 재생성하면 덮어써진다. CSV는 `_HHMMSS`로 여러 개 쌓이므로, 재생성 후에는 이전 CSV가
+자신의 짝 meta를 잃고 남은 3절 meta의 `link_csv_rows`는 최신 CSV의 값이 된다 — BE의 행 수 대조
+(전송 끊김 검출, 6.2절)가 정확히 이 상황을 잡아야 하는데 날짜당 meta 하나로는 잡을 수 없다. CSV
+파일마다 독립된 사이드카를 두면 어떤 CSV를 다시 열어도 그 순간의 `row_count`를 확인할 수 있다.
+3절의 `predictions_{date}.meta.json`은 이 사이드카와 별개로 그대로 유지된다(32키·`link_csv_rows`
+포함, 변경 없음) — 3절 meta는 "이번 배치 실행이 어떤 조건으로 만들어졌는지"를, 사이드카는
+"이 CSV 파일 하나가 몇 행인지"를 각각 답한다.
+
 ---
 
 ## 9. 운영 배치 — 스케줄·파일 수명
@@ -450,8 +478,10 @@ parquet 컬럼과의 대응은 이름만 바뀌고 값은 그대로다 — `date
   **오늘·내일 2일치**다.
 - 산출 경로는 `AI/data/CROWD/serving/`이고, 서버 절대 경로는
   `/home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI/data/CROWD/serving`이다.
-- 같은 날짜가 여러 번 만들어질 수 있다(재실행·배율표/모델 교체). parquet은 덮어쓰이고
-  **CSV는 `_HHMMSS`가 달라 쌓인다** — BE는 파일명 사전순 최신을 고른다.
+- 같은 날짜가 여러 번 만들어질 수 있다(재실행·배율표/모델 교체). parquet과 날짜당 하나인
+  `predictions_{date}.meta.json`(3절)은 덮어쓰이고, **CSV와 그 사이드카 meta(8.2절)는 `_HHMMSS`가
+  달라 짝을 이룬 채로 같이 쌓인다** — BE는 파일명 사전순 최신을 고른다. BE의 fetch glob은
+  `predictions_*.csv`라 사이드카(`.meta.json`)는 걸리지 않는다.
 - 재적재 판정은 `meta.generated_at`이다. 적재는 BE load job이 수동으로 하며 upsert라 멱등이다.
 - 오래된 CSV 정리 규칙은 **두지 않는다**(BE와 합의). 필요해지면 그때 옵션으로 붙인다.
 - 이 절이 바뀌면(시각·경로·파일명 규칙) BE 통지문을 보낸다.
