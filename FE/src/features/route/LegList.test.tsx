@@ -3,7 +3,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Route } from './types'
-import LegList from './LegList'
+import LegList, { compactLegs } from './LegList'
 
 afterEach(cleanup)
 
@@ -68,5 +68,28 @@ describe('구간 이동 안내', () => {
     const activeItem = screen.getByText('현재 단계').parentElement?.parentElement?.parentElement
     expect(activeItem?.getAttribute('aria-current')).toBe('step')
     expect(activeItem?.classList.contains('is-active')).toBe(true)
+  })
+
+  it('선택 가능한 버스 노선 목록이 다른 연속 구간은 합치지 않는다', () => {
+    const legs = [
+      {
+        mode: 'bus' as const,
+        title: '정류장 A → 정류장 B',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 3,
+        busRouteOptions: [{ routeId: '108' }],
+      },
+      {
+        mode: 'bus' as const,
+        title: '정류장 B → 정류장 C',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 4,
+        busRouteOptions: [{ routeId: '143' }],
+      },
+    ]
+
+    expect(compactLegs(legs)).toHaveLength(2)
   })
 })

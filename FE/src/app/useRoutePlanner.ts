@@ -36,6 +36,19 @@ function samePlace(first: Place, second: Place) {
   )
 }
 
+function hasRouteLocation(place: Place) {
+  const hasCoordinates =
+    typeof place.lat === 'number' &&
+    typeof place.lng === 'number' &&
+    Number.isFinite(place.lat) &&
+    Number.isFinite(place.lng) &&
+    place.lat >= -90 &&
+    place.lat <= 90 &&
+    place.lng >= -180 &&
+    place.lng <= 180
+  return Boolean(place.stationId?.trim()) || hasCoordinates
+}
+
 export function useRoutePlanner(
   repository?: RouteRepository,
   guidanceApi: GuidanceRepository = defaultGuidanceRepository,
@@ -118,6 +131,11 @@ export function useRoutePlanner(
       openSearch('destination')
       return false
     }
+    if (!hasRouteLocation(trip.origin)) {
+      if (place) trip.setDestination(place)
+      openSearch('origin')
+      return Boolean(place)
+    }
     if (samePlace(destination, trip.origin)) {
       setMessage('출발지와 다른 도착지를 선택해 주세요.')
       return false
@@ -154,7 +172,7 @@ export function useRoutePlanner(
     return true
   }
   const swapPlaces = () => {
-    if (!trip.destination) return false
+    if (!trip.destination || !hasRouteLocation(trip.origin)) return false
     if (screen === 'results') {
       void trip.search(trip.origin, trip.destination)
       go('results')

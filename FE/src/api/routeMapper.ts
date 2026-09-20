@@ -4,6 +4,7 @@ import type {
   CongestionGrade,
   CongestionPrediction,
   CongestionPredictionBasis,
+  BusRouteOption,
   GeometryLineString,
   Route,
   RouteEndpoint,
@@ -62,6 +63,7 @@ function mapMode(mode: unknown): { mode: 'walk' | 'subway' | 'bus' | 'bike'; tra
 function routeLineName(routeId: string | undefined) {
   if (!routeId) return undefined
   const names: Record<string, string> = {
+    BUS: '버스',
     BIKE: '자전거',
     WALK: '도보',
     '1001': '1호선',
@@ -77,6 +79,36 @@ function routeLineName(routeId: string | undefined) {
     '1075': '수인분당선',
   }
   return names[routeId] || routeId
+}
+
+function mapBusRouteOptions(value: unknown, mode: unknown): BusRouteOption[] | undefined {
+  if (value === undefined || value === null) return undefined
+  if (mode !== 'BUS' || !Array.isArray(value)) {
+    throw new RepositoryError('invalid-response', '버스 노선 선택지 응답이 올바르지 않아요.')
+  }
+  const options = value.map((option) => {
+    if (!isRecord(option) || !text(option.routeId)) {
+      throw new RepositoryError('invalid-response', '버스 노선 선택지 응답이 올바르지 않아요.')
+    }
+    if (option.routeName != null && !text(option.routeName)) {
+      throw new RepositoryError('invalid-response', '버스 노선명 응답이 올바르지 않아요.')
+    }
+    if (
+      option.headwayMin != null &&
+      (!Number.isInteger(option.headwayMin) || (option.headwayMin as number) <= 0)
+    ) {
+      throw new RepositoryError('invalid-response', '버스 배차간격 응답이 올바르지 않아요.')
+    }
+    return {
+      routeId: text(option.routeId) as string,
+      ...(text(option.routeName) ? { routeName: text(option.routeName) } : {}),
+      ...(option.headwayMin != null ? { headwayMin: option.headwayMin as number } : {}),
+    }
+  })
+  if (new Set(options.map((option) => option.routeId)).size !== options.length) {
+    throw new RepositoryError('invalid-response', '버스 노선 선택지가 중복되었어요.')
+  }
+  return options
 }
 
 function endpointCoordinate(value: unknown, min: number, max: number) {
@@ -211,6 +243,7 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
     const fromName = text(rawLeg.fromNodeName) || text(rawLeg.fromNodeId) || '출발 지점'
     const toName = text(rawLeg.toNodeName) || text(rawLeg.toNodeId) || '도착 지점'
     const routeId = text(rawLeg.routeId)
+    const busRouteOptions = mapBusRouteOptions(rawLeg.routeOptions, rawLeg.mode)
     const rawCongestionLevel = optionalCongestionLevel(rawLeg.congestionLevel)
     const segmentCongestionLevel =
       mappedMode.mode === 'subway' || mappedMode.mode === 'bus' ? rawCongestionLevel : undefined
@@ -243,16 +276,25 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
               : transfer
                 ? '환승'
                 : undefined
+    const busRouteNames = busRouteOptions
+      ?.map((option) => option.routeName || option.routeId)
+      .filter(Boolean)
     return {
       mode: mappedMode.mode,
       transfer,
       title: transitionName ? `${fromName}에서 ${transitionName}` : `${fromName} → ${toName}`,
-      note: text(rawLeg.routeName) || routeLineName(routeId) || transitionName || '이동 구간',
+      note:
+        text(rawLeg.routeName) ||
+        (busRouteNames?.length ? busRouteNames.join(' · ') : undefined) ||
+        routeLineName(routeId) ||
+        transitionName ||
+        '이동 구간',
       distanceMeters: optionalDistance(rawLeg.distanceMeters),
       minutes: rawLeg.minutes as number,
       ...(transition ? { transitionType: transition } : {}),
       ...(geometry ? { geometry } : {}),
       ...(routeId ? { routeId } : {}),
+      ...(busRouteOptions !== undefined ? { busRouteOptions } : {}),
       ...(segmentCongestionLevel !== undefined ? { segmentCongestionLevel } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),

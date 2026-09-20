@@ -9,7 +9,14 @@ const prediction = (congestionPercent: number, congestionGrade: 'LOW' | 'MEDIUM'
 })
 
 export const places: Place[] = [
-  { id: 'origin', name: '멀티캠퍼스 역삼', address: '서울 강남구 테헤란로 212', kind: '장소' },
+  {
+    id: 'origin',
+    name: '멀티캠퍼스 역삼',
+    address: '서울 강남구 테헤란로 212',
+    kind: '장소',
+    lat: 37.50162,
+    lng: 127.03944,
+  },
   { id: 'dogok', name: '도곡역', address: '서울 강남구 남부순환로 지하 2814', kind: '역' },
   { id: 'exit', name: '도곡역 1번 출구', address: '서울 강남구 도곡동', kind: '출구' },
   { id: 'bike', name: '도곡역 대여소', address: '도곡역에서 150m', kind: '대여소' },

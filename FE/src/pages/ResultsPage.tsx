@@ -6,7 +6,7 @@ import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
 import { clockTime, congestionPredictionFor } from '../features/route/selectors'
-import { busRouteOptions, groupRoutes } from '../features/route/routeGrouping'
+import { busOptionCount, busRouteOptions, groupRoutes } from '../features/route/routeGrouping'
 import type { RepositoryErrorCode } from '../api/errors'
 
 interface Props {
@@ -292,12 +292,16 @@ export default function ResultsPage({
             {!liveApi && <p className="results-sample">시안 · 예시 데이터</p>}
             <div className="route-list">
               {routeGroups.map(({ representative: route, variants }) => {
-                const busVariantCount = busRouteOptions(variants).length
+                const inlineBusOptionCount = busOptionCount(route)
+                const legacyBusOptionCount = busRouteOptions(variants).length
+                const displayedBusOptionCount = inlineBusOptionCount || legacyBusOptionCount
                 return (
                   <RouteCard
                     key={route.id}
                     route={route}
-                    busVariantCount={busVariantCount > 1 ? busVariantCount : undefined}
+                    busOptionCount={
+                      displayedBusOptionCount > 1 ? displayedBusOptionCount : undefined
+                    }
                     onDetail={() => {
                       setSelectedId(route.id)
                       go('detail')

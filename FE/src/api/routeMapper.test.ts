@@ -12,6 +12,53 @@ const response = (overrides: Record<string, unknown> = {}) => ({
 })
 
 describe('경로 응답 확장 필드', () => {
+  it('BUS leg의 노선 선택지와 배차간격을 표시 모델에 보존한다', () => {
+    const route = mapBackendRoute(
+      response({
+        legs: [
+          {
+            mode: 'BUS',
+            routeId: 'BUS',
+            routeName: null,
+            minutes: 10,
+            routeOptions: [
+              { routeId: '108', routeName: '108번', headwayMin: 10 },
+              { routeId: '143', routeName: null, headwayMin: null },
+            ],
+          },
+        ],
+      }),
+      0,
+      '2026-09-17T00:00:00.000Z',
+    )
+
+    expect(route.legs[0]).toMatchObject({
+      routeId: 'BUS',
+      note: '108번 · 143',
+      busRouteOptions: [{ routeId: '108', routeName: '108번', headwayMin: 10 }, { routeId: '143' }],
+    })
+  })
+
+  it.each([
+    { mode: 'SUBWAY', routeOptions: [] },
+    { mode: 'BUS', routeOptions: {} },
+    { mode: 'BUS', routeOptions: [{ routeName: '108번' }] },
+    { mode: 'BUS', routeOptions: [{ routeId: '108', routeName: ' ' }] },
+    { mode: 'BUS', routeOptions: [{ routeId: '108', headwayMin: 0 }] },
+    {
+      mode: 'BUS',
+      routeOptions: [{ routeId: '108' }, { routeId: '108', routeName: '108번' }],
+    },
+  ])('잘못된 버스 노선 선택지를 거부한다: %#', ({ mode, routeOptions }) => {
+    expect(() =>
+      mapBackendRoute(
+        response({ legs: [{ mode, minutes: 10, routeOptions }] }),
+        0,
+        '2026-09-17T00:00:00.000Z',
+      ),
+    ).toThrow(RepositoryError)
+  })
+
   it('leg 혼잡도 수치를 내부 구간 필드로 보존하고 100 초과도 허용한다', () => {
     const route = mapBackendRoute(
       response({

@@ -47,6 +47,55 @@ function route(id: string, busId: string, busName: string): Route {
 }
 
 describe('경로 상세 버스 선택', () => {
+  it('BUS leg 내부 노선명과 배차간격을 표시하고 경로 선택으로 취급하지 않는다', () => {
+    const current = route('current', 'BUS', '버스')
+    current.legs[2].busRouteOptions = [
+      { routeId: '108', routeName: '108번', headwayMin: 10 },
+      { routeId: '143' },
+    ]
+    const setSelectedId = vi.fn()
+
+    render(
+      <DetailPage
+        origin={{ id: 'origin', name: '출발', address: '', kind: '장소' }}
+        destinationName="도착"
+        selected={current}
+        alternatives={[current]}
+        setSelectedId={setSelectedId}
+        go={vi.fn()}
+        startGuide={vi.fn()}
+      />,
+    )
+
+    const region = screen.getByRole('region', { name: '이용 가능한 버스' })
+    expect(region.textContent).toContain('transfer → destination')
+    expect(region.textContent).toContain('108번')
+    expect(region.textContent).toContain('약 10분 간격')
+    expect(region.textContent).toContain('143번')
+    expect(region.textContent).toContain('배차 정보 없음')
+    expect(region.querySelectorAll('button')).toHaveLength(0)
+    expect(setSelectedId).not.toHaveBeenCalled()
+  })
+
+  it('빈 BUS leg 선택지는 노선 정보가 없다고 표시한다', () => {
+    const current = route('current', 'BUS', '버스')
+    current.legs[2].busRouteOptions = []
+
+    render(
+      <DetailPage
+        origin={{ id: 'origin', name: '출발', address: '', kind: '장소' }}
+        destinationName="도착"
+        selected={current}
+        alternatives={[current]}
+        setSelectedId={vi.fn()}
+        go={vi.fn()}
+        startGuide={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('버스 노선 정보를 확인하지 못했어요.')).toBeTruthy()
+  })
+
   it('그룹화된 버스 번호를 보여주고 실제 Route를 선택한다', () => {
     const first = route('first', '420-id', '420')
     const second = route('second', 'N26-id', 'N26')
