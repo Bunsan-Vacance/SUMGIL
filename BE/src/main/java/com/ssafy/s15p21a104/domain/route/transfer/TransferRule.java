@@ -79,6 +79,10 @@ public class TransferRule {
         if (!isTransfer(currentLine, nextLine)) {
             return travelSec;
         }
+        if (transferTimes.isEmpty()) {
+            // 빈 실측표 — 조회 키 생성 없이 상수 폴백 (S15P21A104-235 핫패스)
+            return travelSec + defaultSec;
+        }
         Integer measured = null;
         if (stationId != null && currentLine != null && nextLine != null) {
             measured = transferTimes.get(new TransferKey(stationId, currentLine, nextLine));
@@ -212,11 +216,12 @@ public class TransferRule {
      */
     public static Set<String> keptTransitLines(
             Set<String> kept, TravelMode mode, Set<String> options) {
-        Set<String> keptSafe = kept == null ? Set.of() : Set.copyOf(kept);
+        // 호출부(탐색기·매퍼)는 불변 집합만 넘긴다 — 방어 복사 제거 (S15P21A104-235 핫패스).
+        Set<String> keptSafe = kept == null ? Set.of() : kept;
         if (!isTransit(mode)) {
             return keptSafe;
         }
-        Set<String> optionsSafe = options == null ? Set.of() : Set.copyOf(options);
+        Set<String> optionsSafe = options == null ? Set.of() : options;
         if (keptSafe.isEmpty()) {
             return optionsSafe;
         }
@@ -234,9 +239,10 @@ public class TransferRule {
     public static TransferDecision decideLines(
             Set<String> kept, TravelMode prevMode, Set<String> prevOptions,
             TravelMode nextMode, Set<String> nextOptions) {
-        Set<String> keptSafe = kept == null ? Set.of() : Set.copyOf(kept);
-        Set<String> prevSafe = prevOptions == null ? Set.of() : Set.copyOf(prevOptions);
-        Set<String> nextSafe = nextOptions == null ? Set.of() : Set.copyOf(nextOptions);
+        // 호출부는 불변 집합만 넘긴다 — 방어 복사 제거 (S15P21A104-235 핫패스).
+        Set<String> keptSafe = kept == null ? Set.of() : kept;
+        Set<String> prevSafe = prevOptions == null ? Set.of() : prevOptions;
+        Set<String> nextSafe = nextOptions == null ? Set.of() : nextOptions;
         if (prevMode != null && isTransit(nextMode) && !keptSafe.isEmpty() && !nextSafe.isEmpty()) {
             for (String line : nextSafe) {
                 if (keptSafe.contains(line)) {
@@ -257,6 +263,9 @@ public class TransferRule {
      * 경계 환승 비용. 후보 쌍 중 실측 최소값, 전부 miss면 상수(Q3 결정).
      */
     public long transferCost(String stationId, Set<String> fromLines, Set<String> toLines) {
+        if (transferTimes.isEmpty()) {
+            return defaultSec;
+        }
         long best = defaultSec;
         boolean found = false;
         if (fromLines != null && toLines != null && stationId != null) {

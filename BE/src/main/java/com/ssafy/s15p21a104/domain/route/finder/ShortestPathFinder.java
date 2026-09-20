@@ -248,24 +248,26 @@ public final class ShortestPathFinder {
         dist.computeIfAbsent(node, k -> new HashMap<>()).put(key, cost);
     }
 
+    // 아래 세 레코드의 집합은 호출부가 불변(optionsFor·keptTransitLines·Set.of)으로만
+    // 넘긴다 — 완화 핫패스의 방어 복사를 제거한다(S15P21A104-235).
     private record StateKey(String line, Set<String> keptLine) {
         StateKey {
-            keptLine = keptLine == null ? Set.of() : Set.copyOf(keptLine);
+            keptLine = keptLine == null ? Set.of() : keptLine;
         }
     }
 
     private record State(long cost, String node, String line, TravelMode arrivalMode,
                          Set<String> keptLine, Set<String> arrivedOptions) {
         State {
-            keptLine = keptLine == null ? Set.of() : Set.copyOf(keptLine);
-            arrivedOptions = arrivedOptions == null ? Set.of() : Set.copyOf(arrivedOptions);
+            keptLine = keptLine == null ? Set.of() : keptLine;
+            arrivedOptions = arrivedOptions == null ? Set.of() : arrivedOptions;
         }
     }
 
     private record Previous(String fromNode, String fromLine, TravelMode fromMode,
                               Set<String> fromKeptLine, Edge edge) {
         Previous {
-            fromKeptLine = fromKeptLine == null ? Set.of() : Set.copyOf(fromKeptLine);
+            fromKeptLine = fromKeptLine == null ? Set.of() : fromKeptLine;
         }
     }
 }
