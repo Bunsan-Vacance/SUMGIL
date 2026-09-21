@@ -54,7 +54,7 @@ class LegContract237Test {
     }
 
     @Test
-    @DisplayName("237-L3: 대여소 출발 BIKE는 BIKE_RENTAL + rentalId 명시다")
+    @DisplayName("237-L3: 대여소 ID는 BIKE 구간에 명시하고 유형은 TRANSFER 구간에만 둔다")
     void l3_대여는RENTAL() {
         List<RouteLegResponse> legs = List.of(
                 leg(TravelMode.WALK, "H", "R1", "WALK"),
@@ -64,13 +64,14 @@ class LegContract237Test {
         List<RouteLegResponse> result =
                 LegContract.withContractFields(legs, Set.of("R1", "R2"));
 
-        assertEquals(TransitionType.BIKE_RENTAL, result.get(1).transitionType());
+        // FE 검증이 transitionType을 TRANSFER 모드에서만 허용한다 — BIKE 구간은 null.
+        assertNull(result.get(1).transitionType());
         assertEquals("R1", result.get(1).fromRentalId());
         assertEquals("R2", result.get(1).toRentalId());
     }
 
     @Test
-    @DisplayName("237-L4: 대여소 도착 BIKE는 BIKE_RETURN이다")
+    @DisplayName("237-L4: 대여소 도착 BIKE도 유형은 null, ID만 명시한다")
     void l4_반납은RETURN() {
         List<RouteLegResponse> legs = List.of(
                 leg(TravelMode.BIKE, "X", "R2", "R9"));
@@ -78,7 +79,7 @@ class LegContract237Test {
         List<RouteLegResponse> result =
                 LegContract.withContractFields(legs, Set.of("R2"));
 
-        assertEquals(TransitionType.BIKE_RETURN, result.get(0).transitionType());
+        assertNull(result.get(0).transitionType());
         assertNull(result.get(0).fromRentalId());
         assertEquals("R2", result.get(0).toRentalId());
     }

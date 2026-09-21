@@ -60,6 +60,9 @@ public final class LegContract {
 
     private static TransitionType transitionTypeOf(RouteLegResponse leg,
             boolean transitBefore, boolean transitAfter, Set<String> rentals) {
+        // FE 검증이 transitionType을 TRANSFER 모드에서만 허용한다(2026-09-21 prod 장애).
+        // BIKE_RENTAL·BIKE_RETURN 값은 계약에 있으나 BIKE 구간에 달면 FE가 응답을 버리므로
+        // 달지 않는다 — 대여·반납 의미는 from/toRentalId로 전달한다. FE와 위치 협의 후 재결정.
         if (leg.mode() == TravelMode.TRANSFER) {
             if (!transitBefore) {
                 return TransitionType.BOARDING;
@@ -68,14 +71,6 @@ public final class LegContract {
                 return TransitionType.ALIGHTING;
             }
             return TransitionType.TRANSFER;
-        }
-        if (leg.mode() == TravelMode.BIKE) {
-            if (rentals.contains(leg.fromNodeId())) {
-                return TransitionType.BIKE_RENTAL;
-            }
-            if (rentals.contains(leg.toNodeId())) {
-                return TransitionType.BIKE_RETURN;
-            }
         }
         return null;
     }
