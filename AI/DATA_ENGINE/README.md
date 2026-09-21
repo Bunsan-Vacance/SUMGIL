@@ -443,11 +443,12 @@ Kafka consumer는 서버 로컬에 `snapshot_*.parquet`를 계속 쌓는다. 로
 snapshot만 48시간 기준으로 정리한다. 운영 삭제는 Drive 업로드 manifest에서 백업 성공이 확인된
 파티션만 대상으로 한다.
 
-삭제 대상은 아래 두 경로로만 제한한다.
+삭제 대상은 아래 세 경로로만 제한한다.
 
 ```text
 AI/data/BIKE/raw/realtime/dt=*/hh=*/snapshot_*.parquet
 AI/data/EXTERNAL/weather/raw/nowcast/dt=*/hh=*/snapshot_*.parquet
+AI/data/SUBWAY/raw/arrival/dt=*/hh=*/snapshot_*.parquet
 ```
 
 삭제 제외 대상:
@@ -467,7 +468,12 @@ AI/data/EXTERNAL/weather/raw/nowcast/dt=*/hh=*/snapshot_*.parquet
 `--require-archive-success`를 함께 사용하면 `data/manifest/archive_uploads.jsonl`에서
 해당 `dataset/dt/hh`의 최신 기록이 `status=success`인 경우만 삭제 후보에 포함한다.
 백업 성공 기록이 없거나 최신 기록이 실패라면 `SKIP ... reason=archive_not_success`로 출력하고
-삭제하지 않는다.
+삭제하지 않는다. manifest가 success여도 파일마다 Drive 원격 파일의 존재·크기·MD5를 다시 대조하며,
+하나라도 어긋나면(`archive_file_missing`, `archive_size_mismatch`, `archive_checksum_mismatch` 등)
+그 파일은 삭제하지 않는다. 현재 진행 중인 시간 파티션도 삭제하지 않는다.
+
+`--notify-discord`를 붙이면 retention 기간을 넘겼는데도 Drive 검증 실패로 남겨진 파일이 있을 때
+Discord로 알린다(사유·데이터셋·시간 파티션별 파일 수). 삭제 보류가 없으면 알리지 않는다.
 
 ```bash
 cd <REPO_ROOT>/AI
@@ -489,7 +495,7 @@ python -m DATA_ENGINE.monitor.cleanup_retention \
 수집 부하가 낮은 시간대를 권장한다.
 
 ```cron
-20 3 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --require-archive-success --yes >> logs/data_engine_retention.log 2>&1
+20 3 * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.monitor.cleanup_retention --retention-hours 48 --require-archive-success --notify-discord --yes >> logs/data_engine_retention.log 2>&1
 ```
 
 ## Drive 임시 백업 인증
@@ -575,14 +581,24 @@ python -m DATA_ENGINE.archive.upload_raw_partitions --yes
 주요 옵션:
 
 ```text
---dataset bike|weather|all
+--dataset bike|weather|subway|all
 --older-than-hours 1
 --max-partitions 24
 --manifest-path data/manifest/archive_uploads.jsonl
+--notify-discord
 ```
 
 기본값은 dry-run이라 Drive API를 호출하지 않고 manifest도 기록하지 않는다. `--yes`를 붙이면
 완료된 시간대 파티션만 Drive에 올리고, 결과를 `data/manifest/archive_uploads.jsonl`에 기록한다.
+`--dataset`을 생략하면(`all`) bike·weather·subway를 모두 대상으로 한다. 이미 success인 파티션도
+매 실행마다 Drive와 대조해 누락된 파일만 다시 올린다.
+
+`--notify-discord`를 붙이면 파티션 업로드가 실패하거나(크기·MD5 불일치 포함) 인증 오류로 전체가
+중단됐을 때 Discord로 알린다. 모두 성공하면 알리지 않는다. 주기 실행 예시(매시 10분):
+
+```cron
+10 * * * * cd /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI && .venv/bin/python -m DATA_ENGINE.archive.upload_raw_partitions --yes --notify-discord >> logs/data_engine_archive.log 2>&1
+```
 
 ## Kafka consumer
 

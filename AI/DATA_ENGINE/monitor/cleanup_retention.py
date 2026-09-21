@@ -31,6 +31,7 @@ from DATA_ENGINE.archive.upload_raw_partitions import (
     drive_destination_for_partition,
 )
 from DATA_ENGINE.collect.common import KST
+from DATA_ENGINE.monitor.notify_discord import notify_failure
 
 AI_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RETENTION_HOURS = 48
@@ -38,6 +39,8 @@ DEFAULT_BIKE_BASE = Path("data/BIKE/raw/realtime")
 DEFAULT_WEATHER_BASE = Path("data/EXTERNAL/weather/raw/nowcast")
 DEFAULT_SUBWAY_BASE = Path("data/SUBWAY/raw/arrival")
 SNAPSHOT_PATTERN = "dt=*/hh=*/snapshot_*.parquet"
+RETENTION_ALERT_TITLE = "[DATA_ENGINE] retention 삭제 보류 (Drive 백업 미검증)"
+MAX_ALERT_LINES = 10
 
 
 @dataclass(frozen=True)
@@ -418,6 +421,25 @@ def print_cleanup_result(result: CleanupResult) -> None:
         )
 
 
+def build_skip_alert(result: CleanupResult) -> str:
+    """Summarize skipped files by partition; each is past retention yet unverified on Drive."""
+    counts: dict[tuple[str, str, str, str], int] = {}
+    for skip in result.skips:
+        key = (skip.reason, skip.dataset, skip.dt, skip.hh)
+        counts[key] = counts.get(key, 0) + 1
+    lines = [
+        f"{reason} {dataset} dt={dt} hh={hh} files={count}"
+        for (reason, dataset, dt, hh), count in sorted(counts.items())
+    ]
+    shown = lines[:MAX_ALERT_LINES]
+    if len(lines) > len(shown):
+        shown.append(f"... 외 {len(lines) - len(shown)}개 파티션")
+    return (
+        f"retention {result.retention_hours:g}h 초과 파일 {len(result.skips)}개를 "
+        "Drive 검증 실패로 삭제하지 않았다(파일은 보존됨).\n" + "\n".join(shown)
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Clean up old DATA_ENGINE realtime raw snapshot parquet files.",
@@ -443,6 +465,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--require-archive-success",
         action="store_true",
         help="Delete only partitions whose latest archive manifest status is success.",
+    )
+    parser.add_argument(
+        "--notify-discord",
+        action="store_true",
+        help="Send a Discord alert when old files are kept because Drive verification failed.",
     )
     parser.add_argument(
         "--manifest-path",
@@ -479,6 +506,8 @@ def main(argv: list[str] | None = None) -> int:
         ai_root=args.ai_root,
     )
     print_cleanup_result(result)
+    if args.notify_discord and result.skips:
+        notify_failure(build_skip_alert(result), title=RETENTION_ALERT_TITLE)
     return 0
 
 

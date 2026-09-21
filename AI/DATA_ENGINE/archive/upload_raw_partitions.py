@@ -18,6 +18,7 @@ from DATA_ENGINE.archive.manifest import (
     ArchiveManifestRecord,
     append_manifest_record,
     has_successful_archive,
+    load_manifest_records,
 )
 from DATA_ENGINE.archive.storage.drive_client import match_local_file
 from DATA_ENGINE.archive.targets import (
@@ -27,6 +28,10 @@ from DATA_ENGINE.archive.targets import (
     filter_datasets,
 )
 from DATA_ENGINE.collect.common import AI_ROOT, KST
+from DATA_ENGINE.monitor.notify_discord import notify_failure
+
+ARCHIVE_ALERT_TITLE = "[DATA_ENGINE] Drive archive 업로드 실패"
+MAX_ALERT_LINES = 10
 
 DATASET_ROOT_ENV_KEYS = {
     "bike": "GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID",
@@ -352,6 +357,24 @@ def upload_targets(
     return failures
 
 
+def build_failure_alert(manifest_path: Path, run_started: datetime, failures: int) -> str:
+    """List the partitions this run recorded as failed (read back from the manifest)."""
+    started = run_started.isoformat()
+    lines = [
+        f"{record.dataset} dt={record.dt} hh={record.hh} archive={record.archive_path} "
+        f"error={record.error}"
+        for record in load_manifest_records(manifest_path)
+        if record.status == "failed" and record.uploaded_at >= started
+    ]
+    shown = lines[:MAX_ALERT_LINES]
+    if len(lines) > len(shown):
+        shown.append(f"... 외 {len(lines) - len(shown)}개 파티션")
+    return (
+        f"Drive archive 업로드 실패 {failures}건 (manifest에 failed 기록, 다음 실행에서 재시도)\n"
+        + "\n".join(shown)
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Upload completed DATA_ENGINE raw snapshot partitions to Google Drive.",
@@ -365,6 +388,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--yes",
         action="store_true",
         help="Actually upload to Drive and append manifest records. Omitted by default for dry-run.",
+    )
+    parser.add_argument(
+        "--notify-discord",
+        action="store_true",
+        help="Send a Discord alert when a partition fails to upload. Silent when all succeed.",
     )
     return parser.parse_args(argv)
 
@@ -426,16 +454,30 @@ def main(argv: list[str] | None = None) -> int:
     planned_targets = [PlannedTarget(target, is_backfill=False) for target in new_targets] + [
         PlannedTarget(target, is_backfill=True) for target in backfill_candidates
     ]
-    failures = upload_targets(
-        planned_targets,
-        ai_root=ai_root,
-        manifest_path=manifest_path,
-        drive_auth_mode=drive_auth_mode,
-        service_account_file=Path(service_account) if service_account else None,
-        oauth_token_file=Path(oauth_token) if oauth_token else None,
-        drive_root_folder_ids=drive_root_folder_ids,
-        backend=backend,
-    )
+    run_started = datetime.now(KST)
+    try:
+        failures = upload_targets(
+            planned_targets,
+            ai_root=ai_root,
+            manifest_path=manifest_path,
+            drive_auth_mode=drive_auth_mode,
+            service_account_file=Path(service_account) if service_account else None,
+            oauth_token_file=Path(oauth_token) if oauth_token else None,
+            drive_root_folder_ids=drive_root_folder_ids,
+            backend=backend,
+        )
+    except Exception as exc:  # 인증 실패 등 전체 중단도 알린 뒤 그대로 올린다.
+        if args.notify_discord:
+            notify_failure(
+                f"Drive archive 업로드 중단: {type(exc).__name__}: {exc}",
+                title=ARCHIVE_ALERT_TITLE,
+            )
+        raise
+    if failures and args.notify_discord:
+        notify_failure(
+            build_failure_alert(manifest_path, run_started, failures),
+            title=ARCHIVE_ALERT_TITLE,
+        )
     return 1 if failures else 0
 
 

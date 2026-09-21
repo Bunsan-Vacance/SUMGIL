@@ -97,6 +97,15 @@ def send_discord_notification(
     )
 
 
+def notify_failure(detail: str, *, title: str = DEFAULT_TITLE) -> DiscordNotifyResult:
+    """Send a failure alert; a failed send is reported on stderr and never raises."""
+    content = build_discord_message(detail, server_name=resolve_server_name(), title=title)
+    result = send_discord_notification(content)
+    if result.status != "sent":
+        print(result.message, file=sys.stderr)
+    return result
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Send DATA_ENGINE monitor alert to Discord.")
     parser.add_argument("--message", required=True, help="Alert detail message.")
