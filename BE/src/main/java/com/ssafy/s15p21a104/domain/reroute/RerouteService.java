@@ -3,13 +3,9 @@ package com.ssafy.s15p21a104.domain.reroute;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
-import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
-import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
-import com.ssafy.s15p21a104.domain.route.finder.KShortestPathFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder;
-import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
+import com.ssafy.s15p21a104.domain.route.finder.ScoredCandidate;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
-import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -27,24 +23,20 @@ public final class RerouteService {
     /** 잔여 후보 상한. */
     private static final int MAX_REMAIN = 3;
 
+    /** 잔여 안내 고정 문구 (FE 표시용). */
+    private static final String REMAIN_REASON = "현재 경계에서 남은 시간을 다시 계산했어요.";
+
     private final RouteCandidateFinder candidateFinder;
-    private final TransferRule transferRule;
     private final java.util.function.Supplier<RouteGraph> graphSupplier;
-    private final java.util.function.Supplier<java.util.Map<TransferRule.TransferKey, Integer>> transferTimesSupplier;
 
     /**
      * @param candidateFinder 잔여 매핑용 조립기 (그래프·역정보 주입済)
-     * @param transferRule 환승 규칙
      * @param graphSupplier 탐색 그래프 공급자
-     * @param transferTimesSupplier 환승 실측표 공급자
      */
-    public RerouteService(RouteCandidateFinder candidateFinder, TransferRule transferRule,
-                          java.util.function.Supplier<RouteGraph> graphSupplier,
-                          java.util.function.Supplier<java.util.Map<TransferRule.TransferKey, Integer>> transferTimesSupplier) {
+    public RerouteService(RouteCandidateFinder candidateFinder,
+                          java.util.function.Supplier<RouteGraph> graphSupplier) {
         this.candidateFinder = candidateFinder;
-        this.transferRule = transferRule;
         this.graphSupplier = graphSupplier;
-        this.transferTimesSupplier = transferTimesSupplier;
     }
 
     /**
@@ -64,16 +56,23 @@ public final class RerouteService {
         if (graph == null || !graph.containsNode(boundaryId) || !graph.containsNode(destId)) {
             return List.of();
         }
-        List<FoundPath> paths;
+        // findCandidatesWithPaths가 leg 서명 중복 제거된 서로 다른 후보를 시간순으로 준다.
+        // 후보마다 동일 인자로 재탐색하던 기존 toResult는 같은 1등만 반복했다.
+        List<ScoredCandidate> scored;
         try {
-            paths = new KShortestPathFinder(transferRule.withTable(transferTimes()))
-                    .findK(graph, boundaryId, destId, MAX_REMAIN);
+            scored = candidateFinder.findCandidatesWithPaths(graph, boundaryId, destId, MAX_REMAIN);
         } catch (RuntimeException e) {
             return List.of();
         }
         List<RerouteResult> result = new ArrayList<>();
-        for (FoundPath found : paths) {
-            toResult(found, boundaryId, destId).ifPresent(result::add);
+        for (ScoredCandidate candidate : scored) {
+            RouteSearchResponse route = candidate.response();
+            // 잔여 legs만 담고 totalMinutes는 잔여 합과 일치시킨다(FE §5.2 ±0.01).
+            double sum = route.legs().stream().mapToDouble(RouteLegResponse::minutes).sum();
+            RouteSearchResponse remain = new RouteSearchResponse(
+                    route.routeType(), sum, route.legs(), RouteSource.ALGORITHM,
+                    route.totalDistanceMeters(), route.transferCount());
+            result.add(new RerouteResult(REMAIN_REASON, "ALGORITHM", remain));
             if (result.size() >= MAX_REMAIN) {
                 break;
             }
@@ -82,28 +81,7 @@ public final class RerouteService {
         return List.copyOf(result);
     }
 
-    private java.util.Optional<RerouteResult> toResult(FoundPath found, String boundaryId, String destId) {
-        // RouteCandidateFinder에 단일 경로 매핑을 위임할 수 없어 여기서 직접 조립한다.
-        // 잔여 legs만 담고 totalMinutes는 잔여 합과 일치시킨다(FE §5.2 ±0.01).
-        List<RouteSearchResponse> mapped = candidateFinder.findCandidates(
-                graphOf(), boundaryId, destId, 1);
-        if (mapped.isEmpty()) {
-            return java.util.Optional.empty();
-        }
-        RouteSearchResponse route = mapped.get(0);
-        double sum = route.legs().stream().mapToDouble(RouteLegResponse::minutes).sum();
-        RouteSearchResponse remain = new RouteSearchResponse(
-                route.routeType(), sum, route.legs(), RouteSource.ALGORITHM,
-                route.totalDistanceMeters(), route.transferCount());
-        return java.util.Optional.of(new RerouteResult(
-                "현재 경계에서 남은 시간을 다시 계산했어요.", "ALGORITHM", remain));
-    }
-
     private RouteGraph graphOf() {
         return graphSupplier.get();
-    }
-
-    private java.util.Map<TransferRule.TransferKey, Integer> transferTimes() {
-        return transferTimesSupplier.get();
     }
 }
