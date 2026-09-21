@@ -4,6 +4,7 @@ import {
   congestionBasisText,
   congestionGradeText,
   congestionPredictionFor,
+  formatCongestionPercent,
   getRoutes,
   isCongestionPredictionDate,
   remaining,
@@ -115,6 +116,12 @@ describe('경로 선택과 안내 데이터', () => {
     expect(congestionBasisText('RECENT_7D')).toBe('최근 7일 데이터 기반')
     expect(congestionBasisText('PARTIAL')).toBe('일부 기간 데이터 기반')
     expect(congestionBasisText('WEEKDAY_AVERAGE')).toBe('요일 평균 기준')
+  })
+
+  it('혼잡도 퍼센트는 0과 100 초과 값을 포함해 소숫점 첫째 자리로 표시한다', () => {
+    expect(formatCongestionPercent(0)).toBe('0.0')
+    expect(formatCongestionPercent(68.26)).toBe('68.3')
+    expect(formatCongestionPercent(120.04)).toBe('120.0')
   })
 
   it('AVAILABLE이 아닌 상태의 수치는 예측으로 사용하지 않는다', () => {

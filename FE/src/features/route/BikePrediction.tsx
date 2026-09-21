@@ -113,19 +113,35 @@ export default function BikePrediction({
   if (!hasBikeLeg) return null
 
   return (
-    <section className="bike-prediction-card" aria-label="도착 시 따릉이 예측">
-      <header>
-        <div>
-          <h3>도착 시 따릉이 예측</h3>
-          {target?.leg.from?.name && <small>{target.leg.from.name}</small>}
+    <section className="bike-prediction-card" aria-label="따릉이 대여 예측">
+      <div className="bike-prediction-summary">
+        <div className="bike-prediction-copy">
+          <div className="bike-prediction-heading">
+            <h3>따릉이 대여 예측</h3>
+            {currentPrediction?.source === 'MOCK' && (
+              <small className="bike-prediction-source">샘플</small>
+            )}
+          </div>
+          {target && (
+            <p className="bike-prediction-arrival">
+              {target.leg.from?.name
+                ? `${target.leg.from.name} · ${displayTime(target.arrivalTime)} 도착`
+                : `${displayTime(target.arrivalTime)} 도착`}
+            </p>
+          )}
         </div>
-        <span>예측</span>
-      </header>
-      {target && (
-        <p className="bike-prediction-arrival">
-          대여소 도착 예상 {displayTime(target.arrivalTime)}
-        </p>
-      )}
+        {currentPrediction && (
+          <div className="bike-prediction-result">
+            {currentPrediction.status === 'UNAVAILABLE' ? (
+              <strong>도착 시 예측 정보 없음</strong>
+            ) : currentPrediction.predictedBikes === null ? (
+              <strong>예측 수량 없음</strong>
+            ) : (
+              <strong>{currentPrediction.predictedBikes}대 예상</strong>
+            )}
+          </div>
+        )}
+      </div>
       {state.status === 'error' && (
         <div className="bike-prediction-state" role="alert">
           <p>도착 시 따릉이 예측을 불러오지 못했어요.</p>
@@ -144,30 +160,6 @@ export default function BikePrediction({
           도착 시 재고를 예측하고 있어요…
         </p>
       ) : null}
-      {currentPrediction && (
-        <div className="bike-prediction-result">
-          {currentPrediction.predictedBikes === null ? (
-            <strong>예측 수량 없음</strong>
-          ) : (
-            <strong>{currentPrediction.predictedBikes}대 예상</strong>
-          )}
-          <p>
-            {currentPrediction.status === 'AVAILABLE'
-              ? '현재 재고가 아니라 도착 시각 기준 예측이에요.'
-              : '도착 시 예측을 제공할 수 없어요.'}
-          </p>
-          {currentPrediction.availabilityProbability !== null && (
-            <small>
-              대여 가능성 {Math.round(currentPrediction.availabilityProbability * 100)}%
-            </small>
-          )}
-          <small>
-            {currentPrediction.source === 'MOCK' ? '미리보기 예측' : '모델 산출'}
-            {currentPrediction.predictedAt &&
-              ` · 산출 ${displayTime(currentPrediction.predictedAt)}`}
-          </small>
-        </div>
-      )}
     </section>
   )
 }

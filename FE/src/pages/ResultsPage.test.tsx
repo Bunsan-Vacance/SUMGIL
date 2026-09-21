@@ -79,7 +79,7 @@ describe('경로 결과 상태', () => {
     expect(screen.queryByText('2호선 · 수인분당선')).toBeNull()
     expect(screen.queryByText('상세 이동 경로')).toBeNull()
     expect(screen.queryByText('역삼 → 선릉')).toBeNull()
-    expect(screen.queryByRole('heading', { name: /추천 경로/ })).toBeNull()
+    expect(screen.getByRole('heading', { name: /추천 경로/ })).toBeTruthy()
     fireEvent.click(screen.getByText('역삼'))
     expect(setSelectedId).toHaveBeenCalledWith('station-route')
     expect(go).toHaveBeenCalledWith('detail')
@@ -196,66 +196,83 @@ describe('경로 결과 상태', () => {
     expect(screen.getAllByText('혼잡도 예상')).toHaveLength(2)
     const predictions = document.querySelectorAll('.route-card-prediction')
     expect(predictions).toHaveLength(2)
-    expect(predictions[0].textContent).toContain('68%')
+    expect(predictions[0].textContent).toContain('68.0%')
     expect(predictions[0].textContent).toContain('보통')
-    expect(predictions[1].textContent).toContain('42%')
+    expect(predictions[1].textContent).toContain('42.0%')
     expect(predictions[1].textContent).toContain('여유')
     expect(screen.queryByText('최근 7일 데이터 기반')).toBeNull()
     expect(screen.queryByText(/혼잡 \d+구간/)).toBeNull()
   })
 
-  it('혼잡도를 비교할 수 있으면 정렬 메뉴에서 덜 붐비는 순을 선택한다', () => {
+  it('추천 경로를 먼저 보여주고 다른 경로만 로컬 정렬한다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
-    const setPriority = vi.fn()
-    render(<ResultsPage {...props({ visible: routes.slice(0, 2), setPriority })} />)
+    const calmFeatured = {
+      ...routes[1],
+      congestionPrediction: { ...routes[1].congestionPrediction!, congestionPercent: 5 },
+    }
+    const remainingFast = {
+      ...routes[2],
+      id: 'remaining-fast',
+      minutes: 16,
+      congestionPrediction: { ...routes[2].congestionPrediction!, congestionPercent: 80 },
+    }
+    const remainingCalm = {
+      ...routes[3],
+      id: 'remaining-calm',
+      minutes: 21,
+      congestionPrediction: { ...routes[3].congestionPrediction!, congestionPercent: 20 },
+    }
+    render(
+      <ResultsPage
+        {...props({ visible: [routes[0], calmFeatured, remainingFast, remainingCalm] })}
+      />,
+    )
 
-    fireEvent.click(screen.getByRole('button', { name: '경로 정렬: 빠른 순' }))
-    fireEvent.click(screen.getByRole('menuitemradio', { name: '덜 붐비는 순' }))
+    const recommended = screen.getByRole('region', { name: '추천 경로' })
+    const other = screen.getByRole('region', { name: '다른 경로' })
+    expect(recommended.textContent).toContain('가장 빠른 경로')
+    expect(recommended.textContent).toContain('덜 붐비는 경로')
+    expect(other.textContent).toContain('빠른 순')
+    expect(other.textContent).toContain('덜 붐비는 순')
 
-    expect(setPriority).toHaveBeenCalledWith('calm')
+    const otherCards = () => Array.from(other.querySelectorAll<HTMLButtonElement>('.route-card'))
+    expect(otherCards()[0].getAttribute('aria-label')).toContain('지하철 경로')
+    fireEvent.click(screen.getByRole('button', { name: '덜 붐비는 순' }))
+    expect(otherCards()[0].getAttribute('aria-label')).toContain('버스 경로')
   })
 
-  it('서버가 덜 붐비는 경로를 지정하면 혼잡도 수치 없이도 정렬 메뉴를 표시한다', () => {
-    const liveRoutes = routes.slice(0, 2).map(({ congestionPrediction: _, ...route }, index) => ({
+  it('추천 경로가 같은 경로면 두 배지를 한 카드에 표시한다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
+    const both = {
+      ...routes[0],
+      id: 'both',
+      minutes: 15,
+      routeType: 'LOW_CONGESTION' as const,
+    }
+    render(<ResultsPage {...props({ visible: [both, routes[1]] })} />)
+
+    const card = screen.getByRole('button', { name: /가장 빠른 경로.*덜 붐비는 경로/ })
+    expect(card.querySelectorAll('.route-recommendation-badge')).toHaveLength(2)
+  })
+
+  it('서버 혼잡도 표식만 있을 때도 추천하고 남은 경로의 혼잡도 정렬은 막는다', () => {
+    const withoutPrediction = ({ congestionPrediction: _, ...route }: (typeof routes)[number]) =>
+      route
+    const liveRoutes = routes.map(withoutPrediction).map((route, index) => ({
       ...route,
-      routeType: index === 0 ? ('LOW_CONGESTION' as const) : ('SHORTEST' as const),
+      id: `live-${index}`,
+      routeType: index === 1 ? ('LOW_CONGESTION' as const) : ('ALTERNATIVE' as const),
     }))
     render(<ResultsPage {...props({ visible: liveRoutes, isLiveApi: true })} />)
 
-    expect(screen.getByRole('button', { name: '경로 정렬: 빠른 순' })).toBeTruthy()
-  })
-
-  it('혼잡도 없는 결과는 예측 정보 없음을 표시하고 정렬을 숨긴다', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
-    const liveRoutes = routes
-      .slice(0, 1)
-      .map(({ congestionPrediction: _congestionPrediction, ...route }) => route)
-    render(<ResultsPage {...props({ visible: liveRoutes, isLiveApi: true })} />)
-
-    expect(screen.getByText('예측 정보 없음')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /예측 정보 없음/ })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /경로 정렬:/ })).toBeNull()
-  })
-
-  it('정렬 메뉴는 화살표 클릭과 키보드 이동을 지원하고 Esc 또는 바깥 클릭으로 닫힌다', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
-    render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
-    const trigger = screen.getByRole('button', { name: '경로 정렬: 빠른 순' })
-    fireEvent.click(trigger.querySelector('svg')!)
-    const fast = screen.getByRole('menuitemradio', { name: '빠른 순' })
-    expect(document.activeElement).toBe(fast)
-    fireEvent.keyDown(fast, { key: 'ArrowDown' })
-    const calm = screen.getByRole('menuitemradio', { name: '덜 붐비는 순' })
-    expect(document.activeElement).toBe(calm)
-    fireEvent.keyDown(calm, { key: 'Escape' })
-    expect(screen.queryByRole('menu')).toBeNull()
-    expect(document.activeElement).toBe(trigger)
-    fireEvent.click(trigger)
-    fireEvent.pointerDown(document.body)
-    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.getByRole('region', { name: '추천 경로' }).textContent).toContain(
+      '덜 붐비는 경로',
+    )
+    expect(
+      (screen.getByRole('button', { name: '덜 붐비는 순' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
   })
 
   it('출발·도착 교환을 요청한다', () => {

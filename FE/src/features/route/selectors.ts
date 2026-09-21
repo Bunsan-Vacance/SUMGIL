@@ -79,6 +79,15 @@ export function congestionPredictionFor(
     : undefined
 }
 
+const congestionPercentFormatter = new Intl.NumberFormat('ko-KR', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+})
+
+export function formatCongestionPercent(value: number) {
+  return congestionPercentFormatter.format(value)
+}
+
 export function congestionGradeText(value: CongestionGrade | null) {
   return value === 'LOW'
     ? '여유'

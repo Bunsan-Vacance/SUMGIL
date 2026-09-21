@@ -1,6 +1,6 @@
 import type { Leg, Route } from './types'
 import { modeIcons } from './ModeIcon'
-import { roundMinutes } from './selectors'
+import { formatCongestionPercent, roundMinutes } from './selectors'
 import { lineColor } from './lineColor'
 import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
 import { isTransitLeg, transitionLabel } from './transitions'
@@ -19,7 +19,7 @@ function formatCongestion(leg: Leg) {
   }
   return leg.segmentCongestionLevel === undefined
     ? undefined
-    : `구간 예상 혼잡도 ${leg.segmentCongestionLevel}%`
+    : `구간 예상 혼잡도 ${formatCongestionPercent(leg.segmentCongestionLevel)}%`
 }
 
 function sameBusOptions(left: Leg, right: Leg) {

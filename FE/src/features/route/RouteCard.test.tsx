@@ -45,7 +45,7 @@ describe('경로 카드 구간 혼잡도', () => {
 
     const prediction = document.querySelector('.route-card-prediction')
     expect(prediction?.textContent).toContain('혼잡도 예상')
-    expect(prediction?.textContent).toContain('68%')
+    expect(prediction?.textContent).toContain('68.0%')
     expect(prediction?.textContent).toContain('보통')
     expect(screen.queryByText('최근 7일 데이터 기반')).toBeNull()
   })
@@ -74,6 +74,52 @@ describe('경로 카드 구간 혼잡도', () => {
       '예측 정보 없음',
     )
     expect(screen.getByRole('button', { name: /예측 정보 없음/ })).toBeTruthy()
+  })
+
+  it('혼잡도 퍼센트를 소숫점 첫째 자리까지 반올림해 표시하고 접근성 라벨에도 반영한다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
+    render(
+      <RouteCard
+        route={route({
+          congestionPrediction: {
+            congestionPercent: 68.26,
+            congestionGrade: 'HIGH',
+            dataStatus: 'AVAILABLE',
+            predictionBasis: 'RECENT_7D',
+          },
+        })}
+        onDetail={vi.fn()}
+      />,
+    )
+
+    expect(document.querySelector('.route-card-prediction')?.textContent).toContain('68.3%')
+    expect(screen.getByRole('button').getAttribute('aria-label')).toContain('68.3%')
+  })
+
+  it('시간 아래에 경로 막대기를 바로 표시하고 경로 요약 문구는 표시하지 않는다', () => {
+    const card = render(
+      <RouteCard
+        route={route({
+          totalDistanceMeters: 2269,
+          transfers: 1,
+          legs: [
+            { mode: 'walk', title: '출발지 → 역삼역', note: '도보', minutes: 1 },
+            { mode: 'subway', title: '역삼역 → 선릉역', note: '2호선', minutes: 13 },
+            { mode: 'walk', title: '선릉역 → 도착지', note: '도보', minutes: 1 },
+          ],
+        })}
+        onDetail={vi.fn()}
+      />,
+    ).container.querySelector('.route-card')
+
+    expect(card?.querySelector('.route-facts')).toBeNull()
+    expect(card?.textContent).not.toContain('총 2,269m')
+    expect(card?.textContent).not.toContain('환승 1회')
+    expect(card?.textContent).not.toContain('도보 2분')
+    expect(card?.querySelector('.route-card-main')?.nextElementSibling).toBe(
+      card?.querySelector('.mode-strip'),
+    )
   })
 
   it('모든 표시 구간을 같은 폭으로 정렬하고 등급 없는 구간은 비워 둔다', () => {

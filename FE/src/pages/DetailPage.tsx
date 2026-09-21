@@ -3,9 +3,8 @@ import BottomSheet from '../components/BottomSheet'
 import LegList from '../features/route/LegList'
 import BikePrediction from '../features/route/BikePrediction'
 import {
-  congestionBasisText,
-  congestionGradeText,
   congestionPredictionFor,
+  formatCongestionPercent,
   isCongestionPredictionDate,
   routeArrival,
   roundMinutes,
@@ -44,13 +43,9 @@ export default function DetailPage({
   const legacyBusOptions = selectedGroup ? busRouteOptions(selectedGroup.variants) : []
   const predictionDate = isCongestionPredictionDate(selected.departedAt)
   const prediction = congestionPredictionFor(selected)
-  const predictionLabel = prediction
-    ? `혼잡도 예상 ${prediction.congestionPercent}%${
-        congestionGradeText(prediction.congestionGrade)
-          ? ` · ${congestionGradeText(prediction.congestionGrade)}`
-          : ''
-      }`
-    : '혼잡도 예상 정보 없음'
+  const formattedPercent = prediction
+    ? formatCongestionPercent(prediction.congestionPercent)
+    : undefined
   return (
     <>
       <button
@@ -78,9 +73,6 @@ export default function DetailPage({
             <small>분</small>
           </h2>
           <span>{routeArrival(selected.minutes, selected.departedAt)} 도착 예상</span>
-          <b className={prediction?.congestionGrade === 'LOW' ? 'calm-text' : 'fast-text'}>
-            {selected.label}
-          </b>
         </div>
         {selected.source === 'MOCK' && <small className="detail-source">샘플 경로</small>}
         <div className="stats">
@@ -102,17 +94,11 @@ export default function DetailPage({
           )}
           {predictionDate && (
             <div>
-              <strong>{prediction ? `${prediction.congestionPercent}%` : '정보 없음'}</strong>
+              <strong>{prediction ? `${formattedPercent}%` : '정보 없음'}</strong>
               <small>혼잡도 예상</small>
             </div>
           )}
         </div>
-        <span className="route-comfort">
-          <strong>{prediction ? predictionLabel : '예측 정보 없음'}</strong>
-          {prediction && congestionBasisText(prediction.predictionBasis) && (
-            <small>{congestionBasisText(prediction.predictionBasis)}</small>
-          )}
-        </span>
         <BikePrediction route={selected} />
         {inlineBusSegments.length > 0 && (
           <section className="bus-options" aria-label="이용 가능한 버스">
