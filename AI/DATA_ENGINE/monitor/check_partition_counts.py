@@ -16,8 +16,7 @@ DEFAULT_BIKE_BASE = Path("data/BIKE/raw/realtime")
 DEFAULT_WEATHER_BASE = Path("data/EXTERNAL/weather/raw/nowcast")
 DEFAULT_HOURS = 1
 DEFAULT_BIKE_MIN_COUNT = 10
-DEFAULT_WEATHER_MIN_COUNT = 5
-KAFKA_WEATHER_MIN_COUNT = 1
+DEFAULT_WEATHER_MIN_COUNT = 1
 
 
 @dataclass(frozen=True)
@@ -31,7 +30,7 @@ class PartitionCheck:
     name: str
     base_path: Path
     min_count: int
-    required_column: str | None = None
+    required_topic: str | None = None
 
 
 @dataclass(frozen=True)
@@ -73,17 +72,24 @@ def partition_path(base_path: Path, slot: HourSlot) -> Path:
 
 
 def count_partition_snapshots(
-    base_path: Path, slot: HourSlot, required_column: str | None = None
+    base_path: Path, slot: HourSlot, required_topic: str | None = None
 ) -> int:
     path = partition_path(base_path, slot)
     if not path.exists():
         return 0
     files = (item for item in path.glob("snapshot_*.parquet") if item.is_file())
-    if required_column is None:
+    if required_topic is None:
         return sum(1 for _ in files)
     import pyarrow.parquet as pq
 
-    return sum(required_column in pq.read_schema(item).names for item in files)
+    count = 0
+    for item in files:
+        if "kafka_topic" not in pq.read_schema(item).names:
+            continue
+        topics = pq.read_table(item, columns=["kafka_topic"]).column("kafka_topic").to_pylist()
+        if required_topic in topics:
+            count += 1
+    return count
 
 
 def check_partition(check: PartitionCheck, slot: HourSlot) -> PartitionResult:
@@ -91,7 +97,7 @@ def check_partition(check: PartitionCheck, slot: HourSlot) -> PartitionResult:
         raise ValueError("min_count must be positive")
 
     path = partition_path(check.base_path, slot)
-    count = count_partition_snapshots(check.base_path, slot, check.required_column)
+    count = count_partition_snapshots(check.base_path, slot, check.required_topic)
     if count == 0:
         return PartitionResult(
             name=check.name,
@@ -148,21 +154,19 @@ def build_partition_checks(
     ai_root: Path,
     bike_min_count: int,
     weather_min_count: int,
-    weather_source: str = "poller",
 ) -> list[PartitionCheck]:
-    if weather_source not in {"poller", "kafka"}:
-        raise ValueError("weather_source must be poller or kafka")
     return [
         PartitionCheck(
             name="bike",
             base_path=ai_root / DEFAULT_BIKE_BASE,
             min_count=bike_min_count,
+            required_topic="bike.stock",
         ),
         PartitionCheck(
             name="weather",
             base_path=ai_root / DEFAULT_WEATHER_BASE,
             min_count=weather_min_count,
-            required_column="kafka_topic" if weather_source == "kafka" else None,
+            required_topic="weather.nowcast",
         ),
     ]
 
@@ -192,10 +196,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--weather-min-count",
         type=int,
-        default=None,
+        default=DEFAULT_WEATHER_MIN_COUNT,
         help="Minimum weather snapshots per completed hour.",
     )
-    parser.add_argument("--weather-source", choices=["poller", "kafka"], default="poller")
     return parser.parse_args(argv)
 
 
@@ -205,16 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     checks = build_partition_checks(
         args.ai_root,
         bike_min_count=args.bike_min_count,
-        weather_min_count=(
-            args.weather_min_count
-            if args.weather_min_count is not None
-            else (
-                KAFKA_WEATHER_MIN_COUNT
-                if args.weather_source == "kafka"
-                else DEFAULT_WEATHER_MIN_COUNT
-            )
-        ),
-        weather_source=args.weather_source,
+        weather_min_count=args.weather_min_count,
     )
     results = check_partitions(checks, slots)
     for result in results:
