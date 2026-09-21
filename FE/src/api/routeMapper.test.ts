@@ -71,6 +71,39 @@ describe('경로 응답 확장 필드', () => {
     expect(route.legs[0].segmentCongestionLevel).toBe(120.5)
   })
 
+  it('서버 구간 등급을 보존하고 숫자 기반 등급보다 우선하도록 함께 매핑한다', () => {
+    const route = mapBackendRoute(
+      response({
+        legs: [
+          { mode: 'BUS', minutes: 5, congestionLevel: 80, congestionGrade: 'NORMAL' },
+          { mode: 'SUBWAY', minutes: 5, congestionGrade: 'SATURATED' },
+        ],
+      }),
+      0,
+      '2026-09-17T00:00:00.000Z',
+    )
+
+    expect(
+      route.legs.map((leg) => [leg.segmentCongestionLevel, leg.segmentCongestionGrade]),
+    ).toEqual([
+      [80, 'NORMAL'],
+      [undefined, 'SATURATED'],
+    ])
+  })
+
+  it.each(['LOW', 'MEDIUM', 'HIGH', 'UNKNOWN'])(
+    '지원하지 않는 구간 등급을 거부한다: %s',
+    (grade) => {
+      expect(() =>
+        mapBackendRoute(
+          response({ legs: [{ mode: 'BUS', minutes: 10, congestionGrade: grade }] }),
+          0,
+          '2026-09-17T00:00:00.000Z',
+        ),
+      ).toThrow(RepositoryError)
+    },
+  )
+
   it('도보·자전거 구간의 혼잡도 수치는 표시 모델에 넣지 않는다', () => {
     const route = mapBackendRoute(
       response({

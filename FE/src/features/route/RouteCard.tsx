@@ -10,7 +10,7 @@ import type { Route } from './types'
 import { compactLegs } from './LegList'
 import { modeIcons } from './ModeIcon'
 import { lineColor, lineTextColor } from './lineColor'
-import { segmentCongestionGradeForLevel, segmentCongestionPresentation } from './segmentCongestion'
+import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
 import { isTransitLeg, isTransferLeg, transitionLabel } from './transitions'
 
 export default function RouteCard({
@@ -26,7 +26,7 @@ export default function RouteCard({
 }) {
   const displayLegs = compactLegs(route.legs)
   const hasCongestion = displayLegs.some(
-    (leg) => isTransitLeg(leg) && leg.segmentCongestionLevel !== undefined,
+    (leg) => isTransitLeg(leg) && segmentCongestionGradeForLeg(leg) !== undefined,
   )
   const departure = clockTime(route.departedAt)
   const arrival = routeArrival(route.minutes, route.departedAt)
@@ -98,9 +98,7 @@ export default function RouteCard({
         <span className="route-segment-labels" aria-label="구간별 혼잡도">
           {displayLegs.map((leg, index) => {
             const congestion = isTransitLeg(leg)
-              ? segmentCongestionPresentation(
-                  segmentCongestionGradeForLevel(leg.segmentCongestionLevel),
-                )
+              ? segmentCongestionPresentation(segmentCongestionGradeForLeg(leg))
               : undefined
             const from = leg.from?.name || leg.title.split(' → ')[0]
             const to = leg.to?.name || leg.title.split(' → ').at(-1)

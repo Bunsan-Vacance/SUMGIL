@@ -127,6 +127,30 @@ describe('경로 카드 구간 혼잡도', () => {
     expect(screen.getByRole('button').getAttribute('aria-label')).toContain('상세 경로')
   })
 
+  it('서버 구간 등급을 숫자 기반 등급보다 우선해 표시한다', () => {
+    render(
+      <RouteCard
+        route={route({
+          legs: [
+            {
+              mode: 'bus',
+              title: '정류장 A → 정류장 B',
+              note: '버스',
+              minutes: 15,
+              segmentCongestionLevel: 80,
+              segmentCongestionGrade: 'NORMAL',
+            },
+          ],
+        })}
+        onDetail={vi.fn()}
+      />,
+    )
+
+    expect(
+      Array.from(screen.getByLabelText('구간별 혼잡도').children, (cell) => cell.textContent),
+    ).toEqual(['보통'])
+  })
+
   it('구간 혼잡도 값이 없으면 구간별 혼잡도 UI를 만들지 않는다', () => {
     const route: Route = {
       id: 'live-route',

@@ -304,6 +304,16 @@ describe('경로 지도 선과 지점', () => {
           }).strokeColor,
       ),
     ).toEqual(['#1d4ed8', '#15803d', '#b91c1c', '#7e22ce'])
+    expect(
+      routeLineStyle({
+        mode: 'subway',
+        title: '',
+        note: '',
+        minutes: 1,
+        segmentCongestionLevel: 80,
+        segmentCongestionGrade: 'NORMAL',
+      }).strokeColor,
+    ).toBe('#15803d')
 
     const place = routeEndpointPlace({
       endpoint: endpoint('raw-214', '강변', 37.5, 127.03),

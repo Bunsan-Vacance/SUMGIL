@@ -1,7 +1,7 @@
 import type { KakaoMapInstance, KakaoMaps, MapOverlay } from '../../lib/kakao/sdk'
 import type { GeometryLineString, Leg, Place, Route, RouteEndpoint } from '../route/types'
 import {
-  segmentCongestionGradeForLevel,
+  segmentCongestionGradeForLeg,
   segmentCongestionPresentation,
 } from '../route/segmentCongestion'
 import { isTransitLeg, isTransferLeg } from '../route/transitions'
@@ -33,7 +33,7 @@ export interface RouteLineEntry {
 
 export function routeLineStyle(leg: Leg) {
   const congestion = isTransitLeg(leg)
-    ? segmentCongestionPresentation(segmentCongestionGradeForLevel(leg.segmentCongestionLevel))
+    ? segmentCongestionPresentation(segmentCongestionGradeForLeg(leg))
     : undefined
   if (isTransferLeg(leg)) {
     return congestion
