@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # DATA_ENGINE 수집 상태 점검을 한 번에 실행한다.
 #
-# 정상: freshness + partition count 모두 통과하면 exit 0.
+# 정상: freshness + partition count + consumer lag 모두 통과하면 exit 0.
 # 비정상: 하나라도 실패하면 모든 점검을 마친 뒤 exit 1.
 set -uo pipefail
 
@@ -32,6 +32,9 @@ PARTITION_HOURS="${PARTITION_HOURS:-1}"
 BIKE_MIN_COUNT="${BIKE_MIN_COUNT:-10}"
 SUBWAY_MAX_AGE_MIN="${SUBWAY_MAX_AGE_MIN:-10}"
 SUBWAY_MIN_RUNS="${SUBWAY_MIN_RUNS:-30}"
+# lag 판정은 실행 간 이력을 쓰므로 모니터를 15분보다 촘촘하게(예: 5분) 돌려야 한다.
+LAG_WARN_MIN="${LAG_WARN_MIN:-5}"
+LAG_FAIL_MIN="${LAG_FAIL_MIN:-15}"
 # 운영 시간은 SUBWAY_OPERATING_START / SUBWAY_OPERATING_END(HH:MM) 환경변수로 바꾼다.
 DISCORD_NOTIFY_ON_FAILURE="${DISCORD_NOTIFY_ON_FAILURE:-1}"
 
@@ -73,13 +76,13 @@ run_check() {
   fi
 }
 
-run_check "[1/2] collection freshness check" \
+run_check "[1/3] collection freshness check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_collection_freshness \
     --ai-root "${AI_ROOT}" \
     --bike-max-age-min "${BIKE_MAX_AGE_MIN}" \
     --weather-max-age-min "${WEATHER_MAX_AGE_MIN}"     --subway-max-age-min "${SUBWAY_MAX_AGE_MIN}"
 
-run_check "[2/2] partition count check" \
+run_check "[2/3] partition count check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_partition_counts \
     --ai-root "${AI_ROOT}" \
     --hours "${PARTITION_HOURS}" \
