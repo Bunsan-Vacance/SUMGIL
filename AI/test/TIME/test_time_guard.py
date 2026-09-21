@@ -69,9 +69,9 @@ def test_total_budget_exceeded_returns_budget_error() -> None:
     assert guard.check(GET_ETA_STOCK) is not None
 
 
-def test_replan_tool_budget_is_five_and_scoped_to_that_tool() -> None:
+def test_replan_tool_budget_is_three_and_scoped_to_that_tool() -> None:
     guard = ToolGuard(clock=FakeClock())
-    _ok(guard, REPLAN_ROUTE, count=5)  # 하차 후보역 상한
+    _ok(guard, REPLAN_ROUTE, count=3)  # BE 회신 K=3 + 순차 호출 권고(8번)
 
     err = guard.check(REPLAN_ROUTE)
     assert isinstance(err, ToolError)
@@ -315,7 +315,7 @@ def test_default_tool_budgets_are_not_shared_between_instances() -> None:
     first = ToolGuard(clock=FakeClock())
     first.tool_budgets[REPLAN_ROUTE] = 1
 
-    assert ToolGuard(clock=FakeClock()).budget_for(REPLAN_ROUTE) == 5
+    assert ToolGuard(clock=FakeClock()).budget_for(REPLAN_ROUTE) == 3
 
 
 def test_동시_호출에서_카운터가_유실되지_않는다():
