@@ -2,6 +2,10 @@ package com.ssafy.s15p21a104.domain.route.service;
 
 import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
 import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
+import com.ssafy.s15p21a104.domain.buscongestion.BusArrival;
+import com.ssafy.s15p21a104.domain.buscongestion.BusCongestionProperties;
+import com.ssafy.s15p21a104.domain.buscongestion.BusCongestionReader;
+import com.ssafy.s15p21a104.domain.buscongestion.BusCongestionWindow;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
@@ -35,9 +39,11 @@ import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
 import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -46,12 +52,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * 경로 검색. 그래프 미적재 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
  */
 @Service
-@RequiredArgsConstructor
+// 생성자가 둘이라(아래 10인자 편의 생성자) Spring 이 어느 쪽을 쓸지 스스로 못 고른다 —
+// Lombok 이 만드는 전체 생성자에 @Autowired 를 붙여 주입 대상을 명시한다.
+// 없으면 기동 때 "No default constructor found" 로 죽는다(단위 테스트로는 안 잡힌다).
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 @Transactional(readOnly = true)
 public class RouteSearchService {
 
@@ -68,6 +78,32 @@ public class RouteSearchService {
     private final BusRouteRepository busRouteRepository;
     private final CongestionRepository congestionRepository;
     private final CongestionPredRepository congestionPredRepository;
+    private final BusCongestionReader busCongestionReader;
+    private final BusCongestionProperties busCongestionProperties;
+    private final Clock clock;
+
+    /**
+     * 버스 실시간 혼잡도(297) 없이 만드는 기존 형태. 혼잡도는 응답에 등급만 얹는 곁가지라 탐색
+     * 동작을 검증하는 테스트가 이 의존을 몰라도 되게 남겨 둔다 — 이 경로에서는 항상 null 등급이다.
+     */
+    public RouteSearchService(
+            StationRepository stationRepository,
+            RouteGraphRegistry graphRegistry,
+            TransferRule transferRule,
+            RailGeometryRegistry railGeometryRegistry,
+            WalkGeometryRegistry walkGeometryRegistry,
+            BikeGeometryRegistry bikeGeometryRegistry,
+            RouteLineRepository routeLineRepository,
+            BusRouteRepository busRouteRepository,
+            CongestionRepository congestionRepository,
+            CongestionPredRepository congestionPredRepository) {
+        this(stationRepository, graphRegistry, transferRule, railGeometryRegistry, walkGeometryRegistry,
+                bikeGeometryRegistry, routeLineRepository, busRouteRepository, congestionRepository,
+                congestionPredRepository,
+                BusCongestionReader.disabled(),
+                new BusCongestionProperties(false, null, 0, null, null, null, null),
+                Clock.systemDefaultZone());
+    }
 
     /** 6경로 응답 상한: 속도 3 + 혼잡 3(S15P21A104-214, 배포 문서 순서표). */
     private static final int SPEED_ROUTES = 3;
@@ -120,7 +156,7 @@ public class RouteSearchService {
         List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
                 speed, calm, ranked, SPEED_ROUTES + CALM_ROUTES);
         // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
-        return withRouteNames(withGeometryAll(six));
+        return withRouteNames(withGeometryAll(six), departureTime);
     }
 
     /** 탐색→매핑 조립기. 레지스트리 값을 주입해 만든다. */
@@ -179,8 +215,27 @@ public class RouteSearchService {
     /**
      * 사람이 읽는 노선 이름을 배치로 붙인다(213 T4). {@link RouteNameResolver}에
      * 위임하고 서비스는 DB 조회 함수만 넘긴다.
+     *
+     * <p>버스 실시간 혼잡도(297)도 여기서 붙는다. <b>지금 출발 검색이고 버스 구간이 있을 때만</b>
+     * 그 승차 정류소를 한 번에 받아 온다 — 지하철만 나온 검색은 외부 호출이 아예 없다.
+     *
+     * @param departureTime 요청한 출발 시각(없으면 null = 지금). 실시간 값을 붙일지 가른다
      */
-    private List<RouteSearchResponse> withRouteNames(List<RouteSearchResponse> responses) {
+    private List<RouteSearchResponse> withRouteNames(
+            List<RouteSearchResponse> responses, LocalDateTime departureTime) {
+        Function<String, Map<String, BusArrival>> congestion = stopId -> Map.of();
+        if (BusCongestionWindow.isLive(departureTime, clock, busCongestionProperties.nowWindow())) {
+            Set<String> stops = RouteNameResolver.busBoardingStops(responses);
+            if (!stops.isEmpty()) {
+                busCongestionReader.prefetch(stops);
+                congestion = busCongestionReader::forStop;
+            }
+        }
+        return withRouteNames(responses, congestion);
+    }
+
+    private List<RouteSearchResponse> withRouteNames(
+            List<RouteSearchResponse> responses, Function<String, Map<String, BusArrival>> busCongestion) {
         return new RouteNameResolver(
                 ids -> {
                     Map<String, String> names = new HashMap<>();
@@ -203,7 +258,8 @@ public class RouteSearchService {
                         headways.put(busRoute.getRouteId(), busRoute.getHeadwayMin());
                     }
                     return headways;
-                }).withRouteNames(responses);
+                },
+                busCongestion).withRouteNames(responses);
     }
 
     /** 좌표 검색 전용 임시 노드 ID(S15P21A104-187). 요청 하나 안에서만 쓰고 그래프에 남기지 않는다. */
@@ -289,7 +345,7 @@ public class RouteSearchService {
                 ranked, departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
         List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
                 speed, calm, ranked, SPEED_ROUTES + CALM_ROUTES);
-        return withRouteNames(withGeometryAll(six));
+        return withRouteNames(withGeometryAll(six), request.departureTime());
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {
