@@ -56,7 +56,7 @@ scp -i $key -r "$ai\models\BIKE\<태그>_<타임스탬프>" ${server}:~/Soomgil-
 ## 3. `ai-api` systemd 서비스
 
 `app.main:app`을 `uvicorn`으로 상시 구동한다. 유닛 템플릿은 `AI/scripts/ai-api.service`
-(`bike-realtime-poller.service`와 같은 `<REPO_ROOT>`/`<VENV_PATH>` 플레이스홀더 방식).
+(`<REPO_ROOT>`/`<VENV_PATH>` 플레이스홀더 방식).
 
 ### 최초 설치 (이미 완료돼 있음 — 재설치할 때만)
 
@@ -111,12 +111,11 @@ curl -s "http://100.64.193.109:8000/bike/stations/ST-10/eta-stock?eta_minutes=15
 | 서비스 | 역할 | 소유 |
 | --- | --- | --- |
 | `ai-api.service` | FastAPI 게이트웨이(`CROWD`+`BIKE` 전체), 방금 추가 | 이 문서 |
-| `bike-realtime-poller.service` | 카프카에서 실시간 재고 받아 `latest_stock.parquet` 갱신 | 별도 브랜치 |
-| `weather-nowcast-poller.service` | 실시간 날씨 스냅샷 갱신 | 별도 브랜치 |
+| `data-engine-kafka-consumer.service` | Kafka 원본 저장 및 재고·날씨 최신 파일 갱신 | DATA_ENGINE |
 | `bike-avg-batch.timer`/`.service` | `bike_stock_pred` 배치표(폴백용) 주기 갱신 | S15P21A104-225 |
 | `subway-ridership-daily.timer`/`.service` | D-1 승하차 일 2회 수집 | 별도 브랜치 |
 
-`ai-api`는 `bike-realtime-poller`가 쓰는 `latest_stock.parquet`을 읽기만 하고, `bike-avg-batch`가
+`ai-api`는 Kafka consumer가 쓰는 `latest_stock.parquet`을 읽기만 하고, `bike-avg-batch`가
 만드는 배치표는 **읽지 않는다**(`/bike/stations/{id}/eta-stock`은 실시간 모델 직접 호출 — 배치표는
 BE가 자기 DB로 가져가 쓰는 폴백 전용, `router.py` 모듈 docstring 참고). 그래서 이 서비스들끼리는
 서로 재시작 순서를 맞출 필요가 없다.

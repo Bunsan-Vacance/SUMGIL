@@ -6,8 +6,7 @@
 
 ## 구조
 
-- `collect/` — 외부 API 수집 스크립트. `bike_realtime.py`(5min 폴링), `weather_nowcast.py`
-  (초단기실황/예보, 10min 폴링), `weather_asos_backfill.py`(과거 백필, 기본 dry-run),
+- `collect/` — 외부 API 배치 수집 스크립트. `weather_asos_backfill.py`(과거 백필, 기본 dry-run),
   `common.py`(재시도·시각·parquet 저장 공용), `subway_ridership_daily.py`(CROWD: 서울교통공사 역별
   시간대별 승하차 D−1 일 배치, `getStnPsgr`, 143). CROWD의 **학습** 원본(연간·일별 CSV, 혼잡도 스냅샷)은
   수동 다운로드 파일이고, 수집기는 배치 예측의 이력 창(시차 피처)을 채우는 최근 실측만 받는다.
@@ -40,13 +39,13 @@
 - `reports/` — `download_guide.md`(수동 다운로드 안내, 커밋 대상), `bike_weather_eda.md`·
   `crowd_eda.md`·`figures/*.png|svg`(생성 산출물, `.gitignore` 대상 — 코드만 커밋되고 리포트
   자체는 재생성. 그림은 Drive `data/CROWD/reports/figures/` 미러와 Notion 실험실 첨부로 공유).
-- `scripts/` — 폴러 백그라운드 실행용 nohup 스크립트·systemd 유닛 템플릿, 모니터링·배치 통합 실행 스크립트.
+- `scripts/` — 배치용 systemd 유닛 템플릿과 모니터링·배치 통합 실행 스크립트.
 
-## 실시간 수집기 운영
+## 배치 수집기 운영
 
-따릉이와 날씨 nowcast 수집기는 서버에서 상시 실행해야 하므로 운영 환경에서는 systemd를
-기본으로 사용한다. `start_*.sh`는 수동 테스트나 임시 실행용으로만 쓴다. 지하철 D−1 승하차
-수집기는 폴러가 아니라 **하루 두 번 실행되는 oneshot**이라 `.timer`로 띄운다(아래 별도 절).
+따릉이와 날씨 nowcast는 `DATA_ENGINE.stream.kafka_consumer`가 수집한다. 이 설치 스크립트는
+지하철 D−1 승하차 수집과 예측 배치처럼 정해진 시각에 실행하는 systemd timer를 설치한다.
+Kafka consumer 운영 방법은 아래 "Kafka consumer" 절을 참고한다.
 
 사전 준비:
 
@@ -60,7 +59,6 @@ mkdir -p logs
 `AI/.env`에는 최소 아래 키가 필요하다.
 
 ```text
-SEOUL_BIKE_KEY 또는 SEOUL_API_KEY
 SEOUL_SUBWAY_KEY 또는 SEOUL_API_KEY   # getStnPsgr(D−1 승하차)
 KMA_API_KEY
 ```
@@ -77,28 +75,6 @@ bash DATA_ENGINE/scripts/install_data_engine_services.sh
 ```bash
 bash DATA_ENGINE/scripts/install_data_engine_services.sh --enable-now
 ```
-
-수동으로 시작·확인할 때는 아래 명령을 사용한다.
-
-```bash
-sudo systemctl enable --now bike-realtime-poller.service
-sudo systemctl enable --now weather-nowcast-poller.service
-
-sudo systemctl status bike-realtime-poller.service
-sudo systemctl status weather-nowcast-poller.service
-
-tail -n 100 AI/logs/bike_realtime.log
-tail -n 100 AI/logs/weather_nowcast.log
-```
-
-정상 동작 기준:
-
-- `bike-realtime-poller.service`, `weather-nowcast-poller.service`가 `active` 상태다.
-- `AI/logs/bike_realtime.log`, `AI/logs/weather_nowcast.log`가 생성된다.
-- `AI/data/BIKE/raw/realtime/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet`가 생성된다.
-- `AI/data/EXTERNAL/weather/raw/nowcast/dt=YYYY-MM-DD/hh=HH/snapshot_*.parquet`가 생성된다.
-- `AI/data/BIKE/raw/realtime/latest.parquet`가 갱신된다.
-- `AI/data/EXTERNAL/weather/raw/nowcast/latest.parquet`가 갱신된다.
 
 ### 지하철 D−1 승하차 수집(`subway_ridership_daily`, 143)
 
@@ -258,9 +234,9 @@ python -m DATA_ENGINE.monitor.check_partition_counts
 - 날씨 완료 시간대 파티션: `kafka_topic=weather.nowcast` snapshot 최소 1개/hour.
 - 현재 진행 중인 KST 시간대는 파티션 파일 수 검사에서 제외한다.
 
-모니터는 poller의 `latest.parquet`과 평탄화 snapshot을 집계하지 않는다. 파일 mtime이
-새로워도 내부 데이터 시각이 오래됐으면 stale로 판정하며, 같은 디렉터리에 poller 파일이
-남아 있어도 `kafka_topic` 값이 일치하는 Kafka snapshot만 센다.
+모니터는 과거 직접 수집기의 `latest.parquet`과 평탄화 snapshot을 집계하지 않는다. 파일
+mtime이 새로워도 내부 데이터 시각이 오래됐으면 stale로 판정하며, 같은 디렉터리에 과거
+파일이 남아 있어도 `kafka_topic` 값이 일치하는 Kafka snapshot만 센다.
 
 기준값은 실행 시 환경변수로 조정할 수 있다.
 
@@ -301,11 +277,9 @@ cron 등록 예시:
 장애 확인 순서:
 
 ```bash
-sudo systemctl status bike-realtime-poller.service --no-pager
-sudo systemctl status weather-nowcast-poller.service --no-pager
+sudo systemctl status data-engine-kafka-consumer.service --no-pager
 
-tail -n 100 logs/bike_realtime.log
-tail -n 100 logs/weather_nowcast.log
+sudo journalctl -u data-engine-kafka-consumer.service -n 100 --no-pager
 tail -n 100 logs/data_engine_monitor.log
 
 find data/BIKE/raw/realtime -type f | tail
@@ -390,7 +364,7 @@ collected_at, collected_date, collected_hour, collected_minute, weather_source,
 base_datetime, forecast_datetime, nx, ny, t1h, rn1, reh, wsd, pty
 ```
 
-날씨 배치는 poller raw의 평탄화된 컬럼과 Kafka raw의 `payload_json`을 함께 읽는다.
+날씨 배치는 과거 직접 수집 raw의 평탄화된 컬럼과 Kafka raw의 `payload_json`을 함께 읽는다.
 Kafka payload의 `obsrValue`/`fcstValue`로 `observed`/`forecast`를 구분하고,
 동일 종류·발표 시각·유효 시각·격자·category가 반복되면 마지막 수집값을 사용한다.
 따라서 위 2026-09-13 행 수는 변경 전 실행 기록이며 재실행 시 결과 행 수가 줄 수 있다.
@@ -464,8 +438,8 @@ DATA_ENGINE batch output quality FAILED
 
 ## 데이터 보관 정책
 
-따릉이·날씨 실시간 수집기는 서버 로컬에 `snapshot_*.parquet`를 계속 쌓는다. 로컬 디스크가
-무한히 커지지 않도록, 재생성 불가능한 수동 원천과 가공 산출물은 건드리지 않고 상시 폴링 raw
+Kafka consumer는 서버 로컬에 `snapshot_*.parquet`를 계속 쌓는다. 로컬 디스크가
+무한히 커지지 않도록, 재생성 불가능한 수동 원천과 가공 산출물은 건드리지 않고 실시간 raw
 snapshot만 48시간 기준으로 정리한다. 운영 삭제는 Drive 업로드 manifest에서 백업 성공이 확인된
 파티션만 대상으로 한다.
 
@@ -478,8 +452,9 @@ AI/data/EXTERNAL/weather/raw/nowcast/dt=*/hh=*/snapshot_*.parquet
 
 삭제 제외 대상:
 
-- `AI/data/BIKE/raw/realtime/latest.parquet`
-- `AI/data/EXTERNAL/weather/raw/nowcast/latest.parquet`
+- `AI/data/BIKE/raw/realtime/latest_stock.parquet`
+- `AI/data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet`
+- `AI/data/EXTERNAL/weather/raw/nowcast/latest_weather.parquet`
 - `AI/data/BIKE/raw/station_5min/`, `AI/data/BIKE/raw/rental_history/`,
   `AI/data/BIKE/raw/station_master/`
 - `AI/data/BIKE/interim/`, `AI/data/BIKE/processed/`
@@ -738,19 +713,18 @@ J15A104A의 최근 Kafka 날씨 snapshot을 확인한 결과, `weather.nowcast`�
 확인한 category는 `T1H`, `RN1`, `REH`, `WSD`, `PTY`이며, 샘플의 격자는
 `nx=60, ny=127` 한 곳이다. 이는 현재 샘플의 사실이지 producer가 항상 한 격자만
 발행한다는 계약은 아니다. 공통 산출물은 격자와 관측/예보 종류, 발표/유효 시각을
-보존해야 한다. 기존 poller raw는 이 필드가 평탄화되어 있고 `source`가
+보존해야 한다. 과거 직접 수집 raw는 이 필드가 평탄화되어 있고 `source`가
 `observed`/`forecast`인 반면, Kafka raw는 `payload_json` 안에 필드가 있으며
-envelope `source`가 `weather.nowcast`다. 현재 날씨 배치는 평탄화된 poller 형식만
-받으므로 Kafka raw를 그대로 입력할 수 없다.
+envelope `source`가 `weather.nowcast`다. 날씨 배치는 두 형식을 모두 읽고 같은 내부
+스키마로 정규화한다.
 
 최근 서버 snapshot의 서로 다른 `poll_run_at` 간격은 약 60분이었다. BIKE 서빙의
 15분 신선도 기준을 Kafka 발행 간격에 그대로 적용하면 정상 수집 중에도 오래된 값으로
-판정될 수 있다. 구현 전 다음 정책을 확정한다.
+판정될 수 있다. 현재 적용한 정책은 다음과 같다.
 
-- 동일 관측이 poller와 Kafka 양쪽에 있거나 Kafka에서 재전송될 때의 중복 키와 우선순위.
-- BIKE가 사용할 실황 `observed`의 대표 격자와 `RN1`/`PTY` 기반 강수 판정, 결측 처리.
-- 신선도를 관측 시각, 수집 시각, 최신 파일 갱신 시각 중 어디에 적용할지와 허용 지연.
-  값의 관측 시각을 파일 갱신 시각으로 대체해 신선해 보이게 만들지 않는다.
+- 동일 관측이 과거 직접 수집 raw와 Kafka 양쪽에 있거나 재전송되면 정규화 키로 중복 제거한다.
+- BIKE 실황은 대표 격자 `(60, 127)`의 `T1H`와 `RN1`을 사용한다.
+- 공통 날씨 신선도는 `ingested_at`, BIKE 실황 파일의 `updated_at`은 실제 관측 시각을 사용한다.
 
 서버에서 수동 확인:
 
@@ -815,7 +789,7 @@ Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전
   필요하면 이 네트워크 구성과 함께 확인해야 한다.
 
 따라서 이 폴더의 수집기는 Redis key/TTL을 임의로 확정하지 않는다. BE/Infra Redis 컨벤션과
-네트워크 접근 방식이 확정되기 전까지는 `latest.parquet`를 최신값 fallback으로 사용한다.
+네트워크 접근 방식이 확정되기 전까지는 Kafka consumer가 갱신하는 최신 parquet을 사용한다.
 
 ## `data/` 하위 각 디렉터리가 뭔지
 
@@ -829,15 +803,15 @@ Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전
 
 | 경로 | 내용 | 출처 | 시간 해상도 | 쓰이는 곳 |
 | --- | --- | --- | --- | --- |
-| `data/BIKE/raw/realtime/` | 대여소별 실시간 재고 스냅샷 | `bike_realtime.py` 폴링 (소급 불가, 지금부터 쌓는 것만 존재) | 5분 | 재고 분포·시간패턴·공간구조 (1·2·4번 섹션) |
-| `data/BIKE/raw/realtime/latest.parquet` | 최신 따릉이 재고 스냅샷 | `bike_realtime.py`가 매 폴링마다 atomic replace로 갱신 | 최신 1회 | Redis 연동 전 latest fallback |
+| `data/BIKE/raw/realtime/` | 대여소별 실시간 재고 Kafka 스냅샷 | `DATA_ENGINE.stream.kafka_consumer`가 `bike.stock` 수집 | producer 발행 주기 | 배치·재고 분포·시간패턴·공간구조 |
 | `data/BIKE/raw/realtime/latest_stock.parquet` | Kafka `bike.stock` 기반 대여소별 최신 재고(`rental_id`, `current_stock`, `updated_at`) | `DATA_ENGINE.stream.kafka_consumer`가 `bike.stock` consume 시 atomic replace로 갱신 | 최신 1회 | BIKE 실시간 ETA 재고 API의 현재고 입력 |
 | `data/BIKE/raw/rental_history/` | 대여소별 이용정보 **월별 집계** (OA-15182) | 수동 다운로드 | 월 단위 | 정류소/자치구 월간 총량 참고용 — **날씨 분석엔 미사용** |
 | `data/BIKE/raw/station_5min/` | 대여소별 5분단위 이용현황 O-D (OA-21229) | 수동 다운로드 | 5분(집계 시 시간 단위로 묶음) | **날씨-수요 핵심 분석 (3번 섹션)** |
 | `data/BIKE/raw/station_master/` | 대여소 좌표 (OA-21235) | 수동 다운로드 | - | 공간분석 좌표 조인 (4번 섹션) |
 | `data/EXTERNAL/weather/raw/asos/` | 종관기상관측 시간자료 2년 백필 (지점 108) | `weather_asos_backfill.py` | 시간 | 날씨-수요 핵심 분석 (3번 섹션) |
-| `data/EXTERNAL/weather/raw/nowcast/` | 초단기실황/예보 스냅샷 | `weather_nowcast.py` 폴링 | 10분 | 재고 쪽 보조 분석(향후, 데이터 쌓이는 대로) |
-| `data/EXTERNAL/weather/raw/nowcast/latest.parquet` | 최신 초단기실황/예보 스냅샷 | `weather_nowcast.py`가 매 폴링마다 atomic replace로 갱신 | 최신 1회 | Redis 연동 전 latest fallback |
+| `data/EXTERNAL/weather/raw/nowcast/` | 초단기실황/예보 Kafka 스냅샷 | `DATA_ENGINE.stream.kafka_consumer`가 `weather.nowcast` 수집 | producer 발행 주기 | 날씨 배치와 재고 보조 피처 |
+| `data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet` | 격자·실황/예보·category별 최신 날씨 | Kafka consumer가 atomic replace로 갱신 | 최신 1회 | 모니터링과 공통 최신 날씨 조회 |
+| `data/EXTERNAL/weather/raw/nowcast/latest_weather.parquet` | 대표 격자의 BIKE용 기온·강수 여부 | Kafka consumer가 atomic replace로 갱신 | 최신 1회 | BIKE ETA 날씨 입력 |
 | `data/EXTERNAL/station/raw/` | 서울시 역사마스터(역사_ID·역사명·호선·위경도, 지하철 전 노선) | 수동 다운로드 | - | CROWD 역 군집화·ROUTE 라우팅·BIKE 역-대여소 거리 등 여러 도메인이 참조 |
 | `data/EXTERNAL/population/raw/` | 서울 생활인구 250M 격자, 일별 zip(시간대·연령·성별) | 수동 다운로드 | 시간 | 역 반경 집계 후 CROWD/BIKE 수요 보조 피처 (아직 집계 코드 없음) |
 | `data/EXTERNAL/holiday/raw/` | 사립학교교직원연금공단 공휴일 관리 정보 | 수동 다운로드 | 일 단위 | 공휴일 파생변수(is_holiday) — CROWD/BIKE 이벤트 피처 |

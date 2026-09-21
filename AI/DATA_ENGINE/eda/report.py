@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from DATA_ENGINE.batch.build_bike_stock_5min import read_raw_snapshots
 from DATA_ENGINE.eda import analysis
 
 # 한글 폰트가 없으면 그래프 제목이 네모로 깨진다 — 있는 것만 골라서 적용, 없으면 기본값 유지.
@@ -41,9 +42,9 @@ def _load_snapshots() -> pd.DataFrame:
     if not files:
         raise FileNotFoundError(
             "data/BIKE/raw/realtime 에 스냅샷이 없습니다. "
-            "scripts/start_bike_poller.sh 로 폴러를 먼저 돌려서 데이터를 쌓으세요."
+            "Kafka consumer가 bike.stock을 수집 중인지 확인하세요."
         )
-    return pd.concat((pd.read_parquet(f) for f in files), ignore_index=True)
+    return read_raw_snapshots(files)
 
 
 def _load_rental_hourly() -> pd.DataFrame:
