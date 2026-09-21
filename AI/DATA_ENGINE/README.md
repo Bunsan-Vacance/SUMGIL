@@ -172,8 +172,9 @@ systemd-analyze calendar '*-*-* 03:00:00 Asia/Seoul'
 `crowd-batch-predict.timer`는 매일 09:30(Asia/Seoul)에 `crowd-batch-predict.service`를
 실행한다. 서비스는 `app.CROWD.pipeline.batch_predict --today --tomorrow --link-table`을 돌려
 `data/CROWD/serving/`에 오늘·내일 2일치 `predictions_<날짜>.parquet` + `.meta.json`,
-`predictions_link_<날짜>.parquet`, 그리고 **BE 적재용 `predictions_link_<날짜>_<HHMMSS>.csv`**를
-만든다.
+`predictions_link_<날짜>.parquet`, 그리고 **BE 적재용 `predictions_<날짜>_<HHMMSS>.csv`**(파일명에
+`link_` 토큰이 없다)와 그 사이드카 `predictions_<날짜>_<HHMMSS>.meta.json`(`target_date`·
+`row_count`·`generated_at` 3키)을 만든다.
 
 09:30인 이유는 D−1 승하차 수집기(`subway-ridership-daily.timer`, 09:00 + 최대 5분 랜덤 지연)가
 끝난 뒤라야 전날 실측이 이어붙어 `lag1d_available: true`(가용성 `full`)가 되기 때문이고,
@@ -203,7 +204,7 @@ bash DATA_ENGINE/scripts/install_data_engine_services.sh
 sudo systemctl start crowd-batch-predict.service
 sudo systemctl status crowd-batch-predict.service --no-pager
 tail -n 50 logs/crowd_batch_predict.log
-ls -lt data/CROWD/serving/predictions_link_*.csv | head
+ls -lt data/CROWD/serving/predictions_*.csv | head
 
 sudo systemctl enable --now crowd-batch-predict.timer
 sudo systemctl list-timers --no-pager crowd-batch-predict.timer
@@ -216,6 +217,8 @@ systemd-analyze calendar '*-*-* 09:30:00 Asia/Seoul'
 - `.meta.json`의 `link_table`이 `true`이고, `link_csv_rows`가 CSV 실제 데이터 행 수와 같다
   (BE 로더가 이 값으로 전송 손상을 검증한다).
 - `.meta.json`의 `generated_at` 시각(HHMMSS)이 CSV 파일명의 `_HHMMSS`와 같다.
+- CSV와 같은 basename의 사이드카 `.meta.json`이 같이 생겼고, 그 `row_count`가 CSV 실제 데이터
+  행 수와 같다.
 - `lag1d_available`이 `true`다(D−1 수집기가 돌고 있으면). `false`면 표는 나오지만 가용성이
   `d7_only`로 떨어진 상태다 — 결함이 아니라 상태다.
 - 첫 실행에서 **소요 시간과 피크 메모리를 기록**한다(`TimeoutStartSec` 조정 근거, 워커 노드에

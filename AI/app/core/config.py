@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # B-5 적재 계약은 확정됐지만(`.claude/handoff/response/FROME_BE-crowd-pred-load-path.md`)
     # 배치 스케줄이 아직 등록되지 않아, 첫 릴리스는 명시적으로 켰을 때만 만든다.
     crowd_link_table: bool = False
+    # 9호선 2·3단계(언주 4126~중앙보훈병원 4138) lookup 기준선 서빙 여부. **모델에는 절대
+    # 넣지 않는다** — station_no가 학습 패널에 0건이라 모델(`pipeline/features.CATEGORICAL_COLS`)
+    # 기준으로는 미학습 범주가 된다. True면 배치가 그 13역을 day_type×station_no×time_slot
+    # lookup 평균으로만 채워 슬롯·링크 표에 편입하고 `pred_source="lookup_line9"`로 구분한다.
+    # 기본 True — 9호선 편입이 목적이고 BE가 아직 적재를 시작하지 않아 호환 부담이 없다.
+    # CLI `--line9`/`--no-line9`로 이번 실행만 덮어쓸 수 있다.
+    crowd_line9_serving: bool = True
 
     # ── BIKE 서빙 ──
     # bike_stock_pred 표가 놓이는 곳. CROWD와 달리 날짜별 파일이 아니라 **단일 최신 표**다
