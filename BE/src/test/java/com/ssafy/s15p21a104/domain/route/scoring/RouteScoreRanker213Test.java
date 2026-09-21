@@ -23,7 +23,7 @@ class RouteScoreRanker213Test {
                 "A", "에이역", 37.5, 127.0, "C", "씨역", 37.5, 127.01,
                 routeId, minutes, null, "unavailable", null, null, null);
         return new RouteSearchResponse(RouteType.SHORTEST, minutes, List.of(leg),
-                RouteSource.ALGORITHM, null, 0);
+                RouteSource.ALGORITHM, null, 0, null);
     }
 
     @Test
@@ -68,7 +68,7 @@ class RouteScoreRanker213Test {
                 "A", "에이역", 37.5, 127.0, "C", "씨역", 37.5, 127.01,
                 "BIKE", 5.0, null, "unavailable", null, null, null);
         RouteSearchResponse bike = new RouteSearchResponse(
-                RouteType.SHORTEST, 5.0, List.of(leg), RouteSource.ALGORITHM, null, 0);
+                RouteType.SHORTEST, 5.0, List.of(leg), RouteSource.ALGORITHM, null, 0, null);
         RouteScoreRanker ranker = new RouteScoreRanker(
                 (targetType, targetId, dowType, timeSlot) -> 1.0);
 

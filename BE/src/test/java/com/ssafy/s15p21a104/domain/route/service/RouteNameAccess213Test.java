@@ -26,7 +26,7 @@ class RouteNameAccess213Test {
                 "A", "에이역", 37.5, 127.0, "C", "씨역", 37.5, 127.01,
                 routeId, 5.0, null, "unavailable", null, null, null);
         return new RouteSearchResponse(RouteType.SHORTEST, 5.0, List.of(leg),
-                RouteSource.ALGORITHM, null, 0);
+                RouteSource.ALGORITHM, null, 0, null);
     }
 
     @Test

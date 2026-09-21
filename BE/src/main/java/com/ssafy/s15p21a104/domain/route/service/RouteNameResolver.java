@@ -124,7 +124,8 @@ public final class RouteNameResolver {
                     .toList();
             named.add(new RouteSearchResponse(
                     response.routeType(), response.totalMinutes(), legs, response.source(),
-                    response.totalDistanceMeters(), response.transferCount()));
+                    response.totalDistanceMeters(), response.transferCount(),
+                    response.congestionPrediction()));
         }
         return named;
     }

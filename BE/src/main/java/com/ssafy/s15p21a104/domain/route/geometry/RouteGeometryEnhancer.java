@@ -88,7 +88,8 @@ public final class RouteGeometryEnhancer {
             List<RouteLegResponse> legs = withGeometry(response.legs());
             return new RouteSearchResponse(
                     response.routeType(), response.totalMinutes(), legs, response.source(),
-                    totalDistanceOf(legs), response.transferCount());
+                    totalDistanceOf(legs), response.transferCount(),
+                    response.congestionPrediction());
         } catch (RuntimeException e) {
             return response;
         }

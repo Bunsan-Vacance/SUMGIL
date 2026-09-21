@@ -81,7 +81,8 @@ public final class RouteMapper {
 
         double totalMinutes = enginePath.totalSeconds() / 60.0;
         return Optional.of(new RouteSearchResponse(
-                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount()));
+                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount(),
+                null));
     }
 
     /**
@@ -242,7 +243,8 @@ public final class RouteMapper {
 
         double totalMinutes = enginePath.totalSeconds() / 60.0;
         return Optional.of(new RouteSearchResponse(
-                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount()));
+                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount(),
+                null));
     }
 
     /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용(232). */

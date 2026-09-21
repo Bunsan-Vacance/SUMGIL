@@ -26,7 +26,7 @@ class RouteGeometryEnhancer213Test {
                 id, id + "역", 37.5, 127.0, id + "-2", id + "-2역", 37.5, 127.01,
                 "L1", 5.0, null, "unavailable", null, null, null);
         return new RouteSearchResponse(RouteType.SHORTEST, 5.0, List.of(leg),
-                RouteSource.ALGORITHM, null, 0);
+                RouteSource.ALGORITHM, null, 0, null);
     }
 
     @Test

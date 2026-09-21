@@ -18,6 +18,11 @@ public record RouteSearchResponse(
          * TRANSFER leg 수와 같다. 접근 경계(WALK ↔ 주행)는 환승이 아니라
          * TRANSFER leg를 만들지 않으므로 카운트에서 제외한다.
          */
-        Integer transferCount
+        Integer transferCount,
+        /**
+         * 혼잡 예측(S15P21A104-236, FE-BE 통합 계약 §2). null이면 미제공 —
+         * FE는 {@code 예측 정보 없음}을 표시한다.
+         */
+        CongestionPrediction congestionPrediction
 ) {
 }

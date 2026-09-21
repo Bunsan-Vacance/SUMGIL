@@ -264,7 +264,8 @@ public final class RouteCandidateFinder {
             RouteType routeType = i == 0 ? RouteType.SHORTEST : RouteType.ALTERNATIVE;
             ranked.add(new RouteSearchResponse(
                     routeType, candidate.totalMinutes(), candidate.legs(), candidate.source(),
-                    candidate.totalDistanceMeters(), candidate.transferCount()));
+                    candidate.totalDistanceMeters(), candidate.transferCount(),
+                    candidate.congestionPrediction()));
         }
         return ranked;
     }
@@ -352,7 +353,7 @@ public final class RouteCandidateFinder {
     }
 
     /** leg 단위 (수단·출발·도착·노선) 전체 서명 — 같은 응답 판정. */
-    private static String exactSignature(RouteSearchResponse response) {
+    public static String exactSignature(RouteSearchResponse response) {
         StringBuilder signature = new StringBuilder();
         for (RouteLegResponse leg : response.legs()) {
             signature.append(leg.mode()).append(':')

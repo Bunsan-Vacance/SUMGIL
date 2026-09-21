@@ -71,7 +71,8 @@ public final class RerouteService {
             double sum = route.legs().stream().mapToDouble(RouteLegResponse::minutes).sum();
             RouteSearchResponse remain = new RouteSearchResponse(
                     route.routeType(), sum, route.legs(), RouteSource.ALGORITHM,
-                    route.totalDistanceMeters(), route.transferCount());
+                    route.totalDistanceMeters(), route.transferCount(),
+                    route.congestionPrediction());
             result.add(new RerouteResult(REMAIN_REASON, "ALGORITHM", remain));
             if (result.size() >= MAX_REMAIN) {
                 break;
