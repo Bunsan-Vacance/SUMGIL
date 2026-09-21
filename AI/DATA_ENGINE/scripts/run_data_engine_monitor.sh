@@ -30,6 +30,9 @@ WEATHER_MAX_AGE_MIN="${WEATHER_MAX_AGE_MIN:-90}"
 WEATHER_MIN_COUNT="${WEATHER_MIN_COUNT:-1}"
 PARTITION_HOURS="${PARTITION_HOURS:-1}"
 BIKE_MIN_COUNT="${BIKE_MIN_COUNT:-10}"
+SUBWAY_MAX_AGE_MIN="${SUBWAY_MAX_AGE_MIN:-10}"
+SUBWAY_MIN_RUNS="${SUBWAY_MIN_RUNS:-30}"
+# 운영 시간은 SUBWAY_OPERATING_START / SUBWAY_OPERATING_END(HH:MM) 환경변수로 바꾼다.
 DISCORD_NOTIFY_ON_FAILURE="${DISCORD_NOTIFY_ON_FAILURE:-1}"
 
 status=0
@@ -74,14 +77,14 @@ run_check "[1/2] collection freshness check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_collection_freshness \
     --ai-root "${AI_ROOT}" \
     --bike-max-age-min "${BIKE_MAX_AGE_MIN}" \
-    --weather-max-age-min "${WEATHER_MAX_AGE_MIN}"
+    --weather-max-age-min "${WEATHER_MAX_AGE_MIN}"     --subway-max-age-min "${SUBWAY_MAX_AGE_MIN}"
 
 run_check "[2/2] partition count check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_partition_counts \
     --ai-root "${AI_ROOT}" \
     --hours "${PARTITION_HOURS}" \
     --bike-min-count "${BIKE_MIN_COUNT}" \
-    --weather-min-count "${WEATHER_MIN_COUNT}"
+    --weather-min-count "${WEATHER_MIN_COUNT}"     --subway-min-runs "${SUBWAY_MIN_RUNS}"
 
 printf '\n'
 if [[ "${status}" -eq 0 ]]; then

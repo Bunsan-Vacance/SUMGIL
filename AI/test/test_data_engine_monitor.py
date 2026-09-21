@@ -158,7 +158,7 @@ def test_freshness_checks_kafka_latest_not_poller(tmp_path, capsys):
         now_ts,
     )
 
-    assert main(["--ai-root", str(tmp_path)]) == 1
+    assert main(["--ai-root", str(tmp_path), "--no-subway"]) == 1
     output = capsys.readouterr().out
     assert "latest_stock.parquet" in output
     assert "latest_by_grid.parquet" in output
@@ -172,7 +172,7 @@ def test_freshness_checks_kafka_latest_not_poller(tmp_path, capsys):
         60,
         now_ts,
     )
-    assert main(["--ai-root", str(tmp_path)]) == 0
+    assert main(["--ai-root", str(tmp_path), "--no-subway"]) == 0
 
 
 def test_freshness_rejects_stale_kafka_latest(tmp_path):
@@ -187,7 +187,7 @@ def test_freshness_rejects_stale_kafka_latest(tmp_path):
         now_ts,
     )
 
-    assert main(["--ai-root", str(tmp_path)]) == 1
+    assert main(["--ai-root", str(tmp_path), "--no-subway"]) == 1
 
 
 def test_check_freshness_returns_all_results(tmp_path):
@@ -223,7 +223,7 @@ def test_main_returns_zero_when_all_latest_files_are_fresh(tmp_path, capsys):
         now_ts=now_ts,
     )
 
-    exit_code = main(["--ai-root", str(tmp_path)])
+    exit_code = main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -240,7 +240,7 @@ def test_main_returns_one_when_any_latest_file_fails(tmp_path, capsys):
         now_ts=now_ts,
     )
 
-    exit_code = main(["--ai-root", str(tmp_path)])
+    exit_code = main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -419,11 +419,11 @@ def test_partition_monitor_counts_only_kafka_snapshots(tmp_path):
         weather_slot / "snapshot_poller.parquet", index=False
     )
 
-    assert partition_main(["--ai-root", str(tmp_path)]) == 1
+    assert partition_main(["--ai-root", str(tmp_path), "--no-subway"]) == 1
 
     create_kafka_snapshots(bike, slot, 10, "bike.stock")
     create_kafka_snapshots(weather, slot, 1, "weather.nowcast")
-    assert partition_main(["--ai-root", str(tmp_path)]) == 0
+    assert partition_main(["--ai-root", str(tmp_path), "--no-subway"]) == 0
 
 
 def test_partition_main_returns_zero_when_all_partitions_meet_minimum(tmp_path, capsys):
@@ -433,7 +433,7 @@ def test_partition_main_returns_zero_when_all_partitions_meet_minimum(tmp_path, 
         tmp_path / "data/EXTERNAL/weather/raw/nowcast", slot, 1, "weather.nowcast"
     )
 
-    exit_code = partition_main(["--ai-root", str(tmp_path)])
+    exit_code = partition_main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -445,7 +445,7 @@ def test_partition_main_returns_one_when_any_partition_fails(tmp_path, capsys):
     slot = completed_hour_slots(1)[0]
     create_kafka_snapshots(tmp_path / "data/BIKE/raw/realtime", slot, 10, "bike.stock")
 
-    exit_code = partition_main(["--ai-root", str(tmp_path)])
+    exit_code = partition_main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 1
