@@ -49,4 +49,26 @@ class CoordinateAccessQuota231Test {
         assertTrue(edges.stream().anyMatch(e -> e.toNode().equals("221")),
                 "최근접 역(221)이 접근 후보에 있어야 한다");
     }
+
+    @Test
+    @DisplayName("231-T2: 접근 엣지 소요도 직선×우회율이다 (그래프 안팎 일치)")
+    void t2_접근소요_우회율() {
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        infos.put("221", new RouteMapper.StationInfo("221", "역삼역", 37.500658, 127.03643));
+        RouteGraph graph = RouteTestFixtures.graphOf(
+                RouteTestFixtures.subway("221", "222", "L1", 100),
+                RouteTestFixtures.subway("222", "221", "L1", 100));
+
+        List<Edge> edges = CoordinateAccessEdges.accessEdges(
+                "PLACE-ORIGIN", 37.4980, 127.0320, infos, graph, true,
+                Set.of("221", "222"));
+
+        double dist = com.ssafy.s15p21a104.global.geo.GeoDistance.haversineMeters(
+                37.4980, 127.0320, 37.500658, 127.03643);
+        int expected = (int) Math.round(dist
+                * com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder.CIRCUITY
+                / com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder.METERS_PER_SEC);
+        assertTrue(edges.stream().anyMatch(e ->
+                e.toNode().equals("221") && e.travelSec() == expected));
+    }
 }

@@ -90,7 +90,10 @@ public final class CoordinateAccessEdges {
 
         List<Edge> edges = new ArrayList<>();
         for (Candidate candidate : picked) {
-            int sec = (int) Math.round(candidate.distanceM() / WalkEdgeBuilder.METERS_PER_SEC);
+            // 비용에만 우회율을 얹는다 — 반경·정렬은 직선 그대로(연결성·순서 보존).
+            // WalkEdgeBuilder와 같은 상수라 도보 시간이 그래프 안팎에서 일치한다.
+            int sec = (int) Math.round(
+                    candidate.distanceM() * WalkEdgeBuilder.CIRCUITY / WalkEdgeBuilder.METERS_PER_SEC);
             edges.add(outgoing
                     ? new Edge(placeNodeId, candidate.nodeId(), WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK)
                     : new Edge(candidate.nodeId(), placeNodeId, WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK));
