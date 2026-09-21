@@ -61,10 +61,13 @@ from sklearn.metrics import mean_absolute_error, r2_score
 from app.BIKE.pipeline.calendar import load_holidays
 from app.BIKE.pipeline.dataset import load_paths, monthly_paths, scan_station_ids
 from app.BIKE.pipeline.external_features import (
+    attach_floating_population,
     attach_kbo,
     attach_weather,
     jamsil_nearby_stations,
+    load_dong_hour_population,
     load_jamsil_game_dates,
+    load_station_dong_map,
     load_weather,
 )
 from app.BIKE.pipeline.features import (
@@ -259,6 +262,8 @@ def _attach_v4_features(
     lag_lookup: pd.DataFrame | None,
     weather: pd.DataFrame | None,
     distance: pd.DataFrame | None,
+    population: pd.DataFrame | None = None,
+    station_dong_map: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """feature_set에 맞는 v4 계열 피처만 붙인다. v3는 그대로 통과.
 
@@ -274,6 +279,10 @@ def _attach_v4_features(
         df = attach_weather(df, weather, date_col="date", hour_col="hour")
     elif feature_set == "v4_distance":
         df = attach_distance(df, distance)
+    elif feature_set == "v4_floating":
+        df = attach_floating_population(
+            df, population, station_dong_map, date_col="date", hour_col="hour"
+        )
     return df
 
 
@@ -307,8 +316,9 @@ def run(
     avg_baseline = StockProfileBaseline().fit_streaming(train_paths, holidays)
     print(f"[avg] station×dow_type×time_slot {len(avg_baseline.table_):,}행")
 
-    # ── v4 전용 재료(KBO 일정, jamsil 인근역, D-1/D-7 lag lookup, 날씨, 역 거리) — v3면 전부 None ──
+    # ── v4 전용 재료(KBO 일정, jamsil 인근역, D-1/D-7 lag lookup, 날씨, 역 거리, 유동인구) — v3면 전부 None ──
     jamsil_dates = jamsil_stations = lag_lookup = weather = distance = None
+    population = station_dong_map = None
     if feature_set == "v4_kbo_lag":
         jamsil_dates = load_jamsil_game_dates()
         coords = pd.read_parquet(
@@ -334,6 +344,13 @@ def run(
             ["od_station_id", "dist_subway_m", "dist_bus_m"]
         ]
         print(f"[v4_distance] 역 거리 {len(distance):,}행")
+    elif feature_set == "v4_floating":
+        print("[v4_floating] 유동인구·역-행정동 매핑 로딩...")
+        population = load_dong_hour_population()
+        station_dong_map = load_station_dong_map()
+        print(
+            f"[v4_floating] 유동인구 {len(population):,}행, 역-행정동 매핑 {len(station_dong_map):,}행"
+        )
 
     # ── LightGBM: target_net_flow (historical profile + 공휴일 feature [+ v4 피처]) ──
     station_ids = (
@@ -344,7 +361,15 @@ def run(
     train_df = load_paths(train_paths, TRAIN_READ_COLS, TARGET_COL, sample_frac, random_state)
     train_df = _attach_holiday_flag(train_df, holidays)
     train_df = _attach_v4_features(
-        train_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather, distance
+        train_df,
+        feature_set,
+        jamsil_dates,
+        jamsil_stations,
+        lag_lookup,
+        weather,
+        distance,
+        population,
+        station_dong_map,
     )
     profile = HistoricalProfileBuilder().fit(train_df)
     train_df = profile.transform(train_df)
@@ -353,7 +378,15 @@ def run(
     valid_df = load_paths(valid_paths, BASE_READ_COLS, TARGET_COL)
     valid_df = _attach_holiday_flag(valid_df, holidays)
     valid_df = _attach_v4_features(
-        valid_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather, distance
+        valid_df,
+        feature_set,
+        jamsil_dates,
+        jamsil_stations,
+        lag_lookup,
+        weather,
+        distance,
+        population,
+        station_dong_map,
     )
     valid_df = profile.transform(valid_df)
     apply_station_code(valid_df, station_dtype, "valid")
@@ -384,7 +417,15 @@ def run(
         test_df = load_paths([p], BASE_READ_COLS, TARGET_COL)
         test_df = _attach_holiday_flag(test_df, holidays)
         test_df = _attach_v4_features(
-            test_df, feature_set, jamsil_dates, jamsil_stations, lag_lookup, weather, distance
+            test_df,
+            feature_set,
+            jamsil_dates,
+            jamsil_stations,
+            lag_lookup,
+            weather,
+            distance,
+            population,
+            station_dong_map,
         )
         test_df = profile.transform(test_df)
         apply_station_code(test_df, station_dtype, f"test:{p.stem}")

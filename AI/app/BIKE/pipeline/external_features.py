@@ -2,8 +2,10 @@
 
 0단계에서 net_flow 평균만으로는 놓쳤다가, 활동량·미래 empty/full 발생률까지 같이 보고서야
 효과를 확인한 세 피처만 채택했다(`validation/BYC/lightgbm-stock-conversion-check/RESULTS.md`).
-공휴일 세분화(명절/연휴전후)는 원본에 그 구분이 없어서 binary만 쓴다. 유동인구는 raw
-데이터 시기(2026년)가 학습·평가 기간(2024~2025)과 안 맞아 제외했다.
+공휴일 세분화(명절/연휴전후)는 원본에 그 구분이 없어서 binary만 쓴다. 유동인구는 처음
+확보한 raw 데이터 시기(2026년)가 학습·평가 기간(2024~2025)과 안 맞아 한 번 보류됐다가,
+2024-01~2024-12·2025-07~2025-09 전체를 새로 확보해 `v4_floating` 세트로 재개했다
+(아래 `attach_floating_population` 참고).
 
 **학습/서빙 값 출처가 다르다**(계획서 3단계):
 
@@ -153,3 +155,52 @@ def attach_weather(
     # dtype이 object로 깨져서 LightGBM이 거부한다 — fillna 뒤 명시 캐스팅한다.
     df["is_rain"] = df["is_rain"].fillna(False).astype("int8")
     return df
+
+
+# ── v4_floating: 유동인구(서울 생활인구, 행정동 단위) ──
+# 산출 스크립트: validation/BYC/floating-population-check/src/
+#   build_station_dong_mapping.py  대여소 위경도 -> 행정동코드(point-in-polygon)
+#   build_dong_hour_population.py  생활인구 원본(27GB, 일별 CSV) -> 행정동x일x시간대 합계
+POPULATION_DIR = AI_ROOT / "data" / "EXTERNAL" / "population" / "processed"
+STATION_DONG_MAP_PATH = POPULATION_DIR / "station_dong_mapping.parquet"
+DONG_HOUR_POPULATION_PATH = POPULATION_DIR / "dong_hour_population.parquet"
+
+
+def load_station_dong_map() -> pd.DataFrame:
+    """대여소 -> 행정동코드 매핑. 컬럼: od_station_id, dong_code, dong_name, match_method."""
+    if not STATION_DONG_MAP_PATH.exists():
+        raise FileNotFoundError(
+            f"{STATION_DONG_MAP_PATH} 없음 — build_station_dong_mapping.py 먼저 실행"
+        )
+    return pd.read_parquet(STATION_DONG_MAP_PATH)
+
+
+def load_dong_hour_population() -> pd.DataFrame:
+    """행정동x일x시간대 생활인구 합계. 컬럼: date, hour, dong_code, population_total."""
+    if not DONG_HOUR_POPULATION_PATH.exists():
+        raise FileNotFoundError(
+            f"{DONG_HOUR_POPULATION_PATH} 없음 — build_dong_hour_population.py 먼저 실행"
+        )
+    out = pd.read_parquet(DONG_HOUR_POPULATION_PATH)
+    out["date"] = pd.to_datetime(out["date"]).dt.normalize()
+    return out
+
+
+def attach_floating_population(
+    df: pd.DataFrame,
+    population: pd.DataFrame,
+    station_dong_map: pd.DataFrame,
+    date_col: str = "date",
+    hour_col: str = "hour",
+) -> pd.DataFrame:
+    """`floating_population`(anchor 시각 기준 행정동 생활인구 합계) 부착 — v4_floating 세트용.
+
+    대여소 -> 행정동 매핑이 안 되는 역(2,583개 중 극소수)이나 원본 데이터가 없는 날짜는
+    NaN으로 남긴다(원칙 8: 표본 부족 구간에 값을 채우지 않는다) — LightGBM이 결측을
+    분할 정보로 받아들인다.
+    """
+    df = df.merge(station_dong_map[["od_station_id", "dong_code"]], on="od_station_id", how="left")
+    pop = population.rename(columns={"date": date_col, "hour": hour_col})
+    df = df.merge(pop, on=["dong_code", date_col, hour_col], how="left")
+    df = df.rename(columns={"population_total": "floating_population"})
+    return df.drop(columns=["dong_code"])

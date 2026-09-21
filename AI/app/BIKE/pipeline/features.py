@@ -95,11 +95,22 @@ DISTANCE_FEATURE_COLS = ["dist_subway_m", "dist_bus_m"]
 FEATURE_COLS_V4_DISTANCE = [*FEATURE_COLS, *DISTANCE_FEATURE_COLS]
 MODEL_FEATURE_COLS_V4_DISTANCE = [*FEATURE_COLS_V4_DISTANCE, "station_code"]
 
+# ── v4_floating: + 유동인구(서울 생활인구, anchor 시각 기준 행정동 합계) (성능 고도화) ──
+# 대여소 -> 행정동(point-in-polygon, `floating-population-check/src/build_station_dong_mapping.py`)
+# -> 생활인구(행정동x일x시간대 스트리밍 집계, `build_dong_hour_population.py`) 순으로 조인한다.
+# 2024년 3~8월분뿐이던 원본 데이터 문제로 보류됐다가(기간이 학습/평가 구간과 안 겹침),
+# 2024-01~2024-12·2025-07~2025-09 전체를 새로 확보해 재개했다(`bike-floating-population-blocked`
+# 메모 참고). 매핑 실패·데이터 없는 날짜는 NaN으로 남긴다(원칙 8, LightGBM이 결측을 분할 정보로 받음).
+FLOATING_FEATURE_COLS = ["floating_population"]
+FEATURE_COLS_V4_FLOATING = [*FEATURE_COLS, *FLOATING_FEATURE_COLS]
+MODEL_FEATURE_COLS_V4_FLOATING = [*FEATURE_COLS_V4_FLOATING, "station_code"]
+
 FEATURE_SETS = {
     "v3": MODEL_FEATURE_COLS,
     "v4_kbo_lag": MODEL_FEATURE_COLS_V4,
     "v4_weather": MODEL_FEATURE_COLS_V4_WEATHER,
     "v4_distance": MODEL_FEATURE_COLS_V4_DISTANCE,
+    "v4_floating": MODEL_FEATURE_COLS_V4_FLOATING,
 }
 
 TARGET_COL = "target_net_flow"
