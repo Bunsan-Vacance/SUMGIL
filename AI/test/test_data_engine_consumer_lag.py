@@ -307,3 +307,45 @@ def test_main_uses_topics_from_env_not_hardcoded_defaults(tmp_path, monkeypatch,
     assert code == 0
     assert requested[0][2] == ["bike.stock.v2", "weather.v2", "subway.v2"]
     assert "topic=weather.v2" in capsys.readouterr().out
+
+
+def test_status_of_another_group_is_ignored():
+    status = {"group_id": "ai-spark-old", **status_with(retry_pending=True, last_error="x")}
+
+    assert evaluate_consumer_status(status, now=NOON, group_id="ai-spark") == []
+    assert len(evaluate_consumer_status(status, now=NOON, group_id="ai-spark-old")) == 1
+
+
+def test_status_of_unsubscribed_topic_is_ignored():
+    status = {"group_id": "ai-spark", **status_with(retry_pending=True, last_error="x")}
+
+    assert evaluate_consumer_status(status, now=NOON, topics=["bike.v2"]) == []
+    assert len(evaluate_consumer_status(status, now=NOON, topics=["bike.stock"])) == 1
+
+
+def test_main_ignores_stale_state_after_topic_and_group_change(tmp_path, monkeypatch, capsys):
+    stale = {
+        "group_id": "ai-spark",
+        "topics": {
+            "subway.arrival": {"retry_pending": True, "last_error": "OSError: disk full"},
+        },
+    }
+    (tmp_path / "status.json").write_text(json.dumps(stale))
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+    monkeypatch.setenv("KAFKA_TOPIC_BIKE_STOCK", "bike.stock")
+    monkeypatch.setenv("KAFKA_TOPIC_WEATHER_NOWCAST", "weather.nowcast")
+    monkeypatch.setenv("KAFKA_TOPIC_SUBWAY_ARRIVAL", "subway.arrival.v2")  # 구독 topic 변경
+    monkeypatch.setenv("KAFKA_CONSUMER_STATUS_PATH", str(tmp_path / "status.json"))
+    monkeypatch.setattr(
+        check_consumer_lag,
+        "fetch_offsets",
+        lambda _b, _g, topics: ({(t, 0): 1 for t in topics}, {(t, 0): 1 for t in topics}),
+    )
+    args = ["--history-path", str(tmp_path / "h.json")]
+
+    assert check_consumer_lag.main(args) == 0
+    assert "save_failed" not in capsys.readouterr().out
+
+    monkeypatch.setenv("KAFKA_CONSUMER_GROUP", "ai-spark-v2")  # group 변경
+    monkeypatch.setenv("KAFKA_TOPIC_SUBWAY_ARRIVAL", "subway.arrival")
+    assert check_consumer_lag.main(args) == 0

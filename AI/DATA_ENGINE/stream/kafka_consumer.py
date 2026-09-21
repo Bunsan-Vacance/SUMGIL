@@ -161,7 +161,7 @@ def run_consumer(
         config.bootstrap_servers,
     )
 
-    status = ConsumerStatus(config.group_id)
+    status = ConsumerStatus(config.group_id, topics=config.topics)
     buffer: list[object] = []
     last_flush = time.monotonic()
     while True:

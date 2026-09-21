@@ -137,3 +137,30 @@ def test_previous_failure_survives_a_consumer_restart(tmp_path):
         [Msg(good(), offset=1)], commit=lambda: None, status=restarted, write=lambda e: []
     )
     assert restarted.topics["bike.stock"].retry_pending is False
+
+
+def _write_failed_subway_state(tmp_path, group_id="ai-spark"):
+    old = ConsumerStatus(group_id, tmp_path / "status.json")
+    old.record_save_failure(["subway.arrival"], OSError("disk full"))
+    old.write()
+
+
+def test_state_from_another_consumer_group_is_not_carried_over(tmp_path):
+    _write_failed_subway_state(tmp_path, group_id="ai-spark-old")
+
+    fresh = ConsumerStatus("ai-spark", tmp_path / "status.json")
+
+    assert fresh.topics == {}
+
+
+def test_state_of_unsubscribed_topic_is_dropped_on_restart(tmp_path):
+    _write_failed_subway_state(tmp_path)
+    old = ConsumerStatus("ai-spark", tmp_path / "status.json")
+    old.record_parse_failure("bike.stock", 0, 3)
+    old.write()
+
+    restarted = ConsumerStatus("ai-spark", tmp_path / "status.json", topics=["bike.stock"])
+
+    assert list(restarted.topics) == ["bike.stock"]
+    restarted.write()
+    assert "subway.arrival" not in read_status(tmp_path / "status.json")["topics"]

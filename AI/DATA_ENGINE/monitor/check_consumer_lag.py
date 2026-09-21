@@ -14,7 +14,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -201,6 +201,8 @@ def evaluate_consumer_status(
     *,
     now: float,
     parse_failure_window_min: float = DEFAULT_PARSE_FAILURE_WINDOW_MIN,
+    topics: Iterable[str] | None = None,
+    group_id: str | None = None,
 ) -> list[LagResult]:
     """Fail on consumer-reported data loss that lag alone cannot show.
 
@@ -210,7 +212,12 @@ def evaluate_consumer_status(
     """
     results: list[LagResult] = []
     since = now - parse_failure_window_min * 60
+    if group_id is not None and (status or {}).get("group_id") != group_id:
+        return results  # 다른 group이 남긴 과거 상태는 현재 consumer가 해제할 수 없다.
+    subscribed = set(topics) if topics is not None else None
     for topic, info in sorted(((status or {}).get("topics") or {}).items()):
+        if subscribed is not None and topic not in subscribed:
+            continue  # 더 이상 구독하지 않는 topic의 상태는 검사하지 않는다.
         recent = []
         for failure in info.get("recent_parse_failures") or []:
             try:
@@ -267,13 +274,14 @@ def run_check(
     subway_window: OperatingWindow,
     now: float | None = None,
     status_path: Path | None = None,
+    group_id: str | None = None,
 ) -> list[LagResult]:
     now = time.time() if now is None else now
     if warn_min <= 0 or fail_min < warn_min:
         raise ValueError("require 0 < warn_min <= fail_min")
 
     status = read_status(status_path)
-    status_results = evaluate_consumer_status(status, now=now)
+    status_results = evaluate_consumer_status(status, now=now, topics=topics, group_id=group_id)
 
     try:
         end, committed = fetch()
@@ -357,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
         warn_min=args.warn_min,
         fail_min=args.fail_min,
         subway_window=window,
+        group_id=config.group_id,
     )
     for result in results:
         print(result.message)

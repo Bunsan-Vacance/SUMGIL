@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
@@ -50,17 +51,34 @@ class ConsumerStatus:
     path) does not erase the failure a monitor has not seen yet.
     """
 
-    def __init__(self, group_id: str, path: Path | None = None) -> None:
+    def __init__(
+        self,
+        group_id: str,
+        path: Path | None = None,
+        *,
+        topics: Iterable[str] | None = None,
+    ) -> None:
         self.group_id = group_id
         self.path = path or status_path_from_env()
         self.started_at = _now()
-        self.topics: dict[str, TopicStatus] = self._load_previous()
+        self.topics: dict[str, TopicStatus] = self._load_previous(
+            set(topics) if topics is not None else None
+        )
 
-    def _load_previous(self) -> dict[str, TopicStatus]:
+    def _load_previous(self, subscribed: set[str] | None) -> dict[str, TopicStatus]:
+        """Carry over only the current group's state for currently subscribed topics.
+
+        A different group or a dropped topic can never be cleared by this consumer, so
+        its ``retry_pending`` would otherwise alert forever.
+        """
         previous = read_status(self.path) or {}
+        if previous.get("group_id") != self.group_id:
+            return {}
         known = {item.name for item in fields(TopicStatus)}
         topics: dict[str, TopicStatus] = {}
         for topic, values in (previous.get("topics") or {}).items():
+            if subscribed is not None and topic not in subscribed:
+                continue
             if isinstance(values, dict):
                 topics[topic] = TopicStatus(**{k: v for k, v in values.items() if k in known})
         return topics
