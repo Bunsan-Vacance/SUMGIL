@@ -1,6 +1,8 @@
 package com.ssafy.s15p21a104.domain.route.scoring;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder.RouteStop;
@@ -79,5 +81,13 @@ class CongestionCostModelTest {
         KShortestPathFinder.EdgeCostModel model = model(0.0);
 
         assertEquals(600, model.travelCost(new Edge("A", "B", "L1", 600, 0, TravelMode.SUBWAY)));
+    }
+
+    @Test
+    @DisplayName("216-C5: 가중 임계 경계 — 100은 무가중, 초과만 가중 (생략 판정 기준)")
+    void c5_임계경계() {
+        assertFalse(CongestionCostModel.hasWeightEffect(100.0));
+        assertFalse(CongestionCostModel.hasWeightEffect(91.9));
+        assertTrue(CongestionCostModel.hasWeightEffect(100.1));
     }
 }

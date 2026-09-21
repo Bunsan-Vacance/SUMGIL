@@ -20,12 +20,24 @@ import java.util.Set;
  */
 public final class CongestionCostModel {
 
+    /**
+     * 가중이 발동하는 혼잡도 하한(%). 이 값 이하는 비용이 시간과 같다 — 216 후속:
+     * 슬롯의 LINE·ROUTE 값이 전부 이하면 혼잡 가중 탐색이 시간 탐색과 같은 경로를 내므로
+     * 2회 탐색을 생략하는 판정에 쓴다.
+     */
+    public static final double WEIGHT_MIN_LEVEL = 100.0;
+
     /** 혼잡도 조회: (targetType, targetId). 모르면 null. */
     public interface LevelSource {
         Double levelOf(String targetType, String targetId);
     }
 
     private CongestionCostModel() {
+    }
+
+    /** 이 혼잡도가 비용을 시간과 다르게 만드는가(임계 초과). */
+    public static boolean hasWeightEffect(double level) {
+        return level > WEIGHT_MIN_LEVEL;
     }
 
     /**
@@ -47,7 +59,7 @@ public final class CongestionCostModel {
                 return edge.travelSec();
             }
             return Math.round(edge.travelSec()
-                    * (1 + lambda * Math.max(0, level - 100) / 100));
+                    * (1 + lambda * Math.max(0, level - WEIGHT_MIN_LEVEL) / 100));
         };
     }
 
