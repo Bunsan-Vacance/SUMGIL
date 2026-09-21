@@ -397,8 +397,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def run(args: argparse.Namespace) -> int:
     if args.max_partitions <= 0:
         raise ValueError("max_partitions must be positive")
 
@@ -455,30 +454,35 @@ def main(argv: list[str] | None = None) -> int:
         PlannedTarget(target, is_backfill=True) for target in backfill_candidates
     ]
     run_started = datetime.now(KST)
-    try:
-        failures = upload_targets(
-            planned_targets,
-            ai_root=ai_root,
-            manifest_path=manifest_path,
-            drive_auth_mode=drive_auth_mode,
-            service_account_file=Path(service_account) if service_account else None,
-            oauth_token_file=Path(oauth_token) if oauth_token else None,
-            drive_root_folder_ids=drive_root_folder_ids,
-            backend=backend,
-        )
-    except Exception as exc:  # 인증 실패 등 전체 중단도 알린 뒤 그대로 올린다.
-        if args.notify_discord:
-            notify_failure(
-                f"Drive archive 업로드 중단: {type(exc).__name__}: {exc}",
-                title=ARCHIVE_ALERT_TITLE,
-            )
-        raise
+    failures = upload_targets(
+        planned_targets,
+        ai_root=ai_root,
+        manifest_path=manifest_path,
+        drive_auth_mode=drive_auth_mode,
+        service_account_file=Path(service_account) if service_account else None,
+        oauth_token_file=Path(oauth_token) if oauth_token else None,
+        drive_root_folder_ids=drive_root_folder_ids,
+        backend=backend,
+    )
     if failures and args.notify_discord:
         notify_failure(
             build_failure_alert(manifest_path, run_started, failures),
             title=ARCHIVE_ALERT_TITLE,
         )
     return 1 if failures else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        return run(args)
+    except Exception as exc:  # 설정 누락·인증 실패 등 전체 중단도 알린 뒤 그대로 올린다.
+        if args.notify_discord and args.yes:
+            notify_failure(
+                f"Drive archive 업로드 중단: {type(exc).__name__}: {exc}",
+                title=ARCHIVE_ALERT_TITLE,
+            )
+        raise
 
 
 if __name__ == "__main__":

@@ -351,3 +351,61 @@ def test_notify_failure_reports_send_error_on_stderr(monkeypatch, capsys):
 
     assert not result.ok
     assert "discord notification failed" in capsys.readouterr().err
+
+
+# ---- 설정 누락(인증·폴더 ID)도 알림 대상 ----
+
+
+def test_missing_drive_credentials_are_alerted_and_raised(tmp_path, monkeypatch, sent):
+    make_partition(tmp_path / "data/SUBWAY/raw/arrival")
+    monkeypatch.setenv("DATA_ENGINE_DRIVE_AUTH_MODE", "oauth")
+    monkeypatch.delenv("GOOGLE_OAUTH_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID", "root")
+
+    with pytest.raises(RuntimeError, match="GOOGLE_OAUTH_TOKEN_FILE"):
+        upload_main(upload_args(tmp_path, "subway", "--notify-discord"))
+
+    assert "GOOGLE_OAUTH_TOKEN_FILE is empty" in sent[0][0]
+
+
+def test_missing_drive_root_folder_is_alerted(tmp_path, monkeypatch, sent):
+    make_partition(tmp_path / "data/SUBWAY/raw/arrival")
+    monkeypatch.setenv("DATA_ENGINE_DRIVE_AUTH_MODE", "oauth")
+    monkeypatch.setenv("GOOGLE_OAUTH_TOKEN_FILE", str(tmp_path / "token.json"))
+
+    with pytest.raises(RuntimeError, match="ROOT_FOLDER_ID"):
+        upload_main(upload_args(tmp_path, "subway", "--notify-discord"))
+
+    assert "ROOT_FOLDER_ID is empty" in sent[0][0]
+
+
+def test_config_error_without_flag_or_yes_does_not_notify(tmp_path, monkeypatch, sent):
+    make_partition(tmp_path / "data/SUBWAY/raw/arrival")
+    monkeypatch.setenv("DATA_ENGINE_DRIVE_AUTH_MODE", "oauth")
+    monkeypatch.delenv("GOOGLE_OAUTH_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID", "root")
+
+    with pytest.raises(RuntimeError):
+        upload_main(upload_args(tmp_path, "subway"))  # --notify-discord 없음
+    dry_run = [a for a in upload_args(tmp_path, "subway", "--notify-discord") if a != "--yes"]
+    assert upload_main(dry_run) == 0  # --yes 없으면 자격 증명을 검사하지 않는다
+
+    assert sent == []
+
+
+def test_retention_crash_is_alerted_only_when_deleting(tmp_path, sent):
+    (tmp_path / "archive.jsonl").write_text("{broken json\n")
+    base = [
+        "--ai-root",
+        str(tmp_path),
+        "--manifest-path",
+        str(tmp_path / "archive.jsonl"),
+        "--require-archive-success",
+        "--notify-discord",
+    ]
+    old_subway_file(tmp_path)
+
+    with pytest.raises(ValueError):
+        retention_main([*base, "--yes"])
+
+    assert "retention 정리 중단" in sent[0][0]

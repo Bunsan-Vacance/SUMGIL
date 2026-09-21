@@ -491,8 +491,7 @@ def resolve_project_path(ai_root: Path, path: Path) -> Path:
     return ai_root / path
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def run(args: argparse.Namespace) -> int:
     load_dotenv(args.ai_root / ".env")
     targets = build_retention_targets(args.ai_root)
     manifest_path = resolve_project_path(args.ai_root, args.manifest_path)
@@ -509,6 +508,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.notify_discord and result.skips:
         notify_failure(build_skip_alert(result), title=RETENTION_ALERT_TITLE)
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        return run(args)
+    except Exception as exc:  # 설정 오류 등으로 정리 자체가 못 돌 때도 알린 뒤 그대로 올린다.
+        if args.notify_discord and args.yes:
+            notify_failure(
+                f"retention 정리 중단: {type(exc).__name__}: {exc}",
+                title=RETENTION_ALERT_TITLE,
+            )
+        raise
 
 
 if __name__ == "__main__":
