@@ -191,9 +191,9 @@ Flyway 는 `Successfully validated 3 migrations` · `Schema "public" is up to da
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-17 | `bike_stock_pred` (172) | `bikepred` | 406,656 행 | V5 — 이미지 빌드 + `be-consumer`·`be` 재시작 | [load-bikepred.md](load-bikepred.md) |
 | 2026-09-18 | `bus_route.headway_min` (228) | `busheadway` | 451 행 UPDATE · 값 있음 446 · 33 ms | V6 — 이미지는 09-17 빌드, `be-consumer` 09-17 · `be` 09-18 재시작 | [load-bus-bike.md](load-bus-bike.md) 배차간격 절 |
-| (예정) | `congestion_pred` (305) | `crowdpred` | 로컬 21,684 행 · 580 ms | **V8 선행** — `predictor_version` 32→128. 이미지 빌드 후 적재 | [load-congestion-pred.md](load-congestion-pred.md) |
+| (예정) | `congestion_pred` (305) | `crowdpred` | 로컬 21,684 행 · 580 ms | **V9 선행** — `predictor_version` 32→128. 이미지 빌드 후 적재 | [load-congestion-pred.md](load-congestion-pred.md) |
 
 - `busheadway` 는 `bus_route` 에 UPDATE 만 하므로 `bus` 를 함께 돌릴 필요가 없다 — 마스터 718행은 09-14 적재분 그대로다.
-- `crowdpred` 는 **V8 이 먼저 적용돼야 한다.** `predictor_version` 실값이 67자라 V7(32)에서는 첫 행부터 실패한다. prod 는 `be` 기동 시 Flyway 가 적용하므로 순서는 "이미지 배포 → 적재" 다.
+- `crowdpred` 는 **V9 가 먼저 적용돼야 한다.** `predictor_version` 실값이 67자라 V7(32)에서는 첫 행부터 실패한다. prod 는 `be` 기동 시 Flyway 가 적용하므로 순서는 "이미지 배포 → 적재" 다.
 - 둘 다 읽는 코드가 없거나(배차간격) Redis 를 먼저 보는(재고 예측) 열이라 적재 뒤 `be` 재기동은 필요 없었다. 2-6 절 표의 "메모리 그래프" 열(`edge_time` 등)이 바뀔 때만 재기동한다.
 - 09-18 은 로컬 Redis 없이(Docker 미기동) 로더가 정상 기동했다 — `RedisConfig` 는 템플릿만 만들고 연결은 첫 사용 때라, 2-2 절의 `REDIS_HOST` 는 자리만 채우면 된다.
