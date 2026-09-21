@@ -114,7 +114,7 @@ public class StaticLoadRunner implements ApplicationRunner {
     /** 서울교통공사 지하철혼잡도정보(공공데이터포털 15071311). 1~8호선 요일·30분 슬롯별 혼잡도 %. */
     static final String CONGESTION_FILE = "seoulmetro-congestion_20260630.csv";
     /**
-     * {@code congestion_pred.predictor_version} 열 폭 (V8). AI 아티팩트 이름이 실측 67자라
+     * {@code congestion_pred.predictor_version} 열 폭 (V9). AI 아티팩트 이름이 실측 67자라
      * V7 의 32 로는 안 들어갔다. DB 가 적재 도중 끊기기 전에 검증기가 먼저 막는 기준이다.
      */
     static final int PREDICTOR_VERSION_MAX = 128;

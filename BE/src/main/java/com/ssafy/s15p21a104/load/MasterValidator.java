@@ -224,7 +224,7 @@ public final class MasterValidator {
      *
      * @param knownStationIds     적재된 역 ID. <b>비어 있으면 대조를 건너뛴다</b> — dry-run 은 DB 를 읽지 않는다
      * @param knownLineIds        적재된 노선 ID. 같은 규칙
-     * @param predictorVersionMax {@code predictor_version} 열 폭(V8 기준 128). DB 가 적재 도중
+     * @param predictorVersionMax {@code predictor_version} 열 폭(V9 기준 128). DB 가 적재 도중
      *                            "value too long" 으로 끊기기 전에 여기서 먼저 막는다
      */
     public static ValidationReport validateCongestionPred(List<CongestionPredRow> rows,

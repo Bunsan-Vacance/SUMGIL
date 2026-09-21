@@ -22,7 +22,7 @@ import java.time.LocalDate;
  * @param predSource       {@code model}·{@code lookup_negative}·{@code lookup_line9}.
  *                         {@code lookup_*} 는 모델 예측을 그대로 쓰지 않은 셀이다
  * @param predictorVersion 그 행을 만든 예측기. <b>행 단위 열</b>이라 같은 날짜 표 안에서도 다르다
- *                         (9호선만 {@code lookup:line9_…}). 실값이 67자라 V8 에서 128 로 넓혔다
+ *                         (9호선만 {@code lookup:line9_…}). 실값이 67자라 V9 에서 128 로 넓혔다
  */
 public record CongestionPredRow(LocalDate predDate, String fromStationId, String toStationId, String lineId,
                                 String direction, int timeSlot, BigDecimal level,
