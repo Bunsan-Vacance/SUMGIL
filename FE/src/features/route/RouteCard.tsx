@@ -135,7 +135,7 @@ export default function RouteCard({
               className={`mode-strip-item ${transfer ? 'transfer' : leg.mode}`}
               style={{
                 flexGrow: leg.minutes,
-                backgroundColor: lineColor(leg),
+                backgroundColor: transfer || leg.mode === 'walk' ? 'transparent' : lineColor(leg),
                 color: lineTextColor(leg),
               }}
               title={`${transitionLabel(leg.transitionType) || (transfer ? '환승' : leg.note)} ${roundMinutes(leg.minutes)}분`}

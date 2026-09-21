@@ -3,6 +3,7 @@ import { ArrowLeft, Bike, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-
 import type { Place } from '../features/route/types'
 import MapPlacePicker from '../features/map/MapPlacePicker'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
+import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
 import {
   clearRecentPlaces,
   loadRecentPlaces,
@@ -18,6 +19,7 @@ interface Props {
   choosePlace: (place: Place) => boolean | void
 }
 export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: Props) {
+  const searchRef = useScrollbarVisibility<HTMLElement>()
   const [query, setQuery] = useState('')
   const [recentPlaces, setRecentPlaces] = useState<Place[]>(loadRecentPlaces)
   const [mapMode, setMapMode] = useState(false)
@@ -80,7 +82,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
     )
   }
   return (
-    <section className="search-screen">
+    <section ref={searchRef} className="search-screen scrollbar-auto">
       <header className="row">
         <button className="icon-button" aria-label="이전 화면으로 돌아가기" onClick={cancelSearch}>
           <ArrowLeft />

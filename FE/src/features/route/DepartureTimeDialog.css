@@ -35,8 +35,6 @@
   overscroll-behavior: contain;
   scroll-snap-type: y mandatory;
   scroll-padding-block: 84px;
-  scrollbar-width: thin;
-  scrollbar-color: #b6c5c1 transparent;
 }
 
 .departure-time-wheel > button {

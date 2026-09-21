@@ -1045,26 +1045,28 @@ small {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  padding: 0 16px 14px;
+}
+.scrollbar-auto {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
   transition: scrollbar-color 0.28s ease;
-  padding: 0 16px 14px;
 }
-.sheet-body::-webkit-scrollbar {
+.scrollbar-auto::-webkit-scrollbar {
   width: 8px;
 }
-.sheet-body::-webkit-scrollbar-track {
+.scrollbar-auto::-webkit-scrollbar-track {
   background: transparent;
 }
-.sheet-body::-webkit-scrollbar-thumb {
+.scrollbar-auto::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 999px;
   transition: background-color 0.28s ease;
 }
-.sheet-body.scrollbar-visible {
+.scrollbar-auto.scrollbar-visible {
   scrollbar-color: #b4bfce transparent;
 }
-.sheet-body.scrollbar-visible::-webkit-scrollbar-thumb {
+.scrollbar-auto.scrollbar-visible::-webkit-scrollbar-thumb {
   background: #b4bfce;
 }
 .sheet-footer {
@@ -1199,7 +1201,6 @@ small {
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
 }
 .results-sort-row {
   display: grid;
@@ -1448,7 +1449,7 @@ small {
   gap: 0;
   width: 100%;
   margin-top: 12px;
-  border-radius: 6px;
+  border-radius: 999px;
   overflow: hidden;
   background: #edf0f2;
 }
@@ -1470,6 +1471,11 @@ small {
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
+}
+.mode-strip-item.subway,
+.mode-strip-item.bus,
+.mode-strip-item.bike {
+  border-radius: 999px;
 }
 .mode-strip-label {
   display: flex;
@@ -1497,7 +1503,10 @@ small {
 }
 .mode-strip-item.transfer {
   color: #46515e;
-  background: #d6dde4;
+  background: transparent;
+}
+.mode-strip-item.walk {
+  background: transparent;
 }
 .mode-strip-item.subway {
   color: white;
