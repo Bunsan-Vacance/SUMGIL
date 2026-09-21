@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.domain.bike.controller;
 
 import com.ssafy.s15p21a104.domain.bike.dto.response.BikeStationResponse;
 import com.ssafy.s15p21a104.domain.bike.dto.response.BikeStockResponse;
+import com.ssafy.s15p21a104.domain.bike.dto.response.BikePredictionResponse;
 import com.ssafy.s15p21a104.global.response.ApiResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,4 +34,14 @@ public interface BikeStationApi {
             + "UNAVAILABLE(캐시 없음·TTL 300초 만료, 값은 전부 null). 등록되지 않은 rentalId는 404다.")
     @GetMapping("/{rentalId}/stock")
     ApiResult<BikeStockResponse> stock(@PathVariable String rentalId);
+
+    @Operation(summary = "대여소 도착 시 예측 조회", description = "도착 예상 시각의 정적 예측표 값을 읽는다 "
+            + "(실시간 수집값을 다시 계산하지 않음). AVAILABLE이면 예상 재고·산출 시각을 주고, "
+            + "행이 없으면 UNAVAILABLE로 값은 전부 null이다(재고 0으로 해석하지 않음). "
+            + "arrivalTime은 offset ISO이며 응답에 같은 instant로 돌려준다. "
+            + "등록되지 않은 rentalId는 404, 시각이 없거나 깨지면 400이다.")
+    @GetMapping("/{rentalId}/prediction")
+    ApiResult<BikePredictionResponse> prediction(
+            @PathVariable String rentalId,
+            @RequestParam(required = false) String arrivalTime);
 }

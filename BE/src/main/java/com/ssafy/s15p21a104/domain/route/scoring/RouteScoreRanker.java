@@ -143,12 +143,14 @@ public final class RouteScoreRanker {
             if (!lowestTagged) {
                 relabeled.add(new RouteSearchResponse(
                         RouteType.LOW_CONGESTION, candidate.totalMinutes(), candidate.legs(),
-                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
+                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount(),
+                        candidate.congestionPrediction()));
                 lowestTagged = true;
             } else {
                 relabeled.add(new RouteSearchResponse(
                         RouteType.ALTERNATIVE, candidate.totalMinutes(), candidate.legs(),
-                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
+                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount(),
+                        candidate.congestionPrediction()));
             }
         }
         return relabeled;
@@ -193,7 +195,8 @@ public final class RouteScoreRanker {
             lowestTagged = true;
             relabeled.add(new RouteSearchResponse(
                     routeType, candidate.totalMinutes(), candidate.legs(),
-                    candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
+                    candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount(),
+                    candidate.congestionPrediction()));
         }
         return relabeled;
     }

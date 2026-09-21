@@ -12,6 +12,7 @@ import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,7 +37,7 @@ class RerouteService193Test {
         }
         var finder = new com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder(
                 new TransferRule(180), Map.of(), Set.of(), infos, Map::of);
-        return new RerouteService(finder, new TransferRule(180), () -> graph, Map::of);
+        return new RerouteService(finder, () -> graph);
     }
 
     @Test
@@ -83,5 +84,26 @@ class RerouteService193Test {
 
         assertTrue(full.size() >= 1 && remain.size() >= 1);
         assertTrue(remain.get(0).route().totalMinutes() < full.get(0).route().totalMinutes());
+    }
+
+    @Test
+    @DisplayName("193-T4: 잔여 후보들의 leg 서명은 서로 다르다 (중복 탐색 버그 회귀)")
+    void t4_후보leg서명_서로다르다() {
+        RerouteService service = serviceWith();
+
+        // B→C: 직통 L1 vs B→D→C L2 — 서로 다른 leg 서명이어야 한다.
+        List<RerouteResult> result = service.replan("B", "C", 0, 0);
+
+        assertTrue(result.size() >= 2);
+        Set<String> signatures = new HashSet<>();
+        for (RerouteResult r : result) {
+            StringBuilder signature = new StringBuilder();
+            for (var leg : r.route().legs()) {
+                signature.append(leg.mode()).append(':')
+                        .append(leg.fromNodeId()).append("->").append(leg.toNodeId()).append(':')
+                        .append(leg.routeId()).append('|');
+            }
+            assertTrue(signatures.add(signature.toString()), "중복 후보: " + signature);
+        }
     }
 }

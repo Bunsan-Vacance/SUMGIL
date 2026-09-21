@@ -45,9 +45,8 @@ public class RerouteController implements RerouteApi {
                 graphRegistry.stationInfos(),
                 graphRegistry::bikeStock);
         RerouteService service = new RerouteService(
-                finder, transferRule,
-                () -> graphRegistry.graphFor(slot.dowType(), slot.timeSlot()),
-                graphRegistry::transferTimes);
+                finder,
+                () -> graphRegistry.graphFor(slot.dowType(), slot.timeSlot()));
         return ApiResult.ok(RerouteResponse.listOf(
                 service.replan(request.boundaryId(), destId, slot.dowType(), slot.timeSlot())));
     }

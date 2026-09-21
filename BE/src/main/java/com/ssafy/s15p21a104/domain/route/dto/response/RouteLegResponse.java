@@ -42,12 +42,28 @@ public record RouteLegResponse(
          * <p>퍼센트가 아니라 등급인 이유: 원천이 4단계 코드라 퍼센트로 바꾸면 안 잰 숫자를 화면에 띄우게
          * 된다. FE 계약 문서 {@code .claude/handoff/TO_FE-bus-congestion-01.md} 참고.
          */
-        String congestionGrade
+        String congestionGrade,
+        /**
+         * 구간 전환 구분(S15P21A104-237, FE-BE 통합 계약 §3). TRANSFER 모드 구간과
+         * BIKE 구간에만 값이 있고 나머지는 null이다.
+         */
+        TransitionType transitionType,
+        /**
+         * 자전거 대여 leg의 출발 대여소 ID(S15P21A104-237). 출발점이 대여소가
+         * 아니면 null — FE가 ID를 추측하지 않게 명시한다.
+         */
+        String fromRentalId,
+        /**
+         * 자전거 대여 leg의 도착 대여소 ID(S15P21A104-237). 도착점이 대여소가
+         * 아니면 null.
+         */
+        String toRentalId
 ) {
 
     /**
-     * 혼잡 등급 없이 만드는 기존 형태(S15P21A104-234 까지의 16인자). 등급은 {@code RouteNameResolver}
-     * 가 후처리로 붙이므로 매퍼·기하 보강 단계는 이 생성자를 쓴다.
+     * 부가 필드 없이 만드는 기존 형태(S15P21A104-234 까지의 16인자). 등급은 {@code RouteNameResolver}
+     * 가, 전환 구분·대여소 ID는 {@code LegContract} 가 후처리로 붙이므로 매퍼·기하 보강 단계는
+     * 이 생성자를 쓴다.
      */
     public RouteLegResponse(
             TravelMode mode,
@@ -58,13 +74,15 @@ public record RouteLegResponse(
             Double distanceMeters, String routeName,
             List<RouteOptionResponse> routeOptions) {
         this(mode, fromNodeId, fromNodeName, fromLat, fromLng, toNodeId, toNodeName, toLat, toLng,
-                routeId, minutes, geometry, geometryStatus, distanceMeters, routeName, routeOptions, null);
+                routeId, minutes, geometry, geometryStatus, distanceMeters, routeName, routeOptions,
+                null, null, null, null);
     }
 
     /** 같은 leg 에 혼잡 등급만 바꿔 끼운다. */
     public RouteLegResponse withCongestionGrade(String grade) {
         return new RouteLegResponse(mode, fromNodeId, fromNodeName, fromLat, fromLng,
                 toNodeId, toNodeName, toLat, toLng, routeId, minutes,
-                geometry, geometryStatus, distanceMeters, routeName, routeOptions, grade);
+                geometry, geometryStatus, distanceMeters, routeName, routeOptions, grade,
+                transitionType, fromRentalId, toRentalId);
     }
 }

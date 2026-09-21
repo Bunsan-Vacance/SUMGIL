@@ -22,6 +22,15 @@ public final class WalkEdgeBuilder {
     /** 도보 속도(m/s). 분당 67m. */
     public static final double METERS_PER_SEC = 67.0 / 60.0;
 
+    /**
+     * 직선→실제 도보 우회율 (S15P21A104-216 배치).
+     * FE는 실제 도보 경로(횡단보도 등)를 렌더링하지만 엔진 비용은 직선 거리라,
+     * 돌아가는 구간이 최단으로 찍히던 문제를 보정한다. 도심 보행 문헌값 1.2~1.4의
+     * 중간값이며, 카카오 실측 표본으로 재보정해야 한다. 반경 판정은 직선 그대로
+     * 두고(연결성 유지) 비용에만 얹는다.
+     */
+    public static final double CIRCUITY = 1.3;
+
     /** WALK 엣지의 routeId. 노선 전환(환승 집계·페널티) 기준이 된다. */
     public static final String WALK_ROUTE_ID = "WALK";
 
@@ -98,7 +107,7 @@ public final class WalkEdgeBuilder {
                         if (dist > RADIUS_M) {
                             continue;
                         }
-                        int sec = (int) Math.round(dist / METERS_PER_SEC);
+                        int sec = (int) Math.round(dist * CIRCUITY / METERS_PER_SEC);
                         edges.add(new Edge(a.id(), b.id(), WALK_ROUTE_ID, sec, 0, TravelMode.WALK));
                         edges.add(new Edge(b.id(), a.id(), WALK_ROUTE_ID, sec, 0, TravelMode.WALK));
                     }
