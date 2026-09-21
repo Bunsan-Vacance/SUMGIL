@@ -103,6 +103,29 @@ def test_check_latest_file_rejects_missing_timestamp_column(tmp_path):
     assert "column=updated_at" in result.message
 
 
+def test_check_latest_file_rejects_stale_rows_when_latest_is_fresh(tmp_path):
+    now_ts = time.time()
+    now = datetime.fromtimestamp(now_ts, tz=ZoneInfo("Asia/Seoul"))
+    path = tmp_path / "latest_stock.parquet"
+    pd.DataFrame(
+        {
+            "updated_at": [
+                (now - timedelta(minutes=2)).replace(tzinfo=None),
+                (now - timedelta(minutes=31)).replace(tzinfo=None),
+            ]
+        }
+    ).to_parquet(path, index=False)
+
+    result = check_latest_file(
+        "bike", path, 10, "updated_at", row_max_age_min=30, now_ts=now_ts
+    )
+
+    assert result.ok is False
+    assert result.status == "stale_rows"
+    assert result.stale_rows == 1
+    assert "count=1" in result.message
+
+
 def test_build_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
     checks = build_checks(tmp_path, bike_max_age_min=10, weather_max_age_min=20)
 
@@ -112,6 +135,7 @@ def test_build_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
             path=tmp_path / "data/BIKE/raw/realtime/latest_stock.parquet",
             max_age_min=10,
             timestamp_column="updated_at",
+            row_max_age_min=30,
         ),
         FreshnessCheck(
             name="weather",

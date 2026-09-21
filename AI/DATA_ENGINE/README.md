@@ -251,7 +251,8 @@ python -m DATA_ENGINE.monitor.check_partition_counts
 
 점검 기준:
 
-- 따릉이 Kafka `latest_stock.parquet`: 내부 `updated_at` 최댓값이 10분 초과 시 실패.
+- 따릉이 Kafka `latest_stock.parquet`: 내부 `updated_at` 최댓값이 10분 초과하거나,
+  30분 초과 행이 하나라도 있으면 실패.
 - 날씨 Kafka `latest_by_grid.parquet`: 내부 `ingested_at` 최댓값이 90분 초과 시 실패.
 - 따릉이 완료 시간대 파티션: `kafka_topic=bike.stock` snapshot 최소 10개/hour.
 - 날씨 완료 시간대 파티션: `kafka_topic=weather.nowcast` snapshot 최소 1개/hour.
@@ -660,7 +661,8 @@ data/BIKE/raw/realtime/latest_stock.parquet
 `entity_id`를 사용하고, `current_stock`은 payload의 `parkingBikeTotCnt`를 사용한다.
 `updated_at`은 `freshness_at` 기준이며, 따릉이는 `source_generated_at`이 없으면 `ingested_at`을
 KST naive datetime으로 저장한다. 같은 대여소의 이전 값은 더 최신 `updated_at` 이벤트로만
-갱신된다.
+갱신된다. 최신 이벤트보다 `updated_at`이 30분 넘게 오래된 대여소는 폐쇄·삭제된 대여소의
+마지막 값이 계속 남지 않도록 파일 갱신 시 제거한다.
 
 ### 따릉이 Kafka 입력 계약 (2026-09-21 확인)
 

@@ -7,7 +7,7 @@ import sys
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -20,6 +20,7 @@ DEFAULT_BIKE_LATEST = Path("data/BIKE/raw/realtime/latest_stock.parquet")
 DEFAULT_WEATHER_LATEST = Path("data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet")
 DEFAULT_BIKE_MAX_AGE_MIN = 10.0
 DEFAULT_WEATHER_MAX_AGE_MIN = 90.0
+DEFAULT_BIKE_ROW_MAX_AGE_MIN = 30.0
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class FreshnessCheck:
     path: Path
     max_age_min: float
     timestamp_column: str
+    row_max_age_min: float | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class FreshnessResult:
     status: str
     message: str
     age_min: float | None = None
+    stale_rows: int | None = None
 
 
 def _format_age(age_min: float) -> str:
@@ -49,6 +52,7 @@ def check_latest_file(
     path: Path,
     max_age_min: float,
     timestamp_column: str,
+    row_max_age_min: float | None = None,
     *,
     now_ts: float | None = None,
 ) -> FreshnessResult:
@@ -58,6 +62,8 @@ def check_latest_file(
 
     if max_age_min <= 0:
         raise ValueError("max_age_min must be positive")
+    if row_max_age_min is not None and row_max_age_min <= 0:
+        raise ValueError("row_max_age_min must be positive")
 
     if not path.exists():
         return FreshnessResult(
@@ -70,7 +76,8 @@ def check_latest_file(
 
     try:
         frame = pd.read_parquet(path, columns=[timestamp_column])
-        latest = pd.to_datetime(frame[timestamp_column], errors="coerce").max()
+        timestamps = pd.to_datetime(frame[timestamp_column], errors="coerce")
+        latest = timestamps.max()
     except (ArrowException, KeyError, OSError, TypeError, ValueError) as exc:
         return FreshnessResult(
             name=name,
@@ -116,12 +123,35 @@ def check_latest_file(
             ),
         )
 
+    stale_rows = None
+    if row_max_age_min is not None:
+        if timestamps.dt.tz is None:
+            timestamps = timestamps.dt.tz_localize(KST)
+        else:
+            timestamps = timestamps.dt.tz_convert(KST)
+        cutoff = now - timedelta(minutes=row_max_age_min)
+        stale_rows = int((timestamps < cutoff).sum())
+        if stale_rows:
+            return FreshnessResult(
+                name=name,
+                path=path,
+                ok=False,
+                status="stale_rows",
+                age_min=age_min,
+                stale_rows=stale_rows,
+                message=(
+                    f"FAIL {name} latest contains stale rows: count={stale_rows} "
+                    f"row_max={row_max_age_min:g}m basis={timestamp_column} path={path}"
+                ),
+            )
+
     return FreshnessResult(
         name=name,
         path=path,
         ok=True,
         status="fresh",
         age_min=age_min,
+        stale_rows=stale_rows,
         message=(
             f"OK {name} latest fresh: "
             f"age={_format_age(age_min)} max={max_age_min:g}m "
@@ -144,6 +174,7 @@ def check_freshness(
             check.path,
             check.max_age_min,
             check.timestamp_column,
+            check.row_max_age_min,
             now_ts=now_ts,
         )
         for check in checks
@@ -161,6 +192,7 @@ def build_checks(
             path=ai_root / DEFAULT_BIKE_LATEST,
             max_age_min=bike_max_age_min,
             timestamp_column="updated_at",
+            row_max_age_min=DEFAULT_BIKE_ROW_MAX_AGE_MIN,
         ),
         FreshnessCheck(
             name="weather",
