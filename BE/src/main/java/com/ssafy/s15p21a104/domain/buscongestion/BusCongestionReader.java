@@ -190,4 +190,27 @@ public class BusCongestionReader {
     public long usedCallsToday() {
         return budget.used();
     }
+
+    /**
+     * 항상 빈 값을 주는 리더. 인증키가 없거나 기능이 꺼졌을 때, 그리고 혼잡도와 무관한 테스트에서 쓴다.
+     * 외부도 Redis 도 건드리지 않는다.
+     */
+    public static BusCongestionReader disabled() {
+        return new BusCongestionReader(null, null, null, null, null, null, Duration.ZERO, Duration.ZERO) {
+            @Override
+            public void prefetch(Set<String> stopIds) {
+                // 아무것도 하지 않는다
+            }
+
+            @Override
+            public Map<String, BusArrival> forStop(String stopId) {
+                return Map.of();
+            }
+
+            @Override
+            public long usedCallsToday() {
+                return 0;
+            }
+        };
+    }
 }
