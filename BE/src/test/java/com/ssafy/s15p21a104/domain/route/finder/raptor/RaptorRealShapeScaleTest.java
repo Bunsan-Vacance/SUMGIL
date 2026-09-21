@@ -1,13 +1,22 @@
 package com.ssafy.s15p21a104.domain.route.finder.raptor;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bike.BikeRentalEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteStopsReader;
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder;
+import com.ssafy.s15p21a104.domain.route.finder.ScoredCandidate;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
+import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
+import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -16,19 +25,21 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * RAPTOR 프로토타입 실형상 스케일 테스트 — 서버 기동과 같은 원천(버스 노선 CSV·역 좌표 CSV·
- * 대여소·정류장)으로 노선·연결을 조립해 prod와 같은 OD의 탐색 시간을 잰다.
+ * RAPTOR 실형상 테스트 — 서버 기동과 같은 원천(버스 노선 CSV·역 좌표 CSV·대여소·정류장)으로
+ * 노선·연결을 조립해 (a) 탐색 시간(AC: 1초 내)과 (b) 후보 생성 계약(217 C1/C2)을 검증한다.
  *
- * <p>AC(4부 §5): BUS 포함 탐색 1초 내. 지하철은 좌표 CSV의 (호선, 순번) 체인으로 양방향 구성,
- * 버스는 원천 CSV 그대로. 승차 대기는 D1 결정 전이라 0으로 둔다(headway 미적재).
+ * <p>지하철은 좌표 CSV의 (호선, 순번) 체인으로 양방향 구성하고, 버스는 원천 CSV 그대로 쓴다.
+ * 승차 대기는 D1 결정 전이라 0(218 배선 시 재측정).
  */
 class RaptorRealShapeScaleTest {
 
@@ -39,52 +50,23 @@ class RaptorRealShapeScaleTest {
     private static final double BUS_METERS_PER_SEC = 14_000.0 / 3600.0;
     private static final double SUBWAY_METERS_PER_SEC = 35_000.0 / 3600.0;
 
+    /** 실형상 조립 결과. */
+    private record RealShape(List<RaptorFinder.Route> routes,
+                             List<RaptorFinder.Connection> connections,
+                             Map<String, RouteMapper.StationInfo> infos) {
+    }
+
     @Test
     @DisplayName("실형상: 222→151 / 222→221 — RAPTOR 탐색 시간 기록 (1초 내)")
     void 실형상_탐색시간() throws IOException {
         long buildStart = System.nanoTime();
-        List<RaptorFinder.Route> routes = new ArrayList<>();
-        routes.addAll(busRoutes());
-        Map<Integer, List<String[]>> subwayRows = new LinkedHashMap<>();
-        Map<String, BikeEdgeBuilder.Stop> stations = new LinkedHashMap<>();
-        Map<String, BikeEdgeBuilder.Stop> busStops = new LinkedHashMap<>();
-        Map<String, BikeEdgeBuilder.Stop> rentals = new LinkedHashMap<>();
-        readCsv(COORDS, cells -> {
-            if (cells.length > 6) {
-                addStop(stations, cells[2], cells[4], cells[5]);
-                Integer line = parseInt(cells[1]);
-                if (line != null) {
-                    subwayRows.computeIfAbsent(line, key -> new ArrayList<>()).add(cells);
-                }
-            }
-        });
-        readCsv(BUS_STOPS, cells -> {
-            if (cells.length > 4) {
-                addStop(busStops, cells[0], cells[4], cells[3]);
-            }
-        });
-        readCsv(BIKE_STATIONS, cells -> {
-            if (cells.length > 5) {
-                addStop(rentals, cells[0], cells[4], cells[5]);
-            }
-        });
-        routes.addAll(subwayRoutes(subwayRows));
-
-        List<RaptorFinder.Connection> connections = new ArrayList<>();
-        for (Edge edge : WalkEdgeBuilder.build(stations, rentals, busStops)) {
-            connections.add(new RaptorFinder.Connection(
-                    edge.fromNode(), edge.toNode(), edge.travelSec(), TravelMode.WALK));
-        }
-        for (Edge edge : BikeRentalEdgeBuilder.build(rentals)) {
-            connections.add(new RaptorFinder.Connection(
-                    edge.fromNode(), edge.toNode(), edge.travelSec(), TravelMode.BIKE));
-        }
+        RealShape shape = buildRealShape();
         long buildMs = (System.nanoTime() - buildStart) / 1_000_000;
-        int totalStops = routes.stream().mapToInt(route -> route.stops().size()).sum();
+        int totalStops = shape.routes().stream().mapToInt(route -> route.stops().size()).sum();
         System.out.printf("raptor routes=%d stops=%d connections=%d build=%dms%n",
-                routes.size(), totalStops, connections.size(), buildMs);
+                shape.routes().size(), totalStops, shape.connections().size(), buildMs);
 
-        RaptorFinder finder = new RaptorFinder(routes, connections);
+        RaptorFinder finder = new RaptorFinder(shape.routes(), shape.connections());
         String[][] ods = {{"222", "151"}, {"222", "221"}, {"221", "2734"}};
         for (String[] od : ods) {
             finder.find(od[0], od[1], Map.of(od[0], 0), Map.of(od[1], 0), 4, false); // 워밍업
@@ -96,14 +78,99 @@ class RaptorRealShapeScaleTest {
             for (RaptorFinder.Journey journey : journeys) {
                 System.out.printf("  total=%ds transfers=%d legs=%d%n",
                         journey.totalSec(), journey.transfers(), journey.legs().size());
-                for (RaptorFinder.Leg leg : journey.legs()) {
-                    System.out.printf("    %s(%s) %s->%s %ds→%ds%n", leg.mode(), leg.routeId(),
-                            leg.from(), leg.to(), leg.boardSec(), leg.alightSec());
-                }
             }
             assertTrue(!journeys.isEmpty(), od[0] + "->" + od[1] + " journey 없음");
             assertTrue(ms < 1000, od[0] + "->" + od[1] + " 1초 초과: " + ms + "ms");
         }
+    }
+
+    @Test
+    @DisplayName("실형상: 후보 생성 계약 — BUS corridor·환승 집계·legs 합 (217 C1/C2)")
+    void 실형상_후보계약() throws IOException {
+        RealShape shape = buildRealShape();
+        BusRouteIndex index = BusRouteIndex.build(BusRouteStopsReader.read());
+        RouteCandidateFinder finder = new RouteCandidateFinder(
+                new TransferRule(180), Map.of(), Set.of(), shape.infos(), Map::of, index,
+                new RouteCandidateFinder.RaptorInput(
+                        new RaptorRouteSet(shape.routes(), shape.connections()), null));
+
+        String[][] ods = {{"222", "151"}, {"221", "2734"}};
+        for (String[] od : ods) {
+            long start = System.nanoTime();
+            List<ScoredCandidate> candidates = finder.findCandidatesWithPaths(
+                    RouteTestFixtures.graphOf(), od[0], od[1], 10, null, null);
+            long ms = (System.nanoTime() - start) / 1_000_000;
+            System.out.printf("raptor candidates %s->%s: %dms %d건%n",
+                    od[0], od[1], ms, candidates.size());
+            assertTrue(!candidates.isEmpty(), od[0] + "->" + od[1] + " 후보 없음");
+            assertTrue(candidates.size() <= 10, "후보 상한 초과");
+            for (ScoredCandidate scored : candidates) {
+                RouteSearchResponse response = scored.response();
+                double legsSum = response.legs().stream()
+                        .mapToDouble(leg -> leg.minutes()).sum();
+                assertEquals(response.totalMinutes(), legsSum, 0.05,
+                        "legs 합과 totalMinutes 불일치");
+                long transferLegs = response.legs().stream()
+                        .filter(leg -> leg.mode() == TravelMode.TRANSFER).count();
+                assertNotNull(response.transferCount());
+                assertEquals(response.transferCount(), (int) transferLegs,
+                        "transferCount와 TRANSFER leg 수 불일치");
+                response.legs().stream()
+                        .filter(leg -> leg.mode() == TravelMode.BUS)
+                        .forEach(leg -> {
+                            assertEquals("BUS", leg.routeId(), "BUS routeId는 corridor여야 한다");
+                            assertTrue(leg.routeOptions() != null && !leg.routeOptions().isEmpty(),
+                                    "BUS routeOptions 누락");
+                        });
+            }
+            assertTrue(ms < 2000, od[0] + "->" + od[1] + " 후보 생성 2초 초과: " + ms + "ms");
+        }
+    }
+
+    /** 서버 기동 로더와 같은 원천으로 RAPTOR 노선·연결·표시정보를 조립한다. */
+    private static RealShape buildRealShape() throws IOException {
+        Map<String, BikeEdgeBuilder.Stop> stations = new LinkedHashMap<>();
+        Map<String, BikeEdgeBuilder.Stop> busStops = new LinkedHashMap<>();
+        Map<String, BikeEdgeBuilder.Stop> rentals = new LinkedHashMap<>();
+        Map<Integer, List<String[]>> subwayRowsByLine = new LinkedHashMap<>();
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+
+        readCsv(COORDS, cells -> {
+            if (cells.length > 6) {
+                addStop(stations, cells[2], cells[4], cells[5]);
+                addInfo(infos, cells[2], cells[3], cells[4], cells[5]);
+                Integer line = parseInt(cells[1]);
+                if (line != null) {
+                    subwayRowsByLine.computeIfAbsent(line, key -> new ArrayList<>()).add(cells);
+                }
+            }
+        });
+        readCsv(BUS_STOPS, cells -> {
+            if (cells.length > 4) {
+                addStop(busStops, cells[0], cells[4], cells[3]);
+                addInfo(infos, cells[0], cells[2], cells[4], cells[3]);
+            }
+        });
+        readCsv(BIKE_STATIONS, cells -> {
+            if (cells.length > 5) {
+                addStop(rentals, cells[0], cells[4], cells[5]);
+                addInfo(infos, cells[0], cells[1], cells[4], cells[5]);
+            }
+        });
+
+        List<RaptorFinder.Route> routes = new ArrayList<>();
+        routes.addAll(busRoutes());
+        routes.addAll(subwayRoutes(subwayRowsByLine));
+        List<RaptorFinder.Connection> connections = new ArrayList<>();
+        for (Edge edge : WalkEdgeBuilder.build(stations, rentals, busStops)) {
+            connections.add(new RaptorFinder.Connection(
+                    edge.fromNode(), edge.toNode(), edge.travelSec(), TravelMode.WALK));
+        }
+        for (Edge edge : BikeRentalEdgeBuilder.build(rentals)) {
+            connections.add(new RaptorFinder.Connection(
+                    edge.fromNode(), edge.toNode(), edge.travelSec(), TravelMode.BIKE));
+        }
+        return new RealShape(List.copyOf(routes), List.copyOf(connections), infos);
     }
 
     private static List<RaptorFinder.Route> busRoutes() throws IOException {
@@ -124,8 +191,8 @@ class RaptorRealShapeScaleTest {
                     continue;
                 }
                 if (prev != null) {
-                    secs.add(Math.max(1, (int) Math.round(distanceM(prev.lat(), prev.lng(),
-                            stop.lat(), stop.lng()) / BUS_METERS_PER_SEC)));
+                    secs.add(Math.max(1, (int) Math.round(BusEdgeBuilder.distanceM(prev, stop)
+                            / BUS_METERS_PER_SEC)));
                 }
                 ids.add(stop.stopId());
                 prev = stop;
@@ -158,7 +225,6 @@ class RaptorRealShapeScaleTest {
                 Integer seq = parseInt(row[0]);
                 return seq == null ? Integer.MAX_VALUE : seq;
             }));
-            // 좌표 있고 연속 중복 없는 정류장만 남긴다.
             List<String[]> filtered = new ArrayList<>();
             for (String[] row : rows) {
                 Double lat = parseDouble(row[4]);
@@ -220,6 +286,18 @@ class RaptorRealShapeScaleTest {
             return;
         }
         target.putIfAbsent(key, new BikeEdgeBuilder.Stop(key, latValue, lngValue));
+    }
+
+    private static void addInfo(Map<String, RouteMapper.StationInfo> infos, String id, String name,
+                                String lat, String lng) {
+        String key = id.trim();
+        Double latValue = parseDouble(lat);
+        Double lngValue = parseDouble(lng);
+        if (key.isEmpty() || latValue == null || lngValue == null) {
+            return;
+        }
+        infos.putIfAbsent(key, new RouteMapper.StationInfo(key,
+                name == null || name.isBlank() ? key : name.trim(), latValue, lngValue));
     }
 
     private static void readCsv(String resourcePath, Consumer<String[]> row) throws IOException {

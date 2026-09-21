@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,6 +52,9 @@ public final class RouteCandidateFinder {
 
     /** 라운드 상한 — 환승 3회 내외(4라운드) */
     static final int RAPTOR_MAX_ROUNDS = 4;
+
+    /** K 후보를 위한 세그먼트 금지 재스캔 상한 — 스캔 1회가 ms 단위라 넉넉히 둔다. */
+    static final int RAPTOR_MAX_BAN_RUNS = 8;
 
     /**
      * @param transferRule 환승 비용 규칙
@@ -262,30 +266,82 @@ public final class RouteCandidateFinder {
             }
         }
         boolean minimizeCost = costModel != null;
-        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder finder;
-        if (minimizeCost) {
-            finder = new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder(
-                    routes, connections,
-                    (routeId, fromIdx, toIdx, passThrough, travel) -> costModel.travelCost(
-                            new Edge("raptor", "raptor", routeId, travel, 0,
-                                    modeByRouteId.getOrDefault(routeId, TravelMode.BUS))));
-        } else {
-            finder = new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder(
-                    routes, connections);
+
+        // K 후보 전략(217): 첫 스캔 후, 직전 후보의 첫 탑승 구간을 금지해가며 재스캔한다.
+        // 라운드별 최선만 나오는 RAPTOR에서 서로 다른 후보를 maxCandidates까지 채운다.
+        List<FoundPath> collected = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        Set<String> bannedSegments = new LinkedHashSet<>();
+        List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route> currentRoutes =
+                routes;
+        int runs = 0;
+        while (collected.size() < maxCandidates && runs <= RAPTOR_MAX_BAN_RUNS) {
+            runs++;
+            com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder finder;
+            if (minimizeCost) {
+                finder = new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder(
+                        currentRoutes, connections,
+                        (routeId, fromIdx, toIdx, passThrough, travel) -> costModel.travelCost(
+                                new Edge("raptor", "raptor", routeId, travel, 0,
+                                        modeByRouteId.getOrDefault(routeId, TravelMode.BUS))));
+            } else {
+                finder = new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder(
+                        currentRoutes, connections);
+            }
+            List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey> journeys =
+                    finder.find(originStationId, destStationId,
+                            Map.of(originStationId, 0), Map.of(destStationId, 0),
+                            RAPTOR_MAX_ROUNDS, minimizeCost);
+            boolean addedNew = false;
+            for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey journey
+                    : journeys) {
+                java.util.Optional<FoundPath> path =
+                        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorPathAdapter
+                                .toFoundPath(journey, currentRoutes,
+                                        transferRule.withTable(transferTimes), busRouteIndex);
+                if (path.isPresent() && seen.add(pathSignature(path.get()))) {
+                    collected.add(path.get());
+                    addedNew = true;
+                    if (collected.size() >= maxCandidates) {
+                        break;
+                    }
+                }
+            }
+            if (!addedNew) {
+                break;
+            }
+            Edge firstTransit = firstTransitSegment(collected.get(collected.size() - 1));
+            if (firstTransit == null) {
+                break;
+            }
+            bannedSegments.add(firstTransit.fromNode() + "->" + firstTransit.toNode());
+            currentRoutes = com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSetBuilder
+                    .withoutSegments(routes, bannedSegments);
+            if (currentRoutes.isEmpty()) {
+                break;
+            }
         }
-        List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey> journeys =
-                finder.find(originStationId, destStationId,
-                        Map.of(originStationId, 0), Map.of(destStationId, 0),
-                        RAPTOR_MAX_ROUNDS, minimizeCost);
-        List<FoundPath> paths = new ArrayList<>();
-        for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey journey
-                : journeys) {
-            com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorPathAdapter
-                    .toFoundPath(journey, routes, transferRule.withTable(transferTimes),
-                            busRouteIndex)
-                    .ifPresent(paths::add);
+        return collected;
+    }
+
+    /** 경로의 첫 대중교통 구간 — K 전략에서 다음 후보를 위해 금지할 구간. */
+    private static Edge firstTransitSegment(FoundPath path) {
+        for (Edge edge : path.edges()) {
+            if (edge.mode() == TravelMode.BUS || edge.mode() == TravelMode.SUBWAY) {
+                return edge;
+            }
         }
-        return paths;
+        return null;
+    }
+
+    /** FoundPath 서명(수단·구간·노선) — K 수집 중 중복 제거용. */
+    private static String pathSignature(FoundPath path) {
+        StringBuilder signature = new StringBuilder();
+        for (Edge edge : path.edges()) {
+            signature.append(edge.mode()).append(':').append(edge.fromNode()).append('>')
+                    .append(edge.toNode()).append(':').append(edge.routeId()).append('|');
+        }
+        return signature.toString();
     }
 
     /** RAPTOR 모드 필터 — WALK·TRANSFER는 연결 구간이라 항상 허용(215 §3.4와 동일 규칙). */

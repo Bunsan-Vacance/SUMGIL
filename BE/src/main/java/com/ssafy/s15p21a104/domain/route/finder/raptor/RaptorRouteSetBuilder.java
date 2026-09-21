@@ -206,6 +206,46 @@ public final class RaptorRouteSetBuilder {
         return connections;
     }
 
+    /**
+     * 금지 구간({"from->to"})을 제거한 노선 목록 — K 후보를 얻기 위한 반복 스캔용(217 K 전략).
+     * 구간이 빠지면 노선이 조각나므로 조각들을 각각 노선으로 만든다(값을 지어내지 않음).
+     */
+    public static List<RaptorFinder.Route> withoutSegments(
+            List<RaptorFinder.Route> routes, java.util.Set<String> bannedSegments) {
+        if (routes == null || routes.isEmpty() || bannedSegments == null
+                || bannedSegments.isEmpty()) {
+            return routes == null ? List.of() : routes;
+        }
+        List<RaptorFinder.Route> out = new ArrayList<>();
+        for (RaptorFinder.Route route : routes) {
+            List<String> stops = route.stops();
+            int start = 0;
+            for (int i = 0; i + 1 < stops.size(); i++) {
+                if (!bannedSegments.contains(stops.get(i) + "->" + stops.get(i + 1))) {
+                    continue;
+                }
+                if (i > start) {
+                    splitInto(route, start, i + 1, out);
+                }
+                start = i + 1;
+            }
+            if (stops.size() - start >= 2) {
+                splitInto(route, start, stops.size(), out);
+            }
+        }
+        return out;
+    }
+
+    /** 원 노선의 [fromIdx, toIdx) 정류장 조각을 노선으로 만든다. */
+    private static void splitInto(RaptorFinder.Route route, int fromIdx, int toIdx,
+                                  List<RaptorFinder.Route> out) {
+        List<String> subStops = new ArrayList<>(route.stops().subList(fromIdx, toIdx));
+        int[] subTravel = java.util.Arrays.copyOfRange(route.travelSec(), fromIdx, toIdx - 1);
+        int[] subWait = java.util.Arrays.copyOfRange(route.boardWaitSec(), fromIdx, toIdx);
+        out.add(new RaptorFinder.Route(route.routeId(), route.mode(), List.copyOf(subStops),
+                subTravel, subWait));
+    }
+
     private static int flush(String routeId, int part, List<Segment> segments,
                              List<RaptorFinder.Route> out) {
         if (segments.size() >= 1) {

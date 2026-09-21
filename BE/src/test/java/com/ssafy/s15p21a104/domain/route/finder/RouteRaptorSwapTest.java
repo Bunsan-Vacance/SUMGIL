@@ -143,4 +143,44 @@ class RouteRaptorSwapTest {
         // RAPTOR·레거시 모두 BUS-only 경로는 제외한다 → 빈 후보(에러 아님).
         assertEquals(0, candidates.size());
     }
+
+    @Test
+    @DisplayName("S4: K 후보 — 금지 재스캔으로 서로 다른 후보를 채운다")
+    void s4_K후보() {
+        // 직통 버스(A→C 240s) vs 버스+지하철(A→B→C 200s) — leg 구성이 달라야 별도 후보가 된다.
+        Map<String, List<BusEdgeBuilder.RouteStop>> routesMap = Map.of(
+                "r1", List.of(
+                        new BusEdgeBuilder.RouteStop("A", 1, 37.50, 127.0),
+                        new BusEdgeBuilder.RouteStop("C", 2, 37.50, 127.02)),
+                "r2", List.of(
+                        new BusEdgeBuilder.RouteStop("A", 1, 37.50, 127.0),
+                        new BusEdgeBuilder.RouteStop("B", 2, 37.50, 127.01)));
+        BusRouteIndex index = BusRouteIndex.build(routesMap);
+        var graph = graphOf(
+                new com.ssafy.s15p21a104.domain.route.graph.Edge("A", "C", "BUS", 240, 0, TravelMode.BUS),
+                new com.ssafy.s15p21a104.domain.route.graph.Edge("A", "B", "BUS", 100, 0, TravelMode.BUS),
+                new com.ssafy.s15p21a104.domain.route.graph.Edge("B", "C", "1002", 100, 0, TravelMode.SUBWAY));
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        for (String id : List.of("A", "B", "C")) {
+            infos.put(id, new RouteMapper.StationInfo(id, id + "역", 37.5, 127.0));
+        }
+        RaptorRouteSet set = new RaptorRouteSet(List.of(
+                new RaptorFinder.Route("r1", TravelMode.BUS, List.of("A", "C"),
+                        new int[]{240}, 0),
+                new RaptorFinder.Route("r2", TravelMode.BUS, List.of("A", "B"),
+                        new int[]{100}, 0),
+                new RaptorFinder.Route("1002", TravelMode.SUBWAY, List.of("B", "C"),
+                        new int[]{100}, 0)), List.of());
+        RouteCandidateFinder finder = new RouteCandidateFinder(
+                new TransferRule(180), Map.of(), Set.of(), infos, Map::of, index,
+                new RouteCandidateFinder.RaptorInput(set, null));
+
+        List<ScoredCandidate> candidates =
+                finder.findCandidatesWithPaths(graph, "A", "C", 10, null, null);
+
+        assertTrue(candidates.size() >= 2, "K 후보가 2건 미만: " + candidates.size());
+        double first = candidates.get(0).response().totalMinutes();
+        double second = candidates.get(1).response().totalMinutes();
+        assertTrue(Math.abs(first - second) > 0.1, "후보 총계가 같다 (다양성 실패)");
+    }
 }
