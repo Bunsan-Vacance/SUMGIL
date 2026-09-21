@@ -27,6 +27,9 @@ spec:
                 name: be-config
             - secretRef:
                 name: data-secret
+            # 앱 비밀 전체(275). 카카오 키와 함께 버스 혼잡도용 DATA_GO_KR_KEY(297)도 여기로 들어온다 —
+            # 키별 secretKeyRef 를 따로 두지 않는다. Secret 에 그 키가 없으면 환경변수가 안 생기고
+            # 앱이 기능을 스스로 끄므로(BusCongestionProperties.usable) 변수 등록 전에도 안 깨진다.
             - secretRef:
                 name: be-secret
           livenessProbe:

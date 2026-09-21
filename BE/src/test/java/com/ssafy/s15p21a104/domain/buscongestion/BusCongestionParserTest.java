@@ -79,6 +79,24 @@ class BusCongestionParserTest {
     }
 
     @Test
+    @DisplayName("297-P1b: 강남역 실측(2026-09-21 11:20) — 37행 중 등급 있는 13개, 경기 버스는 빠진다")
+    void p1b_강남역_실측() {
+        Map<String, BusArrival> out =
+                BusCongestionParser.parse(MAPPER, sample("bus-121000012_20260921.json"));
+
+        // 37행 중 reride_Num1 이 0 이 아닌 것은 13개(전부 코드 3). 나머지 24개는 경기 버스·미운행이다.
+        assertEquals(13, out.size());
+        assertTrue(out.values().stream().allMatch(a -> a.grade() == BusCongestionGrade.RELAXED),
+                "이 시점 실측은 전부 여유였다 — 등급이 잘 안 움직인다는 관찰의 근거다");
+        assertFalse(out.containsKey("120000051"), "1550광주 같은 경기 버스는 코드 0 이라 빠진다");
+
+        // 구간 대푯값은 가장 먼저 오는 버스다 — 421 이 2초 뒤로 제일 빠르다.
+        BusArrival soonest = out.values().stream().reduce(BusArrival::soonerOf).orElseThrow();
+        assertEquals("100100409", soonest.routeId(), "421");
+        assertEquals(2, soonest.arrivalSec());
+    }
+
+    @Test
     @DisplayName("297-P2: 09-21 실측 형태 — 3 여유 · 4 보통, 0 은 제외")
     void p2_등급_매핑() {
         Map<String, BusArrival> out = BusCongestionParser.parse(MAPPER, bodyOf(List.of(
