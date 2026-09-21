@@ -31,6 +31,7 @@ import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
 import com.ssafy.s15p21a104.domain.route.mapper.LegContract;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
+import com.ssafy.s15p21a104.domain.route.scoring.BusCrowdingScale;
 import com.ssafy.s15p21a104.domain.route.scoring.CongestionCostModel;
 import com.ssafy.s15p21a104.domain.route.scoring.CongestionPredictionResolver;
 import com.ssafy.s15p21a104.domain.route.scoring.RouteScoreRanker;
@@ -209,10 +210,23 @@ public class RouteSearchService {
         List<RouteSearchResponse> speed = ranked.stream()
                 .limit(SPEED_ROUTES)
                 .toList();
+        List<ScoredCandidate> calmPool = calmScored.isEmpty() ? timeScored : calmScored;
+        // BUS 실시간 등급(297)을 calm 랭킹 이전에 받아 둔다(5부 C1) — 지하철 링크 점수와 같은
+        // 축(BusCrowdingScale)에서 비교하기 위해서다. 지금 출발 + BUS 구간일 때만 외부 호출이고,
+        // 이후 withRouteNames의 prefetch는 같은 캐시를 읽는다(중복 호출 없음).
+        Function<String, Map<String, BusArrival>> busCongestion = stopId -> Map.of();
+        if (BusCongestionWindow.isLive(departureTime, clock, busCongestionProperties.nowWindow())) {
+            Set<String> stops = RouteNameResolver.busBoardingStops(
+                    calmPool.stream().map(ScoredCandidate::response).toList());
+            if (!stops.isEmpty()) {
+                busCongestionReader.prefetch(stops);
+                busCongestion = busCongestionReader::forStop;
+            }
+        }
         // 158(통지 05 S-1): 링크 단위·통과 시각 슬롯으로 정제. 혼잡 탐색이 비면 시간 후보에서 고른다.
         List<RouteSearchResponse> calm = scoreRanker().topCalmByLink(
-                calmScored.isEmpty() ? timeScored : calmScored,
-                departureTime, congestionPredLookup(), CALM_ROUTES);
+                calmPool, departureTime, congestionPredLookup(), CALM_ROUTES,
+                busLevelLookup(busCongestion));
         // 부족분 채움 풀은 두 탐색 합본(시간순).
         List<RouteSearchResponse> pool = new ArrayList<>(ranked);
         for (ScoredCandidate calmCandidate : calmScored) {
@@ -350,6 +364,37 @@ public class RouteSearchService {
                                 CongestionTarget.LINE, targetId, dowType, timeSlot)
                         .map(c -> c.getLevel().doubleValue())
                         .orElse(null));
+    }
+
+    /**
+     * BUS leg → 공통 수치 혼잡(5부 C1). 표시(297)와 같은 규칙(후보 노선 중 가장 먼저 오는
+     * 버스의 등급)을 쓰고, 등급→수치는 {@link BusCrowdingScale} 한 곳에서 옮긴다. 모르면 중립(null).
+     */
+    private RouteScoreRanker.BusLevelLookup busLevelLookup(
+            Function<String, Map<String, BusArrival>> busCongestion) {
+        return leg -> {
+            if (leg.fromNodeId() == null || leg.fromNodeId().isBlank()) {
+                return null;
+            }
+            Set<String> options = leg.routeOptions() != null && !leg.routeOptions().isEmpty()
+                    ? leg.routeOptions().stream()
+                            .map(com.ssafy.s15p21a104.domain.route.dto.response
+                                    .RouteOptionResponse::routeId)
+                            .collect(java.util.stream.Collectors.toCollection(
+                                    java.util.LinkedHashSet::new))
+                    : (leg.routeId() == null ? Set.of() : Set.of(leg.routeId()));
+            if (options.isEmpty()) {
+                return null;
+            }
+            try {
+                return BusCrowdingScale.levelOfName(
+                                RouteNameResolver.gradeName(
+                                        busCongestion.apply(leg.fromNodeId()), options))
+                        .orElse(null);
+            } catch (RuntimeException e) {
+                return null;
+            }
+        };
     }
 
     /**

@@ -38,8 +38,9 @@ public final class LinkCongestionScorer {
      * @param weightedAverage 소요시간(travelSec) 가중 평균 혼잡도(%) — 정렬용
      * @param worstEdge 값을 아는 엣지 중 혼잡도가 가장 높은 엣지 — 표시용
      * @param worstLevel worstEdge의 혼잡도(%)
+     * @param weightedSec 가중 평균에 쓰인 탑승 시간 합(초) — 크로스모달 합산용(5부 C1)
      */
-    public record Result(double weightedAverage, Edge worstEdge, double worstLevel) {
+    public record Result(double weightedAverage, Edge worstEdge, double worstLevel, long weightedSec) {
     }
 
     /**
@@ -79,6 +80,6 @@ public final class LinkCongestionScorer {
         if (knownSec <= 0) {
             return Optional.empty();
         }
-        return Optional.of(new Result(weightedSum / knownSec, worstEdge, worstLevel));
+        return Optional.of(new Result(weightedSum / knownSec, worstEdge, worstLevel, knownSec));
     }
 }

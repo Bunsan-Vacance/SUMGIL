@@ -168,13 +168,30 @@ public final class RouteScoreRanker {
      * @param n 최대 개수
      * @return 혼잡순 상위 목록(최대 n개). 혼잡도 데이터가 하나도 없으면 빈 목록
      */
+    /** BUS leg → 공통 수치 혼잡(5부 C1). 모르면 null(중립). */
+    @FunctionalInterface
+    public interface BusLevelLookup {
+        Double levelOf(RouteLegResponse leg);
+    }
+
     public List<RouteSearchResponse> topCalmByLink(
             List<ScoredCandidate> candidates, LocalDateTime departureTime,
             LinkCongestionScorer.LinkLevelLookup lookup, int n) {
+        return topCalmByLink(candidates, departureTime, lookup, n, null);
+    }
+
+    /**
+     * @param busLevels BUS leg 혼잡 수치 조회(5부 C1, 선택). null이면 지하철 링크만으로 채점
+     */
+    public List<RouteSearchResponse> topCalmByLink(
+            List<ScoredCandidate> candidates, LocalDateTime departureTime,
+            LinkCongestionScorer.LinkLevelLookup lookup, int n, BusLevelLookup busLevels) {
         Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
         for (ScoredCandidate candidate : candidates) {
-            LinkCongestionScorer.score(candidate.path().edges(), departureTime, lookup)
-                    .ifPresent(result -> scoreByCandidate.put(candidate.response(), result.weightedAverage()));
+            Double score = combinedScore(candidate, departureTime, lookup, busLevels);
+            if (score != null) {
+                scoreByCandidate.put(candidate.response(), score);
+            }
         }
         if (scoreByCandidate.isEmpty()) {
             return List.of();
@@ -199,5 +216,38 @@ public final class RouteScoreRanker {
                     candidate.congestionPrediction()));
         }
         return relabeled;
+    }
+
+    /**
+     * 지하철 링크(통과 시각) + BUS 등급(공통 축)을 <b>타고 있는 시간</b>으로 가중 평균한
+     * 크로스모달 점수(5부 C1). 아는 값이 하나도 없으면 null — 혼잡도로 비교할 수 없는 후보다.
+     */
+    private static Double combinedScore(ScoredCandidate candidate, LocalDateTime departureTime,
+            LinkCongestionScorer.LinkLevelLookup lookup, BusLevelLookup busLevels) {
+        double weightedSum = 0;
+        long weightedSec = 0;
+        var link = LinkCongestionScorer.score(candidate.path().edges(), departureTime, lookup);
+        if (link.isPresent()) {
+            weightedSum += link.get().weightedAverage() * link.get().weightedSec();
+            weightedSec += link.get().weightedSec();
+        }
+        if (busLevels != null) {
+            for (RouteLegResponse leg : candidate.response().legs()) {
+                if (leg.mode() != TravelMode.BUS) {
+                    continue;
+                }
+                Double level = busLevels.levelOf(leg);
+                if (level == null) {
+                    continue;
+                }
+                long sec = Math.max(0, Math.round((leg.minutes() == null ? 0 : leg.minutes()) * 60));
+                weightedSum += level * sec;
+                weightedSec += sec;
+            }
+        }
+        if (weightedSec <= 0) {
+            return null;
+        }
+        return weightedSum / weightedSec;
     }
 }

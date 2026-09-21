@@ -177,7 +177,18 @@ public final class RouteNameResolver {
         } catch (RuntimeException e) {
             return null;
         }
-        if (arrivals == null || arrivals.isEmpty()) {
+        return gradeName(arrivals, candidateRouteIds);
+    }
+
+    /**
+     * 도착 맵에서 후보 노선 중 <b>가장 먼저 오는</b> 버스의 등급 이름(순수, 5부 C1).
+     * 표시(297)와 calm 크로스모달 채점이 같은 규칙을 쓰도록 단일 함수로 둔다.
+     *
+     * @return 등급 이름(예: CONGESTED). 모르면 null
+     */
+    public static String gradeName(Map<String, BusArrival> arrivals, Set<String> candidateRouteIds) {
+        if (arrivals == null || arrivals.isEmpty()
+                || candidateRouteIds == null || candidateRouteIds.isEmpty()) {
             return null;
         }
         BusArrival soonest = null;
