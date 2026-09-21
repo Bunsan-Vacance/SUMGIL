@@ -25,24 +25,44 @@ import java.util.Set;
  */
 public final class RaptorFinder {
 
-    /** 노선 한 개. {@code stops[i] → stops[i+1]} 소요가 {@code travelSec[i]}. 승차 대기는 노선 공통 {@code waitSec}. */
-    public record Route(String routeId, TravelMode mode, List<String> stops, int[] travelSec, int waitSec) {
+    /**
+     * 노선 한 개. {@code stops[i] → stops[i+1]} 소요가 {@code travelSec[i]}, 정류장 {@code i}에서의
+     * 승차 대기가 {@code boardWaitSec[i]}(버스 headway/2·지하철 대기, 미정이면 0).
+     */
+    public record Route(String routeId, TravelMode mode, List<String> stops, int[] travelSec,
+                        int[] boardWaitSec) {
         public Route {
             Objects.requireNonNull(routeId, "routeId");
             Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(stops, "stops");
             Objects.requireNonNull(travelSec, "travelSec");
-            if (stops.size() < 2 || travelSec.length != stops.size() - 1) {
+            Objects.requireNonNull(boardWaitSec, "boardWaitSec");
+            if (stops.size() < 2 || travelSec.length != stops.size() - 1
+                    || boardWaitSec.length != stops.size()) {
                 throw new IllegalArgumentException("노선 길이 불일치: " + routeId);
-            }
-            if (waitSec < 0) {
-                throw new IllegalArgumentException("대기 음수: " + routeId);
             }
             for (int sec : travelSec) {
                 if (sec < 0) {
                     throw new IllegalArgumentException("구간 소요 음수: " + routeId);
                 }
             }
+            for (int sec : boardWaitSec) {
+                if (sec < 0) {
+                    throw new IllegalArgumentException("승차 대기 음수: " + routeId);
+                }
+            }
+        }
+
+        /** 승차 대기 균일 노선(테스트·단순화용). */
+        public Route(String routeId, TravelMode mode, List<String> stops, int[] travelSec,
+                     int waitSec) {
+            this(routeId, mode, stops, travelSec, uniform(stops.size(), waitSec));
+        }
+
+        private static int[] uniform(int length, int waitSec) {
+            int[] waits = new int[length];
+            java.util.Arrays.fill(waits, waitSec);
+            return waits;
         }
     }
 
@@ -64,9 +84,14 @@ public final class RaptorFinder {
         SegmentCost TIME = (routeId, fromIdx, toIdx, passThroughSec, travelSec) -> travelSec;
     }
 
-    /** journey 한 구간. transit = 노선 탑승, WALK·BIKE = 접근·연결. */
+    /** journey 한 구간. transit = 노선 탑승(구간 전개용 {@code routeIndex}·정류장 위치 보유), 연결 = 접근·도보·자전거. */
     public record Leg(String routeId, TravelMode mode, String from, String to,
-                      long boardSec, long alightSec) {
+                      long boardSec, long alightSec, int routeIndex, int boardIndex, int alightIndex) {
+        /** 연결·접근 leg. */
+        public static Leg connection(String routeId, TravelMode mode, String from, String to,
+                                     long boardSec, long alightSec) {
+            return new Leg(routeId, mode, from, to, boardSec, alightSec, -1, -1, -1);
+        }
     }
 
     public record Journey(List<Leg> legs, long totalSec, long totalCost, int transfers) {
@@ -109,7 +134,7 @@ public final class RaptorFinder {
         Map<String, Label> round0 = new HashMap<>();
         for (Map.Entry<String, Integer> access : originAccess.entrySet()) {
             round0.put(access.getKey(), new Label(access.getValue(), access.getValue(),
-                    new Trace(-1, null, "WALK", TravelMode.WALK, 0, access.getValue())));
+                    new Trace(-1, null, "WALK", TravelMode.WALK, 0, access.getValue(), -1, -1, -1)));
         }
         byRound.add(round0);
 
@@ -122,8 +147,9 @@ public final class RaptorFinder {
             Map<String, Label> current = new HashMap<>(prev); // 이하 r회 — 이월
             Set<String> improvedStops = new LinkedHashSet<>();
             boolean improved = false;
-            for (Route route : routes) {
-                improved |= scanRoute(route, prev, current, round, minimizeCost, improvedStops);
+            for (int routeIndex = 0; routeIndex < routes.size(); routeIndex++) {
+                Route route = routes.get(routeIndex);
+                improved |= scanRoute(route, routeIndex, prev, current, round, minimizeCost, improvedStops);
             }
             if (!improvedStops.isEmpty()) {
                 improved |= relaxConnections(current, round, improvedStops, minimizeCost);
@@ -146,7 +172,7 @@ public final class RaptorFinder {
     }
 
     /** 노선 한 개를 정류장 순서대로 훑어 하차 라벨을 이완한다. */
-    private boolean scanRoute(Route route, Map<String, Label> prev, Map<String, Label> current,
+    private boolean scanRoute(Route route, int routeIndex, Map<String, Label> prev, Map<String, Label> current,
                               int round, boolean minimizeCost, Set<String> improvedStops) {
         List<String> stops = route.stops();
         int n = stops.size();
@@ -163,7 +189,7 @@ public final class RaptorFinder {
                 // 탑승 후보 갱신은 i-1 정류장까지 반영된 뒤 i로 전진한다.
                 Label boarding = prev.get(stops.get(i - 1));
                 if (boarding != null) {
-                    long depart = boarding.time() + route.waitSec();
+                    long depart = boarding.time() + route.boardWaitSec()[i - 1];
                     if (depart < bestDepart) {
                         bestDepart = depart;
                         bestIdx = i - 1;
@@ -174,7 +200,7 @@ public final class RaptorFinder {
                 }
                 long arrival = bestDepart + (prefix[i] - prefix[bestIdx]);
                 Label label = new Label(arrival, arrival, new Trace(round - 1, stops.get(bestIdx),
-                        route.routeId(), route.mode(), bestDepart, arrival));
+                        route.routeId(), route.mode(), bestDepart, arrival, routeIndex, bestIdx, i));
                 if (relax(current, stops.get(i), label)) {
                     improved = true;
                     improvedStops.add(stops.get(i));
@@ -187,8 +213,9 @@ public final class RaptorFinder {
                 if (boarding == null) {
                     continue;
                 }
-                long time = boarding.time() + route.waitSec();
-                long cost = boarding.cost() + route.waitSec();
+                long wait = route.boardWaitSec()[i];
+                long time = boarding.time() + wait;
+                long cost = boarding.cost() + wait;
                 for (int j = i + 1; j < n; j++) {
                     int seg = j - 1;
                     long passThrough = time;
@@ -197,7 +224,8 @@ public final class RaptorFinder {
                     time += route.travelSec()[seg];
                     cost += segCost;
                     Label label = new Label(time, cost, new Trace(round - 1, stops.get(i),
-                            route.routeId(), route.mode(), boarding.time() + route.waitSec(), time));
+                            route.routeId(), route.mode(), boarding.time() + wait, time,
+                            routeIndex, i, j));
                     if (relax(current, stops.get(j), label)) {
                         improved = true;
                         improvedStops.add(stops.get(j));
@@ -223,7 +251,7 @@ public final class RaptorFinder {
                 long cost = from.cost() + connection.sec();
                 Label label = new Label(time, cost, new Trace(round, connection.from(),
                         connection.mode() == TravelMode.BIKE ? "BIKE" : "WALK",
-                        connection.mode(), from.time(), time));
+                        connection.mode(), from.time(), time, -1, -1, -1));
                 if (relax(current, connection.to(), label)) {
                     improved = true;
                 }
@@ -282,18 +310,19 @@ public final class RaptorFinder {
         while (label != null) {
             Trace trace = label.trace();
             if (trace.prevRound() < 0) {
-                legs.add(0, new Leg("WALK", TravelMode.WALK, originNodeId, current,
+                legs.add(0, Leg.connection("WALK", TravelMode.WALK, originNodeId, current,
                         0, label.time()));
                 break;
             }
             legs.add(0, new Leg(trace.routeId(), trace.mode(), trace.boardStop(), current,
-                    trace.boardTime(), trace.alightTime()));
+                    trace.boardTime(), trace.alightTime(),
+                    trace.routeIndex(), trace.boardIndex(), trace.alightIndex()));
             current = trace.boardStop();
             label = byRound.get(trace.prevRound()).get(current);
         }
         long alightSec = byRound.get(round).get(stop).time();
         long destSec = alightSec + destAccessSec;
-        legs.add(new Leg("WALK", TravelMode.WALK, stop, destNodeId, alightSec, destSec));
+        legs.add(Leg.connection("WALK", TravelMode.WALK, stop, destNodeId, alightSec, destSec));
         int rides = 0;
         for (Leg leg : legs) {
             if (leg.mode() == TravelMode.BUS || leg.mode() == TravelMode.SUBWAY) {
@@ -318,6 +347,7 @@ public final class RaptorFinder {
     }
 
     private record Trace(int prevRound, String boardStop, String routeId, TravelMode mode,
-                         long boardTime, long alightTime) {
+                         long boardTime, long alightTime, int routeIndex, int boardIndex,
+                         int alightIndex) {
     }
 }
