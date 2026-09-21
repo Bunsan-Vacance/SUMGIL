@@ -75,4 +75,18 @@
             <appender-ref ref="CONSOLE_JSON" />
         </root>
     </springProfile>
+
+    <!-- splunk-demo(개인 로컬 데모 전용, BE/docs/infra/splunk-siem-design.md): 기존 appender에 HEC 전송만 추가 -->
+    <springProfile name="splunk-demo">
+        <appender name="SPLUNK_HEC" class="com.splunk.logging.HttpEventCollectorLogbackAppender">
+            <url>${SPLUNK_HEC_URL:-http://localhost:8088}</url>
+            <token>${SPLUNK_HEC_TOKEN:-}</token>
+            <index>sumgil_be</index>
+            <disableCertificateValidation>true</disableCertificateValidation>
+            <layout class="net.logstash.logback.encoder.LogstashEncoder" />
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="SPLUNK_HEC" />
+        </root>
+    </springProfile>
 </configuration>
