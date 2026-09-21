@@ -1,5 +1,6 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { useBottomSheet } from './useBottomSheet'
+import { useScrollbarVisibility } from './useScrollbarVisibility'
 
 type Snap = 'default' | 'expanded' | 'collapsed'
 interface Props {
@@ -21,27 +22,7 @@ export default function BottomSheet({
   className = '',
 }: Props) {
   const { ref, snap, dragHeight, gripProps } = useBottomSheet(initialSnap, preferredSnap)
-  const bodyRef = useRef<HTMLDivElement>(null)
-  const scrollHideTimer = useRef<number | null>(null)
-  useEffect(() => {
-    const body = bodyRef.current
-    if (!body) return
-    const showScrollbar = () => {
-      body.classList.add('scrollbar-visible')
-      if (scrollHideTimer.current !== null) window.clearTimeout(scrollHideTimer.current)
-      scrollHideTimer.current = window.setTimeout(() => {
-        body.classList.remove('scrollbar-visible')
-        scrollHideTimer.current = null
-      }, 700)
-    }
-    body.addEventListener('scroll', showScrollbar, { passive: true })
-    return () => {
-      body.removeEventListener('scroll', showScrollbar)
-      if (scrollHideTimer.current !== null) window.clearTimeout(scrollHideTimer.current)
-      scrollHideTimer.current = null
-      body.classList.remove('scrollbar-visible')
-    }
-  }, [])
+  const bodyRef = useScrollbarVisibility<HTMLDivElement>()
   return (
     <section
       ref={ref}
@@ -53,7 +34,7 @@ export default function BottomSheet({
       <button className="sheet-grip" {...gripProps}>
         <span />
       </button>
-      <div ref={bodyRef} className="sheet-body">
+      <div ref={bodyRef} className="sheet-body scrollbar-auto">
         {children}
       </div>
       {footer && <div className="sheet-footer">{footer}</div>}

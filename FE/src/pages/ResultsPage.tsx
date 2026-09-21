@@ -8,6 +8,7 @@ import type { Navigate } from '../app/useNavigation'
 import { clockTime, congestionPredictionFor } from '../features/route/selectors'
 import { busOptionCount, busRouteOptions, groupRoutes } from '../features/route/routeGrouping'
 import type { RepositoryErrorCode } from '../api/errors'
+import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
 
 interface Props {
   origin: Place
@@ -60,6 +61,7 @@ export default function ResultsPage({
   onResetModes,
   onSearchWalk,
 }: Props) {
+  const resultsRef = useScrollbarVisibility<HTMLDivElement>()
   const [choosingTime, setChoosingTime] = useState(false)
   const [choosingSort, setChoosingSort] = useState(false)
   const sortControl = useRef<HTMLDivElement>(null)
@@ -135,7 +137,7 @@ export default function ResultsPage({
         </div>
       </header>
 
-      <div className="results-scroll">
+      <div ref={resultsRef} className="results-scroll scrollbar-auto">
         <div className="results-sort-row">
           <button
             type="button"

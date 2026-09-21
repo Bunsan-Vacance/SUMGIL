@@ -1,5 +1,6 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useId, useLayoutEffect, useState, type KeyboardEvent } from 'react'
 import Modal from '../../components/Modal'
+import { useScrollbarVisibility } from '../../components/useScrollbarVisibility'
 import './DepartureTimeDialog.css'
 
 const HOURS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'))
@@ -33,7 +34,7 @@ function Wheel({
   value: string
   onChange: (value: string) => void
 }) {
-  const wheel = useRef<HTMLDivElement>(null)
+  const wheel = useScrollbarVisibility<HTMLDivElement>()
   const idPrefix = useId()
   const selectedIndex = Math.max(0, values.indexOf(value))
 
@@ -72,7 +73,7 @@ function Wheel({
       <span className="departure-time-wheel-label">{label}</span>
       <div
         ref={wheel}
-        className="departure-time-wheel"
+        className="departure-time-wheel scrollbar-auto"
         role="listbox"
         tabIndex={0}
         aria-label={`${label} 선택`}
