@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import DetailPage from './DetailPage'
 import type { Route } from '../features/route/types'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 const endpoint = (id: string, name = id) => ({ id, name })
 function route(id: string, busId: string, busName: string): Route {
@@ -47,6 +50,36 @@ function route(id: string, busId: string, busName: string): Route {
 }
 
 describe('경로 상세 버스 선택', () => {
+  it('혼잡도 퍼센트를 소숫점 첫째 자리까지 반올림해 표시한다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
+    const current = route('current', 'BUS', '버스')
+    current.departedAt = '2026-09-17T09:00:00+09:00'
+    current.congestionPrediction = {
+      congestionPercent: 120.04,
+      congestionGrade: 'HIGH',
+      dataStatus: 'AVAILABLE',
+      predictionBasis: 'RECENT_7D',
+    }
+
+    render(
+      <DetailPage
+        origin={{ id: 'origin', name: '출발', address: '', kind: '장소' }}
+        destinationName="도착"
+        selected={current}
+        alternatives={[current]}
+        setSelectedId={vi.fn()}
+        go={vi.fn()}
+        startGuide={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('120.0%')).toBeTruthy()
+    expect(screen.getAllByText('혼잡도 예상')).toHaveLength(1)
+    expect(screen.queryByText('요일 평균 기준')).toBeNull()
+    expect(screen.queryByText('다른 경로')).toBeNull()
+  })
+
   it('BUS leg 내부 노선명과 배차간격을 표시하고 경로 선택으로 취급하지 않는다', () => {
     const current = route('current', 'BUS', '버스')
     current.legs[2].busRouteOptions = [

@@ -1,12 +1,12 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { ArrowLeftRight, Check, ChevronDown, SlidersHorizontal, X } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeftRight, ChevronDown, SlidersHorizontal, X } from 'lucide-react'
 import DepartureTimeDialog from '../features/route/DepartureTimeDialog'
 import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
 import { clockTime, congestionPredictionFor } from '../features/route/selectors'
-import { busOptionCount, busRouteOptions, groupRoutes } from '../features/route/routeGrouping'
+import { groupRoutes } from '../features/route/routeGrouping'
 import type { RepositoryErrorCode } from '../api/errors'
 import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
 
@@ -37,6 +37,68 @@ interface Props {
   onSearchWalk?: () => void
 }
 
+type Recommendation = 'fast' | 'calm'
+
+interface FeaturedRoute {
+  route: Route
+  recommendations: Recommendation[]
+}
+
+function compareByTime(a: Route, b: Route, aIndex: number, bIndex: number) {
+  return a.minutes - b.minutes || aIndex - bIndex
+}
+
+function sortRoutes(routes: Route[], priority: Priority) {
+  return routes
+    .map((route, index) => ({
+      route,
+      index,
+      prediction: congestionPredictionFor(route)?.congestionPercent,
+    }))
+    .sort((a, b) => {
+      if (priority === 'fast') return compareByTime(a.route, b.route, a.index, b.index)
+      if (a.prediction !== undefined && b.prediction !== undefined) {
+        return a.prediction - b.prediction || compareByTime(a.route, b.route, a.index, b.index)
+      }
+      if (a.prediction !== undefined) return -1
+      if (b.prediction !== undefined) return 1
+      return compareByTime(a.route, b.route, a.index, b.index)
+    })
+    .map(({ route }) => route)
+}
+
+function featuredRoutes(routes: Route[]): FeaturedRoute[] {
+  if (!routes.length) return []
+  const fastest = routes.reduce(
+    (best, route, index) =>
+      !best || compareByTime(route, best.route, index, best.index) < 0 ? { route, index } : best,
+    undefined as { route: Route; index: number } | undefined,
+  )
+  const taggedCalm = routes.filter((route) => route.routeType === 'LOW_CONGESTION')
+  const calmCandidates = taggedCalm.length
+    ? taggedCalm
+    : routes.filter((route) => congestionPredictionFor(route) !== undefined)
+  const calm = calmCandidates.reduce<Route | undefined>((best, route) => {
+    if (!best) return route
+    if (taggedCalm.length) return compareByTime(route, best, 0, 0) < 0 ? route : best
+    const routePercent = congestionPredictionFor(route)?.congestionPercent
+    const bestPercent = congestionPredictionFor(best)?.congestionPercent
+    if (routePercent === undefined || bestPercent === undefined) return best
+    return routePercent < bestPercent ||
+      (routePercent === bestPercent && route.minutes < best.minutes)
+      ? route
+      : best
+  }, undefined)
+  const result: FeaturedRoute[] = []
+  if (fastest) result.push({ route: fastest.route, recommendations: ['fast'] })
+  if (calm) {
+    const existing = result.find((entry) => entry.route.id === calm.id)
+    if (existing) existing.recommendations.push('calm')
+    else result.push({ route: calm, recommendations: ['calm'] })
+  }
+  return result
+}
+
 export default function ResultsPage({
   origin,
   destinationName,
@@ -48,7 +110,6 @@ export default function ResultsPage({
   errorCode,
   enabled,
   priority,
-  setPriority,
   openFilter,
   openSearch,
   onBackToInput,
@@ -63,26 +124,15 @@ export default function ResultsPage({
 }: Props) {
   const resultsRef = useScrollbarVisibility<HTMLDivElement>()
   const [choosingTime, setChoosingTime] = useState(false)
-  const [choosingSort, setChoosingSort] = useState(false)
-  const sortControl = useRef<HTMLDivElement>(null)
-  const sortTrigger = useRef<HTMLButtonElement>(null)
-  const sortMenuId = useId()
-  useEffect(() => {
-    if (!choosingSort) return
-    sortControl.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
-    const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && !sortControl.current?.contains(event.target)) {
-        setChoosingSort(false)
-      }
-    }
-    document.addEventListener('pointerdown', dismiss)
-    return () => document.removeEventListener('pointerdown', dismiss)
-  }, [choosingSort])
+  const [localPriority, setLocalPriority] = useState<Priority>(() => priority)
   const liveApi = isLiveApi ?? false
-  const routeGroups = groupRoutes(visible)
-  const canSortByCongestion =
-    visible.length > 1 &&
-    visible.some((route) => route.routeType === 'LOW_CONGESTION' || congestionPredictionFor(route))
+  const featured = featuredRoutes(visible)
+  const featuredIds = new Set(featured.map(({ route }) => route.id))
+  const remaining = visible.filter((route) => !featuredIds.has(route.id))
+  const remainingPredictions = remaining.filter((route) => congestionPredictionFor(route))
+  const canSortByCongestion = remaining.length > 1 && remainingPredictions.length > 0
+  const sortPriority = localPriority === 'calm' && !canSortByCongestion ? 'fast' : localPriority
+  const remainingGroups = groupRoutes(sortRoutes(remaining, sortPriority))
   const departure = departureTime || clockTime(visible[0]?.departedAt)
   const errorTitle =
     errorCode === 'access-candidate-not-found'
@@ -159,87 +209,6 @@ export default function ResultsPage({
             이동수단
             <span className="sr-only">{enabled.length}/4 선택됨</span>
           </button>
-          {canSortByCongestion && (
-            <div
-              className="results-sort-control"
-              ref={sortControl}
-              onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) setChoosingSort(false)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.preventDefault()
-                  setChoosingSort(false)
-                  sortTrigger.current?.focus()
-                }
-              }}
-            >
-              <button
-                type="button"
-                className="results-sort-trigger"
-                ref={sortTrigger}
-                aria-label={`경로 정렬: ${priority === 'fast' ? '빠른 순' : '덜 붐비는 순'}`}
-                aria-haspopup="menu"
-                aria-expanded={choosingSort}
-                aria-controls={choosingSort ? sortMenuId : undefined}
-                onClick={() => setChoosingSort((open) => !open)}
-                onKeyDown={(event) => {
-                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                    event.preventDefault()
-                    setChoosingSort(true)
-                  }
-                }}
-              >
-                {priority === 'fast' ? '빠른 순' : '덜 붐비는 순'}
-                <ChevronDown size={14} aria-hidden="true" />
-              </button>
-              {choosingSort && (
-                <div
-                  className="results-sort-menu"
-                  id={sortMenuId}
-                  role="menu"
-                  aria-label="경로 정렬 기준"
-                  onKeyDown={(event) => {
-                    const items = Array.from(
-                      event.currentTarget.querySelectorAll<HTMLButtonElement>('button'),
-                    )
-                    const index = items.indexOf(document.activeElement as HTMLButtonElement)
-                    const next =
-                      event.key === 'Home'
-                        ? 0
-                        : event.key === 'End'
-                          ? items.length - 1
-                          : event.key === 'ArrowDown'
-                            ? (index + 1) % items.length
-                            : event.key === 'ArrowUp'
-                              ? (index + items.length - 1) % items.length
-                              : -1
-                    if (next >= 0) {
-                      event.preventDefault()
-                      items[next].focus()
-                    }
-                  }}
-                >
-                  {(['fast', 'calm'] as const).map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={priority === value}
-                      onClick={() => {
-                        setPriority(value)
-                        setChoosingSort(false)
-                        sortTrigger.current?.focus()
-                      }}
-                    >
-                      {value === 'fast' ? '빠른 순' : '덜 붐비는 순'}
-                      {priority === value && <Check size={18} aria-hidden="true" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {status === 'loading' ? (
@@ -292,26 +261,62 @@ export default function ResultsPage({
         ) : (
           <>
             {!liveApi && <p className="results-sample">시안 · 예시 데이터</p>}
-            <div className="route-list">
-              {routeGroups.map(({ representative: route, variants }) => {
-                const inlineBusOptionCount = busOptionCount(route)
-                const legacyBusOptionCount = busRouteOptions(variants).length
-                const displayedBusOptionCount = inlineBusOptionCount || legacyBusOptionCount
-                return (
-                  <RouteCard
-                    key={route.id}
-                    route={route}
-                    busOptionCount={
-                      displayedBusOptionCount > 1 ? displayedBusOptionCount : undefined
-                    }
-                    onDetail={() => {
-                      setSelectedId(route.id)
-                      go('detail')
-                    }}
-                  />
-                )
-              })}
-            </div>
+            {featured.length > 0 && (
+              <section className="route-section" aria-labelledby="recommended-routes-heading">
+                <div className="route-section-heading">
+                  <h2 id="recommended-routes-heading">추천 경로</h2>
+                </div>
+                <div className="route-list">
+                  {featured.map(({ route, recommendations }) => (
+                    <RouteCard
+                      key={route.id}
+                      route={route}
+                      recommendations={recommendations}
+                      onDetail={() => {
+                        setSelectedId(route.id)
+                        go('detail')
+                      }}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+            {remainingGroups.length > 0 && (
+              <section className="route-section" aria-labelledby="other-routes-heading">
+                <div className="route-section-heading route-section-heading-with-sort">
+                  <h2 id="other-routes-heading">다른 경로</h2>
+                  <div className="route-sort-segmented" role="group" aria-label="다른 경로 정렬">
+                    <button
+                      type="button"
+                      aria-pressed={sortPriority === 'fast'}
+                      onClick={() => setLocalPriority('fast')}
+                    >
+                      빠른 순
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={sortPriority === 'calm'}
+                      disabled={!canSortByCongestion}
+                      onClick={() => setLocalPriority('calm')}
+                    >
+                      덜 붐비는 순
+                    </button>
+                  </div>
+                </div>
+                <div className="route-list">
+                  {remainingGroups.map(({ representative: route }) => (
+                    <RouteCard
+                      key={route.id}
+                      route={route}
+                      onDetail={() => {
+                        setSelectedId(route.id)
+                        go('detail')
+                      }}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
             {!visible.length && (
               <div className="empty">
                 <h3>해당 수단으로는 경로가 없어요</h3>

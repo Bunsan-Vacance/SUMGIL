@@ -1121,10 +1121,6 @@ small {
   box-shadow: 0 2px 7px #2b3c5110;
   color: #46567d;
 }
-.calm-text,
-.fast-text {
-  color: var(--primary-dark);
-}
 .workspace-results .app-shell {
   height: min(900px, calc(100dvh - 40px));
 }
@@ -1135,6 +1131,9 @@ small {
 .results-screen {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
   height: 100%;
   overflow: hidden;
   background: white;
@@ -1204,7 +1203,7 @@ small {
 }
 .results-sort-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px;
   padding: 3px 14px;
@@ -1225,55 +1224,6 @@ small {
 .results-departure b {
   font-size: inherit;
   font-weight: 650;
-}
-.results-sort-control {
-  position: relative;
-  justify-self: end;
-}
-.results-sort-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 44px;
-  padding: 0 6px;
-  color: #586671;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.results-sort-trigger[aria-expanded='true'] {
-  color: var(--primary-dark);
-}
-.results-sort-menu {
-  position: absolute;
-  z-index: 20;
-  top: 100%;
-  right: 0;
-  width: 176px;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: white;
-  box-shadow: 0 5px 18px #233c3326;
-}
-.results-sort-menu button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 48px;
-  padding: 0 12px;
-  border-radius: 6px;
-  text-align: left;
-  font-size: 14px;
-}
-.results-sort-menu button[aria-checked='true'] {
-  color: var(--primary-dark);
-  font-weight: 650;
-}
-.results-sort-menu button:hover,
-.results-sort-menu button:focus-visible {
-  background: var(--primary-soft);
 }
 .results-filter {
   display: inline-flex;
@@ -1297,6 +1247,54 @@ small {
   flex-direction: column;
   gap: 0;
 }
+.route-section {
+  width: 100%;
+}
+.route-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 16px 9px;
+}
+.route-section-heading h2 {
+  margin: 0;
+  color: #263944;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.route-section-heading-with-sort {
+  align-items: end;
+  padding-bottom: 10px;
+}
+.route-sort-segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  min-width: 178px;
+  padding: 3px;
+  border: 1px solid #dce4eb;
+  border-radius: 10px;
+  background: #f4f7fa;
+}
+.route-sort-segmented button {
+  min-height: 34px;
+  padding: 0 9px;
+  border-radius: 7px;
+  color: #52636f;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.route-sort-segmented button[aria-pressed='true'] {
+  color: #244e86;
+  background: white;
+  box-shadow: 0 1px 4px #263b4b18;
+}
+.route-sort-segmented button:disabled {
+  cursor: not-allowed;
+  color: #a3afb8;
+}
 .route-card {
   display: block;
   width: 100%;
@@ -1307,7 +1305,7 @@ small {
   border-radius: 0;
   box-shadow: none;
 }
-.route-card + .route-card {
+.route-card:not(.route-card-featured) + .route-card:not(.route-card-featured) {
   border-top: 8px solid #f1f4f3;
 }
 .route-card:hover {
@@ -1315,6 +1313,57 @@ small {
 }
 .route-card:focus-visible {
   outline-offset: -3px;
+}
+.route-card-featured {
+  width: calc(100% - 28px);
+  margin: 0 14px 10px;
+  border: 1px solid #6fa7e7;
+  border-radius: 14px;
+  background: #f5f9ff;
+}
+.route-card-featured-calm {
+  border-color: #9f76d2;
+  background: #fbf8ff;
+}
+.route-card-featured-both {
+  border-color: #6fa7e7;
+  background: linear-gradient(90deg, #f5f9ff 0%, #f5f9ff 50%, #fbf8ff 50%, #fbf8ff 100%);
+  box-shadow: inset 0 0 0 1px #9f76d2;
+}
+.route-card-heading {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+.route-recommendation-badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.route-recommendation-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+.route-recommendation-badge.fast {
+  border-color: #6fa7e7;
+  color: #205d9f;
+  background: #e8f2ff;
+}
+.route-recommendation-badge.calm {
+  border-color: #9f76d2;
+  color: #6b419f;
+  background: #f1e9ff;
 }
 .route-card-topline {
   display: flex;
@@ -1421,28 +1470,6 @@ small {
 .route-time small {
   font-size: 12px;
   color: #5f7180;
-}
-.route-facts {
-  display: block;
-  margin-top: 5px;
-  font-size: 12px;
-  color: #5f7180;
-  line-height: 1.5;
-}
-.route-comfort {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  margin-top: 7px;
-  color: var(--primary-dark);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.route-comfort strong {
-  font-weight: 750;
-}
-.route-comfort small {
-  color: #687984;
 }
 .mode-strip {
   display: flex;
@@ -1745,10 +1772,6 @@ small {
   color: #4f5d69;
   font-size: 14px;
 }
-.detail-title > b {
-  margin-left: auto;
-  font-size: 14px;
-}
 .detail-source {
   display: block;
   margin: -6px 0 10px;
@@ -1779,56 +1802,60 @@ small {
   color: #4f5d69;
 }
 .bike-prediction-card {
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--control-radius);
-  background: var(--surface-soft);
+  margin-top: 16px;
+  padding: 12px 0;
 }
-.bike-prediction-card header {
+.bike-prediction-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.bike-prediction-copy {
+  min-width: 0;
+}
+.bike-prediction-heading {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
 }
 .bike-prediction-card h3 {
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.35;
 }
-.bike-prediction-card header small,
-.bike-prediction-card header > span,
-.bike-prediction-result small {
+.bike-prediction-source {
   color: var(--muted);
   font-size: 11px;
 }
-.bike-prediction-card header small {
-  display: block;
-  margin-top: 4px;
-}
-.bike-prediction-card header > span {
-  padding: 3px 6px;
-  border-radius: 999px;
-  background: white;
-}
 .bike-prediction-arrival,
-.bike-prediction-state,
-.bike-prediction-result p {
-  margin-top: 10px;
+.bike-prediction-state {
+  margin-top: 5px;
   color: #43515e;
   font-size: 12px;
   line-height: 1.5;
 }
+.bike-prediction-arrival {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
 .bike-prediction-state .secondary {
   margin-top: 10px;
 }
+.bike-prediction-result {
+  min-width: 0;
+  justify-self: end;
+  text-align: right;
+}
 .bike-prediction-result strong {
   display: block;
-  margin-top: 12px;
+  margin: 0;
   color: var(--primary-dark);
-  font-size: 24px;
-}
-.bike-prediction-result small {
-  display: block;
-  margin-top: 7px;
+  font-size: 19px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 .bus-options {
   margin-top: 18px;

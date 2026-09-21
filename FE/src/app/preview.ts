@@ -28,12 +28,14 @@ export function isCongestionPreview(search: string, isDev = import.meta.env.DEV)
 
 export function previewTripFor(search: string, isDev = import.meta.env.DEV): TripState {
   if (!isCongestionPreview(search, isDev)) return previewTrip
+  const departedAt = new Date().toISOString()
+  const previewRoutes = routes.map((route) => ({ ...route, departedAt }))
   return {
     ...previewTrip,
     origin: places[0],
     destination: places[1],
-    candidates: routes,
-    selected: routes[0],
+    candidates: previewRoutes,
+    selected: previewRoutes[0],
     status: 'success',
   }
 }
