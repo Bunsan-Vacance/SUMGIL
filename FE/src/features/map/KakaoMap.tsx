@@ -8,7 +8,7 @@ import { isCongestionPreview } from '../../app/preview'
 import type { Place, Route } from '../route/types'
 import {
   SEGMENT_CONGESTION_LEVELS,
-  segmentCongestionGradeForLevel,
+  segmentCongestionGradeForLeg,
   segmentCongestionPresentation,
 } from '../route/segmentCongestion'
 import { useKakaoMap } from './useKakaoMap'
@@ -89,7 +89,7 @@ function CongestionPreviewMap({ route }: { route: Route }) {
         <path className="congestion-preview-road secondary" d="M90 -20 300 540 M280 -20 80 540" />
         {entries.map(({ leg, coordinates }, index) => {
           const points = coordinates.map(point).join(' ')
-          const grade = segmentCongestionGradeForLevel(leg.segmentCongestionLevel)
+          const grade = segmentCongestionGradeForLeg(leg)
           const congestion = segmentCongestionPresentation(grade)
           const color = congestion?.color || '#708078'
           return (
@@ -344,7 +344,7 @@ export default function KakaoMap({
           (leg.mode === 'subway' || leg.mode === 'bus') &&
           !leg.transfer &&
           !leg.transitionType &&
-          leg.segmentCongestionLevel !== undefined,
+          segmentCongestionGradeForLeg(leg) !== undefined,
       ) && (
         <div className="map-congestion-legend" role="group" aria-label="구간 혼잡도 범례">
           {SEGMENT_CONGESTION_LEVELS.map((level) => (

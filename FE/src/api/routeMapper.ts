@@ -10,6 +10,7 @@ import type {
   RouteEndpoint,
   RouteGeometry,
   RouteSource,
+  SegmentCongestionGrade,
   TransitionType,
 } from '../features/route/types'
 
@@ -154,6 +155,14 @@ function optionalCongestionLevel(value: unknown) {
   return value as number
 }
 
+function optionalCongestionGrade(value: unknown): SegmentCongestionGrade | undefined {
+  if (value === undefined || value === null) return undefined
+  if (value !== 'RELAXED' && value !== 'NORMAL' && value !== 'CONGESTED' && value !== 'SATURATED') {
+    throw new RepositoryError('invalid-response', '구간 혼잡도 등급 응답이 올바르지 않아요.')
+  }
+  return value
+}
+
 function mapTransitionType(value: unknown): TransitionType | undefined {
   if (value === undefined || value === null) return undefined
   if (
@@ -245,8 +254,11 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
     const routeId = text(rawLeg.routeId)
     const busRouteOptions = mapBusRouteOptions(rawLeg.routeOptions, rawLeg.mode)
     const rawCongestionLevel = optionalCongestionLevel(rawLeg.congestionLevel)
+    const rawCongestionGrade = optionalCongestionGrade(rawLeg.congestionGrade)
     const segmentCongestionLevel =
       mappedMode.mode === 'subway' || mappedMode.mode === 'bus' ? rawCongestionLevel : undefined
+    const segmentCongestionGrade =
+      mappedMode.mode === 'subway' || mappedMode.mode === 'bus' ? rawCongestionGrade : undefined
     const transitionType = mapTransitionType(rawLeg.transitionType)
     if (transitionType && rawLeg.mode !== 'TRANSFER') {
       throw new RepositoryError(
@@ -296,6 +308,7 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
       ...(routeId ? { routeId } : {}),
       ...(busRouteOptions !== undefined ? { busRouteOptions } : {}),
       ...(segmentCongestionLevel !== undefined ? { segmentCongestionLevel } : {}),
+      ...(segmentCongestionGrade !== undefined ? { segmentCongestionGrade } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
     }

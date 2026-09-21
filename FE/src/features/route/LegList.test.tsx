@@ -50,6 +50,29 @@ describe('구간 이동 안내', () => {
     expect(screen.queryByText(/구간 예상 혼잡도/)).toBeNull()
   })
 
+  it('구간 혼잡도 등급만 있으면 등급 라벨을 표시한다', () => {
+    const route: Route = {
+      id: 'route-with-grade',
+      label: '빠른 경로',
+      minutes: 4,
+      transfers: 0,
+      modes: ['bus'],
+      legs: [
+        {
+          mode: 'bus',
+          title: '정류장 A → 정류장 B',
+          note: '버스',
+          minutes: 4,
+          segmentCongestionGrade: 'SATURATED',
+        },
+      ],
+    }
+
+    render(<LegList route={route} />)
+
+    expect(screen.getByText('버스 · 거리 준비중입니다 · 구간 예상 혼잡도 포화')).toBeTruthy()
+  })
+
   it('원본 구간 인덱스의 현재 단계에 aria-current와 텍스트를 표시한다', () => {
     const route: Route = {
       id: 'route',
@@ -87,6 +110,29 @@ describe('구간 이동 안내', () => {
         routeId: 'BUS',
         minutes: 4,
         busRouteOptions: [{ routeId: '143' }],
+      },
+    ]
+
+    expect(compactLegs(legs)).toHaveLength(2)
+  })
+
+  it('등급이 있는 연속 버스 구간은 합치지 않는다', () => {
+    const legs = [
+      {
+        mode: 'bus' as const,
+        title: '정류장 A → 정류장 B',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 3,
+        segmentCongestionGrade: 'NORMAL' as const,
+      },
+      {
+        mode: 'bus' as const,
+        title: '정류장 B → 정류장 C',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 4,
+        segmentCongestionGrade: 'CONGESTED' as const,
       },
     ]
 

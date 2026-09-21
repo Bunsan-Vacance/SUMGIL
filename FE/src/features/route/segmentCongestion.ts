@@ -26,3 +26,10 @@ export function segmentCongestionGradeForLevel(level?: number): SegmentCongestio
   if (level < 100) return 'CONGESTED'
   return 'SATURATED'
 }
+
+export function segmentCongestionGradeForLeg(leg: {
+  segmentCongestionGrade?: SegmentCongestionGrade | null
+  segmentCongestionLevel?: number
+}) {
+  return leg.segmentCongestionGrade ?? segmentCongestionGradeForLevel(leg.segmentCongestionLevel)
+}
