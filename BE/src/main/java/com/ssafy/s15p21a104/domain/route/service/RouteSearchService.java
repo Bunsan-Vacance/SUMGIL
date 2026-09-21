@@ -154,8 +154,10 @@ public class RouteSearchService {
             throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
         // 214·216: 속도 3(시간 탐색) + 혼잡 3(혼잡 가중 탐색). modes 필터는 라벨 전에 건다.
+        // 217: RAPTOR 입력이 있으면 노선 스캔으로, 없으면 레거시로(어댑터가 계약 보존).
         SixResult assembled = sixRoutes(
-                candidateFinder(), slotGraph, originStationId, destStationId, modes,
+                candidateFinder(raptorInputFor(departureSlot.dowType(), departureSlot.timeSlot(), null)),
+                slotGraph, originStationId, destStationId, modes,
                 effectiveDepartureTime);
         // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
         // 출발시각을 넘겨 live window일 때만 BUS 실시간 등급을 prefetch한다(297).
@@ -317,13 +319,27 @@ public class RouteSearchService {
 
     /** 탐색→매핑 조립기. 레지스트리 값을 주입해 만든다. */
     private RouteCandidateFinder candidateFinder() {
+        return candidateFinder(null);
+    }
+
+    /** RAPTOR 입력까지 주입하는 판(217 ③). 입력이 null이면 레거시 엔진만. */
+    private RouteCandidateFinder candidateFinder(RouteCandidateFinder.RaptorInput raptorInput) {
         return new RouteCandidateFinder(
                 transferRule,
                 graphRegistry.transferTimes(),
                 graphRegistry.rentalIds(),
                 graphRegistry.stationInfos(),
                 graphRegistry::bikeStock,
-                graphRegistry.busRouteIndex());
+                graphRegistry.busRouteIndex(),
+                raptorInput);
+    }
+
+    /** 슬롯의 RAPTOR 입력. 슬롯 노선이 없으면 null(레거시 폴백). */
+    private RouteCandidateFinder.RaptorInput raptorInputFor(int dowType, int timeSlot,
+                                                            java.util.List<Edge> accessEdges) {
+        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet routeSet =
+                graphRegistry.raptorRouteSetFor(dowType, timeSlot);
+        return routeSet == null ? null : new RouteCandidateFinder.RaptorInput(routeSet, accessEdges);
     }
 
     /** 쾌적 순위기. 혼잡도 조회 함수를 주입해 만든다. */
@@ -506,7 +522,8 @@ public class RouteSearchService {
                 graphRegistry.rentalIds(),
                 stationInfos,
                 graphRegistry::bikeStock,
-                graphRegistry.busRouteIndex());
+                graphRegistry.busRouteIndex(),
+                raptorInputFor(coordSlot.dowType(), coordSlot.timeSlot(), accessEdges));
         // 214·216: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
         LocalDateTime coordDeparture =
                 request.departureTime() != null ? request.departureTime() : LocalDateTime.now();
