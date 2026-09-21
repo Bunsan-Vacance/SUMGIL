@@ -15,7 +15,11 @@ from DATA_ENGINE.monitor.check_partition_counts import (
     partition_path,
 )
 from DATA_ENGINE.monitor.check_partition_counts import main as partition_main
-from DATA_ENGINE.monitor.operating_window import OperatingWindow, parse_hhmm
+from DATA_ENGINE.monitor.operating_window import (
+    OperatingWindow,
+    parse_hhmm,
+    subway_window_from_env,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 WINDOW = OperatingWindow.from_text("05:30", "01:00")
@@ -230,3 +234,43 @@ def test_subway_freshness_rejects_non_positive_threshold(tmp_path):
 def test_freshness_main_no_subway_flag(tmp_path, capsys):
     freshness_main(["--ai-root", str(tmp_path), "--no-subway"])
     assert " subway latest" not in capsys.readouterr().out
+
+
+# ---- 운영 시간 기본값·환경변수 우선순위 ----
+
+
+@pytest.fixture
+def clean_window_env(monkeypatch):
+    for key in ("SUBWAY_OPERATING_START", "SUBWAY_OPERATING_END", "COLLECT_SUBWAY_WINDOW"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_default_window_matches_be_collector(clean_window_env):
+    window = subway_window_from_env()
+
+    assert (window.start_min, window.end_min) == (7 * 60 + 30, 13 * 60)
+    assert window.contains(at(12, 59)) and not window.contains(at(13, 0))
+    assert not window.contains(at(14))  # 13시 이후 수집 중단은 정상
+
+
+def test_shared_be_window_env_is_used(clean_window_env, monkeypatch):
+    monkeypatch.setenv("COLLECT_SUBWAY_WINDOW", "08:00-20:00")
+
+    window = subway_window_from_env()
+
+    assert (window.start_min, window.end_min) == (8 * 60, 20 * 60)
+
+
+def test_explicit_start_end_override_shared_window(clean_window_env, monkeypatch):
+    monkeypatch.setenv("COLLECT_SUBWAY_WINDOW", "08:00-20:00")
+    monkeypatch.setenv("SUBWAY_OPERATING_END", "18:00")
+
+    window = subway_window_from_env()
+
+    assert (window.start_min, window.end_min) == (8 * 60, 18 * 60)
+
+
+def test_invalid_shared_window_raises(clean_window_env, monkeypatch):
+    monkeypatch.setenv("COLLECT_SUBWAY_WINDOW", "garbage")
+    with pytest.raises(ValueError):
+        subway_window_from_env()

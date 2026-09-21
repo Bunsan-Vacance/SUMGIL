@@ -28,13 +28,14 @@ from DATA_ENGINE.monitor.operating_window import (
     subway_window_from_env,
 )
 from DATA_ENGINE.stream.consumer_status import read_status
-from DATA_ENGINE.stream.kafka_consumer import DEFAULT_TOPICS, config_from_env
+from DATA_ENGINE.stream.kafka_consumer import config_from_env
 
 AI_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_HISTORY_PATH = AI_ROOT / "logs" / "kafka_lag_history.json"
 HISTORY_PATH_ENV = "KAFKA_LAG_HISTORY_PATH"
 DEFAULT_WARN_MIN = 5.0
 DEFAULT_FAIL_MIN = 15.0
+DEFAULT_PARSE_FAILURE_WINDOW_MIN = 15.0
 SUBWAY_TOPIC = "subway.arrival"
 # 샘플 간격이 성기더라도 창(window)의 이 비율 이상을 덮어야 판정한다.
 COVERAGE_RATIO = 0.8
@@ -195,6 +196,67 @@ def evaluate(
     return results
 
 
+def evaluate_consumer_status(
+    status: dict | None,
+    *,
+    now: float,
+    parse_failure_window_min: float = DEFAULT_PARSE_FAILURE_WINDOW_MIN,
+) -> list[LagResult]:
+    """Fail on consumer-reported data loss that lag alone cannot show.
+
+    A skipped (unparseable) message still advances the committed offset, so lag stays 0.
+    Only failures newer than the window are reported, otherwise one bad message would
+    alert until the consumer restarts. ``retry_pending`` stays until a save succeeds.
+    """
+    results: list[LagResult] = []
+    since = now - parse_failure_window_min * 60
+    for topic, info in sorted(((status or {}).get("topics") or {}).items()):
+        recent = []
+        for failure in info.get("recent_parse_failures") or []:
+            try:
+                stamp = datetime.fromisoformat(failure["at"]).timestamp()
+            except (KeyError, TypeError, ValueError):
+                continue
+            if stamp >= since:
+                recent.append(failure)
+        if recent:
+            last = recent[-1]
+            results.append(
+                LagResult(
+                    topic=topic,
+                    partition=-1,
+                    ok=False,
+                    level="fail",
+                    lag=-1,
+                    message=(
+                        f"FAIL consumer parse_failed topic={topic} "
+                        f"recent={len(recent)}/{parse_failure_window_min:g}m "
+                        f"last_partition={last.get('partition')} last_offset={last.get('offset')} "
+                        f"at={last.get('at')} (메시지를 건너뛰어 데이터 누락, "
+                        f"total={info.get('parse_failed', 0)})"
+                    ),
+                )
+            )
+        if info.get("retry_pending"):
+            results.append(
+                LagResult(
+                    topic=topic,
+                    partition=-1,
+                    ok=False,
+                    level="fail",
+                    lag=-1,
+                    message=(
+                        f"FAIL consumer save_failed topic={topic} retry_pending=true "
+                        f"last_error_at={info.get('last_error_at')} "
+                        f"error={info.get('last_error')} "
+                        f"last_saved_at={info.get('last_saved_at')} "
+                        "(commit 안 함, 재기동 후 재처리 대기)"
+                    ),
+                )
+            )
+    return results
+
+
 def run_check(
     fetch: Callable[[], tuple[Offsets, Offsets]],
     history_path: Path,
@@ -210,10 +272,14 @@ def run_check(
     if warn_min <= 0 or fail_min < warn_min:
         raise ValueError("require 0 < warn_min <= fail_min")
 
+    status = read_status(status_path)
+    status_results = evaluate_consumer_status(status, now=now)
+
     try:
         end, committed = fetch()
     except Exception as exc:  # noqa: BLE001 - 브로커 접속 불가도 운영자가 알아야 하는 실패다.
         return [
+            *status_results,
             LagResult(
                 topic=",".join(topics),
                 partition=-1,
@@ -221,7 +287,7 @@ def run_check(
                 level="error",
                 lag=-1,
                 message=f"FAIL consumer lag unavailable: error={type(exc).__name__}: {exc}",
-            )
+            ),
         ]
 
     latest = [
@@ -231,7 +297,6 @@ def run_check(
     keep_after = now - (fail_min + 5) * 60
     history = [sample for sample in load_history(history_path) if sample.ts >= keep_after]
 
-    status = read_status(status_path)
     last_saved = {
         topic: info.get("last_saved_at") for topic, info in (status or {}).get("topics", {}).items()
     }
@@ -249,6 +314,7 @@ def run_check(
     except OSError:
         pass  # 이력 저장 실패가 이번 판정을 막지 않는다.
 
+    results.extend(status_results)
     missing = sorted(set(topics) - {sample.topic for sample in latest})
     for topic in missing:
         results.append(
@@ -280,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         parse_hhmm(args.subway_window_end) if args.subway_window_end else default_window.end_min,
     )
-    config = config_from_env(topics=args.topics or list(DEFAULT_TOPICS))
+    config = config_from_env(topics=args.topics or None)
     history_path = args.history_path or Path(
         os.environ.get(HISTORY_PATH_ENV) or DEFAULT_HISTORY_PATH
     )

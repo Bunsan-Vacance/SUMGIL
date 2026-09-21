@@ -120,3 +120,20 @@ def test_read_status_missing_or_corrupt_returns_none(tmp_path):
     assert read_status(tmp_path / "bad.json") is None
     (tmp_path / "ok.json").write_text(json.dumps({"topics": {}}))
     assert read_status(tmp_path / "ok.json") == {"topics": {}}
+
+
+def test_previous_failure_survives_a_consumer_restart(tmp_path):
+    first = make_status(tmp_path)
+    first.record_parse_failure("bike.stock", 0, 7)
+    first.record_save_failure(["bike.stock"], OSError("disk full"))
+    first.write()
+
+    restarted = make_status(tmp_path)  # 저장 실패로 죽은 뒤 재기동된 프로세스
+
+    topic = restarted.topics["bike.stock"]
+    assert topic.retry_pending is True and "disk full" in topic.last_error
+    assert topic.parse_failed == 1
+    process_batch(
+        [Msg(good(), offset=1)], commit=lambda: None, status=restarted, write=lambda e: []
+    )
+    assert restarted.topics["bike.stock"].retry_pending is False

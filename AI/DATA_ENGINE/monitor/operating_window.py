@@ -7,10 +7,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 MINUTES_PER_DAY = 24 * 60
-DEFAULT_SUBWAY_WINDOW_START = "05:30"
-DEFAULT_SUBWAY_WINDOW_END = "01:00"
+# BE 수집기 기본값(application-collect.yml의 collect.subway.window)과 같다.
+DEFAULT_SUBWAY_WINDOW_START = "07:30"
+DEFAULT_SUBWAY_WINDOW_END = "13:00"
 SUBWAY_WINDOW_START_ENV = "SUBWAY_OPERATING_START"
 SUBWAY_WINDOW_END_ENV = "SUBWAY_OPERATING_END"
+# BE 수집기와 공유하는 환경변수("HH:MM-HH:MM"). 개별 START/END가 없을 때 쓴다.
+SHARED_SUBWAY_WINDOW_ENV = "COLLECT_SUBWAY_WINDOW"
 
 
 def parse_hhmm(value: str) -> int:
@@ -66,7 +69,14 @@ class OperatingWindow:
 
 
 def subway_window_from_env() -> OperatingWindow:
+    """Resolve the window: SUBWAY_OPERATING_START/END > COLLECT_SUBWAY_WINDOW > BE default."""
+    start = os.environ.get(SUBWAY_WINDOW_START_ENV)
+    end = os.environ.get(SUBWAY_WINDOW_END_ENV)
+    shared = os.environ.get(SHARED_SUBWAY_WINDOW_ENV, "").strip()
+    if shared:
+        shared_start, _, shared_end = shared.partition("-")
+        start = start or shared_start
+        end = end or shared_end
     return OperatingWindow.from_text(
-        os.environ.get(SUBWAY_WINDOW_START_ENV, DEFAULT_SUBWAY_WINDOW_START),
-        os.environ.get(SUBWAY_WINDOW_END_ENV, DEFAULT_SUBWAY_WINDOW_END),
+        start or DEFAULT_SUBWAY_WINDOW_START, end or DEFAULT_SUBWAY_WINDOW_END
     )

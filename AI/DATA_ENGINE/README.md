@@ -251,15 +251,21 @@ python -m DATA_ENGINE.monitor.check_consumer_lag
 지하철 producer는 운영 시간에만 돈다. 그 밖에는 신규 이벤트가 없는 것이 정상이라 지하철의
 freshness·수집량 검사를 건너뛰고(`SKIP`), 알림도 보내지 않는다.
 
+기본값은 BE 수집기(`application-collect.yml`의 `collect.subway.window`)와 같은 `07:30~13:00`(KST)이다.
+아래 순서로 정해지며, BE와 같은 `COLLECT_SUBWAY_WINDOW`를 서버 `.env`에 두면 따로 맞출 필요가 없다.
+
 ```text
-SUBWAY_OPERATING_START=05:30   # KST, HH:MM
-SUBWAY_OPERATING_END=01:00     # 시작보다 이르면 자정을 넘는 구간, 24:00 허용
+1. SUBWAY_OPERATING_START / SUBWAY_OPERATING_END   # HH:MM, 개별 지정(시작·종료 각각 우선)
+2. COLLECT_SUBWAY_WINDOW=07:30-13:00               # BE 수집기와 공유하는 "HH:MM-HH:MM"
+3. 기본값 07:30 ~ 13:00
 ```
+
+종료가 시작보다 이르면 자정을 넘는 구간으로 보고, `24:00`도 허용한다.
 
 - 수집량은 시간 전체가 운영 시간에 들어가는 시간대만 검사한다(부분만 걸친 시간대는 skip).
 - freshness는 운영 시간 중에만 판정하며, 개장 직후에는 전날 마지막 수집분이 남아 있으므로
   개장 시각부터 나이를 잰다(개장 후 기준 시간이 지나야 stale이 된다).
-- 기본값은 추정치다. BE producer의 실제 운영 시간에 맞춰 `.env`에서 조정한다.
+- BE에서 `COLLECT_SUBWAY_WINDOW`를 바꾸면 AI 서버에도 같은 값을 반영해야 한다. 어긋나면 운영 시간 밖을 장애로 오탐하거나 운영 시간 중 중단을 놓친다.
 
 모니터는 과거 직접 수집기의 `latest.parquet`과 평탄화 snapshot을 집계하지 않는다. 파일
 mtime이 새로워도 내부 데이터 시각이 오래됐으면 stale로 판정하며, 같은 디렉터리에 과거
@@ -318,7 +324,7 @@ df -h
 ### Kafka consumer 처리 상태와 lag 모니터링
 
 consumer(`kafka_consumer.py`)는 topic별 처리 상태를 `AI/logs/kafka_consumer_status.json`에 원자적으로
-기록한다(`KAFKA_CONSUMER_STATUS_PATH`로 변경). 프로세스 시작 이후 누적값이다.
+기록한다(`KAFKA_CONSUMER_STATUS_PATH`로 변경). 재기동해도 이전 파일의 값을 이어받아 누적하므로, 저장 실패로 종료된 직후에도 실패 기록이 사라지지 않는다.
 
 | 항목 | 의미 |
 | --- | --- |
@@ -335,7 +341,15 @@ consumer(`kafka_consumer.py`)는 topic별 처리 상태를 `AI/logs/kafka_consum
 
 `check_consumer_lag`는 `ai-spark` group의 topic·partition별 `lag = end offset − committed offset`을
 구하고, 실행 간 이력(`AI/logs/kafka_lag_history.json`, `KAFKA_LAG_HISTORY_PATH`)으로 정체를 판정한다.
-순간 lag은 정상일 수 있으므로 단일 측정값으로는 실패시키지 않는다.
+순간 lag은 정상일 수 있으므로 단일 측정값으로는 실패시키지 않는다. topic은 consumer와 같은
+환경변수(`KAFKA_TOPIC_BIKE_STOCK`, `KAFKA_TOPIC_WEATHER_NOWCAST`, `KAFKA_TOPIC_SUBWAY_ARRIVAL`)에서 읽는다.
+
+lag이 0이어도 consumer가 데이터를 잃었을 수 있어서 상태 파일도 함께 검사한다.
+
+| 상태 파일 조건 | 결과 |
+| --- | --- |
+| 최근 15분 안에 `recent_parse_failures`가 있다 | `FAIL consumer parse_failed` — 건너뛴 메시지의 partition·offset 표시(오래된 실패는 계속 알리지 않음) |
+| `retry_pending=true` | `FAIL consumer save_failed` — 다음 저장이 성공해 해제될 때까지 유지 |
 
 | 상태 | 조건 | 종료 코드 |
 | --- | --- | --- |

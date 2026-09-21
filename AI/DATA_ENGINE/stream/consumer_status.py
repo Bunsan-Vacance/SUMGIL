@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -44,13 +44,26 @@ class TopicStatus:
 
 
 class ConsumerStatus:
-    """Accumulates counters since consumer start and persists them atomically."""
+    """Accumulates per-topic counters and persists them atomically.
+
+    Counters carry over from the previous file so a crash-restart (the save-failure
+    path) does not erase the failure a monitor has not seen yet.
+    """
 
     def __init__(self, group_id: str, path: Path | None = None) -> None:
         self.group_id = group_id
         self.path = path or status_path_from_env()
         self.started_at = _now()
-        self.topics: dict[str, TopicStatus] = {}
+        self.topics: dict[str, TopicStatus] = self._load_previous()
+
+    def _load_previous(self) -> dict[str, TopicStatus]:
+        previous = read_status(self.path) or {}
+        known = {item.name for item in fields(TopicStatus)}
+        topics: dict[str, TopicStatus] = {}
+        for topic, values in (previous.get("topics") or {}).items():
+            if isinstance(values, dict):
+                topics[topic] = TopicStatus(**{k: v for k, v in values.items() if k in known})
+        return topics
 
     def _topic(self, topic: str) -> TopicStatus:
         return self.topics.setdefault(topic, TopicStatus())
