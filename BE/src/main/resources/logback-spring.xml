@@ -81,7 +81,7 @@
         <appender name="SPLUNK_HEC" class="com.splunk.logging.HttpEventCollectorLogbackAppender">
             <url>${SPLUNK_HEC_URL:-http://localhost:8088}</url>
             <token>${SPLUNK_HEC_TOKEN:-}</token>
-            <index>sumgil</index>
+            <index>sumgli</index>
             <disableCertificateValidation>true</disableCertificateValidation>
             <!-- HttpEventCollectorLogbackAppender는 Encoder가 아니라 Layout을 요구한다.
                  LogstashEncoder(Encoder)를 그대로 쓰면 IncompatibleClassException으로 기동이 죽는다. -->

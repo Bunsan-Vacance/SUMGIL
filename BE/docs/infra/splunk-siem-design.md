@@ -14,7 +14,7 @@ BE(Spring Boot, local 프로필)
    │  HTTP POST (HEC 토큰)
    ▼
 로컬 Splunk Enterprise(Free 티어)
-   │  HEC input → index(sumgil)
+   │  HEC input → index(sumgli)
    ▼
 Splunk 검색·대시보드·(스케줄) 알림
 ```
@@ -25,7 +25,7 @@ Splunk 검색·대시보드·(스케줄) 알림
 ## 1. Splunk 쪽 준비 (사용자가 직접, 설계만이라 실행은 안 함)
 
 1. Splunk Enterprise Free 설치(로컬).
-2. Settings → Data Inputs → HTTP Event Collector에서 토큰 발급, 인덱스 `sumgil` 지정.
+2. Settings → Data Inputs → HTTP Event Collector에서 토큰 발급, 인덱스 `sumgli` 지정.
 3. Free 티어 제약: 일 500MB 인덱싱 상한, **스케줄 알림(실시간 알럿)은 Free 티어에 없음** — 로그 양이 이 데모 규모에선 문제 안 되지만, "자동 알림"을 데모하려면 수동 저장 검색(saved search)을 주기적으로 직접 돌리는 식으로 보여줘야 한다는 제약을 감안한다.
 
 ## 2. BE 쪽 추가 (Logback appender)
@@ -40,7 +40,7 @@ Splunk 검색·대시보드·(스케줄) 알림
 <appender name="SPLUNK_HEC" class="com.splunk.logging.HttpEventCollectorLogbackAppender">
     <url>${SPLUNK_HEC_URL:-http://localhost:8088}</url>
     <token>${SPLUNK_HEC_TOKEN:-}</token>
-    <index>sumgil</index>
+    <index>sumgli</index>
     <disableCertificateValidation>true</disableCertificateValidation>
     <layout class="net.logstash.logback.encoder.LogstashEncoder" />
 </appender>
