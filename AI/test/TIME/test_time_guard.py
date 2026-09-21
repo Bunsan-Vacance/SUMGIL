@@ -316,3 +316,32 @@ def test_default_tool_budgets_are_not_shared_between_instances() -> None:
     first.tool_budgets[REPLAN_ROUTE] = 1
 
     assert ToolGuard(clock=FakeClock()).budget_for(REPLAN_ROUTE) == 5
+
+
+def test_동시_호출에서_카운터가_유실되지_않는다():
+    """203 `planner.prefetch`가 후보별 replan을 ThreadPoolExecutor로 동시에 부른다.
+
+    `_counts[name] = _counts.get(name, 0) + 1`은 read-modify-write라 락이 없으면 증가분이
+    유실된다. 유실되면 예산이 실제보다 적게 세어져 **막으라고 만든 가드가 조용히 새기 때문에**
+    실패해도 티가 나지 않는다 — 그래서 여기서 직접 잰다.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    calls = 200
+    guard = ToolGuard(total_budget=calls * 2, per_tool_budget=calls * 2, max_per_second=10**9)
+    ready = threading.Event()
+
+    def hammer(_: int) -> None:
+        ready.wait()  # 스레드가 한꺼번에 출발해야 경쟁이 실제로 난다
+        guard.record("t", elapsed_ms=1.0, result_code=RESULT_OK, arg_keys=["k"])
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(hammer, i) for i in range(calls)]
+        ready.set()
+        for future in futures:
+            future.result()
+
+    assert guard.total_calls == calls
+    assert guard.stats()["t"].calls == calls
+    assert len(guard.logs()) == calls

@@ -19,6 +19,7 @@ LLM 토큰 비용 가드는 이번 범위가 아니다(모델·단가 미정, 20
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping
@@ -117,6 +118,15 @@ class ToolGuard:
         )
         self.max_per_second = max_per_second
         self._clock = clock
+        # 203 `planner.prefetch`가 후보별 replan을 ThreadPoolExecutor로 **동시에** 부른다.
+        # `_counts[name] = _counts.get(name, 0) + 1`은 read-modify-write라 락이 없으면 증가분이
+        # 유실되고, 그러면 예산이 실제보다 적게 세어져 한도를 넘겨 호출된다 — 막으라고 만든
+        # 가드가 조용히 새는 셈이다. `_stats`·`_recent`도 같은 이유로 보호한다.
+        #
+        # **`check`→`record` 사이는 여전히 원자적이지 않다.** 그렇게 만들려면 도구 실행 동안
+        # 락을 쥐고 있어야 해서 병렬 호출이 직렬화된다. 대신 동시 실행 수만큼 예산이 넘칠 수
+        # 있는데(최대 worker-1건), 카운터 자체는 정확하므로 다음 `check`가 바로 막는다.
+        self._lock = threading.RLock()
         self._counts: dict[str, int] = {}
         self._stats: dict[str, ToolStats] = {}
         self._log: list[ToolCallLog] = []
@@ -128,7 +138,8 @@ class ToolGuard:
     @property
     def total_calls(self) -> int:
         """실행된 호출 수. 막힌 호출은 세지 않는다."""
-        return sum(self._counts.values())
+        with self._lock:
+            return sum(self._counts.values())
 
     def budget_for(self, name: str) -> int:
         """도구별 한도. 도구 이름 자체가 유효한지는 검사하지 않는다 —
@@ -139,11 +150,13 @@ class ToolGuard:
     def logs(self) -> tuple[ToolCallLog, ...]:
         """호출 로그 전체. 메모리에만 있고 파일·외부 전송은 이번 범위가 아니다.
         호출자가 내부 리스트를 건드리지 못하도록 복사본을 준다."""
-        return tuple(self._log)
+        with self._lock:
+            return tuple(self._log)
 
     def stats(self) -> dict[str, ToolStats]:
         """도구별 집계 사본. 한 번도 안 불린 도구는 키가 없다."""
-        return {name: replace(stat) for name, stat in self._stats.items()}
+        with self._lock:
+            return {name: replace(stat) for name, stat in self._stats.items()}
 
     # ── 판정·기록 ──
 
@@ -154,21 +167,24 @@ class ToolGuard:
         예외로 튀거나 호출자가 중간에 빠져나갔을 때 쓰지도 않은 예산이 사라진다. 대신 `check`만
         하고 `record`를 빠뜨리면 예산이 영원히 안 깎이므로, 되도록 `run()`을 쓴다.
         """
-        if self.total_calls >= self.total_budget:
-            return ToolError.budget_exceeded(
-                f"이 세션의 도구 호출 한도 {self.total_budget}회를 모두 썼다. "
-                "더 부르지 말고 지금까지 모은 결과로 답할 것."
-            )
-        limit = self.budget_for(name)
-        if self._counts.get(name, 0) >= limit:
-            return ToolError.budget_exceeded(
-                f"'{name}' 호출 한도 {limit}회를 모두 썼다. "
-                "이 도구는 더 부를 수 없으니 이미 받은 결과로 판단할 것."
-            )
-        if self._rate_used() >= self.max_per_second:
-            return ToolError.rate_limited(
-                f"초당 호출 한도 {self.max_per_second}회를 넘었다. 잠시 뒤 다시 부를 것."
-            )
+        # 세 판정을 한 락 안에서 본다 — 조건마다 따로 읽으면 그 사이에 다른 스레드가 기록해
+        # "총량은 통과했는데 도구별은 옛 값"인 어긋난 판정이 나온다.
+        with self._lock:
+            if sum(self._counts.values()) >= self.total_budget:
+                return ToolError.budget_exceeded(
+                    f"이 세션의 도구 호출 한도 {self.total_budget}회를 모두 썼다. "
+                    "더 부르지 말고 지금까지 모은 결과로 답할 것."
+                )
+            limit = self.budget_for(name)
+            if self._counts.get(name, 0) >= limit:
+                return ToolError.budget_exceeded(
+                    f"'{name}' 호출 한도 {limit}회를 모두 썼다. "
+                    "이 도구는 더 부를 수 없으니 이미 받은 결과로 판단할 것."
+                )
+            if self._rate_used() >= self.max_per_second:
+                return ToolError.rate_limited(
+                    f"초당 호출 한도 {self.max_per_second}회를 넘었다. 잠시 뒤 다시 부를 것."
+                )
         return None
 
     def record(
@@ -197,16 +213,17 @@ class ToolGuard:
             arg_keys=tuple(str(key) for key in arg_keys),
             at=started,
         )
-        self._log.append(entry)
-        self._counts[name] = self._counts.get(name, 0) + 1
-        self._recent.append(started)
-        stat = self._stat_for(name)
-        stat.calls += 1
-        stat.total_ms += elapsed_ms
-        if result_code == RESULT_OK:
-            stat.ok += 1
-        else:
-            stat.failed += 1
+        with self._lock:
+            self._log.append(entry)
+            self._counts[name] = self._counts.get(name, 0) + 1
+            self._recent.append(started)
+            stat = self._stat_for(name)
+            stat.calls += 1
+            stat.total_ms += elapsed_ms
+            if result_code == RESULT_OK:
+                stat.ok += 1
+            else:
+                stat.failed += 1
         return entry
 
     def run(
@@ -227,17 +244,18 @@ class ToolGuard:
         keys = arg_keys_of(args)
         blocked = self.check(name)
         if blocked is not None:
-            self._log.append(
-                ToolCallLog(
-                    tool=name,
-                    elapsed_ms=0.0,
-                    result_code=blocked.error.value,
-                    arg_keys=keys,
-                    at=self._clock(),
-                    blocked=True,
+            with self._lock:
+                self._log.append(
+                    ToolCallLog(
+                        tool=name,
+                        elapsed_ms=0.0,
+                        result_code=blocked.error.value,
+                        arg_keys=keys,
+                        at=self._clock(),
+                        blocked=True,
+                    )
                 )
-            )
-            self._stat_for(name).blocked += 1
+                self._stat_for(name).blocked += 1
             return blocked
 
         started = self._clock()
