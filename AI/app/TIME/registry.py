@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-TOOL_SCHEMA_VERSION = "1.1.0"
+TOOL_SCHEMA_VERSION = "1.2.0"
 """도구 스키마 판. 필드 추가는 minor, 삭제·의미 변경은 major. 이력은 TOOL_CONTRACT.md."""
 
 # ── 도구 이름 상수 ──
