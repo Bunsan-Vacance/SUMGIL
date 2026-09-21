@@ -209,7 +209,9 @@ BE 연동: 산출 CSV는 BE(이원빈)가 `scp`로 가져가 `congestion_pred` �
 
 systemd 서비스가 `active`여도 API 오류, 저장 실패, 일부 시간대 누락이 생길 수 있으므로
 별도 모니터링 스크립트로 실제 산출물 갱신 상태를 확인한다. 정상 상태에서는 알림을 보내지
-않고, 실패 상태에서만 Discord Webhook 알림을 보낼 수 있다.
+않고, 실패 상태에서만 Discord Webhook 알림을 보낼 수 있다. 알림에는 실패한 점검의 `FAIL`/`WARN`
+줄만 담는다(정상 줄까지 넣으면 Discord 2000자 제한에 걸려 뒤쪽 실패가 잘릴 수 있다). `WARN`만 있고
+`FAIL`이 없으면 종료 코드 0이라 알림이 가지 않는다.
 
 수동 실행:
 
@@ -223,7 +225,10 @@ bash DATA_ENGINE/scripts/run_data_engine_monitor.sh
 ```bash
 python -m DATA_ENGINE.monitor.check_collection_freshness
 python -m DATA_ENGINE.monitor.check_partition_counts
+python -m DATA_ENGINE.monitor.check_consumer_lag
 ```
+
+각 스크립트는 `--no-subway`(freshness·수집량)로 지하철 검사를 건너뛸 수 있다.
 
 점검 기준:
 
@@ -233,6 +238,28 @@ python -m DATA_ENGINE.monitor.check_partition_counts
 - 따릉이 완료 시간대 파티션: `kafka_topic=bike.stock` snapshot 최소 10개/hour.
 - 날씨 완료 시간대 파티션: `kafka_topic=weather.nowcast` snapshot 최소 1개/hour.
 - 현재 진행 중인 KST 시간대는 파티션 파일 수 검사에서 제외한다.
+- 지하철 freshness: 최신 `subway.arrival` snapshot의 envelope 시각(`source_generated_at`,
+  `ingested_at`, `poll_run_at`)만 읽고 payload는 해석하지 않는다. `poll_run_at` 기준으로 10분을
+  넘기면 실패한다. 실패 메시지에는 세 시각이 모두 찍힌다.
+- 지하철 수집량: 시간 전체가 운영 시간 안인 완료 시간대에서 `kafka_topic=subway.arrival`의
+  `poll_run_at` 고유 회차가 30회/hour 미만이면 실패한다. 한 회차가 여러 파일로 나뉘어도 회차로
+  세므로 파일 수와 무관하다.
+- Kafka consumer lag: 아래 「Kafka consumer lag 모니터링」 절.
+
+### 지하철 운영 시간
+
+지하철 producer는 운영 시간에만 돈다. 그 밖에는 신규 이벤트가 없는 것이 정상이라 지하철의
+freshness·수집량 검사를 건너뛰고(`SKIP`), 알림도 보내지 않는다.
+
+```text
+SUBWAY_OPERATING_START=05:30   # KST, HH:MM
+SUBWAY_OPERATING_END=01:00     # 시작보다 이르면 자정을 넘는 구간, 24:00 허용
+```
+
+- 수집량은 시간 전체가 운영 시간에 들어가는 시간대만 검사한다(부분만 걸친 시간대는 skip).
+- freshness는 운영 시간 중에만 판정하며, 개장 직후에는 전날 마지막 수집분이 남아 있으므로
+  개장 시각부터 나이를 잰다(개장 후 기준 시간이 지나야 stale이 된다).
+- 기본값은 추정치다. BE producer의 실제 운영 시간에 맞춰 `.env`에서 조정한다.
 
 모니터는 과거 직접 수집기의 `latest.parquet`과 평탄화 snapshot을 집계하지 않는다. 파일
 mtime이 새로워도 내부 데이터 시각이 오래됐으면 stale로 판정하며, 같은 디렉터리에 과거
@@ -287,6 +314,61 @@ find data/EXTERNAL/weather/raw/nowcast -type f | tail
 
 df -h
 ```
+
+### Kafka consumer 처리 상태와 lag 모니터링
+
+consumer(`kafka_consumer.py`)는 topic별 처리 상태를 `AI/logs/kafka_consumer_status.json`에 원자적으로
+기록한다(`KAFKA_CONSUMER_STATUS_PATH`로 변경). 프로세스 시작 이후 누적값이다.
+
+| 항목 | 의미 |
+| --- | --- |
+| `last_received_at` / `last_saved_at` | 마지막 메시지 수신·Parquet 저장 시각 |
+| `committed_offsets` | partition별 마지막 commit offset(다음에 읽을 offset) |
+| `saved_events` | 저장한 이벤트 수 |
+| `parse_failed`, `recent_parse_failures` | 파싱 실패 수, 최근 20건의 partition·offset |
+| `save_failed`, `last_error`, `retry_pending` | 저장 실패 수, 마지막 원인, 재기동 후 재처리 대기 여부 |
+
+- 파싱 실패 메시지는 재시도해도 성공할 수 없으므로 건너뛰고 commit하되, 로그(ERROR)와 상태 파일에
+  `topic`·`partition`·`offset`을 남긴다. 같은 배치의 정상 메시지는 계속 저장한다.
+- 저장 실패 시에는 commit하지 않고 원인을 기록한 뒤 예외를 올려 프로세스가 종료된다. 서비스가
+  재기동되면 마지막 commit offset부터 다시 읽는다(`Restart=`가 설정돼 있어야 자동 복구된다).
+
+`check_consumer_lag`는 `ai-spark` group의 topic·partition별 `lag = end offset − committed offset`을
+구하고, 실행 간 이력(`AI/logs/kafka_lag_history.json`, `KAFKA_LAG_HISTORY_PATH`)으로 정체를 판정한다.
+순간 lag은 정상일 수 있으므로 단일 측정값으로는 실패시키지 않는다.
+
+| 상태 | 조건 | 종료 코드 |
+| --- | --- | --- |
+| 정상 | lag이 0이거나 창 안에서 줄어든다 | 0 |
+| `WARN` | lag이 5분간 0 위로 유지되고 줄지 않는다 | 0 (알림 없음) |
+| `FAIL` | 같은 상태가 15분 지속, 브로커 조회 실패, topic 없음 | 1 (알림) |
+
+- 원인 표시: end offset이 늘었는데 committed가 정지·미감소면 consumer 정체, end offset도
+  멈췄으면 "producer 중단 가능성도 함께 확인"으로 표시한다. lag이 0인데 end offset이 15분간
+  늘지 않으면 producer 측 `note`만 붙인다(실패 아님). 지하철은 운영 시간 밖이면 이 note를 붙이지 않는다.
+- **이력을 쓰므로 모니터를 15분보다 촘촘하게(권장 5분) 실행해야 한다.** 이력이 창 길이의 80%를
+  덮지 못하면 판정하지 않는다.
+- 브로커 접근에는 `kafka-python`과 `.env`의 `KAFKA_BOOTSTRAP_SERVERS`가 필요하다.
+
+### 장애 유형별 대응
+
+| 알림·증상 | 의미 | 확인·대응 |
+| --- | --- | --- |
+| `FAIL subway latest stale` / `partition low` | 운영 시간 중 지하철 수집 중단 | consumer lag 줄을 함께 본다. lag이 0이고 end offset이 정지면 BE producer, lag이 쌓이면 consumer |
+| `FAIL consumer lag ... consumer_stalled(end offset 증가...)` | consumer가 소비하지 못함 | `systemctl status data-engine-kafka-consumer`, `journalctl`, 상태 파일의 `last_error`·`retry_pending` |
+| `FAIL consumer lag ... end offset도 정지` | consumer 정지 + producer도 멈췄을 가능성 | consumer 서비스와 BE Kafka producer 둘 다 확인 |
+| `FAIL consumer lag unavailable` | 브로커 접속 실패 | `/etc/hosts`의 `kafka` ClusterIP, `KAFKA_BOOTSTRAP_SERVERS`, 브로커 상태 |
+| `Drive archive 업로드 실패` | 파티션 업로드 실패·크기/MD5 불일치·인증 오류 | 알림의 dataset·dt·hh·error 확인. manifest에 `failed`로 남고 다음 실행에서 누락 파일만 재시도. 인증 오류는 OAuth token·root folder ID 점검 |
+| `retention 삭제 보류` | 48시간을 넘겼지만 Drive 검증 실패로 로컬 파일 유지 | 사유(`archive_not_success`, `archive_size_mismatch` 등)별로 업로드를 다시 실행. 디스크 여유(`df -h`) 확인 |
+
+### 배포 후 관찰 체크리스트 (24시간)
+
+- 정상 상태에서 Discord 알림이 오지 않는다(오탐 없음).
+- 지하철 운영 시간의 시작·종료 경계에서 오탐이 없다.
+- `logs/kafka_consumer_status.json`의 `last_saved_at`이 topic별로 갱신된다.
+- `logs/kafka_lag_history.json`에 5분 간격으로 샘플이 쌓이고 lag이 0 근처로 돌아온다.
+- Drive 정기 업로드 후 manifest(`data/manifest/archive_uploads.jsonl`)에 bike·weather·subway가 모두 `success`로 기록된다.
+- `cleanup_retention`을 dry-run으로 먼저 돌려 `SKIP` 사유가 없고 삭제 후보가 Drive 검증을 통과하는지 확인한 뒤 `--yes`로 전환한다.
 
 ## 수집 데이터 배치 파이프라인
 
