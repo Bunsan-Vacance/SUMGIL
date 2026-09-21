@@ -265,6 +265,15 @@ public final class RouteCandidateFinder {
                         edge.travelSec(), edge.mode()));
             }
         }
+        // 접근·이탈 closure(5부 R-A1) — RAPTOR는 연결을 라운드당 1홉만 이완하므로
+        // 연결망 다중 홉(대여소 체인 등)을 경계에서 one-to-many Dijkstra로 만들어 넘긴다.
+        // K 재스캔·fast/calm에서 재사용되도록 루프 밖에서 1회 계산한다.
+        Map<String, com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Access>
+                originAccess = com.ssafy.s15p21a104.domain.route.finder.raptor
+                        .RaptorAccessClosure.from(originStationId, connections);
+        Map<String, com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Egress>
+                destAccess = com.ssafy.s15p21a104.domain.route.finder.raptor
+                        .RaptorAccessClosure.to(destStationId, connections);
         boolean minimizeCost = costModel != null;
 
         // K 후보 전략(217): 첫 스캔 후, 직전 후보의 첫 탑승 구간을 금지해가며 재스캔한다.
@@ -290,7 +299,8 @@ public final class RouteCandidateFinder {
             }
             List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey> journeys =
                     finder.find(originStationId, destStationId,
-                            Map.of(originStationId, 0), Map.of(destStationId, 0),
+                            new com.ssafy.s15p21a104.domain.route.finder.raptor
+                                    .RaptorFinder.AccessTables(originAccess, destAccess),
                             RAPTOR_MAX_ROUNDS, minimizeCost);
             boolean addedNew = false;
             for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey journey
