@@ -44,8 +44,9 @@ DECISION = TriggerDecision(fired=True)
 class FakeAdapter:
     """도구 이름·인자를 기록하고 미리 정한 응답을 돌려준다.
 
-    `replan_route`는 스레드 풀에서 동시에 불리므로 기록에 락을 건다 — 호출 수를 세는 테스트가
-    경쟁 때문에 드물게 틀리는 일을 막는다.
+    `planner.prefetch`는 이제 `replan_route`를 순차로 부르지만(BE 회신 8번), 락은 그대로 둔다 —
+    가드 동시성 테스트(`test_time_guard.py`)처럼 이 가짜 어댑터를 다른 곳에서 병렬로 쓸 수도 있어
+    기록 자체의 스레드 안전성까지 이 클래스가 보장하지 않을 이유는 없다.
     """
 
     def __init__(
@@ -308,11 +309,37 @@ def test_후보_수만큼_replan을_부른다():
 
     calls = adapter.names(REPLAN_ROUTE)
     assert len(calls) == 3
-    # 병렬이라 호출 **순서**는 보장하지 않는다 — 후보마다 한 번씩 불렸는지만 본다.
-    assert sorted(args["boundary_id"] for args in calls) == ["S1", "S2", "S3"]
+    # 순차 호출이라 호출 순서가 후보 순서와 같다(BE 회신 8번 — CPU 1개 조건에서 순차 권고).
+    assert [args["boundary_id"] for args in calls] == ["S1", "S2", "S3"]
     assert [c.candidate for c in context.candidates] == candidates  # 결과 순서는 후보 순서
     assert context.has_alternative
     assert all(args["dest_station_id"] == "DEST" for args in calls)
+
+
+def test_예산_3을_넘는_네번째_replan은_BUDGET_EXCEEDED다():
+    """`guard.DEFAULT_TOOL_BUDGETS[REPLAN_ROUTE]`가 3이 됐다(BE 회신 8번 — K=3 + 순차 호출
+    권고). 하차 후보 상한(`candidates.MAX_CANDIDATES`)은 아직 5라 4·5번째 후보는 어댑터까지
+    가지 못하고 가드에서 막힌다."""
+    candidates = [_candidate(i) for i in range(1, 6)]
+    adapter = FakeAdapter(replan={f"S{i}": [_route("2호선")] for i in range(1, 6)})
+
+    context = prefetch(
+        DECISION,
+        candidates,
+        adapter=adapter,
+        guard=ToolGuard(),  # 기본 예산 — REPLAN_ROUTE=3
+        dest_station_id="DEST",
+    )
+
+    calls = adapter.names(REPLAN_ROUTE)
+    assert len(calls) == 3  # 4·5번째는 가드가 막아 어댑터까지 가지 않는다
+    assert [args["boundary_id"] for args in calls] == ["S1", "S2", "S3"]
+    fourth, fifth = context.candidates[3], context.candidates[4]
+    for blocked in (fourth, fifth):
+        assert blocked.error is not None
+        assert blocked.error["error"] == ToolErrorCode.BUDGET_EXCEEDED.value
+        assert blocked.routes == []
+    assert [c.candidate for c in context.candidates] == candidates  # 결과 순서는 후보 순서 유지
 
 
 def test_후보_하나가_실패해도_나머지는_살아남는다():

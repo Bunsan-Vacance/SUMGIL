@@ -25,6 +25,7 @@ import requests
 
 from app.TIME.adapters import CompositeAdapter, HttpAdapter, LocalAdapter
 from app.TIME.registry import (
+    BIKE_STATIONS_NEARBY,
     GET_ARRIVALS,
     GET_ETA_STOCK,
     GET_LINE_CONGESTION,
@@ -422,6 +423,92 @@ def test_non_json_response_is_upstream_unavailable(monkeypatch: pytest.MonkeyPat
 
     assert isinstance(result, ToolError)
     assert result.error is ToolErrorCode.UPSTREAM_UNAVAILABLE
+
+
+def test_bike_stations_nearby_query_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    """radius_meters·limit은 선택값이라 안 주면 쿼리에서 빠진다(modes·priority와 같은 규칙).
+    필수 lat·lng는 그대로 전달되고 radius_meters만 camelCase(radiusMeters)로 바뀐다."""
+    captured = _patch_requests(monkeypatch, _respond(_FakeResponse(200, {"data": []})))
+    adapter = HttpAdapter(base_url="http://be.test")
+
+    adapter.call(BIKE_STATIONS_NEARBY, {"lat": 37.5665, "lng": 127.0})
+    adapter.call(
+        BIKE_STATIONS_NEARBY,
+        {"lat": 37.5665, "lng": 127.0, "radius_meters": 800, "limit": 10},
+    )
+
+    assert captured[0]["method"] == "GET"
+    assert captured[0]["url"] == "http://be.test/api/bike-stations/nearby"
+    assert captured[0]["params"] == {"lat": 37.5665, "lng": 127.0}
+    assert captured[1]["params"] == {
+        "lat": 37.5665,
+        "lng": 127.0,
+        "radiusMeters": 800,
+        "limit": 10,
+    }
+
+
+def test_bike_stations_nearby_missing_lat_is_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """필수 인자가 없으면 BE를 부르지도 않고 INVALID_INPUT이다(다른 HTTP 도구와 같은 규칙)."""
+    captured = _patch_requests(monkeypatch, _respond(_FakeResponse(200, {"data": []})))
+
+    result = HttpAdapter(base_url="http://be.test").call(BIKE_STATIONS_NEARBY, {"lng": 127.0})
+
+    assert isinstance(result, ToolError)
+    assert result.error is ToolErrorCode.INVALID_INPUT
+    assert captured == []
+
+
+def test_bike_stations_nearby_unwraps_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    """다른 HTTP 도구와 같은 `{"data": ...}` 래퍼를 쓴다 — 어댑터가 벗겨서 배열 그대로 돌려준다."""
+    body = [
+        {
+            "rentalId": "ST-1",
+            "name": "테스트 대여소",
+            "lat": 37.5,
+            "lng": 127.0,
+            "dockCount": 10,
+            "distanceMeters": 42.0,
+            "availableBikes": 3,
+            "stockUpdatedAt": "2026-09-21T08:00:00+09:00",
+        }
+    ]
+    _patch_requests(monkeypatch, _respond(_FakeResponse(200, {"data": body})))
+
+    result = HttpAdapter(base_url="http://be.test").call(
+        BIKE_STATIONS_NEARBY, {"lat": 37.5, "lng": 127.0}
+    )
+
+    assert result == body
+
+
+def test_bike_stations_nearby_availableBikes_null이_그대로_통과한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """캐시가 없거나 만료되면 availableBikes가 null이다 — 값을 지어내지 않고 그대로 통과해야 한다."""
+    body = [{"rentalId": "ST-1", "availableBikes": None, "stockUpdatedAt": None}]
+    _patch_requests(monkeypatch, _respond(_FakeResponse(200, {"data": body})))
+
+    result = HttpAdapter(base_url="http://be.test").call(
+        BIKE_STATIONS_NEARBY, {"lat": 37.5, "lng": 127.0}
+    )
+
+    assert result[0]["availableBikes"] is None
+    assert result[0]["stockUpdatedAt"] is None
+
+
+def test_bike_stations_nearby_status_code_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """새 분기가 상태코드 매핑까지 새로 짜지 않는다 — 기존 `_error_for_status`를 그대로 탄다."""
+    _patch_requests(monkeypatch, _respond(_FakeResponse(404, None, text="대여소 없음")))
+
+    result = HttpAdapter(base_url="http://be.test").call(
+        BIKE_STATIONS_NEARBY, {"lat": 37.5, "lng": 127.0}
+    )
+
+    assert isinstance(result, ToolError)
+    assert result.error is ToolErrorCode.NOT_FOUND
 
 
 def test_http_missing_required_arg_is_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
