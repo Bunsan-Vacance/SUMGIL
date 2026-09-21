@@ -4,7 +4,8 @@
 # 이 스크립트가 만드는 산출물:
 #   data/CROWD/serving/predictions_<날짜>.parquet + .meta.json
 #   data/CROWD/serving/predictions_link_<날짜>.parquet
-#   data/CROWD/serving/predictions_link_<날짜>_<HHMMSS>.csv   (BE 적재용)
+#   data/CROWD/serving/predictions_<날짜>_<HHMMSS>.csv        (BE 적재용 — 파일명에 link_ 토큰이 없다)
+#   data/CROWD/serving/predictions_<날짜>_<HHMMSS>.meta.json  (위 CSV의 사이드카, row_count 대조용)
 set -uo pipefail
 
 usage() {
