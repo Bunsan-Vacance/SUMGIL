@@ -43,6 +43,26 @@ describe('경로와 안내 화면의 수명', () => {
     expect(search).not.toHaveBeenCalled()
   })
 
+  it('장소 탐색에서 목적지를 고른 뒤 출발지를 검색하면 결과를 다시 조회한다', async () => {
+    const search = vi.fn(async () => routes)
+    const { result } = renderHook(() => useRoutePlanner({ search }))
+
+    act(() => result.current.openBrowse())
+    act(() => result.current.findRoutes(places[1]))
+    expect(result.current.searchTarget).toBe('origin')
+
+    act(() => result.current.choosePlace(places[0]))
+
+    expect(result.current.screen).toBe('results')
+    expect(result.current.trip.origin).toBe(places[0])
+    expect(result.current.trip.destination).toBe(places[1])
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: places[0], destination: places[1] }),
+      expect.any(AbortSignal),
+    )
+  })
+
   it('안내 중 뒤로 갔다가 다시 돌아와도 단계와 열차 선택을 유지한다', async () => {
     const { result } = await renderLoadedPlanner()
     act(() => result.current.startGuide())
