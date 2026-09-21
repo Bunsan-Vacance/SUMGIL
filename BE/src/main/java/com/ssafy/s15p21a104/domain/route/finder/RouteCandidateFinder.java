@@ -14,6 +14,7 @@ import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,6 +42,41 @@ public final class RouteCandidateFinder {
     private final Map<String, RouteMapper.StationInfo> stationInfos;
     private final Supplier<Map<String, Integer>> bikeStock;
     private final BusRouteIndex busRouteIndex;
+    private final RaptorInput raptorInput;
+
+    /** RAPTOR 탐색 입력(S15P21A104-217 ③). null이면 레거시 엔진만 쓴다. */
+    public record RaptorInput(com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet routeSet,
+                              List<Edge> accessEdges) {
+    }
+
+    /** 라운드 상한 — 환승 3회 내외(4라운드) */
+    static final int RAPTOR_MAX_ROUNDS = 4;
+
+    /**
+     * @param transferRule 환승 비용 규칙
+     * @param transferTimes 환승 실측표
+     * @param rentalIds 대여소 ID 집합
+     * @param stationInfos 역 표시 정보
+     * @param bikeStock 대여소별 예상 재고 공급자
+     * @param busRouteIndex 정규 BUS 구간 운행 노선 인덱스(234). null이면 routeId 폴백
+     * @param raptorInput RAPTOR 입력(217). null이면 레거시만
+     */
+    public RouteCandidateFinder(
+            TransferRule transferRule,
+            Map<TransferRule.TransferKey, Integer> transferTimes,
+            Set<String> rentalIds,
+            Map<String, RouteMapper.StationInfo> stationInfos,
+            Supplier<Map<String, Integer>> bikeStock,
+            BusRouteIndex busRouteIndex,
+            RaptorInput raptorInput) {
+        this.transferRule = transferRule;
+        this.transferTimes = transferTimes;
+        this.rentalIds = rentalIds;
+        this.stationInfos = stationInfos;
+        this.bikeStock = bikeStock;
+        this.busRouteIndex = busRouteIndex;
+        this.raptorInput = raptorInput;
+    }
 
     /**
      * @param transferRule 환승 비용 규칙
@@ -57,12 +93,7 @@ public final class RouteCandidateFinder {
             Map<String, RouteMapper.StationInfo> stationInfos,
             Supplier<Map<String, Integer>> bikeStock,
             BusRouteIndex busRouteIndex) {
-        this.transferRule = transferRule;
-        this.transferTimes = transferTimes;
-        this.rentalIds = rentalIds;
-        this.stationInfos = stationInfos;
-        this.bikeStock = bikeStock;
-        this.busRouteIndex = busRouteIndex;
+        this(transferRule, transferTimes, rentalIds, stationInfos, bikeStock, busRouteIndex, null);
     }
 
     /**
@@ -153,20 +184,16 @@ public final class RouteCandidateFinder {
     public List<ScoredCandidate> findCandidatesWithPaths(
             RouteGraph graph, String originStationId, String destStationId, int maxCandidates,
             List<TravelMode> allowedModes, KShortestPathFinder.EdgeCostModel costModel) {
-        // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(transferTimes);
-        ToLongFunction<String> lowerBound = remainingLowerBound(destStationId);
-
-        List<FoundPath> paths = new KShortestPathFinder(rule, busRouteIndex)
-                .findK(graph, originStationId, destStationId, maxCandidates, allowedModes,
-                        lowerBound, costModel);
-        if (paths.isEmpty() && allowsBus(allowedModes)) {
-            // 탐색 작업 상한이 BUS 포함 탐색에서 목적지 후보를 만나기 전에 소진되면 빈 결과가 된다.
-            // 같은 조건에서 BUS만 뺀 경로는 존재할 수 있다 — 수단을 추가했다고 기존 경로가
-            // 사라지면 안 되므로(운영 빈 결과 회귀, 2026-09-20 보고) 비BUS로 제한 재탐색한다.
-            paths = new KShortestPathFinder(rule, busRouteIndex)
-                    .findK(graph, originStationId, destStationId, maxCandidates,
-                            withoutBus(allowedModes), lowerBound, costModel);
+        // RAPTOR 우선(217) — 빈 결과면 레거시로 폴백해 "탐색은 항상 성공" 원칙을 지킨다.
+        List<FoundPath> paths = List.of();
+        if (raptorInput != null && raptorInput.routeSet() != null) {
+            paths = findWithRaptor(raptorInput, originStationId, destStationId, maxCandidates,
+                    allowedModes, costModel);
+        }
+        if (paths.isEmpty()) {
+            paths = findWithLegacy(graph, originStationId, destStationId, maxCandidates,
+                    allowedModes, costModel, rule);
         }
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
@@ -180,6 +207,93 @@ public final class RouteCandidateFinder {
                 .sorted(Comparator.comparingDouble(sc -> sc.response().totalMinutes()))
                 .limit(maxCandidates)
                 .toList();
+    }
+
+    /** 레거시(K 라벨링 다익스트라) 탐색 — RAPTOR 미적용·실패 시 폴백(215·216 경로 그대로). */
+    private List<FoundPath> findWithLegacy(RouteGraph graph, String originStationId,
+            String destStationId, int maxCandidates, List<TravelMode> allowedModes,
+            KShortestPathFinder.EdgeCostModel costModel, TransferRule rule) {
+        // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
+        ToLongFunction<String> lowerBound = remainingLowerBound(destStationId);
+        List<FoundPath> paths = new KShortestPathFinder(rule, busRouteIndex)
+                .findK(graph, originStationId, destStationId, maxCandidates, allowedModes,
+                        lowerBound, costModel);
+        if (paths.isEmpty() && allowsBus(allowedModes)) {
+            // 탐색 작업 상한이 BUS 포함 탐색에서 목적지 후보를 만나기 전에 소진되면 빈 결과가 된다.
+            // 같은 조건에서 BUS만 뺀 경로는 존재할 수 있다 — 수단을 추가했다고 기존 경로가
+            // 사라지면 안 되므로(운영 빈 결과 회귀, 2026-09-20 보고) 비BUS로 제한 재탐색한다.
+            paths = new KShortestPathFinder(rule, busRouteIndex)
+                    .findK(graph, originStationId, destStationId, maxCandidates,
+                            withoutBus(allowedModes), lowerBound, costModel);
+        }
+        return paths;
+    }
+
+    /** RAPTOR 노선 스캔 탐색 — journey를 FoundPath로 전개한다(어댑터가 계약 보존). */
+    private List<FoundPath> findWithRaptor(RaptorInput input, String originStationId,
+            String destStationId, int maxCandidates, List<TravelMode> allowedModes,
+            KShortestPathFinder.EdgeCostModel costModel) {
+        List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route> routes =
+                new ArrayList<>();
+        Map<String, TravelMode> modeByRouteId = new HashMap<>();
+        for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route route
+                : input.routeSet().routes()) {
+            if (isRaptorModeAllowed(route.mode(), allowedModes)) {
+                routes.add(route);
+                modeByRouteId.putIfAbsent(route.routeId(), route.mode());
+            }
+        }
+        if (routes.isEmpty()) {
+            return List.of();
+        }
+        List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Connection> connections =
+                new ArrayList<>();
+        for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Connection connection
+                : input.routeSet().connections()) {
+            if (isRaptorModeAllowed(connection.mode(), allowedModes)) {
+                connections.add(connection);
+            }
+        }
+        if (input.accessEdges() != null) {
+            for (Edge edge : input.accessEdges()) {
+                connections.add(new com.ssafy.s15p21a104.domain.route.finder.raptor
+                        .RaptorFinder.Connection(edge.fromNode(), edge.toNode(),
+                        edge.travelSec(), edge.mode()));
+            }
+        }
+        boolean minimizeCost = costModel != null;
+        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder finder;
+        if (minimizeCost) {
+            finder = new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder(
+                    routes, connections,
+                    (routeId, fromIdx, toIdx, passThrough, travel) -> costModel.travelCost(
+                            new Edge("raptor", "raptor", routeId, travel, 0,
+                                    modeByRouteId.getOrDefault(routeId, TravelMode.BUS))));
+        } else {
+            finder = new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder(
+                    routes, connections);
+        }
+        List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey> journeys =
+                finder.find(originStationId, destStationId,
+                        Map.of(originStationId, 0), Map.of(destStationId, 0),
+                        RAPTOR_MAX_ROUNDS, minimizeCost);
+        List<FoundPath> paths = new ArrayList<>();
+        for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey journey
+                : journeys) {
+            com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorPathAdapter
+                    .toFoundPath(journey, routes, transferRule.withTable(transferTimes),
+                            busRouteIndex)
+                    .ifPresent(paths::add);
+        }
+        return paths;
+    }
+
+    /** RAPTOR 모드 필터 — WALK·TRANSFER는 연결 구간이라 항상 허용(215 §3.4와 동일 규칙). */
+    private static boolean isRaptorModeAllowed(TravelMode mode, List<TravelMode> allowedModes) {
+        if (mode == TravelMode.WALK || mode == TravelMode.TRANSFER) {
+            return true;
+        }
+        return allowedModes == null || allowedModes.isEmpty() || allowedModes.contains(mode);
     }
 
     /** 탐색 결과 1개를 응답 후보로 바꾼다. 재고 게이트 탈락이면 빈 값. */

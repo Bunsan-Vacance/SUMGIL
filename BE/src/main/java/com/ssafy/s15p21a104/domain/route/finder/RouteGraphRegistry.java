@@ -56,6 +56,15 @@ public class RouteGraphRegistry {
     private final java.util.concurrent.ConcurrentMap<String, RouteGraph> slotGraphs =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** RAPTOR 노선·연결(217). 버스·도보·자전거는 슬롯 무관, 지하철만 슬롯 edge_time. */
+    private List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route> raptorBusRoutes =
+            List.of();
+    private List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Connection>
+            raptorConnections = List.of();
+    private final java.util.concurrent.ConcurrentMap<String,
+            com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet> raptorSets =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     public RouteGraphRegistry(RouteEdgeTimeRepository edgeTimeRepository,
                               StationRepository stationRepository,
                               RouteLineRepository lineRepository,
@@ -115,6 +124,11 @@ public class RouteGraphRegistry {
             }
             // 역↔정류장·대여소↔정류장 보행 연결(S15P21A104-188). 정류장↔정류장은 그대로 BUS 엣지 몫이다.
             List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals, busStops);
+            // RAPTOR 노선·연결(217) — 슬롯 무관분을 여기서 한 번 만들어 캐시한다.
+            this.raptorBusRoutes = com.ssafy.s15p21a104.domain.route.finder.raptor
+                    .RaptorRouteSetBuilder.busRoutes(busRoutes);
+            this.raptorConnections = com.ssafy.s15p21a104.domain.route.finder.raptor
+                    .RaptorRouteSetBuilder.connections(stops, rentals, busStops);
             List<Edge> extraEdges = new java.util.ArrayList<>(walkEdges);
             extraEdges.addAll(rentalEdges);
             extraEdges.addAll(busEdges);
@@ -255,5 +269,45 @@ public class RouteGraphRegistry {
      */
     public Map<String, Integer> bikeStock() {
         return Map.of();
+    }
+
+    /**
+     * 슬롯별 RAPTOR 노선·연결 묶음(217). 지하철만 슬롯 {@code edge_time}으로 조립한다.
+     *
+     * <p>슬롯 행이 없거나 로드 실패면 null — 호출 측은 레거시 엔진으로 폴백한다(값을 지어내지 않음).
+     *
+     * @param dowType 요일 구분
+     * @param timeSlot 시간 슬롯
+     * @return 슬롯 RAPTOR 입력 또는 null(폴백)
+     */
+    public com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet raptorRouteSetFor(
+            int dowType, int timeSlot) {
+        if (graph == null) {
+            return null;
+        }
+        String key = dowType + ":" + timeSlot;
+        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet cached = raptorSets.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        List<RouteEdgeRow> rows;
+        try {
+            rows = edgeTimeRepository.findSubwayEdgesBySlot(dowType, timeSlot);
+        } catch (RuntimeException e) {
+            log.warn("RAPTOR 슬롯 조회 실패, 레거시 폴백 ({}:{}): {}", dowType, timeSlot, e.getMessage());
+            return null;
+        }
+        if (rows == null || rows.isEmpty()) {
+            return null;
+        }
+        List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route> routes =
+                new java.util.ArrayList<>(raptorBusRoutes);
+        routes.addAll(com.ssafy.s15p21a104.domain.route.finder.raptor
+                .RaptorRouteSetBuilder.subwayRoutes(rows));
+        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet set =
+                new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet(
+                        List.copyOf(routes), raptorConnections);
+        raptorSets.putIfAbsent(key, set);
+        return raptorSets.getOrDefault(key, set);
     }
 }
