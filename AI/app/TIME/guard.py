@@ -10,7 +10,7 @@
 | 항목 | 기본값 | 근거 |
 | --- | --- | --- |
 | 세션당 총 호출 | 20 | 실제 계획은 replan 5 + arrivals 1이라 3배 여유 |
-| `replan_route` | 5 | 하차 후보역 상한이 5 |
+| `replan_route` | 3 | BE 회신 K=3 + 순차 호출 권고(`FROM_BE-time-reroute-contract-01` 8번) — 하차 후보 상한(5)보다 작아 4·5번째 후보는 예산에서 막힌다 |
 | 그 밖의 도구 | 10 | |
 | 초당 호출 | 10 | BE 부하 보호 |
 
@@ -34,7 +34,7 @@ T = TypeVar("T")
 
 DEFAULT_TOTAL_BUDGET = 20
 DEFAULT_PER_TOOL_BUDGET = 10
-DEFAULT_TOOL_BUDGETS: Mapping[str, int] = MappingProxyType({REPLAN_ROUTE: 5})
+DEFAULT_TOOL_BUDGETS: Mapping[str, int] = MappingProxyType({REPLAN_ROUTE: 3})
 """도구별 예외 예산. 모듈 전역이라 인스턴스가 실수로 고치지 못하게 읽기 전용으로 둔다."""
 
 DEFAULT_MAX_PER_SECOND = 10
@@ -118,14 +118,17 @@ class ToolGuard:
         )
         self.max_per_second = max_per_second
         self._clock = clock
-        # 203 `planner.prefetch`가 후보별 replan을 ThreadPoolExecutor로 **동시에** 부른다.
+        # `ToolGuard`는 원래 여러 스레드가 동시에 부를 수 있다고 가정하고 락을 둔다 —
         # `_counts[name] = _counts.get(name, 0) + 1`은 read-modify-write라 락이 없으면 증가분이
         # 유실되고, 그러면 예산이 실제보다 적게 세어져 한도를 넘겨 호출된다 — 막으라고 만든
         # 가드가 조용히 새는 셈이다. `_stats`·`_recent`도 같은 이유로 보호한다.
+        # (203 `planner.prefetch`는 BE 회신(8번 — CPU 1개 조건에서 순차 권고) 이후 순차 호출로
+        # 바뀌어 지금은 동시 호출자가 없다. 그래도 가드가 호출자의 스레드 모델을 가정하지 않는
+        # 편이 안전해 락은 유지한다 — 아래 동시성 테스트도 그 전제로 남겨둔다.)
         #
         # **`check`→`record` 사이는 여전히 원자적이지 않다.** 그렇게 만들려면 도구 실행 동안
-        # 락을 쥐고 있어야 해서 병렬 호출이 직렬화된다. 대신 동시 실행 수만큼 예산이 넘칠 수
-        # 있는데(최대 worker-1건), 카운터 자체는 정확하므로 다음 `check`가 바로 막는다.
+        # 락을 쥐고 있어야 해서 병렬 호출이 직렬화된다. 동시 호출자가 생기면 그 경쟁만큼 예산이
+        # 넘칠 수 있는데, 카운터 자체는 정확하므로 다음 `check`가 바로 막는다.
         self._lock = threading.RLock()
         self._counts: dict[str, int] = {}
         self._stats: dict[str, ToolStats] = {}
