@@ -25,6 +25,7 @@ TOPIC_BASE_DIRS = {
 BIKE_STOCK_TOPIC = "bike.stock"
 BIKE_LATEST_STOCK_RELATIVE_PATH = Path("data/BIKE/raw/realtime/latest_stock.parquet")
 BIKE_LATEST_STOCK_COLUMNS = ["rental_id", "current_stock", "updated_at"]
+BIKE_LATEST_STOCK_TTL = pd.Timedelta(minutes=30)
 
 
 def base_dir_for_topic(topic: str, ai_root: Path = AI_ROOT) -> Path:
@@ -122,9 +123,12 @@ def update_bike_latest_stock(events: list[KafkaEvent], *, ai_root: Path = AI_ROO
         combined = latest_rows
 
     combined["updated_at"] = pd.to_datetime(combined["updated_at"])
+    combined = combined.sort_values(["rental_id", "updated_at"]).drop_duplicates(
+        subset=["rental_id"], keep="last"
+    )
+    cutoff = combined["updated_at"].max() - BIKE_LATEST_STOCK_TTL
     combined = (
-        combined.sort_values(["rental_id", "updated_at"])
-        .drop_duplicates(subset=["rental_id"], keep="last")
+        combined.loc[combined["updated_at"] >= cutoff]
         .sort_values("rental_id")
         .reset_index(drop=True)
     )

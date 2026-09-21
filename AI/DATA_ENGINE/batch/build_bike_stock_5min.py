@@ -12,6 +12,8 @@ The script is dry-run by default. Pass --yes to write the output file.
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import os
 import sys
 from datetime import datetime
@@ -23,6 +25,7 @@ import pandas as pd
 from DATA_ENGINE.collect.common import AI_ROOT
 
 KST = ZoneInfo("Asia/Seoul")
+logger = logging.getLogger(__name__)
 DEFAULT_INPUT_ROOT = AI_ROOT / "data" / "BIKE" / "raw" / "realtime"
 DEFAULT_OUTPUT_ROOT = AI_ROOT / "data" / "BIKE" / "interim" / "realtime_stock_5min"
 
@@ -64,7 +67,57 @@ def snapshot_files(input_root: Path, dt: str) -> list[Path]:
 def read_raw_snapshots(paths: list[Path]) -> pd.DataFrame:
     if not paths:
         return pd.DataFrame()
-    return pd.concat((pd.read_parquet(path) for path in paths), ignore_index=True)
+    frames = []
+    for path in paths:
+        frame = pd.read_parquet(path)
+        if "payload_json" in frame.columns:
+            frame = flatten_kafka_bike(frame, path)
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
+def flatten_kafka_bike(frame: pd.DataFrame, path: Path) -> pd.DataFrame:
+    """Convert bike.stock envelope rows to the direct bikeList raw schema."""
+    rows = []
+    invalid = 0
+    required_payload = set(RAW_TO_INTERIM_COLUMNS)
+
+    for record in frame.to_dict("records"):
+        try:
+            payload = json.loads(record["payload_json"])
+        except (KeyError, TypeError, ValueError):
+            invalid += 1
+            continue
+        if not isinstance(payload, dict) or not required_payload.issubset(payload):
+            invalid += 1
+            continue
+
+        entity_id = record.get("entity_id")
+        payload_id = payload.get("stationId")
+        if pd.isna(entity_id) or str(entity_id).strip() == "":
+            entity_id = payload_id
+        if str(entity_id).strip() != str(payload_id).strip():
+            invalid += 1
+            continue
+
+        collected_at = pd.to_datetime(record.get("ingested_at"), errors="coerce", utc=True)
+        if pd.isna(collected_at):
+            invalid += 1
+            continue
+        collected_at = collected_at.tz_convert(KST)
+
+        rows.append(
+            {
+                **payload,
+                "stationId": str(entity_id).strip(),
+                "collected_at": collected_at,
+                "source": "bike.stock",
+            }
+        )
+
+    if invalid:
+        logger.warning("Skipped %d invalid Kafka bike rows in %s", invalid, path)
+    return pd.DataFrame(rows, columns=[*RAW_TO_INTERIM_COLUMNS, "collected_at", "source"])
 
 
 def normalize_bike_stock(raw: pd.DataFrame) -> pd.DataFrame:
@@ -101,11 +154,11 @@ def normalize_bike_stock(raw: pd.DataFrame) -> pd.DataFrame:
     df["collected_hour"] = df["collected_at"].dt.hour.astype("int16")
     df["collected_minute"] = df["collected_at"].dt.minute.astype("int16")
 
-    df = df[INTERIM_COLUMNS]
+    df["_slot_5m"] = df["collected_at"].dt.floor("5min")
     df = df.sort_values(["collected_at", "station_id"]).drop_duplicates(
-        ["collected_at", "station_id"], keep="last"
+        ["_slot_5m", "station_id"], keep="last"
     )
-    return df.reset_index(drop=True)
+    return df[INTERIM_COLUMNS].reset_index(drop=True)
 
 
 def build_bike_stock_5min(input_root: Path, dt: str) -> pd.DataFrame:

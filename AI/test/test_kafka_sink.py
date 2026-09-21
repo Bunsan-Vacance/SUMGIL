@@ -73,6 +73,43 @@ def test_write_events_partitions_by_poll_run_at(tmp_path):
     assert paths[1] == latest_stock_path(ai_root=tmp_path)
 
 
+def test_write_events_preserves_bike_stock_raw_contract(tmp_path):
+    sample = BE_SAMPLE_EVENTS["bike.stock"]
+    event = parse_kafka_event(sample, topic="bike.stock", partition=1, offset=10)
+
+    snapshot_path = write_events([event], ai_root=tmp_path)[0]
+
+    frame = pd.read_parquet(snapshot_path)
+    assert list(frame.columns) == [
+        "event_id",
+        "source",
+        "entity_id",
+        "source_generated_at",
+        "ingested_at",
+        "poll_run_at",
+        "freshness_at",
+        "payload_json",
+        "kafka_topic",
+        "kafka_partition",
+        "kafka_offset",
+    ]
+    row = frame.iloc[0]
+    payload = json.loads(row["payload_json"])
+    assert set(payload) >= {
+        "stationId",
+        "stationName",
+        "rackTotCnt",
+        "parkingBikeTotCnt",
+        "shared",
+        "stationLatitude",
+        "stationLongitude",
+    }
+    assert row["entity_id"] == payload["stationId"] == "ST-4"
+    assert pd.isna(row["source_generated_at"])
+    assert row["freshness_at"] == row["ingested_at"]
+    assert snapshot_path.parent.name == "hh=09"
+
+
 def test_write_events_groups_by_topic(tmp_path):
     paths = write_events(
         [
@@ -228,6 +265,50 @@ def test_update_bike_latest_stock_keeps_newer_value_when_old_event_arrives(tmp_p
     df = pd.read_parquet(latest_stock_path(ai_root=tmp_path))
     assert df.loc[0, "current_stock"] == 8
     assert df.loc[0, "updated_at"] == pd.Timestamp("2026-09-14T09:05:03")
+
+
+def test_update_bike_latest_stock_prunes_stations_older_than_30_minutes(tmp_path):
+    first_cycle = [
+        _event(
+            "bike.stock",
+            station_id,
+            event_id=f"bike.stock+{station_id}+first",
+            ingested_at="2026-09-14T09:00:03+09:00",
+            payload={"stationId": station_id, "parkingBikeTotCnt": stock},
+        )
+        for station_id, stock in [("ST-4", "5"), ("ST-5", "6")]
+    ]
+    update_bike_latest_stock(first_cycle, ai_root=tmp_path)
+
+    update_bike_latest_stock(
+        [
+            _event(
+                "bike.stock",
+                "ST-4",
+                event_id="bike.stock+ST-4+partial",
+                ingested_at="2026-09-14T09:20:03+09:00",
+                payload={"stationId": "ST-4", "parkingBikeTotCnt": "7"},
+            )
+        ],
+        ai_root=tmp_path,
+    )
+    within_ttl = pd.read_parquet(latest_stock_path(ai_root=tmp_path))
+    assert set(within_ttl["rental_id"]) == {"ST-4", "ST-5"}
+
+    update_bike_latest_stock(
+        [
+            _event(
+                "bike.stock",
+                "ST-4",
+                event_id="bike.stock+ST-4+next",
+                ingested_at="2026-09-14T09:31:03+09:00",
+                payload={"stationId": "ST-4", "parkingBikeTotCnt": "8"},
+            )
+        ],
+        ai_root=tmp_path,
+    )
+    pruned = pd.read_parquet(latest_stock_path(ai_root=tmp_path))
+    assert pruned["rental_id"].tolist() == ["ST-4"]
 
 
 def test_update_bike_latest_stock_ignores_non_bike_events(tmp_path):

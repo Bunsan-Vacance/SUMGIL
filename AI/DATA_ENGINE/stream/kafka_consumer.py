@@ -11,12 +11,14 @@ import argparse
 import logging
 import os
 import time
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
 from DATA_ENGINE.collect.common import env
+from DATA_ENGINE.stream.consumer_status import ConsumerStatus
 from DATA_ENGINE.stream.kafka_events import KafkaEvent, parse_kafka_event
 from DATA_ENGINE.stream.kafka_sink import write_events
 
@@ -51,8 +53,12 @@ def config_from_env(*, topics: list[str] | None = None) -> KafkaConsumerConfig:
     )
 
 
-def parse_messages(messages: Iterable[object]) -> list[KafkaEvent]:
+def parse_messages_with_failures(
+    messages: Iterable[object],
+) -> tuple[list[KafkaEvent], list[object]]:
+    """Parse messages; failed ones are logged with topic/partition/offset and returned."""
     events: list[KafkaEvent] = []
+    failed: list[object] = []
     for msg in messages:
         try:
             events.append(
@@ -64,13 +70,70 @@ def parse_messages(messages: Iterable[object]) -> list[KafkaEvent]:
                 )
             )
         except Exception:
+            failed.append(msg)
             logger.exception(
-                "Kafka message parse failed: topic=%s partition=%s offset=%s",
+                "Kafka message parse failed (skipped): topic=%s partition=%s offset=%s",
                 getattr(msg, "topic", None),
                 getattr(msg, "partition", None),
                 getattr(msg, "offset", None),
             )
-    return events
+    return events, failed
+
+
+def parse_messages(messages: Iterable[object]) -> list[KafkaEvent]:
+    return parse_messages_with_failures(messages)[0]
+
+
+def next_offsets(messages: Iterable[object]) -> dict[tuple[str, int], int]:
+    """(topic, partition) -> offset that will be committed after these messages."""
+    offsets: dict[tuple[str, int], int] = {}
+    for msg in messages:
+        key = (getattr(msg, "topic", None) or "unknown", getattr(msg, "partition", None) or 0)
+        offsets[key] = max(offsets.get(key, 0), (getattr(msg, "offset", None) or 0) + 1)
+    return offsets
+
+
+def process_batch(
+    messages: list[object],
+    *,
+    commit: Callable[[], None],
+    status: ConsumerStatus,
+    write: Callable[[list[KafkaEvent]], list] = write_events,
+) -> list:
+    """Parse, save and commit one buffered batch, recording per-topic status.
+
+    Unparseable messages are skipped (they can never succeed on retry) but are recorded
+    with topic/partition/offset, and the rest of the batch is still saved. If saving
+    fails nothing is committed, so the batch is re-read after the consumer restarts.
+    """
+    events, failed = parse_messages_with_failures(messages)
+    for msg in failed:
+        status.record_parse_failure(
+            getattr(msg, "topic", None),
+            getattr(msg, "partition", None),
+            getattr(msg, "offset", None),
+        )
+
+    paths: list = []
+    if events:
+        try:
+            paths = write(events)
+        except Exception as exc:
+            topics = sorted({event.kafka_topic or event.source for event in events})
+            status.record_save_failure(topics, exc)
+            status.write()
+            logger.exception(
+                "Kafka events save failed, not committed (will replay after restart): "
+                "topics=%s events=%d",
+                ",".join(topics),
+                len(events),
+            )
+            raise
+    commit()
+    saved = Counter(event.kafka_topic or event.source for event in events)
+    status.record_saved(dict(saved), next_offsets(messages))
+    status.write()
+    return paths
 
 
 def run_consumer(
@@ -98,25 +161,23 @@ def run_consumer(
         config.bootstrap_servers,
     )
 
+    status = ConsumerStatus(config.group_id, topics=config.topics)
     buffer: list[object] = []
     last_flush = time.monotonic()
     while True:
         polled = consumer.poll(timeout_ms=1000)
         for messages in polled.values():
+            status.record_received(messages)
             buffer.extend(messages)
 
         elapsed = time.monotonic() - last_flush
         if not buffer or (len(buffer) < batch_size and elapsed < flush_interval_sec):
             continue
 
-        events = parse_messages(buffer)
+        batch = list(buffer)
         buffer.clear()
         last_flush = time.monotonic()
-        if not events:
-            continue
-        paths = write_events(events)
-        consumer.commit()
-        for path in paths:
+        for path in process_batch(batch, commit=consumer.commit, status=status):
             logger.info("Kafka events saved: %s", path)
 
 

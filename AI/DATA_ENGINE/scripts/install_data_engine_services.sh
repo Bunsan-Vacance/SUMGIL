@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DATA_ENGINE 수집기와 BIKE avg 배치의 systemd 유닛을 설치한다.
+# DATA_ENGINE 일 배치와 예측 배치의 systemd 유닛을 설치한다.
 #
 # 기본 동작은 서비스 파일 설치 + daemon-reload까지만 수행한다.
 # 실제 자동 실행까지 한 번에 진행하려면 --enable-now를 명시한다.
@@ -93,9 +93,7 @@ install_service() {
   echo "installed: /etc/systemd/system/${service_name}"
 }
 
-install_service "bike-realtime-poller.service" "bike-realtime-poller.service"
-install_service "weather-nowcast-poller.service" "weather-nowcast-poller.service"
-# 143: D−1 승하차 수집은 폴러가 아니라 하루 두 번 oneshot — timer 로 띄운다.
+# 143: D−1 승하차 수집은 하루 두 번 oneshot — timer 로 띄운다.
 install_service "subway-ridership-daily.service" "subway-ridership-daily.service"
 install_service "subway-ridership-daily.timer" "subway-ridership-daily.timer"
 install_service "bike-avg-batch.service" "bike-avg-batch.service"
@@ -107,13 +105,9 @@ install_service "crowd-batch-predict.timer" "crowd-batch-predict.timer"
 sudo systemctl daemon-reload
 
 if [[ "${ENABLE_NOW}" -eq 1 ]]; then
-  sudo systemctl enable --now bike-realtime-poller.service
-  sudo systemctl enable --now weather-nowcast-poller.service
   sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl enable --now bike-avg-batch.timer
   sudo systemctl enable --now crowd-batch-predict.timer
-  sudo systemctl status --no-pager bike-realtime-poller.service
-  sudo systemctl status --no-pager weather-nowcast-poller.service
   sudo systemctl list-timers --no-pager subway-ridership-daily.timer
   sudo systemctl list-timers --no-pager bike-avg-batch.timer
   sudo systemctl list-timers --no-pager crowd-batch-predict.timer
@@ -123,13 +117,9 @@ else
 서비스 파일 설치와 daemon-reload가 끝났습니다.
 실제 시작은 아래 명령으로 진행하세요.
 
-  sudo systemctl enable --now bike-realtime-poller.service
-  sudo systemctl enable --now weather-nowcast-poller.service
   sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl enable --now bike-avg-batch.timer
   sudo systemctl enable --now crowd-batch-predict.timer
-  sudo systemctl status bike-realtime-poller.service
-  sudo systemctl status weather-nowcast-poller.service
   sudo systemctl list-timers subway-ridership-daily.timer
   sudo systemctl list-timers bike-avg-batch.timer
   sudo systemctl list-timers crowd-batch-predict.timer
