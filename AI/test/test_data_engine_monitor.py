@@ -116,9 +116,7 @@ def test_check_latest_file_rejects_stale_rows_when_latest_is_fresh(tmp_path):
         }
     ).to_parquet(path, index=False)
 
-    result = check_latest_file(
-        "bike", path, 10, "updated_at", row_max_age_min=30, now_ts=now_ts
-    )
+    result = check_latest_file("bike", path, 10, "updated_at", row_max_age_min=30, now_ts=now_ts)
 
     assert result.ok is False
     assert result.status == "stale_rows"
@@ -310,9 +308,7 @@ def test_count_partition_snapshots_counts_only_matching_kafka_topic(tmp_path):
     pd.DataFrame({"kafka_topic": ["weather.nowcast"]}).to_parquet(
         path / "snapshot_wrong_topic.parquet", index=False
     )
-    pd.DataFrame({"stationId": ["ST-1"]}).to_parquet(
-        path / "snapshot_poller.parquet", index=False
-    )
+    pd.DataFrame({"stationId": ["ST-1"]}).to_parquet(path / "snapshot_poller.parquet", index=False)
 
     assert count_partition_snapshots(base_path, slot, "bike.stock") == 2
 

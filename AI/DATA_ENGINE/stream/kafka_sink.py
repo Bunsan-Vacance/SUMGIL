@@ -123,13 +123,14 @@ def update_bike_latest_stock(events: list[KafkaEvent], *, ai_root: Path = AI_ROO
         combined = latest_rows
 
     combined["updated_at"] = pd.to_datetime(combined["updated_at"])
-    combined = (
-        combined.sort_values(["rental_id", "updated_at"])
-        .drop_duplicates(subset=["rental_id"], keep="last")
+    combined = combined.sort_values(["rental_id", "updated_at"]).drop_duplicates(
+        subset=["rental_id"], keep="last"
     )
     cutoff = combined["updated_at"].max() - BIKE_LATEST_STOCK_TTL
-    combined = combined.loc[combined["updated_at"] >= cutoff].sort_values("rental_id").reset_index(
-        drop=True
+    combined = (
+        combined.loc[combined["updated_at"] >= cutoff]
+        .sort_values("rental_id")
+        .reset_index(drop=True)
     )
     return save_latest_parquet(combined[BIKE_LATEST_STOCK_COLUMNS], path)
 

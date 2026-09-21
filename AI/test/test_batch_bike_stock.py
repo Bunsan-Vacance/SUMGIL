@@ -138,9 +138,7 @@ def test_build_bike_stock_5min_deduplicates_mixed_sources_by_slot(tmp_path):
     kafka_path = base / "dt=2026-09-13" / "hh=01" / "snapshot_kafka.parquet"
     poller_path.parent.mkdir(parents=True, exist_ok=True)
     poller = raw_frame().head(1)
-    poller.loc[:, "collected_at"] = datetime(
-        2026, 9, 13, 1, 5, tzinfo=ZoneInfo("Asia/Seoul")
-    )
+    poller.loc[:, "collected_at"] = datetime(2026, 9, 13, 1, 5, tzinfo=ZoneInfo("Asia/Seoul"))
     poller.to_parquet(poller_path, index=False)
     kafka_frame(stock="7", ingested_at="2026-09-13T01:06:00+09:00").to_parquet(
         kafka_path, index=False
