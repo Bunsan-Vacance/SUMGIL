@@ -135,14 +135,16 @@ def test_혼잡도_예측이_실시간이_아님을_밝힌다():
     assert "실시간" in tool["description"] and "예측" in tool["description"]
 
 
-def test_미확정_계약이_표시돼_있다():
-    # BE 회신(TO_BE-time-reroute-contract-01) 전까지 열지 않은 필드가 무엇인지 코드에 남긴다.
+def test_회신_결과가_표시돼_있다():
+    # BE 회신(FROM_BE-time-reroute-contract-01)의 보류·거절·확정 결과를 코드에 남긴다.
+    # 스키마는 열지 않으므로 x_pending은 더 이상 없어야 한다.
     tool = registry.get_tool(registry.REPLAN_ROUTE)
     assert tool is not None
-    pending = tool.get("x_pending")
-    assert pending is not None
-    assert pending["handoff"] == "TO_BE-time-reroute-contract-01"
-    assert pending["fields"]
+    resolved = tool.get("x_resolved")
+    assert resolved is not None
+    assert resolved["handoff"] == "FROM_BE-time-reroute-contract-01"
+    assert resolved["items"]
+    assert "x_pending" not in tool
 
 
 def test_스키마_버전이_semver다():
@@ -152,7 +154,27 @@ def test_스키마_버전이_semver다():
 @pytest.mark.skipif(not CONTRACT_PATH.exists(), reason="TOOL_CONTRACT.md 미작성")
 def test_계약_문서가_도구_목록과_일치한다():
     # SERVING_CONTRACT.md ↔ test_crowd_serving_contract.py와 같은 방식 — 코드만 고치면 CI가 막힌다.
+    # (test_도구_이름이_중복되지_않는다 등이 registry.TOOLS 자체를 검증하므로 여기는 문서 대조만 본다)
     text = CONTRACT_PATH.read_text(encoding="utf-8")
     for name in registry.tool_names():
         assert f"`{name}`" in text, f"TOOL_CONTRACT.md에 {name}가 없다"
     assert registry.TOOL_SCHEMA_VERSION in text
+
+
+def test_bike_stations_nearby가_도구_목록_맨_뒤에_있다():
+    # 1.1절 순서 고정 — 기존 도구 뒤에 추가해야 tools 배열 순서가 흔들리지 않는다
+    # (LLM 요청의 tools 순서가 프롬프트 캐시 프리픽스에 들어간다).
+    assert registry.TOOLS[-1]["name"] == registry.BIKE_STATIONS_NEARBY
+
+
+def test_bike_stations_nearby는_HTTP_도구다():
+    assert registry.BIKE_STATIONS_NEARBY in registry.HTTP_TOOLS
+    assert registry.BIKE_STATIONS_NEARBY not in registry.LOCAL_TOOLS
+
+
+def test_bike_stations_nearby_설명이_availableBikes_의미를_밝힌다():
+    # availableBikes를 도착 예측으로 오인하면 안 된다 — get_eta_stock으로 유도하는 문장이 있는지 본다.
+    tool = registry.get_tool(registry.BIKE_STATIONS_NEARBY)
+    assert tool is not None
+    assert "availableBikes" in tool["description"]
+    assert "get_eta_stock" in tool["description"]
