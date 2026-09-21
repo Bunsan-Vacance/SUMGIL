@@ -1,4 +1,4 @@
-# 혼잡도 예측 정적 적재 (S15P21A104-305)
+# 혼잡도 예측 정적 적재 (S15P21A104-305 · 304)
 
 AI CROWD 배치가 만든 링크 단위 혼잡도 예측을 `congestion_pred` 에 넣는다. **AI 는 PG 에 직접 쓰지 않고
 BE load job 이 넣는다** — 회신 04 L-2 에서 확정한 구조이고 172(`bike_stock_pred`)와 같다.
@@ -6,8 +6,10 @@ BE load job 이 넣는다** — 회신 04 L-2 에서 확정한 구조이고 172(
 ## 실행
 
 ```bash
-# 1) 최신 산출물 받기 (AI EC2 → AI/data/CROWD/serving/)
+# 1) 오늘 이후 산출물 받기 (AI 워커 j15a104a → AI/data/CROWD/serving/) — CSV + 사이드카, 이미 있으면 건너뜀
 node BE/scripts/data/crowdpred-fetch.mjs
+node BE/scripts/data/crowdpred-fetch.mjs --list              # 원격 목록만 본다 (받을 것에 ← 표시)
+node BE/scripts/data/crowdpred-fetch.mjs --since 2026-09-20  # 기준일 지정 · --all 이면 날짜 제한 없이 전부
 
 # 2) 적재
 cd BE && SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun \
@@ -19,19 +21,25 @@ cd BE && SPRING_PROFILES_ACTIVE=local,load ./gradlew bootRun \
 `crowdpred` 는 기본 `sources` 목록에 **없다.** 원천 파일을 먼저 받아야 하므로 기본에 넣으면 파일이 없는
 팀원의 전체 적재가 실패한다(`bikepred` 와 같은 이유).
 
-> **2026-09-21 기준 1)이 실패한다.** AI 배치(`crowd-batch-predict.timer`)가 서버에 아직 배포되지 않아
-> 원격 폴더 자체가 없다(통지 07 C-5 로 확인 요청함). 그전까지는 받은 파일을
-> `AI/data/CROWD/serving/` 에 직접 두고 2)만 실행한다.
+로더는 `DB_URL`·`DB_USERNAME`·`DB_PASSWORD`·`REDIS_HOST`·`REDIS_PORT` 를 요구한다(`load-prod.md` 2-2).
+로컬은 `.env` 에 DB 변수가 없으니 docker compose 의 값을 셸에 직접 준다. 없으면
+`Driver claims to not accept jdbcUrl, ${DB_URL}` 로 컨텍스트가 뜨지 않는다.
+
+> 수집 스크립트는 **"최신 하나" 를 고르지 않는다.** 대상 날짜가 기준일(기본 오늘, Asia/Seoul) 이후인
+> 산출물을 전부 받아 폴더를 동기화하고, 같은 날짜의 최신 회차는 **로더가** 고른다(아래 "값 규칙").
+> 로컬 `serving/` 에 과거 날짜 파일이 남아 있어도 조회가 `pred_date = 오늘` 이라 읽히지 않지만, 적재 로그의
+> 날짜 목록에 섞이니 치우는 편이 깔끔하다.
 
 ## 원천
 
 | | |
 | --- | --- |
-| 만드는 곳 | AI CROWD 배치 `batch_predict --link-table` (매일 09:30 KST, 오늘·내일 2일치) |
-| 서버 경로 | `~/Soomgil-INFRA-ai-data-monitoring/AI/data/CROWD/serving/` |
-| 파일 | `predictions_<YYYY-MM-DD>_<HHMMSS>.csv` + **사이드카** `.meta.json` |
-| 계약 | `AI/app/CROWD/SERVING_CONTRACT.md` 8·8.1·8.2절 · 통지 07 |
-| 하루치 | 21,684행 · 링크 556 · 역 286 · 2.9 MB (2026-09-20 실측) |
+| 만드는 곳 | AI CROWD 배치 `crowd-batch-predict.timer` — **워커 노드 `j15a104a`**. 매일 09:30 KST(+랜덤 지연 ≤5분), 오늘·내일 2일치. 컨트롤플레인 `a104` 에는 없다 |
+| 서버 경로 | `ubuntu@j15a104a.p.ssafy.io:~/Soomgil-INFRA-ai-data-monitoring/AI/data/CROWD/serving/` |
+| 파일 | `predictions_<YYYY-MM-DD>_<HHMMSS>.csv` + **사이드카** `.meta.json`. `<YYYY-MM-DD>` 는 **대상 날짜**, `<HHMMSS>` 는 **UTC 생성 시각** — 생성 날짜는 이름에 없다 |
+| 같은 폴더의 다른 것 | `predictions_<날짜>.meta.json`(상세 meta) · `predictions_<날짜>.parquet` · `predictions_link_<날짜>.parquet` — 이름 규칙으로 걸러진다 |
+| 계약 | `AI/app/CROWD/SERVING_CONTRACT.md` 8·8.1·8.2절 · 통지 07·08 |
+| 하루치 | 21,684행 · 링크 556 · 역 286 · 2.9 MB (2026-09-21 실측, 09-20 샘플과 같다) |
 
 열 10개는 순서까지 회신 04 6.1절에서 확정했다.
 
@@ -40,10 +48,11 @@ pred_date, line, from_station_no, to_station_no, direction, time_slot, level, da
 ```
 
 사이드카는 키가 셋뿐이다. **필수다** — `generated_at` 이 `congestion_pred` 의 NOT NULL 열이고 행 수
-대조에 쓴다.
+대조에 쓴다. 서버가 UTC 라 `+00:00` 으로 오는데, 열이 `TIMESTAMPTZ` 고 파서가 `OffsetDateTime` 이라 시간대
+가정 없이 같은 시점으로 들어간다(통지 08 의 확인 요청에 답한 근거).
 
 ```json
-{"target_date": "2026-09-20", "row_count": 21684, "generated_at": "2026-09-20T23:43:00+09:00"}
+{"target_date": "2026-09-21", "row_count": 21684, "generated_at": "2026-09-21T06:31:13+00:00"}
 ```
 
 ## 값 규칙
@@ -54,11 +63,17 @@ pred_date, line, from_station_no, to_station_no, direction, time_slot, level, da
   온다. 역번호 순서로 재추론하지 않는다 — `from→to` 가 이미 방향 있는 링크다.
 - **`time_slot` 이 48개가 다 오지 않는다.** 운행 없는 새벽(2~10)은 행 자체가 없어 실측 39종이다.
   "48 × 링크 수" 로 가정하면 어긋난다.
-- **한 번 돌 때 날짜가 다른 파일이 둘 생긴다.** 배치 기본이 `--today --tomorrow` 라 오늘·내일
-  2일치를 따로 쓴다. 그래서 로더는 **대상 날짜마다 최신 회차 하나씩을 골라 모두 읽는다** —
-  파일명만 정렬해 하나만 고르면 내일 것만 잡히고, 조회는 `pred_date = 오늘` 로 하므로 화면이 빈다.
-  같은 날짜가 여러 번 만들어졌으면 그중 가장 늦은 회차만 쓴다.
-- **`generated_at` 은 산출 시각, `updated_at` 은 적재 시각이다.** 재적재 판정 근거라 구분한다.
+- **한 번 돌 때 날짜가 다른 파일이 둘 생기고, 같은 대상 날짜가 이틀에 걸쳐 두 번 만들어진다.** 배치 기본이
+  `--today --tomorrow` 라 오늘·내일을 따로 쓰고, 오늘의 "내일치" 는 다음 날 "오늘치" 로 다시 만들어진다.
+  둘 다 00:30 UTC + 랜덤 지연이다. 그래서
+  - 수집 스크립트는 기준일 이후 산출물을 **전부** 받는다. 고르지 않는다.
+  - 로더는 **대상 날짜마다 사이드카 `generated_at` 이 가장 늦은 회차 하나**를 읽는다(같으면 파일명이 뒤인 것).
+    파일명 `_HHMMSS` 로 고르면 안 된다 — UTC 시각만 있고 생성 날짜가 없어, 전날 `_003400` 생성분과 당일
+    `_003100` 생성분 중 **옛것이 뒤로 정렬된다**(304, 트러블슈팅 D16). 당일 생성분은 전날 실적이 lag 로
+    들어간 것이라 그쪽이 이겨야 한다.
+- **`generated_at` 은 산출 시각, `updated_at` 은 적재 시각이다.** 재적재 판정 근거라 구분한다. 한 번에 읽은
+  파일이 여럿이면 `generated_at` 은 그중 가장 늦은 값 하나가 전 행에 들어간다(305 설계). 같은 배치 회차면
+  1초 차이지만, 날짜별 파일이 다른 회차에서 왔다면 앞 날짜 행의 값이 실제보다 늦게 기록된다 — 후속.
 - 적재는 upsert 라 **멱등**이다. 같은 파일을 다시 넣어도 행 수가 늘지 않고 값만 갱신된다.
 
 ### 역번호 매핑
@@ -76,8 +91,37 @@ pred_date, line, from_station_no, to_station_no, direction, time_slot, level, da
 | 사이드카 meta | 없어도 경고만 | **없으면 중단** | `generated_at` 이 NOT NULL 열이라 넣을 값이 없다 |
 | `row_count` 불일치 | 경고 | **중단** | 잘린 파일을 넣으면 그날 예측이 반쪽이 된다 |
 | 마스터에 없는 대상 | 경고 후 적재 | **오류** | 예측 표가 새 역을 만들 원천이 아니다 — 없으면 매핑이 깨진 것 |
+| 수집 스크립트 | 최신 하나 | **기준일 이후 전부** | 배치가 2일치를 만들고 같은 날짜가 두 회차라 이름으로 못 고른다(304) |
 
-## 2026-09-20 적재 결과 (로컬 postgres:16)
+## 2026-09-21 prod 적재 결과 (304)
+
+AI 배치가 워커에 배포된 날(통지 08). 수동 실행분(15:31 KST)을 받아 넣었다.
+
+```
+받음     predictions_2026-09-21_063113.csv · predictions_2026-09-22_063114.csv (+ 사이드카 2) — 원격 10개 중 CSV 2개
+dry-run  원천 43368 행 · 날짜 [2026-09-21, 2026-09-22] · 링크 556 · 슬롯 39종 · 건너뜀 0
+         출처 {model=41496, lookup_line9=1872} · 검증 오류 0
+적재     congestion_pred · 43368 행 · 3723 ms · 11649 행/초   (SSH 터널 경유 · 1회 측정치)
+```
+
+| `pred_date` | 행 | `level` 있음 | 링크 | 슬롯 | 출처 |
+| --- | --- | --- | --- | --- | --- |
+| 2026-09-21 | 21,684 | 21,450 | 556 | 39 | model · lookup_line9 |
+| 2026-09-22 | 21,684 | 21,450 | 556 | 39 | model · lookup_line9 |
+
+노선별 행은 아래 09-20 표와 같다(1호선 702 … 9호선 936). 이번 회차엔 `lookup_negative` 가 없다(09-20 샘플은 172행).
+
+API 확인 — 서울역(150)→강남(222), 16:55 KST:
+
+| | `congestionPercent` | `congestionGrade` | `predictionBasis` |
+| --- | --- | --- | --- |
+| 적재 전 | 35.5 | LOW | `WEEKDAY_AVERAGE` (노선 평균 폴백, `congestion` 표) |
+| 적재 후 | 75.7 | MEDIUM | `RECENT_7D` (링크 예측, `congestion_pred`) |
+
+**성능 수치는 1회 측정치라 `docs/perf/README.md` 규약(워밍업 + 5회, median·p95)을 충족하지 않는다.**
+로컬 직결은 2,014 ms · 21,533 행/초 — 터널 오버헤드가 섞여 있어 나란히 비교하지 않는다.
+
+## 2026-09-20 샘플 적재 결과 (로컬 postgres:16, 305)
 
 ```
 혼잡도 예측: 원천 21684 행 · 날짜 [2026-09-20] · 링크 556 · 슬롯 39종 · 건너뜀 0
@@ -110,24 +154,8 @@ DB 집계가 CSV 실측과 일치한다 — 21,684행 · 값 21,402 · 결측 28
 | 2549→2555 (5호선 마천지선 하선) | 17 | 19.9 | 19.894586335650523 |
 | 4126→4127 (9호선 상선, `lookup_line9`) | 17 | 10.9 | 10.898517080303831 |
 
-멱등성: 같은 파일을 다시 적재해도 21,684행 그대로(660 ms).
-
-### 2일치 확인
-
-배치가 실제로 내놓을 모양(오늘·내일 파일 2개 + 같은 날짜 재생성분 1개)을 만들어 돌렸다.
-
-```
-원천 43368 행 · 날짜 [2026-09-20, 2026-09-21] · 링크 556 · 슬롯 39종 · 건너뜀 0
-적재 congestion_pred · 43368 행 · 1036 ms · 41861 행/초
-```
-
-| `pred_date` | 행 |
-| --- | --- |
-| 2026-09-20 | 21,684 |
-| 2026-09-21 | 21,684 |
-
-날짜별로 최신 회차 하나씩만 골라 두 날짜가 다 들어갔다 — 09-20 은 `_234300`(재생성분)이 쓰이고
-`_093000` 은 무시된다.
+멱등성: 같은 파일을 다시 적재해도 21,684행 그대로(660 ms). 2일치 픽스처(오늘·내일 + 같은 날짜 재생성분)로
+날짜별 하나씩 골라 43,368행이 들어가는 것도 확인했다.
 
 ## 9호선
 
@@ -160,10 +188,10 @@ lookup:line9_2025_2026                                               (22자)
 ## 데이터 흐름
 
 ```
-AI EC2 serving/ ─(crowdpred-fetch.mjs)─▶ AI/data/CROWD/serving/*.csv + .meta.json
+AI 워커 j15a104a serving/ ─(crowdpred-fetch.mjs: 기준일 이후 전부 동기화)─▶ AI/data/CROWD/serving/*.csv + .meta.json
                                                     │
                                                     ▼
-                          CsvCongestionPredSource (최신 파일 선택 · 사이드카 필수 · 행 수 대조)
+                  CsvCongestionPredSource (날짜별 generated_at 최신 회차 · 사이드카 필수 · 행 수 대조)
                                                     │
                                                     ▼
                           CongestionPredParser (역번호·노선 매핑 · 스케일 · 결측 보존)
@@ -178,25 +206,34 @@ AI EC2 serving/ ─(crowdpred-fetch.mjs)─▶ AI/data/CROWD/serving/*.csv + .me
 ## 읽는 쪽에 미치는 영향
 
 `RouteSearchService.congestionPredLookup()` 이 이 표를 읽어 혼잡 회피 경로를 고른다(158, 인웅).
-표가 비어 있던 동안은 조회가 전부 결측으로 빠졌고, 이 적재로 값이 생긴다.
+표가 비어 있던 동안은 조회가 전부 결측으로 빠져 노선 평균(`WEEKDAY_AVERAGE`)으로 폴백했고, 이 적재로
+링크 예측(`RECENT_7D`)이 나온다. 조회가 매 요청 DB 를 읽어 **`be` 재시작 없이 즉시 반영**된다.
 
 **조회 키에서 `direction` 을 빼자고 제안해 두었다**(`.claude/handoff/TO_ROUTE-subway-direction-02.md`).
 `from→to` 가 이미 방향 있는 링크라 `direction` 은 중복 정보이고, 그것을 키로 쓰면 9호선·2호선 지선·
 반전 링크 3개에서 조회가 어긋난다. **적재는 어느 쪽이든 CSV 값을 그대로 넣으므로 영향이 없다.**
+ROUTE 확정 전이다(AI 계약서엔 결정으로 적혔다 — 회신에서 바로잡는다).
 
 ## 테스트
 
 ```bash
-./gradlew test --offline --rerun --tests 'com.ssafy.s15p21a104.load.crowdpred.*' --tests '*MasterValidator*'
+./gradlew test --offline --rerun --tests 'com.ssafy.s15p21a104.load.crowdpred.*'
 node --test "BE/scripts/data/test/crowdpred-fetch.test.mjs"
 ```
 
-파서 12 · 검증 12 · 원천 8 · 스크립트 8. 입력은 실제 conf 표와 AI 에게 받은 실물 278행 샘플
+파서 12 · 검증 12 · 원천 11 · 스크립트 9. 입력은 실제 conf 표와 AI 에게 받은 실물 278행 샘플
 (`docs/external/samples/predictions_2026-09-20_278rows.csv`)이다 — 역번호 체계나 열 구성이 바뀌면
 인라인 픽스처가 아니라 거기서 먼저 깨지게 했다. 하루치 전체(21,684행)는 커밋하지 않는다.
 
+304 에서 더한 것: 원천 `304-S1`(파일명은 뒤지만 `generated_at` 은 앞인 두 회차 → `generated_at` 이 이긴다),
+스크립트 `artifactsSince`(2일치 전부 · 기준일 이전 제외 · 같은 날짜 여러 회차 전부 · 비산출물 제외).
+
 ## 남은 일 (후속)
 
-- **AI 배치 서버 배포**(통지 07 C-5). 그전까지는 매일 갱신되지 않고 2026-09-20 데이터가 고정이다.
-- prod 적재 — MR 병합 후 터널로. `load-prod.md` 절차.
+- **타이머 첫 자동 발화 확인** — 09-21 파일은 15:31 KST 수동 실행분이다. 타이머는 09-22 09:31 KST 에 처음
+  돈다. 그날 `--list` 로 09-22 재생성분과 09-23 신규가 보이는지, 로더가 09-22 는 새 회차를 고르는지 본다
+  (AI 도 같이 본다, 통지 08).
+- 매일 적재 자동화 — 지금은 받기·적재 모두 수동이다.
+- `generated_at` 을 파일별로 기록(위 "값 규칙").
 - ROUTE 조회 키에서 `direction` 제거 여부(위).
+- AI 에 파일명에 생성 일시(UTC)를 넣어 달라고 제안(비차단 — 지금은 우리 쪽에서 사이드카로 흡수한다).

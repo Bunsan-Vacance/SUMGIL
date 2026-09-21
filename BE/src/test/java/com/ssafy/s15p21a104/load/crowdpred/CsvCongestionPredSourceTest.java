@@ -187,4 +187,26 @@ class CsvCongestionPredSourceTest {
         assertTrue(loaded.rows().isEmpty());
         assertTrue(loaded.warnings().stream().anyMatch(w -> w.contains("999999")), () -> "" + loaded.warnings());
     }
+
+    @Test
+    @DisplayName("304-S1: 같은 날짜 두 회차는 파일명이 아니라 generated_at 으로 고른다 — 파일명엔 생성 날짜가 없다")
+    void s1_304_같은_날짜_generated_at_우선(@TempDir Path dir) throws IOException {
+        // 파일명은 predictions_<대상날짜>_<생성시각HHMMSS>.csv 이고 시각은 UTC 다. 배치가 매일 오늘·내일을
+        // 만들어 같은 대상 날짜가 이틀에 걸쳐 두 번 생긴다 — 둘 다 00:30 UTC + 랜덤 지연(≤5분).
+        // 아래는 전날 "내일치"(지터 4분)가 당일 "오늘치"(지터 1분)보다 파일명이 뒤인 경우다.
+        // 당일 생성분(전날 실적이 lag 로 들어간 것)이 이겨야 한다.
+        String rows = TWO_ROWS.replace("2026-09-20", "2026-09-23");
+        write(dir, "predictions_2026-09-23_003400.csv", rows);
+        writeMeta(dir, "predictions_2026-09-23_003400.csv", 2, "2026-09-22T00:34:00+00:00");
+        Path fresh = write(dir, "predictions_2026-09-23_003100.csv", rows.replace("1.7,ok", "88.8,ok"));
+        writeMeta(dir, "predictions_2026-09-23_003100.csv", 2, "2026-09-23T00:31:00+00:00");
+
+        CongestionPredSource.Loaded loaded = source(dir).read();
+
+        assertEquals(2, loaded.rows().size(), "같은 날짜를 두 번 넣지 않는다");
+        assertEquals(fresh, loaded.origin(), "파일명이 앞이라도 generated_at 이 늦은 회차를 쓴다");
+        assertEquals(OffsetDateTime.parse("2026-09-23T00:31:00+00:00"), loaded.meta().generatedAt());
+        assertTrue(loaded.rows().stream().anyMatch(r -> r.level() != null && r.level().doubleValue() == 88.8),
+                () -> "당일 생성분의 값이 들어와야 한다: " + loaded.rows());
+    }
 }
