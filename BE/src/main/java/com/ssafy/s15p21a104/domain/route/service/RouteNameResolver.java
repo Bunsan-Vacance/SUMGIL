@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
+import com.ssafy.s15p21a104.domain.buscongestion.BusArrival;
 import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
@@ -25,6 +26,7 @@ public final class RouteNameResolver {
     private final Function<Set<String>, Map<String, String>> busNames;
     private final BusRouteIndex busRouteIndex;
     private final Function<Set<String>, Map<String, Integer>> busHeadways;
+    private final Function<String, Map<String, BusArrival>> busCongestion;
 
     public RouteNameResolver(
             Function<Set<String>, Map<String, String>> subwayNames,
@@ -37,10 +39,46 @@ public final class RouteNameResolver {
             Function<Set<String>, Map<String, String>> busNames,
             BusRouteIndex busRouteIndex,
             Function<Set<String>, Map<String, Integer>> busHeadways) {
+        this(subwayNames, busNames, busRouteIndex, busHeadways, stopId -> Map.of());
+    }
+
+    /**
+     * @param busCongestion 승차 정류소 ID → 노선별 다음 도착 버스(S15P21A104-297). 실시간 값을
+     *                      붙이지 않는 검색(미래 시각)에서는 빈 맵을 돌려주는 함수를 넘긴다
+     */
+    public RouteNameResolver(
+            Function<Set<String>, Map<String, String>> subwayNames,
+            Function<Set<String>, Map<String, String>> busNames,
+            BusRouteIndex busRouteIndex,
+            Function<Set<String>, Map<String, Integer>> busHeadways,
+            Function<String, Map<String, BusArrival>> busCongestion) {
         this.subwayNames = subwayNames;
         this.busNames = busNames;
         this.busRouteIndex = busRouteIndex;
         this.busHeadways = busHeadways;
+        this.busCongestion = busCongestion == null ? stopId -> Map.of() : busCongestion;
+    }
+
+    /**
+     * 후보 목록에서 BUS 구간의 승차 정류소를 모은다(S15P21A104-297). 실시간 혼잡도를 미리 받아 둘
+     * 대상이고, 버스 구간이 없으면 빈 집합이라 외부 호출이 아예 일어나지 않는다.
+     *
+     * @param responses 후보 목록
+     * @return 승차 정류소 ID 집합(중복 제거)
+     */
+    public static Set<String> busBoardingStops(List<RouteSearchResponse> responses) {
+        Set<String> stops = new java.util.LinkedHashSet<>();
+        if (responses == null) {
+            return stops;
+        }
+        for (RouteSearchResponse response : responses) {
+            for (RouteLegResponse leg : response.legs()) {
+                if (leg.mode() == TravelMode.BUS && leg.fromNodeId() != null && !leg.fromNodeId().isBlank()) {
+                    stops.add(leg.fromNodeId());
+                }
+            }
+        }
+        return stops;
     }
 
     /**
@@ -75,7 +113,13 @@ public final class RouteNameResolver {
                                 && BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID.equals(leg.routeId())) {
                             return withBusOptions(leg);
                         }
-                        return withRouteName(leg, lineNames, busRouteNames);
+                        RouteLegResponse withName = withRouteName(leg, lineNames, busRouteNames);
+                        if (leg.mode() != TravelMode.BUS || leg.routeId() == null) {
+                            return withName;
+                        }
+                        // 노선이 하나로 정해진 BUS 구간도 혼잡도를 붙인다(297).
+                        return withName.withCongestionGrade(
+                                congestionGrade(leg.fromNodeId(), Set.of(leg.routeId())));
                     })
                     .toList();
             named.add(new RouteSearchResponse(
@@ -108,8 +152,41 @@ public final class RouteNameResolver {
                 leg.routeId(), leg.minutes(),
                 leg.geometry(), leg.geometryStatus(),
                 leg.distanceMeters(), null,
-                RouteOptionResponse.of(optionList, names, headways)
+                RouteOptionResponse.of(optionList, names, headways),
+                congestionGrade(leg.fromNodeId(), optionIds)
         );
+    }
+
+    /**
+     * 구간 대표 혼잡 등급(S15P21A104-297) — 후보 노선 중 <b>가장 먼저 오는</b> 버스의 등급이다.
+     * 사용자가 실제로 탈 버스이기 때문이다.
+     *
+     * <p>조회가 터져도 경로 응답을 깨뜨리지 않는다. 값을 모르면 null 이고 FE 는 "정보 없음" 이 된다.
+     *
+     * @return 등급 이름. 후보 중 값을 아는 노선이 없거나 조회가 실패하면 null
+     */
+    private String congestionGrade(String boardingStopId, Set<String> candidateRouteIds) {
+        if (boardingStopId == null || boardingStopId.isBlank() || candidateRouteIds.isEmpty()) {
+            return null;
+        }
+        Map<String, BusArrival> arrivals;
+        try {
+            arrivals = busCongestion.apply(boardingStopId);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (arrivals == null || arrivals.isEmpty()) {
+            return null;
+        }
+        BusArrival soonest = null;
+        for (String routeId : candidateRouteIds) {
+            BusArrival arrival = arrivals.get(routeId);
+            if (arrival == null) {
+                continue;
+            }
+            soonest = soonest == null ? arrival : soonest.soonerOf(arrival);
+        }
+        return soonest == null ? null : soonest.grade().name();
     }
 
     private static RouteLegResponse withRouteName(
