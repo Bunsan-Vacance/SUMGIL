@@ -1,4 +1,4 @@
--- V8: congestion_pred.predictor_version 폭 확대 (S15P21A104-305).
+-- V9: congestion_pred.predictor_version 폭 확대 (S15P21A104-305).
 --
 -- V7 은 통지 04 1.2절 DDL 대로 VARCHAR(32) 로 뒀는데, AI 가 실제로 보내는 값이 67자다:
 --   lightgbm:festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025   (67자)

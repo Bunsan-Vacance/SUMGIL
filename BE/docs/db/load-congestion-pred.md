@@ -141,7 +141,7 @@ AI 가 9호선 2·3단계 13역(언주 4126 ~ 중앙보훈병원 4138)을 편입
 
 ## 스키마 변경
 
-`V8__widen_congestion_pred_predictor_version.sql` — `predictor_version` `VARCHAR(32)` → `VARCHAR(128)`.
+`V9__widen_congestion_pred_predictor_version.sql` — `predictor_version` `VARCHAR(32)` → `VARCHAR(128)`.
 
 V7(통지 04 1.2절 DDL)이 32로 잡혀 있었는데 실값이 67자다.
 
