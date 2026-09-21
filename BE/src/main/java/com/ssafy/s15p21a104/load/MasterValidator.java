@@ -6,6 +6,7 @@ import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
+import com.ssafy.s15p21a104.load.crowdpred.CongestionPredRow;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -32,6 +33,13 @@ public final class MasterValidator {
     static final int PREDICTION_SOURCE_MAX = 32;
     /** 배차간격 상한. 하루(1,440분)를 넘으면 원천 단위가 초로 바뀐 것이다. */
     static final int MAX_HEADWAY_MIN = 1440;
+    /** V7 {@code congestion_pred} 의 data_status·pred_source 열 폭. */
+    static final int STATUS_MAX = 32;
+    /**
+     * {@code congestion_pred.direction} 이 가질 수 있는 값. 2호선 본선은 내선/외선, 지선은 상선/하선이라
+     * 노선으로 가를 수 없다 — 원천이 주는 값을 그대로 받되 오타만 막는다(AI 통지 07).
+     */
+    private static final Set<String> CONGESTION_PRED_DIRECTIONS = Set.of("상선", "하선", "내선", "외선");
     /** 적재 대여소가 마스터에 없을 때 경고에 담는 예시 수. */
     private static final int EXAMPLE_LIMIT = 10;
 
@@ -199,6 +207,77 @@ public final class MasterValidator {
 
         if (!rows.isEmpty() && withHeadway == 0) {
             warnings.add("배차간격이 있는 노선이 하나도 없다 (" + rows.size() + "행 전부 값 없음) — 수집이 실패했을 수 있다");
+        }
+        return new ValidationReport(errors, warnings);
+    }
+
+    /**
+     * 혼잡도 예측 적재 전 검증 (S15P21A104-305).
+     *
+     * <p><b>마스터에 없는 역·노선은 오류다.</b> {@link #validateBikeStockPred}(경고 후 적재)와 반대인데
+     * 원천의 성격이 다르기 때문이다 — 재고 예측 표는 대여소 마스터보다 최근이라 신설 대여소가 정상적으로
+     * 섞이지만, 혼잡도 예측은 우리가 이미 가진 역 안에서만 나온다. 없다는 것은 역번호 매핑이 깨졌다는
+     * 뜻이고, 그대로 넣으면 조회가 안 되는 행이 조용히 쌓인다.
+     *
+     * <p>{@code level} 은 <b>null 을 허용하고 상한도 없다</b>. 결측은 {@code data_status} 가 이유를 말하고,
+     * 보정 혼잡도는 100 을 넘을 수 있다(실측 최대 164.4). 음수만 막는다.
+     *
+     * @param knownStationIds     적재된 역 ID. <b>비어 있으면 대조를 건너뛴다</b> — dry-run 은 DB 를 읽지 않는다
+     * @param knownLineIds        적재된 노선 ID. 같은 규칙
+     * @param predictorVersionMax {@code predictor_version} 열 폭(V8 기준 128). DB 가 적재 도중
+     *                            "value too long" 으로 끊기기 전에 여기서 먼저 막는다
+     */
+    public static ValidationReport validateCongestionPred(List<CongestionPredRow> rows,
+                                                          Set<String> knownStationIds,
+                                                          Set<String> knownLineIds,
+                                                          int predictorVersionMax) {
+        List<String> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        Set<String> keys = new HashSet<>();
+        Set<String> unknownStations = new LinkedHashSet<>();
+        Set<String> unknownLines = new LinkedHashSet<>();
+
+        for (CongestionPredRow r : rows) {
+            String label = r.predDate() + " " + r.fromStationId() + "→" + r.toStationId()
+                    + " " + r.lineId() + " " + r.direction() + " slot=" + r.timeSlot();
+            // 표의 기본키와 같은 조합이다 — to 가 들어 있어 강동처럼 한 역에서 여러 링크가 나가도 유일하다.
+            String key = r.predDate() + "|" + r.fromStationId() + "|" + r.toStationId()
+                    + "|" + r.lineId() + "|" + r.direction() + "|" + r.timeSlot();
+            if (!keys.add(key)) {
+                errors.add("같은 (날짜, 링크, 노선, 방향, 슬롯) 이 두 번: " + label);
+                continue;
+            }
+            if (r.timeSlot() < 0 || r.timeSlot() > MAX_TIME_SLOT) {
+                errors.add("시간 슬롯이 0~" + MAX_TIME_SLOT + " 밖: " + label);
+            }
+            if (!CONGESTION_PRED_DIRECTIONS.contains(r.direction())) {
+                errors.add("방향이 상선·하선·내선·외선 밖: " + label + " ('" + r.direction() + "')");
+            }
+            if (r.level() != null && r.level().signum() < 0) {
+                errors.add("혼잡도가 음수: " + label + " (" + r.level() + ")");
+            }
+            checkName("data_status", label, r.dataStatus(), STATUS_MAX, errors);
+            checkName("pred_source", label, r.predSource(), STATUS_MAX, errors);
+            checkName("predictor_version", label, r.predictorVersion(), predictorVersionMax, errors);
+            if (!knownStationIds.isEmpty()) {
+                if (!knownStationIds.contains(r.fromStationId())) {
+                    unknownStations.add(r.fromStationId());
+                }
+                if (!knownStationIds.contains(r.toStationId())) {
+                    unknownStations.add(r.toStationId());
+                }
+            }
+            if (!knownLineIds.isEmpty() && !knownLineIds.contains(r.lineId())) {
+                unknownLines.add(r.lineId());
+            }
+        }
+
+        if (!unknownStations.isEmpty()) {
+            errors.add("역 마스터에 없는 역 " + unknownStations.size() + "곳을 예측이 가리킨다 (역번호 매핑을 확인한다): "
+                    + head(List.copyOf(unknownStations)));
+        }
+        if (!unknownLines.isEmpty()) {
+            errors.add("노선 마스터에 없는 노선 " + unknownLines.size() + "종: " + head(List.copyOf(unknownLines)));
         }
         return new ValidationReport(errors, warnings);
     }

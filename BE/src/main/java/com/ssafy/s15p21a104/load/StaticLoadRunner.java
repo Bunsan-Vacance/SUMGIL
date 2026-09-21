@@ -10,6 +10,7 @@ import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.bikepred.BikeStockPredSource;
 import com.ssafy.s15p21a104.load.crowd.CongestionParser;
 import com.ssafy.s15p21a104.load.crowd.CrowdStationCodes;
+import com.ssafy.s15p21a104.load.crowdpred.CongestionPredSource;
 import com.ssafy.s15p21a104.load.csv.CsvTable;
 import com.ssafy.s15p21a104.load.railgeometry.RailGeometryParser;
 import com.ssafy.s15p21a104.load.subway.DirectedSegment;
@@ -112,6 +113,11 @@ public class StaticLoadRunner implements ApplicationRunner {
     static final String BIKE_FILE = "seoul-bike-stations_202606.csv";
     /** 서울교통공사 지하철혼잡도정보(공공데이터포털 15071311). 1~8호선 요일·30분 슬롯별 혼잡도 %. */
     static final String CONGESTION_FILE = "seoulmetro-congestion_20260630.csv";
+    /**
+     * {@code congestion_pred.predictor_version} 열 폭 (V8). AI 아티팩트 이름이 실측 67자라
+     * V7 의 32 로는 안 들어갔다. DB 가 적재 도중 끊기기 전에 검증기가 먼저 막는 기준이다.
+     */
+    static final int PREDICTOR_VERSION_MAX = 128;
 
     private final LoadProperties props;
     private final UpsertWriter writer;
@@ -127,8 +133,9 @@ public class StaticLoadRunner implements ApplicationRunner {
                 case "railgeometry" -> loadRailGeometry();
                 case "congestion" -> loadCongestion();
                 case "bikepred" -> loadBikeStockPred();
+                case "crowdpred" -> loadCongestionPred();
                 case "busheadway" -> loadBusHeadway();
-                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred, busheadway)", source);
+                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred, crowdpred, busheadway)", source);
             }
         }
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
@@ -415,6 +422,41 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         timed("bike_stock_pred", () -> writer.upsertBikeStockPred(loaded.rows()));
         log.info("재고 예측 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 혼잡도 예측. AI CROWD 배치의 링크 단위 산출물(날짜 × 링크 × 방향 × 슬롯)을 그대로 옮긴다 (S15P21A104-305).
+     * <p>
+     * 역번호 매핑은 혼잡도 통계 적재와 <b>같은 표</b>를 쓴다 — 원천이 같은 서울교통공사 외부역코드 체계다.
+     * {@code direction} 은 원천 값을 그대로 넣는다(2호선 지선이 상선/하선으로 온다 — AI 통지 07).
+     * <p>
+     * {@code generated_at} 은 산출물 사이드카 값이라 적재 시각과 다르다 — 재적재 판정 근거다.
+     * 사이드카가 없거나 행 수가 어긋나면 원천 단계에서 멈춘다(잘린 파일을 넣지 않는다).
+     */
+    private void loadCongestionPred() throws IOException {
+        long started = System.nanoTime();
+
+        CrowdStationCodes codes = CrowdStationCodes.from(
+                csv(SUBWAY_DIR, "conf/station-ids.csv").rows(), csv(CROWD_DIR, "conf/crowd-station-aliases.csv").rows());
+        CongestionPredSource.Loaded loaded = props.crowdpred().toSource(codes).read();
+        logWarnings("혼잡도 예측 파싱", loaded.warnings());
+        var st = loaded.stats();
+        log.info("혼잡도 예측: 원천 {} 행 · 날짜 {} · 링크 {} · 슬롯 {}종 · 건너뜀 {} · 적재 대상 {} 행 · 출처 {} · 산출 {} ({})",
+                st.sourceRows(), st.predDates(), st.links(), st.timeSlots(), st.skipped(), loaded.rows().size(),
+                st.predSources(), loaded.meta().generatedAt(), loaded.origin());
+
+        // dry-run 은 DB 를 읽지 않으므로 마스터 대조를 건너뛴다 (검증기가 빈 집합을 그렇게 다룬다).
+        Set<String> stationIds = props.dryRun() ? Set.of() : writer.existingStationIds();
+        Set<String> lineIds = props.dryRun() ? Set.of() : writer.existingLineIds();
+        ValidationReport report = MasterValidator.validateCongestionPred(
+                loaded.rows(), stationIds, lineIds, PREDICTOR_VERSION_MAX);
+        logWarnings("검증", report.warnings());
+        if (!abortIfErrors("혼잡도 예측", report) || dryRun("혼잡도 예측", started)) {
+            return;
+        }
+
+        timed("congestion_pred", () -> writer.upsertCongestionPred(loaded.rows(), loaded.meta().generatedAt()));
+        log.info("혼잡도 예측 적재 완료 ({} ms)", elapsedMs(started));
     }
 
     /**

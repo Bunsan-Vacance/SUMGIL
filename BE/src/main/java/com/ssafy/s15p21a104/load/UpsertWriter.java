@@ -6,6 +6,7 @@ import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
+import com.ssafy.s15p21a104.load.crowdpred.CongestionPredRow;
 import com.ssafy.s15p21a104.load.railgeometry.RailLinkGeometryRow;
 import com.ssafy.s15p21a104.load.railgeometry.RailNodeRow;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
@@ -13,6 +14,7 @@ import com.ssafy.s15p21a104.load.subway.LineRow;
 import com.ssafy.s15p21a104.load.subway.StationRow;
 import com.ssafy.s15p21a104.load.subway.TransferMetaRow;
 import java.sql.Types;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -107,6 +109,22 @@ public class UpsertWriter {
             UPDATE bus_route SET headway_min = ?, updated_at = now() WHERE route_id = ?
             """;
 
+    /**
+     * 혼잡도 예측 (S15P21A104-305). 키에 {@code to_station_id} 가 있어 강동처럼 한 역에서 여러 링크가
+     * 나가도 유일하다. {@code generated_at} 은 산출물 사이드카 값을 그대로 넣는다 — 재적재 판정 근거라
+     * 적재 시각({@code updated_at})과 구분해야 한다.
+     */
+    private static final String UPSERT_CONGESTION_PRED = """
+            INSERT INTO congestion_pred
+              (pred_date, from_station_id, to_station_id, line_id, direction, time_slot,
+               level, data_status, pred_source, predictor_version, generated_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+            ON CONFLICT (pred_date, from_station_id, to_station_id, line_id, direction, time_slot) DO UPDATE
+              SET level = EXCLUDED.level, data_status = EXCLUDED.data_status,
+                  pred_source = EXCLUDED.pred_source, predictor_version = EXCLUDED.predictor_version,
+                  generated_at = EXCLUDED.generated_at, updated_at = now()
+            """;
+
     private final JdbcTemplate jdbc;
 
     public UpsertWriter(JdbcTemplate jdbc) {
@@ -139,6 +157,29 @@ public class UpsertWriter {
             ps.setBigDecimal(6, r.pFull());
             ps.setString(7, r.source());
             ps.setObject(8, r.predictionSource(), Types.VARCHAR);
+        });
+        return rows.size();
+    }
+
+    /**
+     * 혼잡도 예측 적재 (S15P21A104-305). upsert 라 멱등이다 — 같은 날짜 표를 다시 받아 넣어도
+     * 행 수가 늘지 않고 값만 갱신된다.
+     *
+     * @param generatedAt 산출물 사이드카의 {@code generated_at}. 모든 행이 같은 값을 갖는다
+     */
+    public int upsertCongestionPred(List<CongestionPredRow> rows, OffsetDateTime generatedAt) {
+        jdbc.batchUpdate(UPSERT_CONGESTION_PRED, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setObject(1, r.predDate());
+            ps.setString(2, r.fromStationId());
+            ps.setString(3, r.toStationId());
+            ps.setString(4, r.lineId());
+            ps.setString(5, r.direction());
+            ps.setInt(6, r.timeSlot());
+            ps.setBigDecimal(7, r.level());          // null 이면 그대로 NULL — 결측을 0 으로 채우지 않는다
+            ps.setString(8, r.dataStatus());
+            ps.setString(9, r.predSource());
+            ps.setString(10, r.predictorVersion());
+            ps.setObject(11, generatedAt);
         });
         return rows.size();
     }
