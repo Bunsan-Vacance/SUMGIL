@@ -5,7 +5,8 @@
 > **이 문서는 프로덕션 출력의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
 > `batch_predict.OUTPUT_COLS`·`TRAIN_OUTPUT_COLS`·`LINK_OUTPUT_COLS` · `schemas.py`의 응답 모델 ·
 > `data_status` 값 · 등급 임계값(`crowd_grade_thresholds`) · 예측기 계열 추가·교체 · 배율표 판 교체 ·
-> API 경로·파라미터. 모델 성능·피처 세트는 이 문서가 아니라 `pipeline/MODEL_REGISTRY.md`에 적는다.
+> API 경로·파라미터 · **노선 커버리지**(10절, `crowd_line9_serving` 등으로 포함 노선이 바뀌면).
+> 모델 성능·피처 세트는 이 문서가 아니라 `pipeline/MODEL_REGISTRY.md`에 적는다.
 >
 > **이 문서는 테스트가 강제한다**(197 C부). `test/CROWD/test_crowd_serving_contract.py`가 1절 컬럼 표·
 > 2절 상태 표·3절 메타 표·4절 경로·파라미터·응답 예시·7절 열차 표 컬럼·8절 링크 표 컬럼을 각각
@@ -56,7 +57,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `data_status` | str | 셀 상태, 2절 | 없음 |
 | `boarding_pred` | float64 | 승차 예측(명), **1시간 값**. 0 미만은 lookup 값으로 대체됨(197) | 있음 |
 | `alighting_pred` | float64 | 하차 예측(명), **1시간 값**. 0 미만은 lookup 값으로 대체됨(197) | 있음 |
-| `pred_source` | str | `model`(정상) / `lookup_negative`(그 슬롯의 승차·하차 예측 중 하나라도 음수라 lookup 값으로 대체됨, 197) | 없음 |
+| `pred_source` | str | `model`(정상) / `lookup_negative`(그 슬롯의 승차·하차 예측 중 하나라도 음수라 lookup 값으로 대체됨, 197) / `lookup_line9`(9호선 2·3단계 — 모델에 넣지 않고 항상 lookup 기준선만 씀, 10절) | 없음 |
 | `boarding_lookup` | float64 | 기준선(요일유형×역×시간대 평균) 승차 | 있음 |
 | `alighting_lookup` | float64 | 기준선 하차 | 있음 |
 | `actual_boarding` | float64 | 실측 승차 — **과거 날짜만** 채워짐 | 있음 |
@@ -145,7 +146,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 
 ## 3. 배치 메타 — `.meta.json`
 
-경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다. 메타 키는 **30개**다(197까지 21개 + 200에서 이벤트 커버리지 2개 추가 + 239에서 열차·노드 표 관련 5개 추가 + 244에서 링크 표 관련 2개 추가).
+경로: `predictions_{YYYY-MM-DD}.meta.json`. 표가 **어떤 조건으로 만들어졌는지**를 담는다. 운영 모니터링·화면 주의문구의 근거다. 메타 키는 **32개**다(197까지 21개 + 200에서 이벤트 커버리지 2개 추가 + 239에서 열차·노드 표 관련 5개 추가 + 244에서 링크 표 관련 2개 추가 + 9호선 lookup 편입에서 2개 추가).
 
 | 키 | 예시 | 의미 |
 | --- | --- | --- |
@@ -178,6 +179,8 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `train_mass_gap` | `3.6e-12` | (239) 슬롯 재차인원 합과 열차 배분 합의 최대 절대오차(질량 보존 확인, 7절). `train_table=false`면 `null` |
 | `link_table` | `false` | (244) 링크(from/to) 표(`predictions_link_{date}.parquet` + BE CSV, 8절)를 이번에 만들었는지. 기본 `false`(설정값 `crowd_link_table`, CLI `--link-table`/`--no-link-table`로 이번 실행만 덮어쓸 수 있다) |
 | `link_csv_rows` | `21606` | (244) BE 적재용 CSV에 실제로 쓴 행 수(BE 요청 "산출 행 수" — 전송 손상 검증에 쓴다). `link_table=false`면 `null` |
+| `line9_included` | `true` | 9호선 2·3단계 13역을 이번 표에 편입했는지(설정값 `crowd_line9_serving`, CLI `--line9`/`--no-line9`로 이번 실행만 덮어쓸 수 있다). `true`여도 그 13역은 항상 `pred_source="lookup_line9"`다(10절) |
+| `line9_rows` | `1014` | 이번 표에서 `line="9호선"`인 행 수(13역 × 2방향 × 39개 30분 슬롯 — `~06` 버킷은 30분 슬롯이 1개뿐이라 20슬롯 × 2가 아니다, 2절 참고). `line9_included=false`면 `0` |
 | `generated_at` | `"2026-09-17T15:24:24+09:00"` | 생성 시각(KST, ISO8601 오프셋 포함). (244) 같은 실행에서 링크 CSV 파일명의 `_HHMMSS`도 이 시각과 같다 |
 
 ---
@@ -407,7 +410,7 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 | `congestion_pct` | float64 | 보정 혼잡도(%). 1절과 같은 값, 같은 이름 | **있음** — 배율표 결측 |
 | `data_status` | str | 슬롯 표(2절)와 같은 값을 상속 | 없음 |
 | `pred_source` | str | 슬롯 표(`model`/`lookup_negative`)와 같은 값을 상속 | 없음 |
-| `predictor_version` | str | 슬롯 표 메타와 같은 값. **행 단위 컬럼**(라우팅이 행 단위 배정을 열어둘 수 있어 BE가 행 단위로 요청, `FROME_BE-crowd-pred-load-path.md` 1.2절) | 없음 |
+| `predictor_version` | str | 그 행을 만든 예측기 버전. **행 단위 컬럼**(라우팅이 행 단위 배정을 열어둘 수 있어 BE가 행 단위로 요청, `FROME_BE-crowd-pred-load-path.md` 1.2절) — 1~8호선은 슬롯 표 메타와 같은 값이고, **9호선 2·3단계 행만 `lookup:line9_2025_2026`**이다(모델을 타지 않는다, 10절) | 없음 |
 
 **경계는 조인에서 자동으로 빠진다.** `(line, segment, station_no, direction) -> to_station_no`
 대응표를 세그먼트 위상에서 한 번 만들고 슬롯 표에 **이너 조인**한다(`batch_predict.to_link_table`) —
@@ -422,9 +425,11 @@ prefix `/crowd`. 로직은 `service.py`, 응답 모델은 `schemas.py`.
 
 ### 8.1 BE CSV
 
-경로: `AI/data/CROWD/serving/predictions_link_{YYYY-MM-DD}_{HHMMSS}.csv`. 파일명에 생성 시각을
-넣는 이유는 같은 날짜를 다시 만들어도(배율표·모델 교체) 파일명이 겹치지 않게 하기 위해서다 —
-`_HHMMSS`는 그 실행의 `meta.generated_at`과 같은 순간이다(`FROME_BE-crowd-pred-load-path.md`
+경로: `AI/data/CROWD/serving/predictions_{YYYY-MM-DD}_{HHMMSS}.csv`. **`link_` 토큰이 없다** —
+parquet(`predictions_link_{date}.parquet`)과 이름을 다르게 가져가려는 것이 아니라 BE가 명시적으로
+요청한 이름이다(`FROME_BE-crowd-pred-load-path.md` 6.3절 제안, 이번 통지에서 재확인). 파일명에
+생성 시각을 넣는 이유는 같은 날짜를 다시 만들어도(배율표·모델 교체) 파일명이 겹치지 않게 하기
+위해서다 — `_HHMMSS`는 그 실행의 `meta.generated_at`과 같은 순간이다(`FROME_BE-crowd-pred-load-path.md`
 6.3절). 헤더는 BE가 확정한 순서 그대로다(같은 문서 6.1절):
 
 ```
@@ -439,6 +444,32 @@ parquet 컬럼과의 대응은 이름만 바뀌고 값은 그대로다 — `date
 더하는 다른 함수)를 재사용하면 `00:00`/`00:30`이 48/49가 되어 틀리므로, `batch_predict.py`는
 `_slot30_to_index`로 이 식을 직접 계산한다.
 
+### 8.2 CSV 사이드카 meta — `predictions_{YYYY-MM-DD}_{HHMMSS}.meta.json`
+
+CSV를 쓸 때마다 **같은 basename**의 사이드카 meta를 함께 쓴다(`write_link_csv_sidecar_meta`).
+키는 3개뿐이다:
+
+```json
+{"target_date": "2026-09-20", "row_count": 21684, "generated_at": "2026-09-20T13:31:39+09:00"}
+```
+
+- `target_date` — 대상 날짜(`YYYY-MM-DD`)
+- `row_count` — 그 CSV에 실제로 쓴 행 수. BE가 요청한 이름 그대로다(6.2절 "산출 행 수")
+- `generated_at` — 생성 시각(KST, ISO8601). 파일명의 `_HHMMSS`와 `predictions_{date}.meta.json`의
+  `generated_at`(3절)이 가리키는 것과 같은 순간이다
+
+(표가 아니라 목록인 이유: 8절 표의 첫 칸은 계약 테스트가 `LINK_OUTPUT_COLS`와 1:1로 대조하므로,
+링크 표 컬럼이 아닌 키를 같은 절에서 표로 쓰면 그 대조가 깨진다.)
+
+**따로 필요한 이유**: 3절의 풍부한 `.meta.json`(32키, `link_csv_rows` 포함)은 **날짜당 하나**뿐이라
+같은 날짜를 재생성하면 덮어써진다. CSV는 `_HHMMSS`로 여러 개 쌓이므로, 재생성 후에는 이전 CSV가
+자신의 짝 meta를 잃고 남은 3절 meta의 `link_csv_rows`는 최신 CSV의 값이 된다 — BE의 행 수 대조
+(전송 끊김 검출, 6.2절)가 정확히 이 상황을 잡아야 하는데 날짜당 meta 하나로는 잡을 수 없다. CSV
+파일마다 독립된 사이드카를 두면 어떤 CSV를 다시 열어도 그 순간의 `row_count`를 확인할 수 있다.
+3절의 `predictions_{date}.meta.json`은 이 사이드카와 별개로 그대로 유지된다(32키·`link_csv_rows`
+포함, 변경 없음) — 3절 meta는 "이번 배치 실행이 어떤 조건으로 만들어졌는지"를, 사이드카는
+"이 CSV 파일 하나가 몇 행인지"를 각각 답한다.
+
 ---
 
 ## 9. 운영 배치 — 스케줄·파일 수명
@@ -447,11 +478,57 @@ parquet 컬럼과의 대응은 이름만 바뀌고 값은 그대로다 — `date
   **오늘·내일 2일치**다.
 - 산출 경로는 `AI/data/CROWD/serving/`이고, 서버 절대 경로는
   `/home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI/data/CROWD/serving`이다.
-- 같은 날짜가 여러 번 만들어질 수 있다(재실행·배율표/모델 교체). parquet은 덮어쓰이고
-  **CSV는 `_HHMMSS`가 달라 쌓인다** — BE는 파일명 사전순 최신을 고른다.
+- 같은 날짜가 여러 번 만들어질 수 있다(재실행·배율표/모델 교체). parquet과 날짜당 하나인
+  `predictions_{date}.meta.json`(3절)은 덮어쓰이고, **CSV와 그 사이드카 meta(8.2절)는 `_HHMMSS`가
+  달라 짝을 이룬 채로 같이 쌓인다** — BE는 파일명 사전순 최신을 고른다. BE의 fetch glob은
+  `predictions_*.csv`라 사이드카(`.meta.json`)는 걸리지 않는다.
 - 재적재 판정은 `meta.generated_at`이다. 적재는 BE load job이 수동으로 하며 upsert라 멱등이다.
 - 오래된 CSV 정리 규칙은 **두지 않는다**(BE와 합의). 필요해지면 그때 옵션으로 붙인다.
 - 이 절이 바뀌면(시각·경로·파일명 규칙) BE 통지문을 보낸다.
+
+---
+
+## 10. 노선 커버리지 — 어느 호선이 들어있는가
+
+이 문서에 그동안 "어느 호선이 들어있는지"가 한 줄도 없었다 — BE가 경로 탐색을 만들며 빈 hop을
+만나도 원인을 알 수 없는 상태였다. 아래가 전체 스코프다.
+
+| 구분 | 내용 |
+| --- | --- |
+| **포함** | 1~8호선(서울교통공사) 전 구간 + **9호선 2·3단계 13역**(언주 4126 ~ 중앙보훈병원 4138) |
+| **제외** | 9호선 **1단계**(개화~신논현, 운영사가 서울시메트로9호선이라는 민간사업자라 일별 승하차 원천이 없다) · 수인분당선·신분당선·경의중앙선·공항철도·우이신설선·신림선 등 **타 운영사** 노선 전부 |
+| **절단면** | 1~8호선 중 서울교통공사 관할이 아닌 구간과 맞닿는 노선은 그 접점에서 잘린다 — 예: 1호선은 서울역~청량리(양 끝 코레일), 4호선은 불암산~남태령(진접·안산 방면 코레일)만. 노선별 절단 근거는 `DATA_ENGINE/conf/line_topology.yaml`의 `truncated: true` 세그먼트 주석 참고 |
+
+### 9호선은 항상 lookup 기준선이다
+
+9호선 2·3단계는 **D−1 실시간 승하차 원천이 없다.** D−1 이력을 채우는 수집기
+(`DATA_ENGINE/collect/subway_ridership_daily.py`, 열린데이터광장 `getStnPsgr`)가 실제로
+받아오는 원문의 `lineNm`에 9호선이 실리지 않아 수집 결과가 그냥 0건이다 — 이 저장소 쪽에서
+호선을 걸러낸 필터가 아니라 원천 자체의 한계다. 그래서 9호선 13역은:
+
+- **모델 추론에 들어가지 않는다 — 넣어 봤고, lookup보다 낫지 않았다.** 자체 lookup 기준선
+  (day_type×station_no×time_slot 평균, `batch_predict.predict_line9_day`)으로만 예측하고
+  `pred_source="lookup_line9"`로 항상 구분된다(1절).
+  근거는 `validation/CROWD/line9-model-check/RESULTS.md`다 — 9호선 패널을 학습 패널에 합쳐
+  재학습하면 `station_no`는 학습된 범주가 되지만(그러므로 "미학습 범주"는 원인이 아니라 결과다),
+  그렇게 만든 모델의 9호선 `no_lag` 성능은 lookup 대비 RMSE **+0.04~0.06%**에 그치고
+  **하차 MAE는 −0.159% [−0.248, −0.086]로 유의하게 나빠진다**(3b절). 9호선 역에 경기·축제를
+  매핑한 이벤트 표를 따로 만들어 붙여도 결과가 같다.
+  이유는 구조적이다: 배포 피처 13개 중 6개가 시차인데 9호선은 영구 `no_lag`이라 그 6개가 전부
+  죽고, 남는 것은 이벤트 5 + `station_no` + `time_slot`뿐이다 — lookup이 이미
+  (day_type × station_no × time_slot) 평균이라 잔차 모델이 얹을 수 있는 정보가 사실상 없다.
+  **D−1 원천이 9호선까지 열리기 전에는 이 판정이 바뀌지 않는다.**
+- **`lag1d_available`과 무관하다.** 이 필드는 1~8호선 모델 라우팅(`routing.py`)이 이력
+  완비 여부를 판정하는 값이라 9호선에는 애초에 적용되지 않는다 — 9호선 행은 `lag1d_available`
+  값과 상관없이 항상 같은 lookup 경로를 탄다.
+- 슬롯 표·링크 표(8절) 편입 여부는 `crowd_line9_serving`(기본 켜짐)으로 끌 수 있고, 그 값은
+  `.meta.json`의 `line9_included`·`line9_rows`(3절)로 노출된다.
+
+### BE 조치
+
+경로 탐색 중 제외 노선(9호선 1단계, 타 운영사)이 hop에 끼면 AI 서빙 산출물 자체가 그 구간을
+전혀 내려주지 않는다 — 표에 그 역·구간이 없다. **그 hop은 "혼잡도 미상"으로 처리해야 한다**
+(0이나 이웃 구간 값으로 채우지 말 것 — 2절과 같은 원칙 8).
 
 ---
 

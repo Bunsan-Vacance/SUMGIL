@@ -9,22 +9,33 @@
 세그먼트는 모든 역이 양방향 타깃을 가져 행이 하나도 빠지지 않는지, (3) 강동류 분기점에서 세그먼트
 수만큼 서로 다른 `to_station_no`를 가진 별개 행이 나오고 `link_ambiguous` 컬럼 자체가 없는지,
 (4) 배율표 결측(NaN) 행도 실제 이웃이 있으면 버려지지 않는지, (5) `write_link_csv`가 BE가 확정한
-헤더·슬롯 인덱스·결측 표현으로 CSV를 쓰는지, (6) `validated_meta`가 새 메타 키 2개를 요구하는지다.
+헤더·슬롯 인덱스·결측 표현으로 CSV를 쓰는지, (6) `validated_meta`가 새 메타 키 2개를 요구하는지,
+(7) 9호선 2·3단계 행이 `pred_source`·`predictor_version` 양쪽에서 모델 행과 구분되는지,
+(8) BE 적재 규격인 CSV 파일명(`link_` 토큰 없음)과 그 짝 사이드카 meta(`row_count`·`generated_at`)가
+계약대로 나오는지다.
 """
 
 from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from app.CROWD.pipeline.batch_predict import (
+    LINE9_PRED_SOURCE,
+    LINE9_PREDICTOR_VERSION,
     META_KEYS,
     _congestion_table_full,
     _slot30_to_index,
+    link_csv_path,
     to_link_table,
     validated_meta,
     write_link_csv,
+    write_link_csv_sidecar_meta,
 )
 from app.CROWD.pipeline.congestion import ASCENDING, CIRCULAR_LABELS, DESCENDING
 
@@ -347,3 +358,161 @@ def test_validated_meta_accepts_link_table_keys_and_rejects_missing_one():
     del missing_other["link_table"]
     with pytest.raises(RuntimeError):
         validated_meta(missing_other)
+
+
+# ── 7. 9호선 2·3단계 — lookup 전용 행의 출처 표시 ──
+# 역 목록을 **역번호 내림차순**으로 둔다: `line_topology.yaml`의 9호선이 그렇게 돼 있어서
+# "리스트상 다음"(= ASCENDING = 하선)이 역번호 감소 방향이 된다. 실측 산출물에서
+# 종합운동장(4130) → 봉은사(4129)가 하선으로 나오는 것과 같은 배치다.
+LINE9_STATIONS = [4130, 4129, 4128]
+LINE9_CAPACITY = {"car_capacity": 160, "cars_per_train": {"9호선": 6}}
+
+
+def _line9_segments() -> list[dict]:
+    return [{"line": "9호선", "segment": "2·3단계", "stations": LINE9_STATIONS}]
+
+
+def _line9_predicted() -> pd.DataFrame:
+    """`alighting_pred`에 음수를 하나 심는다 — 음수 대체(`lookup_negative`)와 9호선 표시가
+    부딪칠 때 9호선 쪽이 이겨야 한다(둘 다 lookup이지만 출처가 다르다)."""
+    return pd.DataFrame(
+        {
+            "date": DATE,
+            "station_no": LINE9_STATIONS,
+            "station_name": ["종합운동장", "봉은사", "삼성중앙"],
+            "line": "9호선",
+            "time_slot": "08-09",
+            "day_type": "평일",
+            "boarding": [200.0, 120.0, 90.0],
+            "alighting": [10.0, 80.0, 60.0],
+            "boarding_pred": [200.0, 120.0, 90.0],
+            "alighting_pred": [10.0, -5.0, 60.0],
+            "boarding_lookup": [190.0, 115.0, 85.0],
+            "alighting_lookup": [12.0, 75.0, 55.0],
+        }
+    )
+
+
+def _line9_calibration() -> pd.DataFrame:
+    rows = []
+    for s in LINE9_STATIONS:
+        for d in (ASCENDING, DESCENDING):
+            for slot in ("08:00", "08:30"):
+                rows.append(
+                    {
+                        "station_no": s,
+                        "direction": d,
+                        "day_type": "평일",
+                        "time_slot": slot,
+                        "ratio": 0.3,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def line9_full() -> pd.DataFrame:
+    return _congestion_table_full(
+        _line9_predicted(), _line9_segments(), LINE9_CAPACITY, _line9_calibration(), [50.0, 100.0]
+    )
+
+
+def test_line9_rows_are_marked_lookup_line9_even_when_negative_substituted(line9_full):
+    """9호선 행은 음수 대체 여부와 무관하게 전부 `lookup_line9`다 — 모델을 타지 않으니까."""
+    assert (line9_full["pred_source"] == LINE9_PRED_SOURCE).all()
+    assert "lookup_negative" not in set(line9_full["pred_source"])
+    assert "model" not in set(line9_full["pred_source"])
+
+
+def test_line9_link_rows_carry_lookup_version_not_model_artifact(line9_full):
+    """링크 표의 `predictor_version`은 행 단위다 — 9호선 행에 모델 아티팩트 이름이 새면 안 된다."""
+    link_tbl, _ = to_link_table(line9_full, _line9_segments(), "lightgbm:test")
+    assert len(link_tbl)
+    assert (link_tbl["predictor_version"] == LINE9_PREDICTOR_VERSION).all()
+    assert "lightgbm:test" not in set(link_tbl["predictor_version"])
+    # 내림차순 목록이라 "다음 역"이 역번호 감소 방향(하선)이다 — 실측 4130→4129 하선과 같다.
+    got = {(r.from_station_no, r.direction, r.to_station_no) for r in link_tbl.itertuples()}
+    assert (4130, ASCENDING, 4129) in got
+
+
+def test_link_predictor_version_is_per_row_when_lines_are_mixed(full, line9_full):
+    """1~8호선과 9호선이 한 표에 섞여도 각 행이 자기 출처를 갖는다(스칼라 브로드캐스트 아님)."""
+    mixed = pd.concat([full, line9_full], ignore_index=True, sort=False)
+    segments = _segments() + _line9_segments()
+    link_tbl, _ = to_link_table(mixed, segments, "lightgbm:test")
+    by_line = link_tbl.groupby("line")["predictor_version"].unique()
+    assert list(by_line["1호선"]) == ["lightgbm:test"]
+    assert list(by_line["9호선"]) == [LINE9_PREDICTOR_VERSION]
+
+
+# ── 8. BE CSV 파일명·사이드카 meta (BE 적재 규격) ──
+
+
+def test_link_csv_path_drops_link_token_and_stamps_generation_time():
+    """BE가 확정한 이름은 `predictions_{date}_{HHMMSS}.csv`다 — `link_`가 들어가면 안 된다.
+
+    BE fetch가 glob `predictions_*.csv`로 고르고 파일명에서 날짜를 파싱하므로, 이름이 조용히
+    바뀌면 로더가 깨진다(`SERVING_CONTRACT.md` 8.1절).
+    """
+    out_dir = Path("/srv/serving")
+    now = datetime(2026, 9, 20, 13, 31, 39, tzinfo=timezone(timedelta(hours=9)))
+    path = link_csv_path(out_dir, pd.Timestamp("2026-09-20"), now)
+
+    assert path.name == "predictions_2026-09-20_133139.csv"
+    assert "link" not in path.name
+    # 같은 폴더의 슬롯 표 parquet·풍부한 meta와 이름이 겹치지 않아야 한다.
+    assert path.name != "predictions_2026-09-20.parquet"
+    assert path.with_suffix(".meta.json").name != "predictions_2026-09-20.meta.json"
+
+
+def test_link_csv_sidecar_meta_pairs_with_csv_and_row_count_matches(tmp_path):
+    """사이드카는 CSV와 같은 basename이고 `row_count`가 CSV 실제 데이터 행 수와 같다.
+
+    BE는 이 값으로 전송이 끊긴 파일을 거른다(`FROME_BE-crowd-pred-load-path.md` 6.2절). 날짜당
+    하나인 3절 meta는 재생성 시 덮어써져 이전 CSV와 짝이 안 맞으므로 사이드카가 따로 필요하다.
+    """
+    link_table = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-09-20"] * 3),
+            "line": ["1호선"] * 3,
+            "from_station_no": [150] * 3,
+            "to_station_no": [151] * 3,
+            "direction": ["하선"] * 3,
+            "time_slot_30min": ["08:00", "08:30", "09:00"],
+            "congestion_pct": [12.3, np.nan, 45.6],
+            "data_status": ["ok", "no_calibration", "ok"],
+            "pred_source": ["model"] * 3,
+            "predictor_version": ["lightgbm:test"] * 3,
+        }
+    )
+    now = datetime(2026, 9, 20, 13, 31, 39, tzinfo=timezone(timedelta(hours=9)))
+    csv_path = link_csv_path(tmp_path, pd.Timestamp("2026-09-20"), now)
+    rows_written = write_link_csv(link_table, csv_path)
+    write_link_csv_sidecar_meta(csv_path, pd.Timestamp("2026-09-20"), rows_written, now)
+
+    sidecar = csv_path.with_suffix(".meta.json")
+    assert sidecar.name == "predictions_2026-09-20_133139.meta.json"
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert set(payload) == {"target_date", "row_count", "generated_at"}
+    assert payload["target_date"] == "2026-09-20"
+    # 헤더 1줄을 뺀 실제 데이터 행 수와 같아야 한다.
+    data_rows = len(csv_path.read_text(encoding="utf-8").strip().splitlines()) - 1
+    assert payload["row_count"] == data_rows == 3
+
+
+def test_link_csv_sidecar_generated_at_matches_filename_stamp(tmp_path):
+    """사이드카 `generated_at`의 시각이 파일명 `_HHMMSS`와 같은 순간이어야 한다.
+
+    BE는 `generated_at`으로 재적재를 판정하고 파일명 사전순으로 최신을 고른다 — 둘이 어긋나면
+    "최신 파일"과 "최신 생성시각"이 다른 파일을 가리킨다(`SERVING_CONTRACT.md` 8.2절·9절).
+    """
+    now = datetime(2026, 9, 20, 7, 5, 3, tzinfo=timezone(timedelta(hours=9)))
+    csv_path = link_csv_path(tmp_path, pd.Timestamp("2026-09-20"), now)
+    assert csv_path.name.endswith("_070503.csv")  # 0 패딩이 유지되는지도 같이 본다
+
+    write_link_csv_sidecar_meta(csv_path, pd.Timestamp("2026-09-20"), 0, now)
+    payload = json.loads(csv_path.with_suffix(".meta.json").read_text(encoding="utf-8"))
+
+    stamp = datetime.fromisoformat(payload["generated_at"]).strftime("%H%M%S")
+    assert csv_path.stem.endswith(stamp)
+    assert payload["generated_at"] == "2026-09-20T07:05:03+09:00"
