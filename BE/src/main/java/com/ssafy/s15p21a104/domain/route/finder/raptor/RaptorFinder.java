@@ -1,0 +1,323 @@
+package com.ssafy.s15p21a104.domain.route.finder.raptor;
+
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * 노선 스캔(RAPTOR) 탐색 프로토타입 — raptor-transition 티켓 ②.
+ *
+ * <p>엣지·정점 그래프 대신 <b>노선(정류장 순서 배열)</b>을 스캔한다. 라운드 = 환승 횟수이며
+ * 중간 하차·환승이 스캔에서 자연 처리된다(설계 4부 부속 §3). kept 집합·corridor options·
+ * 폴백 구조가 없다.
+ *
+ * <p>순수 로직이며 DB·Spring에 의존하지 않는다. 비용은 기본 {@code travelSec}이며
+ * {@link SegmentCost}로 통과 시각·혼잡을 반영한다(calm). fast 모드는 비용=시간으로 두고
+ * 최선 탑승 압축 단일 스캔, calm은 통과 시각별 비용 때문에 탑승별 전개(O(n²/2))를 쓴다.
+ *
+ * <p>프로토타입 범위: 도달·환승·대기·연결(도보·자전거)·라운드별 journey 산출.
+ * 모드 필터·FoundPath 어댑터·파이프라인 교체(③)는 다음 단계.
+ */
+public final class RaptorFinder {
+
+    /** 노선 한 개. {@code stops[i] → stops[i+1]} 소요가 {@code travelSec[i]}. 승차 대기는 노선 공통 {@code waitSec}. */
+    public record Route(String routeId, TravelMode mode, List<String> stops, int[] travelSec, int waitSec) {
+        public Route {
+            Objects.requireNonNull(routeId, "routeId");
+            Objects.requireNonNull(mode, "mode");
+            Objects.requireNonNull(stops, "stops");
+            Objects.requireNonNull(travelSec, "travelSec");
+            if (stops.size() < 2 || travelSec.length != stops.size() - 1) {
+                throw new IllegalArgumentException("노선 길이 불일치: " + routeId);
+            }
+            if (waitSec < 0) {
+                throw new IllegalArgumentException("대기 음수: " + routeId);
+            }
+            for (int sec : travelSec) {
+                if (sec < 0) {
+                    throw new IllegalArgumentException("구간 소요 음수: " + routeId);
+                }
+            }
+        }
+    }
+
+    /** 노선 밖 연결(도보·자전거). 방향 1건씩 등록한다. */
+    public record Connection(String from, String to, int sec, TravelMode mode) {
+        public Connection {
+            if (sec < 0) {
+                throw new IllegalArgumentException("연결 소요 음수");
+            }
+        }
+    }
+
+    /** 구간 비용(초). {@code passThroughSec} = 구간 진입 시각(출발 기준 경과 초). */
+    @FunctionalInterface
+    public interface SegmentCost {
+        long cost(String routeId, int fromIdx, int toIdx, long passThroughSec, int travelSec);
+
+        /** 기본: 시간 비용 그대로. */
+        SegmentCost TIME = (routeId, fromIdx, toIdx, passThroughSec, travelSec) -> travelSec;
+    }
+
+    /** journey 한 구간. transit = 노선 탑승, WALK·BIKE = 접근·연결. */
+    public record Leg(String routeId, TravelMode mode, String from, String to,
+                      long boardSec, long alightSec) {
+    }
+
+    public record Journey(List<Leg> legs, long totalSec, long totalCost, int transfers) {
+    }
+
+    private static final long INF = Long.MAX_VALUE / 4;
+
+    private final List<Route> routes;
+    private final Map<String, List<Connection>> connectionsBySource;
+    private final SegmentCost costModel;
+
+    public RaptorFinder(List<Route> routes, List<Connection> connections) {
+        this(routes, connections, SegmentCost.TIME);
+    }
+
+    public RaptorFinder(List<Route> routes, List<Connection> connections, SegmentCost costModel) {
+        this.routes = List.copyOf(routes);
+        this.costModel = Objects.requireNonNull(costModel, "costModel");
+        Map<String, List<Connection>> bySource = new HashMap<>();
+        for (Connection connection : connections) {
+            bySource.computeIfAbsent(connection.from(), key -> new ArrayList<>()).add(connection);
+        }
+        this.connectionsBySource = bySource;
+    }
+
+    /**
+     * 라운드별 최선 journey(개선된 라운드만). 라운드에서 개선이 없으면 조기 종료.
+     *
+     * @param minimizeCost true면 비용(costModel 반영) 최소화, false면 시간 최소화
+     */
+    public List<Journey> find(String originNodeId, String destNodeId,
+                              Map<String, Integer> originAccess, Map<String, Integer> destAccess,
+                              int maxRounds, boolean minimizeCost) {
+        Objects.requireNonNull(originAccess, "originAccess");
+        Objects.requireNonNull(destAccess, "destAccess");
+        if (maxRounds <= 0 || originAccess.isEmpty() || destAccess.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Label>> byRound = new ArrayList<>();
+        Map<String, Label> round0 = new HashMap<>();
+        for (Map.Entry<String, Integer> access : originAccess.entrySet()) {
+            round0.put(access.getKey(), new Label(access.getValue(), access.getValue(),
+                    new Trace(-1, null, "WALK", TravelMode.WALK, 0, access.getValue())));
+        }
+        byRound.add(round0);
+
+        List<Journey> found = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        long prevBest = INF;
+        Map<String, Label> prev = round0;
+
+        for (int round = 1; round <= maxRounds; round++) {
+            Map<String, Label> current = new HashMap<>(prev); // 이하 r회 — 이월
+            Set<String> improvedStops = new LinkedHashSet<>();
+            boolean improved = false;
+            for (Route route : routes) {
+                improved |= scanRoute(route, prev, current, round, minimizeCost, improvedStops);
+            }
+            if (!improvedStops.isEmpty()) {
+                improved |= relaxConnections(current, round, improvedStops, minimizeCost);
+            }
+            byRound.add(current);
+
+            Journey best = bestJourney(byRound, destAccess, minimizeCost, originNodeId, destNodeId);
+            if (best != null && best.totalCost() < prevBest) {
+                if (seen.add(signatureOf(best))) {
+                    found.add(best);
+                }
+                prevBest = best.totalCost();
+            }
+            if (!improved) {
+                break;
+            }
+            prev = current;
+        }
+        return List.copyOf(found);
+    }
+
+    /** 노선 한 개를 정류장 순서대로 훑어 하차 라벨을 이완한다. */
+    private boolean scanRoute(Route route, Map<String, Label> prev, Map<String, Label> current,
+                              int round, boolean minimizeCost, Set<String> improvedStops) {
+        List<String> stops = route.stops();
+        int n = stops.size();
+        boolean improved = false;
+        if (!minimizeCost) {
+            // fast: 단일 스캔 + 최선 탑승 압축(시각 최소화). 라운드 로컬 상태.
+            long[] prefix = new long[n];
+            for (int i = 0; i + 1 < n; i++) {
+                prefix[i + 1] = prefix[i] + route.travelSec()[i];
+            }
+            long bestDepart = INF;
+            int bestIdx = -1;
+            for (int i = 1; i < n; i++) {
+                // 탑승 후보 갱신은 i-1 정류장까지 반영된 뒤 i로 전진한다.
+                Label boarding = prev.get(stops.get(i - 1));
+                if (boarding != null) {
+                    long depart = boarding.time() + route.waitSec();
+                    if (depart < bestDepart) {
+                        bestDepart = depart;
+                        bestIdx = i - 1;
+                    }
+                }
+                if (bestIdx < 0) {
+                    continue;
+                }
+                long arrival = bestDepart + (prefix[i] - prefix[bestIdx]);
+                Label label = new Label(arrival, arrival, new Trace(round - 1, stops.get(bestIdx),
+                        route.routeId(), route.mode(), bestDepart, arrival));
+                if (relax(current, stops.get(i), label)) {
+                    improved = true;
+                    improvedStops.add(stops.get(i));
+                }
+            }
+        } else {
+            // calm: 통과 시각별 비용 때문에 탑승별 전개(노선당 n≈58).
+            for (int i = 0; i + 1 < n; i++) {
+                Label boarding = prev.get(stops.get(i));
+                if (boarding == null) {
+                    continue;
+                }
+                long time = boarding.time() + route.waitSec();
+                long cost = boarding.cost() + route.waitSec();
+                for (int j = i + 1; j < n; j++) {
+                    int seg = j - 1;
+                    long passThrough = time;
+                    long segCost = costModel.cost(route.routeId(), seg, j, passThrough,
+                            route.travelSec()[seg]);
+                    time += route.travelSec()[seg];
+                    cost += segCost;
+                    Label label = new Label(time, cost, new Trace(round - 1, stops.get(i),
+                            route.routeId(), route.mode(), boarding.time() + route.waitSec(), time));
+                    if (relax(current, stops.get(j), label)) {
+                        improved = true;
+                        improvedStops.add(stops.get(j));
+                    }
+                }
+            }
+        }
+        return improved;
+    }
+
+    /** 이번 라운드 개선 정류장에서 연결(도보·자전거)을 이완한다(같은 라운드 전환). */
+    private boolean relaxConnections(Map<String, Label> current, int round,
+                                     Set<String> improvedStops, boolean minimizeCost) {
+        boolean improved = false;
+        for (String stop : List.copyOf(improvedStops)) {
+            List<Connection> connections = connectionsBySource.get(stop);
+            if (connections == null) {
+                continue;
+            }
+            Label from = current.get(stop);
+            for (Connection connection : connections) {
+                long time = from.time() + connection.sec();
+                long cost = from.cost() + connection.sec();
+                Label label = new Label(time, cost, new Trace(round, connection.from(),
+                        connection.mode() == TravelMode.BIKE ? "BIKE" : "WALK",
+                        connection.mode(), from.time(), time));
+                if (relax(current, connection.to(), label)) {
+                    improved = true;
+                }
+            }
+        }
+        return improved;
+    }
+
+    /** 비용 기준 이완. fast 모드는 cost=time이라 시간 최소화와 동일해진다. */
+    private static boolean relax(Map<String, Label> current, String stop, Label candidate) {
+        Label existing = current.get(stop);
+        if (existing == null || candidate.cost() < existing.cost()) {
+            current.put(stop, candidate);
+            return true;
+        }
+        return false;
+    }
+
+    /** 라운드별 최선 도착 journey. 하차 정류장 → 도착지 접근 비용을 더해 비교한다. */
+    private Journey bestJourney(List<Map<String, Label>> byRound,
+                                Map<String, Integer> destAccess, boolean minimizeCost,
+                                String originNodeId, String destNodeId) {
+        long bestTotal = INF;
+        int bestRound = -1;
+        String bestStop = null;
+        for (int round = 0; round < byRound.size(); round++) {
+            Map<String, Label> labels = byRound.get(round);
+            for (Map.Entry<String, Integer> dest : destAccess.entrySet()) {
+                Label label = labels.get(dest.getKey());
+                if (label == null) {
+                    continue;
+                }
+                long base = minimizeCost ? label.cost() : label.time();
+                long total = base + dest.getValue();
+                if (total < bestTotal) {
+                    bestTotal = total;
+                    bestRound = round;
+                    bestStop = dest.getKey();
+                }
+            }
+        }
+        if (bestRound < 0) {
+            return null;
+        }
+        return reconstruct(byRound, bestRound, bestStop, destAccess.get(bestStop), minimizeCost,
+                originNodeId, destNodeId);
+    }
+
+    /** 라벨 사슬을 따라 journey를 복원한다. trace.prevRound = 같은 라운드(연결) / 이전 라운드(탑승). */
+    private Journey reconstruct(List<Map<String, Label>> byRound, int round, String stop,
+                                int destAccessSec, boolean minimizeCost,
+                                String originNodeId, String destNodeId) {
+        List<Leg> legs = new ArrayList<>();
+        Label label = byRound.get(round).get(stop);
+        String current = stop;
+        while (label != null) {
+            Trace trace = label.trace();
+            if (trace.prevRound() < 0) {
+                legs.add(0, new Leg("WALK", TravelMode.WALK, originNodeId, current,
+                        0, label.time()));
+                break;
+            }
+            legs.add(0, new Leg(trace.routeId(), trace.mode(), trace.boardStop(), current,
+                    trace.boardTime(), trace.alightTime()));
+            current = trace.boardStop();
+            label = byRound.get(trace.prevRound()).get(current);
+        }
+        long alightSec = byRound.get(round).get(stop).time();
+        long destSec = alightSec + destAccessSec;
+        legs.add(new Leg("WALK", TravelMode.WALK, stop, destNodeId, alightSec, destSec));
+        int rides = 0;
+        for (Leg leg : legs) {
+            if (leg.mode() == TravelMode.BUS || leg.mode() == TravelMode.SUBWAY) {
+                rides++;
+            }
+        }
+        return new Journey(List.copyOf(legs), destSec, byRound.get(round).get(stop).cost()
+                + destAccessSec, Math.max(0, rides - 1));
+    }
+
+    /** journey의 leg 서명 — 라운드 간 중복 제거용. */
+    private static String signatureOf(Journey journey) {
+        StringBuilder signature = new StringBuilder();
+        for (Leg leg : journey.legs()) {
+            signature.append(leg.mode()).append(':').append(leg.from()).append('>')
+                    .append(leg.to()).append(':').append(leg.routeId()).append('|');
+        }
+        return signature.toString();
+    }
+
+    private record Label(long time, long cost, Trace trace) {
+    }
+
+    private record Trace(int prevRound, String boardStop, String routeId, TravelMode mode,
+                         long boardTime, long alightTime) {
+    }
+}
