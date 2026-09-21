@@ -78,14 +78,25 @@
 
     <!-- splunk-demo(개인 로컬 데모 전용, BE/docs/infra/splunk-siem-design.md): 기존 appender에 HEC 전송만 추가 -->
     <springProfile name="splunk-demo">
+        <!-- 일반 ${VAR:-default} 치환은 OS 환경변수만 본다. .env 값은 springboot4-dotenv가
+             Spring Environment에만 올리므로, springProperty로 가져와야 실제 값이 들어간다.
+             이걸 놓치면 토큰이 빈 문자열로 치환되고, HEC가 401을 그냥 버려서 에러 로그도 안 남는다.
+             scope는 반드시 local — context로 두면 로그백 전역 속성이 되어 LogstashLayout이
+             모든 이벤트에 컨텍스트 프로퍼티를 포함시킬 때 토큰이 로그 본문에 그대로 찍힌다. -->
+        <springProperty scope="local" name="SPLUNK_HEC_URL" source="SPLUNK_HEC_URL"
+                         defaultValue="http://localhost:8088"/>
+        <springProperty scope="local" name="SPLUNK_HEC_TOKEN" source="SPLUNK_HEC_TOKEN" defaultValue=""/>
         <appender name="SPLUNK_HEC" class="com.splunk.logging.HttpEventCollectorLogbackAppender">
-            <url>${SPLUNK_HEC_URL:-http://localhost:8088}</url>
-            <token>${SPLUNK_HEC_TOKEN:-}</token>
+            <url>${SPLUNK_HEC_URL}</url>
+            <token>${SPLUNK_HEC_TOKEN}</token>
             <index>sumgil</index>
             <disableCertificateValidation>true</disableCertificateValidation>
             <!-- HttpEventCollectorLogbackAppender는 Encoder가 아니라 Layout을 요구한다.
                  LogstashEncoder(Encoder)를 그대로 쓰면 IncompatibleClassException으로 기동이 죽는다. -->
-            <layout class="net.logstash.logback.layout.LogstashLayout" />
+            <layout class="net.logstash.logback.layout.LogstashLayout">
+                <!-- 컨텍스트 프로퍼티(LOG_HOSTNAME 등)까지 매 이벤트에 끼워 넣지 않게 방어적으로 끈다. -->
+                <includeContext>false</includeContext>
+            </layout>
         </appender>
         <root level="INFO">
             <appender-ref ref="SPLUNK_HEC" />
