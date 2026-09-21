@@ -114,6 +114,20 @@ def test_status_write_failure_never_raises(tmp_path):
     status.write()  # 부모가 파일이라 mkdir 실패 — 예외 없이 넘어가야 한다
 
 
+def test_status_write_never_raises_when_tmp_cleanup_fails_with_enotdir(tmp_path, monkeypatch):
+    """리눅스는 부모가 파일이면 unlink가 FileNotFoundError가 아닌 NotADirectoryError를 낸다.
+    Windows에서는 재현되지 않으므로 그 동작을 직접 주입해 고정한다."""
+    from pathlib import Path
+
+    def enotdir(self, missing_ok=False):
+        raise NotADirectoryError(20, "Not a directory", str(self))
+
+    monkeypatch.setattr(Path, "unlink", enotdir)
+    status = ConsumerStatus("ai-spark", tmp_path / "status.json")
+
+    status.write()  # 예외 없이 끝나야 한다
+
+
 def test_read_status_missing_or_corrupt_returns_none(tmp_path):
     assert read_status(tmp_path / "none.json") is None
     (tmp_path / "bad.json").write_text("{")

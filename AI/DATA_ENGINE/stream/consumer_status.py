@@ -6,6 +6,7 @@ when a topic was last received/saved without touching Kafka.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from collections.abc import Iterable
@@ -158,7 +159,10 @@ class ConsumerStatus:
                 "consumer status write failed: %s", self.path, exc_info=True
             )
         finally:
-            tmp.unlink(missing_ok=True)
+            # missing_ok는 FileNotFoundError만 무시한다. 부모가 파일이면 리눅스는 NotADirectoryError를
+            # 내므로, 정리 실패가 write() 밖으로 새어 consumer를 죽이지 않게 OSError 전체를 삼킨다.
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
 
 
 def read_status(path: Path | None = None) -> dict[str, Any] | None:
