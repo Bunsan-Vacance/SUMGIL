@@ -37,6 +37,12 @@ const prediction = {
   rentalId: 'ST-1',
   source: 'MOCK' as const,
 }
+const unavailablePrediction = {
+  ...prediction,
+  status: 'UNAVAILABLE' as const,
+  predictedBikes: null,
+  predictedAt: null,
+}
 
 describe('BikePrediction', () => {
   it('첫 BIKE 구간 이전 minutes 합으로 대여소 도착 시각을 요청한다', async () => {
@@ -50,7 +56,12 @@ describe('BikePrediction', () => {
       '2026-09-16T23:33:00.000Z',
       expect.any(AbortSignal),
     )
-    expect(screen.getByText(/현재 재고가 아니라/)).toBeTruthy()
+    expect(screen.getByText('따릉이 대여 예측')).toBeTruthy()
+    expect(screen.getByText('강남 대여소 · 08:33 도착')).toBeTruthy()
+    expect(screen.getByText('샘플')).toBeTruthy()
+    expect(screen.queryByText(/현재 재고가 아니라/)).toBeNull()
+    expect(screen.queryByText(/대여 가능성/)).toBeNull()
+    expect(screen.queryByText(/모델 산출|산출/)).toBeNull()
   })
 
   it('명시적인 rentalId가 없으면 API를 호출하지 않는다', () => {
@@ -78,6 +89,16 @@ describe('BikePrediction', () => {
     fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
     await waitFor(() => expect(screen.getByText('4대 예상')).toBeTruthy())
     expect(repository.prediction).toHaveBeenCalledTimes(2)
+  })
+
+  it('예측 불가 응답은 정보 없음 문구 하나로 표시한다', async () => {
+    const repository: BikePredictionRepository = {
+      prediction: vi.fn().mockResolvedValue(unavailablePrediction),
+    }
+    render(<BikePrediction route={route} repository={repository} />)
+    await waitFor(() => expect(screen.getByText('도착 시 예측 정보 없음')).toBeTruthy())
+    expect(screen.queryByText('예측 수량 없음')).toBeNull()
+    expect(screen.queryByText('도착 시 예측을 제공할 수 없어요.')).toBeNull()
   })
 
   it('경로가 바뀌면 이전 요청을 취소한다', async () => {

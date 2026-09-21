@@ -3,6 +3,7 @@ import {
   clockTime,
   congestionGradeText,
   congestionPredictionFor,
+  formatCongestionPercent,
   routeArrival,
   roundMinutes,
 } from './selectors'
@@ -16,12 +17,12 @@ import { isTransitLeg, isTransferLeg, transitionLabel } from './transitions'
 export default function RouteCard({
   route,
   comparison,
-  busOptionCount,
+  recommendations = [],
   onDetail,
 }: {
   route: Route
   comparison?: string
-  busOptionCount?: number
+  recommendations?: Array<'fast' | 'calm'>
   onDetail: () => void
 }) {
   const displayLegs = compactLegs(route.legs)
@@ -32,31 +33,30 @@ export default function RouteCard({
   const arrival = routeArrival(route.minutes, route.departedAt)
   const finalLeg = displayLegs.at(-1)
   const destination = finalLeg?.to?.name || finalLeg?.title.split(' → ').at(-1)
-  const walkingMinutes = route.legs
-    .filter((leg) => leg.mode === 'walk' && !leg.transfer && !leg.transitionType)
-    .reduce((total, leg) => total + leg.minutes, 0)
-  const facts = [
-    route.totalDistanceMeters !== undefined
-      ? `총 ${Math.round(route.totalDistanceMeters).toLocaleString('ko-KR')}m`
-      : null,
-    `환승 ${route.transfers ? `${route.transfers}회` : '없음'}`,
-    walkingMinutes ? `도보 ${roundMinutes(walkingMinutes)}분` : null,
-    busOptionCount && busOptionCount > 1 ? `버스 ${busOptionCount}개 노선` : null,
-  ].filter((fact): fact is string => fact !== null)
   const prediction = congestionPredictionFor(route)
   const congestionGrade = prediction ? congestionGradeText(prediction.congestionGrade) : undefined
+  const formattedPercent = prediction
+    ? formatCongestionPercent(prediction.congestionPercent)
+    : undefined
   const congestionLabel = prediction
-    ? `혼잡도 예상 ${prediction.congestionPercent}%${congestionGrade ? ` · ${congestionGrade}` : ''}`
+    ? `혼잡도 예상 ${formattedPercent}%${congestionGrade ? ` · ${congestionGrade}` : ''}`
     : '예측 정보 없음'
+  const recommendationLabels = recommendations.map((recommendation) =>
+    recommendation === 'fast' ? '가장 빠른 경로' : '덜 붐비는 경로',
+  )
+  const featuredClass = recommendations.length
+    ? `route-card-featured route-card-featured-${recommendations.length > 1 ? 'both' : recommendations[0]}`
+    : ''
 
   return (
     <button
       type="button"
-      className="route-card"
+      className={`route-card ${featuredClass}`.trim()}
       aria-label={[
         route.label,
         `${roundMinutes(route.minutes)}분`,
         congestionLabel,
+        ...recommendationLabels,
         comparison,
         '상세 경로',
       ]
@@ -65,7 +65,21 @@ export default function RouteCard({
       onClick={onDetail}
     >
       <span className="route-card-topline">
-        <span className="route-badge">{route.label}</span>
+        <span className="route-card-heading">
+          <span className="route-badge">{route.label}</span>
+          {recommendationLabels.length > 0 && (
+            <span className="route-recommendation-badges" aria-label="추천 기준">
+              {recommendationLabels.map((label, index) => (
+                <span
+                  className={`route-recommendation-badge ${recommendations[index]}`}
+                  key={label}
+                >
+                  {label}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
         <span className="route-card-actions">
           {route.source === 'MOCK' && <span className="route-source">샘플</span>}
           <ChevronRight className="route-card-chevron" size={20} aria-hidden="true" />
@@ -79,13 +93,12 @@ export default function RouteCard({
             </span>
             <small>{departure ? `${departure} → ${arrival}` : '출발 시각 준비중입니다'}</small>
           </span>
-          <span className="route-facts">{facts.join(' · ')}</span>
         </span>
         <span className="route-card-prediction" aria-label={congestionLabel}>
           {prediction ? (
             <>
               <small>혼잡도 예상</small>
-              <strong>{prediction.congestionPercent}%</strong>
+              <strong>{formattedPercent}%</strong>
               {congestionGrade && <span>{congestionGrade}</span>}
             </>
           ) : (

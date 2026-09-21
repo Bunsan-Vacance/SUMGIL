@@ -23,7 +23,7 @@ describe('구간 이동 안내', () => {
           note: '2호선',
           minutes: 6,
           distanceMeters: 1234,
-          segmentCongestionLevel: 20,
+          segmentCongestionLevel: 20.26,
           from: { id: '221', name: '역삼역' },
         },
       ],
@@ -32,7 +32,7 @@ describe('구간 이동 안내', () => {
     render(<LegList route={route} />)
 
     expect(screen.getByText('도보 · 거리 준비중입니다')).toBeTruthy()
-    expect(screen.getByText('2호선 · 1.2km · 구간 예상 혼잡도 20%')).toBeTruthy()
+    expect(screen.getByText('2호선 · 1.2km · 구간 예상 혼잡도 20.3%')).toBeTruthy()
   })
 
   it('구간 혼잡도 값이 없으면 혼잡도 숫자를 표시하지 않는다', () => {
