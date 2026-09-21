@@ -2285,6 +2285,10 @@ small {
 }
 @media (max-width: 600px) {
   .workspace {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    min-height: 0;
     padding: 0;
   }
   .demo-toolbar {
@@ -2307,7 +2311,8 @@ small {
     gap: 3px;
   }
   .app-shell {
-    height: calc(100dvh - 56px);
+    flex: 1;
+    height: auto;
     min-height: 0;
     max-width: none;
     border: 0;

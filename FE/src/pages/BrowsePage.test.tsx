@@ -146,4 +146,19 @@ describe('일반 장소 탐색 화면', () => {
     expect(screen.queryByRole('region', { name: '선택한 장소' })).toBeNull()
     expect(screen.getByRole('button', { name: '지도에서 장소 선택' }).textContent).toBe('지도')
   })
+
+  it('확인 키로 탐색 입력의 포커스를 닫되 한글 조합 중에는 유지한다', () => {
+    render(
+      <BrowsePage onBack={vi.fn()} onMessage={vi.fn()} setOrigin={vi.fn()} findRoutes={vi.fn()} />,
+    )
+    const input = screen.getByRole('textbox', { name: '탐색할 장소 검색어' })
+
+    input.focus()
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+    expect(document.activeElement).not.toBe(input)
+
+    input.focus()
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', isComposing: true })
+    expect(document.activeElement).toBe(input)
+  })
 })
