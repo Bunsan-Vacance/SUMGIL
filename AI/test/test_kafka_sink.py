@@ -73,6 +73,43 @@ def test_write_events_partitions_by_poll_run_at(tmp_path):
     assert paths[1] == latest_stock_path(ai_root=tmp_path)
 
 
+def test_write_events_preserves_bike_stock_raw_contract(tmp_path):
+    sample = BE_SAMPLE_EVENTS["bike.stock"]
+    event = parse_kafka_event(sample, topic="bike.stock", partition=1, offset=10)
+
+    snapshot_path = write_events([event], ai_root=tmp_path)[0]
+
+    frame = pd.read_parquet(snapshot_path)
+    assert list(frame.columns) == [
+        "event_id",
+        "source",
+        "entity_id",
+        "source_generated_at",
+        "ingested_at",
+        "poll_run_at",
+        "freshness_at",
+        "payload_json",
+        "kafka_topic",
+        "kafka_partition",
+        "kafka_offset",
+    ]
+    row = frame.iloc[0]
+    payload = json.loads(row["payload_json"])
+    assert set(payload) >= {
+        "stationId",
+        "stationName",
+        "rackTotCnt",
+        "parkingBikeTotCnt",
+        "shared",
+        "stationLatitude",
+        "stationLongitude",
+    }
+    assert row["entity_id"] == payload["stationId"] == "ST-4"
+    assert pd.isna(row["source_generated_at"])
+    assert row["freshness_at"] == row["ingested_at"]
+    assert snapshot_path.parent.name == "hh=09"
+
+
 def test_write_events_groups_by_topic(tmp_path):
     paths = write_events(
         [

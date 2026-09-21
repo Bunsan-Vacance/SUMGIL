@@ -673,6 +673,39 @@ data/BIKE/raw/realtime/latest_stock.parquet
 KST naive datetime으로 저장한다. 같은 대여소의 이전 값은 더 최신 `updated_at` 이벤트로만
 갱신된다.
 
+### 따릉이 Kafka 입력 계약 (2026-09-21 확인)
+
+`bike.stock`은 서울시 `bikeList` 행 하나를 Kafka event 하나로 발행한다. AI consumer가
+저장하는 raw Parquet은 다음 공통 envelope 컬럼을 갖는다.
+
+| 컬럼 | 계약 |
+| --- | --- |
+| `event_id` | topic·대여소·payload 기반 이벤트 식별자 |
+| `source`, `kafka_topic` | `bike.stock` |
+| `entity_id` | payload의 `stationId`와 같은 대여소 ID |
+| `source_generated_at` | 원천에 생성시각이 없어 null |
+| `ingested_at` | BE가 API 응답을 수집한 시각이며 따릉이 신선도 기준 |
+| `poll_run_at` | 한 번의 전체 대여소 poll 시작 시각이며 `dt`/`hh` 파티션 기준 |
+| `freshness_at` | `source_generated_at`이 없으므로 `ingested_at`과 같음 |
+| `payload_json` | 아래 `bikeList` 원본 필드를 JSON 문자열로 보존 |
+| `kafka_partition`, `kafka_offset` | Kafka 원본 위치 |
+
+배치가 사용하는 `payload_json` 필드는 다음과 같다. 현재 원천 응답에서는 모두 문자열이며,
+producer는 숫자형으로 바꾸지 않고 그대로 보존한다.
+
+| 필드 | 용도 |
+| --- | --- |
+| `stationId` | 대여소 ID |
+| `stationName` | 대여소 이름 |
+| `rackTotCnt` | 거치대 수 |
+| `parkingBikeTotCnt` | 현재 자전거 수 |
+| `shared` | 거치율 |
+| `stationLatitude`, `stationLongitude` | 대여소 좌표 |
+
+J15A104A의 최신 Kafka raw snapshot에서도 645/645행이 위 7개 필드를 모두 포함하고,
+모든 필드가 문자열이며 `source_generated_at`은 null임을 확인했다. 원천에 필드가 추가되는
+것은 허용하지만 위 필드는 raw → interim 배치의 필수 계약으로 유지한다.
+
 `weather.nowcast`도 raw snapshot 저장 후 공통 최신 날씨 파일을 갱신한다.
 
 ```text
