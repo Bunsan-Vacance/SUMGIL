@@ -9,7 +9,7 @@ LLM 턴이 2~3회(5~15초)가 되는데, 트리거(①)가 이미 "어느 역이
 여기서 하는 일은 둘이다.
 
 - `readings_for_trigger` — 앞쪽 역들의 '지금 vs 도착할 때' 혼잡도를 읽어 `StationReading`으로 만든다.
-- `prefetch` — 하차 후보마다 잔여 경로를 병렬로 받아 `AgentContext`를 조립한다.
+- `prefetch` — 하차 후보마다 잔여 경로를 순차로 받아 `AgentContext`를 조립한다.
 
 **값을 지어내지 않는다.** 조회가 실패하거나 응답에 그 역이 없으면 그 자리는 `None`으로 두고
 상태값으로 알린다. 실패를 빈 목록으로 감추지 않는 것도 같은 원칙이다(`CandidateContext.error`).
@@ -21,7 +21,6 @@ LLM 턴이 2~3회(5~15초)가 되는데, 트리거(①)가 이미 "어느 역이
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from typing import Any
@@ -35,10 +34,6 @@ from app.TIME.trigger import STATUS_NO_DATA, SlotReading, StationReading, Trigge
 
 SLOT_MINUTES = 30
 """CROWD 예측 표의 슬롯 길이. `registry`의 `^([01][0-9]|2[0-3]):(00|30)$` 패턴과 같은 약속이다."""
-
-MAX_PREFETCH_WORKERS = 5
-"""`replan_route` 동시 호출 상한. 후보 상한 5·`replan_route` 예산 5와 같은 값이라
-(계획 4절) 한 프리페치가 동시에 띄우는 호출이 예산을 넘지 않는다."""
 
 STATUS_NOT_IN_RESPONSE = "not_in_response"
 """응답에는 표가 있는데 그 역 행이 없다.
@@ -133,19 +128,15 @@ def prefetch(
     current_route_id: str | None = None,
     modes: Sequence[str] | None = None,
     priority: str | None = None,
-    max_workers: int = MAX_PREFETCH_WORKERS,
 ) -> AgentContext:
     """후보마다 `replan_route`를 불러 잔여 경로를 모으고 `AgentContext`를 만든다.
 
-    **병렬로 부른다.** 어댑터가 `requests` 동기 호출이라 스레드 풀을 쓴다. 후보 5개를 순차로
-    돌리면 BE 왕복이 그대로 쌓이는데, 이 구간은 LLM 턴(1~5초)에 붙는 순수 대기라 줄일수록 그만큼
-    사용자 체감이 준다(계획 1.1·5절). 결과 순서는 후보 순서를 지킨다 — 후보 순서에 `rank_hint`가
-    들어 있고, 전략이 `chosen_index`로 후보를 가리킨다(6.2절).
-
-    `ToolGuard`는 원래 단일 스레드 세션을 가정한 물건이다. 여기서만 여러 스레드가 동시에
-    들어가므로 `check`→`record` 사이 경쟁으로 예산이 worker 수만큼 넘칠 여지가 있다. 지금은 동시
-    상한(5) = `replan_route` 예산(5)이라 실제로 넘을 수 없고, 로그·집계는 잃지 않는다. 가드 쪽에
-    락을 두는 편이 옳지만 202 파일은 이 티켓 범위 밖이라 손대지 않고 여기 남긴다.
+    **순차로 부른다.** 원래는 스레드 풀로 병렬 호출했다(대기 시간을 줄이는 게 목적이었다). BE
+    회신(`FROM_BE-time-reroute-contract-01` 8번)에 따르면 prod BE는 CPU 1개 전제라 동시에 쏴도 BE
+    스레드에서 실질적으로 줄을 서고, 오히려 한 재안내 요청이 BE 스레드 여러 개를 동시에 점유해
+    일반 탐색 요청을 굶긴다 — 그래서 BE가 클라이언트(여기) 쪽 순차 호출을 명시적으로 권했다.
+    결과 순서는 후보 순서를 지킨다(순차 호출이라 이제는 자연히 보장된다) — 후보 순서에
+    `rank_hint`가 들어 있고, 전략이 `chosen_index`로 후보를 가리킨다(6.2절).
 
     `step`은 원본 legs 인덱스다. 후보역이 legs의 몇 번째 구간에 속하는지는 정차역 목록 공급원이
     정해져야 알 수 있어(`TO_BE-time-station-sequence-01`) 지금은 호출자가 넘기는 값을 모든 후보에
@@ -161,14 +152,7 @@ def prefetch(
         priority=priority,
     )
 
-    if not candidates:
-        # 후보가 없으면 스레드 풀도 만들지 않는다(max_workers=0은 ValueError이기도 하다).
-        # `has_alternative`가 False가 되어 전략을 부르지 않고 기존 안내를 유지한다.
-        contexts: list[CandidateContext] = []
-    else:
-        workers = max(1, min(max_workers, len(candidates)))
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="time-prefetch") as pool:
-            contexts = list(pool.map(context_of, candidates))
+    contexts: list[CandidateContext] = [context_of(candidate) for candidate in candidates]
 
     return AgentContext(
         decision=decision,
@@ -429,7 +413,6 @@ def _as_error_dict(result: Any) -> dict[str, Any]:
 
 
 __all__ = [
-    "MAX_PREFETCH_WORKERS",
     "SLOT_MINUTES",
     "STATUS_NOT_IN_RESPONSE",
     "STATUS_UNKNOWN",
