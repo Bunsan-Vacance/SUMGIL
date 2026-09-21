@@ -117,6 +117,31 @@ class Settings(BaseSettings):
     # 20분 여유를 둔 150분(9,000초)으로 잡았다 — 운영 초기값이며 지연 기록을 보고 재조정한다.
     bike_live_weather_max_staleness_seconds: float = 9000.0
 
+    # ── TIME 재안내 트리거(203) ──
+    # ⚠️ 아래 넷은 **잠정값이다.** 정하는 데 필요한 CROWD 예측 표(`data/CROWD/serving/`)가 아직
+    # 없어 실제 상승폭 분포를 보지 못했다. 표를 확보한 뒤 분포를 보고 다시 정한다 — 그때까지는
+    # "이 숫자가 근거 있는 값"이라고 인용하지 않는다.
+    #
+    # 등급과 %p를 **둘 다** 넘어야 트리거다(AND). 등급만 보면 임계 근처에서 1%p 차이로 등급이
+    # 갈려 자주 튀고, %p만 보면 이미 혼잡한 구간의 추가 상승을 과하게 잡는다.
+    time_trigger_grade_rise: int = 1
+    time_trigger_pct_rise: float = 15.0
+    # 한 역만 튀는 것은 노이즈로 보고 연속 구간일 때만 트리거한다.
+    time_trigger_min_run: int = 2
+    # 같은 이동 중 재안내 팝업이 반복해서 뜨는 것을 막는다.
+    time_trigger_cooldown_sec: float = 600.0
+
+    # ── TIME 규칙 기준선 점수식(203) ──
+    # ⚠️ 트리거 임계값과 같은 처지의 **잠정값**이다. 실제 후보 분포를 보지 못했다.
+    # score = 잔여소요(분) + 환승당 페널티 + 혼잡 페널티. 작을수록 좋다.
+    #
+    # 환승 페널티 4분: 환승은 계단·대기라 같은 4분이어도 앉아 가는 4분보다 부담이 크다는
+    # 통념을 옮긴 값일 뿐 측정값이 아니다.
+    time_score_transfer_penalty_min: float = 4.0
+    # 혼잡 1등급당 페널티 3분. 재안내의 목적이 혼잡 회피라 0이면 안 되지만, 너무 크면
+    # 20분 돌아가는 경로를 "덜 혼잡하니까"로 고르게 된다.
+    time_score_congestion_penalty_min: float = 3.0
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]
