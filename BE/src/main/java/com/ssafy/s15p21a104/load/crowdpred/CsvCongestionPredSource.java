@@ -7,6 +7,8 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -23,7 +25,8 @@ import java.util.stream.Stream;
  *       이름만 정렬하면 내일 것만 잡히고 오늘 것이 영영 안 들어간다 — 조회는
  *       {@code pred_date = 오늘} 로 하므로 화면이 빈 채로 남는다</li>
  *   <li>같은 날짜를 다시 만들면 {@code _HHMMSS} 가 달라 <b>쌓인다</b>(AI 가 오래된 것을 지우지 않는다).
- *       그래서 날짜 안에서는 가장 늦은 회차 하나만 쓴다</li>
+ *       그래서 날짜 안에서는 가장 늦은 회차 하나만 쓴다 — 판정은 파일명이 아니라 <b>사이드카
+ *       {@code generated_at}</b> 이다. 파일명 시각엔 생성 날짜가 없어 이틀에 걸친 두 회차를 못 가른다(304)</li>
  * </ul>
  *
  * <p>대상 날짜는 파일명에서 읽는다 — 사이드카의 {@code target_date} 와 같은 값이고, 파일을 열지 않고
@@ -83,6 +86,11 @@ public final class CsvCongestionPredSource implements CongestionPredSource {
     /**
      * 읽을 파일들. 폴더면 <b>대상 날짜마다 최신 회차 하나씩</b>을 날짜 순으로 돌려주고, 파일이면 그것 하나다.
      * 어느 쪽이든 없으면 찾은 경로를 밝힌다.
+     *
+     * <p>같은 날짜 안에서 "최신" 은 <b>사이드카 {@code generated_at}</b> 으로 정한다(같으면 파일명).
+     * 파일명의 {@code _HHMMSS} 는 생성 <i>시각</i>만 있고 생성 <i>날짜</i>가 없다 — 같은 대상 날짜가
+     * 전날 "내일치" 와 당일 "오늘치" 로 이틀에 걸쳐 두 번 만들어지고, 둘 다 00:30 UTC + 랜덤 지연이라
+     * 파일명 정렬은 지터 크기로 갈린다. 당일 생성분(전날 실적이 lag 로 들어간 것)이 이겨야 한다(304).
      */
     private List<Path> resolveCsvs() throws IOException {
         if (!Files.isDirectory(path)) {
@@ -91,16 +99,36 @@ public final class CsvCongestionPredSource implements CongestionPredSource {
             }
             return List.of(path);
         }
-        Map<String, Path> latestByDate = new TreeMap<>();
+        Map<String, List<Path>> byDate = new TreeMap<>();
         try (Stream<Path> files = Files.list(path)) {
-            files.filter(CsvCongestionPredSource::isArtifact).forEach(p -> latestByDate.merge(
-                    targetDateOf(p), p,
-                    (a, b) -> a.getFileName().toString().compareTo(b.getFileName().toString()) >= 0 ? a : b));
+            files.filter(CsvCongestionPredSource::isArtifact)
+                    .forEach(p -> byDate.computeIfAbsent(targetDateOf(p), k -> new ArrayList<>()).add(p));
         }
-        if (latestByDate.isEmpty()) {
+        if (byDate.isEmpty()) {
             throw new IOException("혼잡도 예측 산출물이 없습니다: " + path + " 에 predictions_<날짜>_<시각>.csv");
         }
-        return List.copyOf(latestByDate.values());
+        List<Path> chosen = new ArrayList<>(byDate.size());
+        for (List<Path> candidates : byDate.values()) {
+            chosen.add(latestByGeneratedAt(candidates));
+        }
+        return List.copyOf(chosen);
+    }
+
+    /** 같은 대상 날짜의 후보 중 사이드카 {@code generated_at} 이 가장 늦은 것. 같으면 파일명이 뒤인 것. */
+    private static Path latestByGeneratedAt(List<Path> candidates) throws IOException {
+        Path best = null;
+        OffsetDateTime bestAt = null;
+        for (Path candidate : candidates) {
+            OffsetDateTime at = readMeta(candidate).generatedAt();
+            boolean later = best == null || at.isAfter(bestAt)
+                    || (at.isEqual(bestAt) && candidate.getFileName().toString()
+                            .compareTo(best.getFileName().toString()) > 0);
+            if (later) {
+                best = candidate;
+                bestAt = at;
+            }
+        }
+        return best;
     }
 
     private static boolean isArtifact(Path p) {
