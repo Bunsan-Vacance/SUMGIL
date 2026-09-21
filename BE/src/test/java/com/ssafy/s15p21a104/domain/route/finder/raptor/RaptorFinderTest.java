@@ -157,4 +157,26 @@ class RaptorFinderTest {
         assertEquals(enginePaths.get(0).totalSec(),
                 journeys.get(journeys.size() - 1).totalSec());
     }
+
+    @Test
+    @DisplayName("R8: 좌표 접근 — 출발지(PLACE) 연결로 첫 정류장에 닿는다")
+    void r8_좌표접근() {
+        // PLACE-ORIGIN → A 도보 60s, 노선 A→B 100s, B → PLACE-DEST 도보 30s.
+        RaptorFinder finder = new RaptorFinder(List.of(
+                route("B1", 0, "A", "100", "B")),
+                List.of(
+                        new RaptorFinder.Connection("PLACE-ORIGIN", "A", 60, TravelMode.WALK),
+                        new RaptorFinder.Connection("B", "PLACE-DEST", 30, TravelMode.WALK)));
+
+        List<RaptorFinder.Journey> journeys = finder.find("PLACE-ORIGIN", "PLACE-DEST",
+                access("PLACE-ORIGIN", 0), access("PLACE-DEST", 0), 3, false);
+
+        assertTrue(!journeys.isEmpty(), "좌표 접근 경로가 없다 (접근 연결 이완 누락)");
+        RaptorFinder.Journey journey = journeys.get(0);
+        assertEquals(190, journey.totalSec()); // 60 + 100 + 30
+        RaptorFinder.Leg walkToA = journey.legs().stream()
+                .filter(leg -> leg.from().equals("PLACE-ORIGIN") && leg.to().equals("A"))
+                .findFirst().orElseThrow();
+        assertEquals(TravelMode.WALK, walkToA.mode());
+    }
 }
