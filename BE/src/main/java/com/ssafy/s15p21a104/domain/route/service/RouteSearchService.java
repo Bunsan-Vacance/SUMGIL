@@ -39,6 +39,7 @@ import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
 import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,7 +58,10 @@ import java.util.function.Function;
  * 경로 검색. 그래프 미적재 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
  */
 @Service
-@RequiredArgsConstructor
+// 생성자가 둘이라(아래 10인자 편의 생성자) Spring 이 어느 쪽을 쓸지 스스로 못 고른다 —
+// Lombok 이 만드는 전체 생성자에 @Autowired 를 붙여 주입 대상을 명시한다.
+// 없으면 기동 때 "No default constructor found" 로 죽는다(단위 테스트로는 안 잡힌다).
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 @Transactional(readOnly = true)
 public class RouteSearchService {
 
