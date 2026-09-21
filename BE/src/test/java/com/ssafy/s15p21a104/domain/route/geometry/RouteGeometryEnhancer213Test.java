@@ -9,6 +9,7 @@ import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -85,5 +86,50 @@ class RouteGeometryEnhancer213Test {
         assertTrue(result.get(0).legs().get(0).distanceMeters() > 0);
         assertEquals(result.get(0).legs().get(0).distanceMeters(),
                 result.get(0).totalDistanceMeters());
+    }
+
+    private static RouteLegResponse walkLegOf(String from, String to) {
+        return new RouteLegResponse(TravelMode.WALK,
+                from, from, 37.5, 127.0, to, to, 37.5, 127.01,
+                "WALK", 1.0, null, "unavailable", null, null, null);
+    }
+
+    private static RouteSearchResponse walkResponseOf(String from, String to) {
+        return new RouteSearchResponse(RouteType.SHORTEST, 1.0, List.of(walkLegOf(from, to)),
+                RouteSource.ALGORITHM, null, 0, null);
+    }
+
+    @Test
+    @DisplayName("도보 표시 시간: geometry 있으면 폴리라인 실측 기준으로 정정한다")
+    void walk표시시간_실측정정() {
+        // 두 점 직선 약 880m — 엔진 추정 1.0분과 달라야 한다.
+        MultiLineStringResponse geometry = MultiLineStringResponse.of(
+                List.of(List.of(List.of(127.0, 37.5), List.of(127.01, 37.5))));
+        RouteGeometryEnhancer enhancer = new RouteGeometryEnhancer(
+                (routeId, fromLat, fromLng, toLat, toLng) -> Optional.empty(),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> Optional.of(geometry),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> Optional.empty());
+
+        List<RouteSearchResponse> result = enhancer.enhanceAll(List.of(walkResponseOf("H", "S")));
+
+        double expectedDist = GeoDistance.haversineMeters(37.5, 127.0, 37.5, 127.01);
+        double expectedMin = expectedDist / 67.0;
+        assertEquals(expectedMin, result.get(0).legs().get(0).minutes(), 1e-6);
+        assertEquals(expectedMin, result.get(0).totalMinutes(), 1e-6);
+        assertEquals("available", result.get(0).legs().get(0).geometryStatus());
+    }
+
+    @Test
+    @DisplayName("도보 표시 시간: geometry 없으면 엔진 값 유지한다 (지어내지 않음)")
+    void walk표시시간_무geometry유지() {
+        RouteGeometryEnhancer enhancer = new RouteGeometryEnhancer(
+                (routeId, fromLat, fromLng, toLat, toLng) -> Optional.empty(),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> Optional.empty(),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> Optional.empty());
+
+        List<RouteSearchResponse> result = enhancer.enhanceAll(List.of(walkResponseOf("H", "S")));
+
+        assertEquals(1.0, result.get(0).legs().get(0).minutes(), 1e-9);
+        assertEquals(1.0, result.get(0).totalMinutes(), 1e-9);
     }
 }

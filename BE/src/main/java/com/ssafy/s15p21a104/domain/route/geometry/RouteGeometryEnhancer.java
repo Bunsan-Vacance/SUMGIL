@@ -5,6 +5,7 @@ import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
+import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import java.util.ArrayList;
 import java.util.List;
@@ -86,8 +87,10 @@ public final class RouteGeometryEnhancer {
     private RouteSearchResponse enhanceSafely(RouteSearchResponse response) {
         try {
             List<RouteLegResponse> legs = withGeometry(response.legs());
+            // 표시 total은 정정된 legs 합으로 맞춘다 — WALK 정정분까지 반영돼야 FE 표시가 어긋나지 않는다.
+            double totalMinutes = legs.stream().mapToDouble(RouteLegResponse::minutes).sum();
             return new RouteSearchResponse(
-                    response.routeType(), response.totalMinutes(), legs, response.source(),
+                    response.routeType(), totalMinutes, legs, response.source(),
                     totalDistanceOf(legs), response.transferCount(),
                     response.congestionPrediction());
         } catch (RuntimeException e) {
@@ -178,13 +181,21 @@ public final class RouteGeometryEnhancer {
     }
 
     private RouteLegResponse withGeometry(RouteLegResponse leg, MultiLineStringResponse geometry) {
+        double distance = distanceOf(geometry);
+        double minutes = leg.minutes();
+        if (leg.mode() == TravelMode.WALK && distance > 0) {
+            // 표시 시간 정정(임시방편): FE가 그리는 실제 경로(카카오 폴리라인) 길이 기준.
+            // 탐색 비용(직선)은 그대로라 선정·순위는 바뀌지 않는다 — 탐색 왜곡은 P2/P3 과제.
+            // geometry 없으면 엔진 값을 유지한다(위 withGeometry(leg) 분기).
+            minutes = distance / WalkEdgeBuilder.METERS_PER_SEC / 60.0;
+        }
         return new RouteLegResponse(
                 leg.mode(),
                 leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), leg.minutes(),
+                leg.routeId(), minutes,
                 geometry, "available",
-                distanceOf(geometry), leg.routeName(), null
+                distance, leg.routeName(), null
         );
     }
 
