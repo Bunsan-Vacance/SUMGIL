@@ -49,6 +49,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -183,16 +184,22 @@ public class RouteSearchService {
                         graph, originStationId, destStationId, MAX_CANDIDATES, modes),
                 modes);
         List<ScoredCandidate> calmScored;
-        try {
-            calmScored = RouteCandidateFinder.filterScoredByModes(
-                    finder.findCandidatesWithPaths(graph, originStationId, destStationId,
-                            MAX_CANDIDATES, modes,
-                            CongestionCostModel.of(congestionLambda,
-                                    congestionLevels(slot.dowType(), slot.timeSlot()),
-                                    graphRegistry.busRouteIndex())),
-                    modes);
-        } catch (RuntimeException e) {
+        if (!calmSearchCanDiffer(slot)) {
+            // 슬롯의 LINE·ROUTE 혼잡도가 전부 가중 임계(100) 이하 → 혼잡 가중 탐색이 시간
+            // 탐색과 같은 비용·같은 경로를 낸다. 2배 비용을 피하고 시간 후보로 정제한다(216 후속).
             calmScored = List.of();
+        } else {
+            try {
+                calmScored = RouteCandidateFinder.filterScoredByModes(
+                        finder.findCandidatesWithPaths(graph, originStationId, destStationId,
+                                MAX_CANDIDATES, modes,
+                                CongestionCostModel.of(congestionLambda,
+                                        congestionLevels(slot.dowType(), slot.timeSlot()),
+                                        graphRegistry.busRouteIndex())),
+                        modes);
+            } catch (RuntimeException e) {
+                calmScored = List.of();
+            }
         }
         List<RouteSearchResponse> filtered =
                 timeScored.stream().map(ScoredCandidate::response).toList();
@@ -214,6 +221,24 @@ public class RouteSearchService {
         List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
                 speed, calm, pool, SPEED_ROUTES + CALM_ROUTES);
         return new SixResult(six, timeScored, calmScored);
+    }
+
+    /**
+     * 해당 슬롯에서 혼잡 가중이 탐색 비용을 바꿀 수 있는가(S15P21A104-216 후속).
+     * 가중은 LINE·ROUTE의 임계(100) 초과분만 반영되므로, 초과 값이 하나도 없으면
+     * 혼잡 가중 탐색이 시간 탐색과 동일 경로를 낸다 — 그때는 2회 탐색을 생략한다.
+     * 판정 실패 시에는 기존 동작(혼잡 탐색 수행)을 유지한다.
+     */
+    private boolean calmSearchCanDiffer(DepartureSlot slot) {
+        try {
+            return congestionRepository
+                    .existsById_TargetTypeInAndId_DowTypeAndId_TimeSlotAndLevelGreaterThan(
+                            List.of(CongestionTarget.LINE, CongestionTarget.ROUTE),
+                            slot.dowType(), slot.timeSlot(),
+                            BigDecimal.valueOf(CongestionCostModel.WEIGHT_MIN_LEVEL));
+        } catch (RuntimeException e) {
+            return true;
+        }
     }
 
     /**
