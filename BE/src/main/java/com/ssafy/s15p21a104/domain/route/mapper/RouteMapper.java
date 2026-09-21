@@ -81,7 +81,8 @@ public final class RouteMapper {
 
         double totalMinutes = enginePath.totalSeconds() / 60.0;
         return Optional.of(new RouteSearchResponse(
-                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount()));
+                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount(),
+                null));
     }
 
     /**
@@ -242,7 +243,8 @@ public final class RouteMapper {
 
         double totalMinutes = enginePath.totalSeconds() / 60.0;
         return Optional.of(new RouteSearchResponse(
-                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount()));
+                routeType, totalMinutes, List.copyOf(legs), source, null, enginePath.transferCount(),
+                null));
     }
 
     /** 단일 원소 집합이면 그 원소, 아니면 null — 기존 문자열 규칙 폴백용(232). */
@@ -354,7 +356,8 @@ public final class RouteMapper {
                 first.routeId(),
                 sum / 60.0,
                 // KTDB geometry·거리·노선명은 RouteMapper가 모른다(DB 비의존 순수 함수) —
-                // RouteSearchService가 후처리로 채운다.
+                // RouteSearchService가 후처리로 채운다. 계약 필드(236·237·297)도 후처리 몫이라
+                // 16인자 호환 생성자를 쓴다.
                 null, "unavailable",
                 null, null, routeOptions
         );

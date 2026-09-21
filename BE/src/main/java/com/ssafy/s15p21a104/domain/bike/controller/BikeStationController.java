@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.domain.bike.controller;
 
 import com.ssafy.s15p21a104.domain.bike.dto.response.BikeStationResponse;
 import com.ssafy.s15p21a104.domain.bike.dto.response.BikeStockResponse;
+import com.ssafy.s15p21a104.domain.bike.dto.response.BikePredictionResponse;
 import com.ssafy.s15p21a104.domain.bike.service.BikeStationSearchService;
 import com.ssafy.s15p21a104.global.response.ApiResult;
 import lombok.RequiredArgsConstructor;
@@ -23,5 +24,10 @@ public class BikeStationController implements BikeStationApi {
     @Override
     public ApiResult<BikeStockResponse> stock(String rentalId) {
         return ApiResult.ok(bikeStationSearchService.stock(rentalId));
+    }
+
+    @Override
+    public ApiResult<BikePredictionResponse> prediction(String rentalId, String arrivalTime) {
+        return ApiResult.ok(bikeStationSearchService.prediction(rentalId, arrivalTime));
     }
 }

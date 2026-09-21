@@ -9,6 +9,7 @@ import com.ssafy.s15p21a104.domain.buscongestion.BusCongestionWindow;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
+import com.ssafy.s15p21a104.domain.congestion.scoring.CongestionScorer;
 import com.ssafy.s15p21a104.domain.congestion.scoring.LinkCongestionScorer;
 import com.ssafy.s15p21a104.domain.congestion.scoring.SubwayDirectionResolver;
 import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
@@ -18,6 +19,7 @@ import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
+import com.ssafy.s15p21a104.domain.route.dto.response.CongestionPrediction;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
@@ -26,8 +28,11 @@ import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.mapper.LegContract;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
+import com.ssafy.s15p21a104.domain.route.scoring.CongestionCostModel;
+import com.ssafy.s15p21a104.domain.route.scoring.CongestionPredictionResolver;
 import com.ssafy.s15p21a104.domain.route.scoring.RouteScoreRanker;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
@@ -40,18 +45,23 @@ import com.ssafy.s15p21a104.global.exception.ErrorType;
 import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
@@ -111,6 +121,10 @@ public class RouteSearchService {
     /** 6경로 응답 상한: 속도 3 + 혼잡 3(S15P21A104-214, 배포 문서 순서표). */
     private static final int CALM_ROUTES = 3;
 
+    /** 혼잡 가중치 λ (S15P21A104-216, 기본 0.5). transfer.default-sec 노브와 같은 패턴. */
+    @Value("${route.congestion-lambda:0.5}")
+    private double congestionLambda;
+
     public List<RouteSearchResponse> search(
             String originStationId,
             String destStationId,
@@ -138,25 +152,142 @@ public class RouteSearchService {
         if (slotGraph == null) {
             throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
-        // 214: 속도 3 + 혼잡 3 (배포 문서 순서표). modes 필터는 라벨 전에 걸고,
-        // 속도 3은 시간순 상위, 혼잡 3은 혼잡순 상위(중복 가능)로 뽑는다.
-        List<ScoredCandidate> scoredCandidates = RouteCandidateFinder.filterScoredByModes(
-                candidateFinder().findCandidatesWithPaths(
-                        slotGraph, originStationId, destStationId, MAX_CANDIDATES, modes),
+        // 214·216: 속도 3(시간 탐색) + 혼잡 3(혼잡 가중 탐색). modes 필터는 라벨 전에 건다.
+        SixResult assembled = sixRoutes(
+                candidateFinder(), slotGraph, originStationId, destStationId, modes,
+                effectiveDepartureTime);
+        // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
+        // 출발시각을 넘겨 live window일 때만 BUS 실시간 등급을 prefetch한다(297).
+        List<RouteSearchResponse> named =
+                withRouteNames(withGeometryAll(assembled.six()), effectiveDepartureTime);
+        // 계약 필드(236)는 맨 마지막에 붙인다 — geometry·이름 단계는 필드를 그대로 둔다.
+        return withContractFields(named, assembled, effectiveDepartureTime);
+    }
+
+    /** 탐색 결과 묶음 — 최종 6건과 점수 계산에 쓴 원본 후보. */
+    private record SixResult(List<RouteSearchResponse> six,
+                             List<ScoredCandidate> timeScored,
+                             List<ScoredCandidate> calmScored) {
+    }
+
+    /**
+     * 시간 탐색 1회 + 혼잡 가중 탐색 1회로 속도 3 + 혼잡 3을 뽑는다(S15P21A104-216).
+     * 역 검색·좌표 검색이 같은 파이프를 쓴다.
+     */
+    private SixResult sixRoutes(RouteCandidateFinder finder, RouteGraph graph,
+            String originStationId, String destStationId, List<TravelMode> modes,
+            LocalDateTime departureTime) {
+        DepartureSlot slot = DepartureSlot.of(departureTime);
+        List<ScoredCandidate> timeScored = RouteCandidateFinder.filterScoredByModes(
+                finder.findCandidatesWithPaths(
+                        graph, originStationId, destStationId, MAX_CANDIDATES, modes),
                 modes);
-        List<RouteSearchResponse> filtered = scoredCandidates.stream().map(ScoredCandidate::response).toList();
+        List<ScoredCandidate> calmScored;
+        try {
+            calmScored = RouteCandidateFinder.filterScoredByModes(
+                    finder.findCandidatesWithPaths(graph, originStationId, destStationId,
+                            MAX_CANDIDATES, modes,
+                            CongestionCostModel.of(congestionLambda,
+                                    congestionLevels(slot.dowType(), slot.timeSlot()),
+                                    graphRegistry.busRouteIndex())),
+                    modes);
+        } catch (RuntimeException e) {
+            calmScored = List.of();
+        }
+        List<RouteSearchResponse> filtered =
+                timeScored.stream().map(ScoredCandidate::response).toList();
         List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(filtered);
         List<RouteSearchResponse> speed = ranked.stream()
                 .limit(SPEED_ROUTES)
                 .toList();
-        // 158(통지 05 S-1): 링크 단위·통과 시각 슬롯 기반. 노선 단위 topCalm은 더 안 쓴다.
+        // 158(통지 05 S-1): 링크 단위·통과 시각 슬롯으로 정제. 혼잡 탐색이 비면 시간 후보에서 고른다.
         List<RouteSearchResponse> calm = scoreRanker().topCalmByLink(
-                scoredCandidates, effectiveDepartureTime, congestionPredLookup(), CALM_ROUTES);
+                calmScored.isEmpty() ? timeScored : calmScored,
+                departureTime, congestionPredLookup(), CALM_ROUTES);
+        // 부족분 채움 풀은 두 탐색 합본(시간순).
+        List<RouteSearchResponse> pool = new ArrayList<>(ranked);
+        for (ScoredCandidate calmCandidate : calmScored) {
+            pool.add(calmCandidate.response());
+        }
+        pool.sort(Comparator.comparingDouble(RouteSearchResponse::totalMinutes));
         // 완전 중복(속도∩혼잡)·유사경로(탄 것만 비교) 제거 후 부족분은 전체 후보에서 채운다.
         List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
-                speed, calm, ranked, SPEED_ROUTES + CALM_ROUTES);
-        // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
-        return withRouteNames(withGeometryAll(six), departureTime);
+                speed, calm, pool, SPEED_ROUTES + CALM_ROUTES);
+        return new SixResult(six, timeScored, calmScored);
+    }
+
+    /**
+     * 계약 필드 부착(S15P21A104-236 혼잡 예측 · 237 구간 구분은 legs 변환 포함).
+     * 최종 후보(6개 이하)에만 계산한다 — 조회는 PK 단건이라 상한이 걸린다.
+     */
+    private List<RouteSearchResponse> withContractFields(List<RouteSearchResponse> six,
+            SixResult assembled, LocalDateTime departureTime) {
+        DepartureSlot slot = DepartureSlot.of(departureTime);
+        Map<String, List<Edge>> edgesBySignature = new HashMap<>();
+        for (ScoredCandidate scored : assembled.timeScored()) {
+            edgesBySignature.putIfAbsent(
+                    RouteCandidateFinder.exactSignature(scored.response()), scored.path().edges());
+        }
+        for (ScoredCandidate scored : assembled.calmScored()) {
+            edgesBySignature.putIfAbsent(
+                    RouteCandidateFinder.exactSignature(scored.response()), scored.path().edges());
+        }
+        // stat 폴백용 LINE 레벨 — 최종 후보의 SUBWAY 노선만 묶어 조회한다.
+        Set<String> subwayRouteIds = new HashSet<>();
+        for (RouteSearchResponse response : six) {
+            for (RouteLegResponse leg : response.legs()) {
+                if (leg.mode() == TravelMode.SUBWAY && leg.routeId() != null) {
+                    subwayRouteIds.add(leg.routeId());
+                }
+            }
+        }
+        Map<String, Double> levelByRouteId = new HashMap<>();
+        CongestionCostModel.LevelSource levels =
+                congestionLevels(slot.dowType(), slot.timeSlot());
+        for (String routeId : subwayRouteIds) {
+            Double level = levels.levelOf("LINE", routeId);
+            if (level != null) {
+                levelByRouteId.put(routeId, level);
+            }
+        }
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        List<RouteSearchResponse> out = new ArrayList<>();
+        for (RouteSearchResponse response : six) {
+            List<RouteLegResponse> legs = LegContract.withContractFields(
+                    response.legs(), graphRegistry.rentalIds());
+            List<Edge> edges = edgesBySignature.getOrDefault(
+                    RouteCandidateFinder.exactSignature(response), List.of());
+            AtomicBoolean truncated = new AtomicBoolean(false);
+            Optional<Double> linkScore = edges.isEmpty() ? Optional.empty()
+                    : LinkCongestionScorer.score(
+                                    edges, departureTime, congestionPredLookup(truncated))
+                            .map(LinkCongestionScorer.Result::weightedAverage);
+            Optional<Double> lineScore =
+                    CongestionScorer.score(legs, levelByRouteId);
+            CongestionPrediction prediction = CongestionPredictionResolver.resolve(
+                    linkScore, lineScore, truncated.get(),
+                    departureTime.toLocalDate(), today);
+            out.add(new RouteSearchResponse(response.routeType(), response.totalMinutes(),
+                    legs, response.source(), response.totalDistanceMeters(),
+                    response.transferCount(), prediction));
+        }
+        return out;
+    }
+
+    /** 슬롯 고정 혼잡도 조회 — 탐색 비용 모델에 넘긴다(216). */
+    private CongestionCostModel.LevelSource congestionLevels(int dowType, int timeSlot) {
+        return (targetType, targetId) -> {
+            CongestionTarget target = "LINE".equals(targetType) ? CongestionTarget.LINE
+                    : "ROUTE".equals(targetType) ? CongestionTarget.ROUTE : null;
+            if (target == null || targetId == null) {
+                return null;
+            }
+            return congestionRepository
+                    .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                            target, targetId, dowType, timeSlot)
+                    .map(c -> c.getLevel().doubleValue())
+                    .orElse(null);
+        };
     }
 
     /** 탐색→매핑 조립기. 레지스트리 값을 주입해 만든다. */
@@ -186,15 +317,35 @@ public class RouteSearchService {
      * 결측과 동일하게 다룬다.
      */
     private LinkCongestionScorer.LinkLevelLookup congestionPredLookup() {
-        return (edge, passThroughTime) -> SubwayDirectionResolver
-                .resolve(edge.fromNode(), edge.toNode(), edge.routeId())
-                .flatMap(direction -> congestionPredRepository
-                        .findById_PredDateAndId_FromStationIdAndId_ToStationIdAndId_LineIdAndId_DirectionAndId_TimeSlot(
-                                passThroughTime.toLocalDate(), edge.fromNode(), edge.toNode(), edge.routeId(),
-                                direction, DepartureSlot.of(passThroughTime).timeSlot())
-                        .map(com.ssafy.s15p21a104.domain.congestion.entity.CongestionPred::getLevel))
-                .map(java.math.BigDecimal::doubleValue)
-                .orElse(null);
+        return congestionPredLookup(new AtomicBoolean());
+    }
+
+    /**
+     * 방향 미판정을 기록하는 판(S15P21A104-236 LINE1_TRUNCATED).
+     *
+     * @param directionUnresolved SUBWAY 엣지의 방향을 못 정할 때 true로 세운다
+     */
+    private LinkCongestionScorer.LinkLevelLookup congestionPredLookup(
+            AtomicBoolean directionUnresolved) {
+        return (edge, passThroughTime) -> {
+            var direction =
+                    SubwayDirectionResolver.resolve(edge.fromNode(), edge.toNode(), edge.routeId());
+            if (direction.isEmpty()) {
+                if (edge.mode() == TravelMode.SUBWAY) {
+                    directionUnresolved.set(true);
+                }
+                return null;
+            }
+            return direction
+                    .flatMap(resolved -> congestionPredRepository
+                            .findById_PredDateAndId_FromStationIdAndId_ToStationIdAndId_LineIdAndId_DirectionAndId_TimeSlot(
+                                    passThroughTime.toLocalDate(), edge.fromNode(), edge.toNode(),
+                                    edge.routeId(), resolved,
+                                    DepartureSlot.of(passThroughTime).timeSlot())
+                            .map(com.ssafy.s15p21a104.domain.congestion.entity.CongestionPred::getLevel))
+                    .map(java.math.BigDecimal::doubleValue)
+                    .orElse(null);
+        };
     }
 
     /**
@@ -324,7 +475,6 @@ public class RouteSearchService {
         stationInfos.put(PLACE_DEST_ID, new RouteMapper.StationInfo(
                 PLACE_DEST_ID, destination.name(), destination.lat(), destination.lng()));
 
-        DepartureSlot departureSlot = coordSlot;
         RouteCandidateFinder coordFinder = new RouteCandidateFinder(
                 transferRule,
                 graphRegistry.transferTimes(),
@@ -332,20 +482,14 @@ public class RouteSearchService {
                 stationInfos,
                 graphRegistry::bikeStock,
                 graphRegistry.busRouteIndex());
-        // 214: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
-        List<RouteSearchResponse> filtered = RouteCandidateFinder.filterByModes(
-                coordFinder.findCandidates(
-                        augmentedGraph, PLACE_ORIGIN_ID, PLACE_DEST_ID, MAX_CANDIDATES, request.modes()),
-                request.modes());
-        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(filtered);
-        List<RouteSearchResponse> speed = ranked.stream()
-                .limit(SPEED_ROUTES)
-                .toList();
-        List<RouteSearchResponse> calm = scoreRanker().topCalm(
-                ranked, departureSlot.dowType(), departureSlot.timeSlot(), CALM_ROUTES);
-        List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
-                speed, calm, ranked, SPEED_ROUTES + CALM_ROUTES);
-        return withRouteNames(withGeometryAll(six), request.departureTime());
+        // 214·216: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
+        LocalDateTime coordDeparture =
+                request.departureTime() != null ? request.departureTime() : LocalDateTime.now();
+        SixResult coordAssembled = sixRoutes(coordFinder, augmentedGraph,
+                PLACE_ORIGIN_ID, PLACE_DEST_ID, request.modes(), coordDeparture);
+        List<RouteSearchResponse> coordNamed =
+                withRouteNames(withGeometryAll(coordAssembled.six()), coordDeparture);
+        return withContractFields(coordNamed, coordAssembled, coordDeparture);
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {

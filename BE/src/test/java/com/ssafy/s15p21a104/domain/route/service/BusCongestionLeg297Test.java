@@ -59,7 +59,7 @@ class BusCongestionLeg297Test {
 
     private static RouteSearchResponse responseOf(RouteLegResponse... legs) {
         return new RouteSearchResponse(RouteType.SHORTEST, 4.0, List.of(legs),
-                RouteSource.ALGORITHM, null, 0);
+                RouteSource.ALGORITHM, null, 0, null);
     }
 
     private static RouteNameResolver resolver(Function<String, Map<String, BusArrival>> congestion) {

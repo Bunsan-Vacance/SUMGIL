@@ -43,6 +43,18 @@ public final class KShortestPathFinder {
 
     private static final Logger log = LoggerFactory.getLogger(KShortestPathFinder.class);
 
+    /**
+     * 엣지 이동 비용 모델(S15P21A104-216). 기본은 시간 비용이며, 혼잡 가중 탐색·
+     * 장래 노선 페널티(TIME 재탐색 회신 #1)는 같은 자리에 얹는다.
+     */
+    public interface EdgeCostModel {
+        /** 시간 비용 그대로. */
+        EdgeCostModel TIME = Edge::travelSec;
+
+        /** 엣지 1건 이동에 드는 비용(초). 환승 상수·대기는 별도라 포함하지 않는다. */
+        long travelCost(Edge edge);
+    }
+
     private final TransferRule transferRule;
     private final BusRouteIndex busRouteIndex;
 
@@ -99,14 +111,29 @@ public final class KShortestPathFinder {
                           int k, List<TravelMode> allowedModes,
                           ToLongFunction<String> remainingLowerBound) {
         return findK(graph, originStationId, destStationId, k, allowedModes,
-                DEFAULT_MAX_WORK, DEFAULT_MAX_LABELS_PER_STATE, remainingLowerBound);
+                DEFAULT_MAX_WORK, DEFAULT_MAX_LABELS_PER_STATE, remainingLowerBound,
+                EdgeCostModel.TIME);
+    }
+
+    /**
+     * 엣지 비용 모델까지 받는 판(S15P21A104-216 혼잡 가중 탐색).
+     *
+     * @param costModel 엣지 이동 비용. null이면 시간 비용
+     */
+    List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
+                          int k, List<TravelMode> allowedModes,
+                          ToLongFunction<String> remainingLowerBound,
+                          EdgeCostModel costModel) {
+        return findK(graph, originStationId, destStationId, k, allowedModes,
+                DEFAULT_MAX_WORK, DEFAULT_MAX_LABELS_PER_STATE, remainingLowerBound, costModel);
     }
 
     /** 작업 상한·상태당 라벨 상한까지 명시하는 판(테스트·튜닝용). */
     List<FoundPath> findK(RouteGraph graph, String originStationId, String destStationId,
                           int k, List<TravelMode> allowedModes,
                           long maxWork, int maxLabelsPerState,
-                          ToLongFunction<String> remainingLowerBound) {
+                          ToLongFunction<String> remainingLowerBound,
+                          EdgeCostModel costModel) {
         Objects.requireNonNull(graph, "graph");
         if (k <= 0) {
             return List.of();
@@ -117,6 +144,7 @@ public final class KShortestPathFinder {
         if (!graph.containsNode(originStationId) || !graph.containsNode(destStationId)) {
             return List.of();
         }
+        EdgeCostModel costs = costModel == null ? EdgeCostModel.TIME : costModel;
         int labelCap = Math.max(1, Math.min(k, maxLabelsPerState));
         long work = 0;
         ToLongFunction<String> lowerBound = remainingLowerBound == null ? node -> 0L : remainingLowerBound;
@@ -135,7 +163,7 @@ public final class KShortestPathFinder {
                 return List.of();
             }
             long cost = transferRule.costWithStation(
-                    edge.travelSec(), originStationId, null, edge.routeId(), null, edge.mode())
+                    costs.travelCost(edge), originStationId, null, edge.routeId(), null, edge.mode())
                     + edge.waitSec();
             Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
             Set<String> kept = TransferRule.keptTransitLines(Set.of(), edge.mode(), options);
@@ -163,8 +191,14 @@ public final class KShortestPathFinder {
             }
             for (Edge edge : graph.outgoingEdges(label.node())) {
                 if (++work >= maxWork) {
-                    log.warn("탐색 작업 상한 도달: {}->{} maxWork={} 후보={}건",
-                            originStationId, destStationId, maxWork, results.size());
+                    // 상한 도달 시점의 상태 수 — kept 집합 축소 판단용 측정값(216 배치).
+                    long states = 0;
+                    for (Map<StateKey, List<Label>> byKey : labelsByNode.values()) {
+                        states += byKey.size();
+                    }
+                    log.warn("탐색 작업 상한 도달: {}->{} maxWork={} 후보={}건 노드={} 상태={}",
+                            originStationId, destStationId, maxWork, results.size(),
+                            labelsByNode.size(), states);
                     break search;
                 }
                 if (!isModeAllowed(edge.mode(), allowedModes)) {
@@ -178,7 +212,7 @@ public final class KShortestPathFinder {
                 TransferRule.TransferDecision decision = TransferRule.decideLines(
                         label.keptLine(), label.arrivalMode(), label.arrivedOptions(),
                         edge.mode(), options);
-                long nextCost = label.cost() + edge.travelSec();
+                long nextCost = label.cost() + costs.travelCost(edge);
                 if (decision.transfer()) {
                     nextCost += transferRule.transferCost(label.node(), label.keptLine(), options);
                 } else if (label.arrivedOptions().size() == 1 && options.size() == 1) {

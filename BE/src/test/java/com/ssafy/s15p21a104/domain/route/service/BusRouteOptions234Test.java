@@ -38,7 +38,7 @@ class BusRouteOptions234Test {
 
     private static RouteSearchResponse responseOf(RouteLegResponse leg) {
         return new RouteSearchResponse(RouteType.SHORTEST, 4.0, List.of(leg),
-                RouteSource.ALGORITHM, null, 0);
+                RouteSource.ALGORITHM, null, 0, null);
     }
 
     @Test

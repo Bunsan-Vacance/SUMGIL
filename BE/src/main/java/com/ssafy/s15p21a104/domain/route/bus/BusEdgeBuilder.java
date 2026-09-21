@@ -18,8 +18,13 @@ import java.util.Objects;
  */
 public final class BusEdgeBuilder {
 
-    /** 버스 속도(m/s). 20km/h 보수치 (후속 정교화). */
-    public static final double METERS_PER_SEC = 20_000.0 / 3600.0;
+    /**
+     * 버스 실효 속도(m/s). 14km/h (S15P21A104-216 배치).
+     * 직선 거리/20km/h는 실측보다 ~1.5배 짧게 나온다(동일 노선·정류장 네이버 12분
+     * 대비 8분 표본). 도로 우회·신호·정차가 합쳐진 값이므로 단일 노브로 두고,
+     * 시간표 기반 구간 시각(원빈 트랙)이 들어오면 이 상수는 폐기한다.
+     */
+    public static final double METERS_PER_SEC = 14_000.0 / 3600.0;
 
     /** 정규 BUS 엣지의 routeId. 노선 구분 없는 구간 단위 엣지 표시(S15P21A104-234). */
     public static final String BUS_CORRIDOR_ROUTE_ID = "BUS";

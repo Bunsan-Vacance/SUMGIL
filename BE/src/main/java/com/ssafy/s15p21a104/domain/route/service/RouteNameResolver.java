@@ -124,7 +124,8 @@ public final class RouteNameResolver {
                     .toList();
             named.add(new RouteSearchResponse(
                     response.routeType(), response.totalMinutes(), legs, response.source(),
-                    response.totalDistanceMeters(), response.transferCount()));
+                    response.totalDistanceMeters(), response.transferCount(),
+                    response.congestionPrediction()));
         }
         return named;
     }
@@ -153,7 +154,8 @@ public final class RouteNameResolver {
                 leg.geometry(), leg.geometryStatus(),
                 leg.distanceMeters(), null,
                 RouteOptionResponse.of(optionList, names, headways),
-                congestionGrade(leg.fromNodeId(), optionIds)
+                congestionGrade(leg.fromNodeId(), optionIds),
+                leg.transitionType(), leg.fromRentalId(), leg.toRentalId()
         );
     }
 

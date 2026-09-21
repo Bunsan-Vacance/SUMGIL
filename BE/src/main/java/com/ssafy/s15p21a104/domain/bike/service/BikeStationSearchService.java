@@ -2,10 +2,17 @@ package com.ssafy.s15p21a104.domain.bike.service;
 
 import com.ssafy.s15p21a104.domain.bike.dto.response.BikeStationResponse;
 import com.ssafy.s15p21a104.domain.bike.dto.response.BikeStockResponse;
+import com.ssafy.s15p21a104.domain.bike.dto.response.BikePredictionResponse;
+import com.ssafy.s15p21a104.domain.bike.dto.response.BikePredictionSource;
+import com.ssafy.s15p21a104.domain.bike.dto.response.BikePredictionStatus;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStation;
+import com.ssafy.s15p21a104.domain.bike.entity.BikeStockPred;
+import com.ssafy.s15p21a104.domain.bike.entity.BikeStockPredId;
 import com.ssafy.s15p21a104.domain.bike.repository.BikeStationRepository;
+import com.ssafy.s15p21a104.domain.bike.repository.BikeStockPredRepository;
 import com.ssafy.s15p21a104.domain.bike.stock.BikeStock;
 import com.ssafy.s15p21a104.domain.bike.stock.BikeStockReader;
+import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
@@ -13,8 +20,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +41,7 @@ public class BikeStationSearchService {
 
     private final BikeStationRepository bikeStationRepository;
     private final BikeStockReader bikeStockReader;
+    private final BikeStockPredRepository bikeStockPredRepository;
 
     public List<BikeStationResponse> nearby(Double lat, Double lng, Integer radiusMeters, Integer limit) {
         validateCoordinate(lat, lng);
@@ -55,6 +69,48 @@ public class BikeStationSearchService {
                 .orElseThrow(() -> new DomainException(ErrorType.BIKE_STATION_NOT_FOUND));
         BikeStock stock = bikeStockReader.find(station.getRentalId());
         return new BikeStockResponse(station.getRentalId(), stock.available(), stock.updatedAt(), stock.status());
+    }
+
+    /**
+     * 도착 시각 기준 예상 재고(S15P21A104-237, FE-BE 통합 계약 §6).
+     * 정적 예측표({@code bike_stock_pred})만 읽는다 — 실시간 수집값을 건드리지 않는다.
+     *
+     * @param rentalId 대여소 ID
+     * @param arrivalTime 도착 예상 시각(offset ISO). 없거나 깨지면 400
+     * @return 예측 응답. 행이 없으면 UNAVAILABLE(값을 0으로 바꾸지 않음)
+     */
+    public BikePredictionResponse prediction(String rentalId, String arrivalTime) {
+        BikeStation station = bikeStationRepository.findById(rentalId)
+                .orElseThrow(() -> new DomainException(ErrorType.BIKE_STATION_NOT_FOUND));
+        OffsetDateTime arrival = parseArrival(arrivalTime);
+        // 슬롯 규칙은 탐색과 같은 정의(DepartureSlot)를 쓴다 — pred 테이블 키와 일치해야 한다.
+        LocalDateTime seoul = arrival.atZoneSameInstant(ZoneId.of("Asia/Seoul")).toLocalDateTime();
+        DepartureSlot slot = DepartureSlot.of(seoul);
+        Optional<BikeStockPred> row = bikeStockPredRepository.findById(
+                new BikeStockPredId(station.getRentalId(), slot.dowType(), slot.timeSlot()));
+        if (row.isEmpty()) {
+            return new BikePredictionResponse(BikePredictionStatus.UNAVAILABLE, null, null, null,
+                    arrival, station.getRentalId(), BikePredictionSource.MOCK);
+        }
+        BikeStockPred pred = row.get();
+        int bikes = pred.getExpBikes().setScale(0, RoundingMode.HALF_UP).intValueExact();
+        double probability =
+                Math.min(1.0, Math.max(0.0, 1.0 - pred.getPEmpty().doubleValue()));
+        BikePredictionSource source = "model".equalsIgnoreCase(pred.getSource())
+                ? BikePredictionSource.MODEL : BikePredictionSource.MOCK;
+        return new BikePredictionResponse(BikePredictionStatus.AVAILABLE, bikes, probability,
+                pred.getUpdatedAt(), arrival, station.getRentalId(), source);
+    }
+
+    private OffsetDateTime parseArrival(String arrivalTime) {
+        if (arrivalTime == null || arrivalTime.isBlank()) {
+            throw new DomainException(ErrorType.BAD_REQUEST);
+        }
+        try {
+            return OffsetDateTime.parse(arrivalTime);
+        } catch (DateTimeParseException e) {
+            throw new DomainException(ErrorType.BAD_REQUEST);
+        }
     }
 
     private void validateCoordinate(Double lat, Double lng) {
