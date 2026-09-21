@@ -179,4 +179,7 @@ class RaptorFinderTest {
                 .findFirst().orElseThrow();
         assertEquals(TravelMode.WALK, walkToA.mode());
     }
+
+    // 연결망 다중 홉(대여소 체인)은 엔진이 아니라 경계가 접근·이탈 테이블로 공급한다(5부 R-A1).
+    // 커버리지: RaptorAccessClosureTest(단위) · RouteRaptorAccessChainTest(경계 통합).
 }

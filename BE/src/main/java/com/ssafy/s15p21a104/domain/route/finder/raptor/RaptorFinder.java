@@ -75,6 +75,18 @@ public final class RaptorFinder {
         }
     }
 
+    /** 접근 사슬 한 칸 — 정점 도달 비용과 직전 구간(추적용). {@code fromNode == null}이면 시드(출발지). */
+    public record Access(int costSec, String fromNode, int legSec, TravelMode mode) {
+    }
+
+    /** 이탈 사슬 한 칸 — 정점에서 도착지까지의 비용과 다음 구간(추적용). {@code toNode == null}이면 시드(도착지). */
+    public record Egress(int costSec, String toNode, int legSec, TravelMode mode) {
+    }
+
+    /** 경계(접근·이탈 closure)가 만든 테이블 묶음 — 비용 + 경로 사슬(5부 R-A1). */
+    public record AccessTables(Map<String, Access> origin, Map<String, Egress> dest) {
+    }
+
     /** 구간 비용(초). {@code passThroughSec} = 구간 진입 시각(출발 기준 경과 초). */
     @FunctionalInterface
     public interface SegmentCost {
@@ -122,9 +134,33 @@ public final class RaptorFinder {
      *
      * @param minimizeCost true면 비용(costModel 반영) 최소화, false면 시간 최소화
      */
+    /** 비용만 있는 접근·이탈 맵(기존 API) — 경로 추적 정보 없이 시드로 감싼다. */
     public List<Journey> find(String originNodeId, String destNodeId,
                               Map<String, Integer> originAccess, Map<String, Integer> destAccess,
                               int maxRounds, boolean minimizeCost) {
+        Objects.requireNonNull(originAccess, "originAccess");
+        Objects.requireNonNull(destAccess, "destAccess");
+        Map<String, Access> accesses = new HashMap<>();
+        for (Map.Entry<String, Integer> entry : originAccess.entrySet()) {
+            accesses.put(entry.getKey(), new Access(entry.getValue(), null, 0, TravelMode.WALK));
+        }
+        Map<String, Egress> egresses = new HashMap<>();
+        for (Map.Entry<String, Integer> entry : destAccess.entrySet()) {
+            egresses.put(entry.getKey(), new Egress(entry.getValue(), null, 0, TravelMode.WALK));
+        }
+        return find(originNodeId, destNodeId, new AccessTables(accesses, egresses),
+                maxRounds, minimizeCost);
+    }
+
+    /**
+     * 경계가 만든 접근·이탈 테이블(경로 사슬 포함)로 탐색한다(5부 R-A1).
+     * 라운드 0 라벨이 접근 사슬을 그대로 이어받고, 복원이 이탈 사슬을 실제 연결 leg로 편다.
+     */
+    public List<Journey> find(String originNodeId, String destNodeId, AccessTables accessTables,
+                              int maxRounds, boolean minimizeCost) {
+        Objects.requireNonNull(accessTables, "accessTables");
+        Map<String, Access> originAccess = accessTables.origin();
+        Map<String, Egress> destAccess = accessTables.dest();
         Objects.requireNonNull(originAccess, "originAccess");
         Objects.requireNonNull(destAccess, "destAccess");
         if (maxRounds <= 0 || originAccess.isEmpty() || destAccess.isEmpty()) {
@@ -132,12 +168,15 @@ public final class RaptorFinder {
         }
         List<Map<String, Label>> byRound = new ArrayList<>();
         Map<String, Label> round0 = new HashMap<>();
-        for (Map.Entry<String, Integer> access : originAccess.entrySet()) {
-            round0.put(access.getKey(), new Label(access.getValue(), access.getValue(),
-                    new Trace(-1, null, "WALK", TravelMode.WALK, 0, access.getValue(), -1, -1, -1)));
+        for (Map.Entry<String, Access> access : originAccess.entrySet()) {
+            Access value = access.getValue();
+            Trace trace = value.fromNode() == null
+                    ? new Trace(-1, null, "WALK", TravelMode.WALK, 0, value.costSec(), -1, -1, -1)
+                    : new Trace(0, value.fromNode(), connectionRouteId(value.mode()), value.mode(),
+                            value.costSec() - value.legSec(), value.costSec(), -1, -1, -1);
+            round0.put(access.getKey(), new Label(value.costSec(), value.costSec(), trace));
         }
-        // 라운드 0 연결 이완 — 좌표 출발(PLACE-ORIGIN)의 접근 엣지 등, 출발지에서 한 홉.
-        // (이 단계가 없으면 출발지가 노선 정류장이 아닌 좌표 검색이 시작조차 못 한다.)
+        // 라운드 0 연결 이완 — 사슬 없는 단순 맵(기존 API)의 출발지 접근 한 홉 호환.
         relaxConnections(round0, 0, originAccess.keySet(), minimizeCost);
         byRound.add(round0);
 
@@ -275,20 +314,20 @@ public final class RaptorFinder {
 
     /** 라운드별 최선 도착 journey. 하차 정류장 → 도착지 접근 비용을 더해 비교한다. */
     private Journey bestJourney(List<Map<String, Label>> byRound,
-                                Map<String, Integer> destAccess, boolean minimizeCost,
+                                Map<String, Egress> destAccess, boolean minimizeCost,
                                 String originNodeId, String destNodeId) {
         long bestTotal = INF;
         int bestRound = -1;
         String bestStop = null;
         for (int round = 0; round < byRound.size(); round++) {
             Map<String, Label> labels = byRound.get(round);
-            for (Map.Entry<String, Integer> dest : destAccess.entrySet()) {
+            for (Map.Entry<String, Egress> dest : destAccess.entrySet()) {
                 Label label = labels.get(dest.getKey());
                 if (label == null) {
                     continue;
                 }
                 long base = minimizeCost ? label.cost() : label.time();
-                long total = base + dest.getValue();
+                long total = base + dest.getValue().costSec();
                 if (total < bestTotal) {
                     bestTotal = total;
                     bestRound = round;
@@ -299,13 +338,13 @@ public final class RaptorFinder {
         if (bestRound < 0) {
             return null;
         }
-        return reconstruct(byRound, bestRound, bestStop, destAccess.get(bestStop), minimizeCost,
+        return reconstruct(byRound, bestRound, bestStop, destAccess, minimizeCost,
                 originNodeId, destNodeId);
     }
 
     /** 라벨 사슬을 따라 journey를 복원한다. trace.prevRound = 같은 라운드(연결) / 이전 라운드(탑승). */
     private Journey reconstruct(List<Map<String, Label>> byRound, int round, String stop,
-                                int destAccessSec, boolean minimizeCost,
+                                Map<String, Egress> destAccess, boolean minimizeCost,
                                 String originNodeId, String destNodeId) {
         List<Leg> legs = new ArrayList<>();
         Label label = byRound.get(round).get(stop);
@@ -324,16 +363,38 @@ public final class RaptorFinder {
             label = byRound.get(trace.prevRound()).get(current);
         }
         long alightSec = byRound.get(round).get(stop).time();
-        long destSec = alightSec + destAccessSec;
-        legs.add(Leg.connection("WALK", TravelMode.WALK, stop, destNodeId, alightSec, destSec));
+        long alightCost = byRound.get(round).get(stop).cost();
+        // 이탈 사슬 — 도착지까지 실제 연결 leg(들)을 편다. 사슬이 없으면(비용만 있는 맵·역 도착)
+        // 기존과 같은 합성 leg를 남긴다(어댑터가 0초 동일노드 leg를 제거).
+        Egress seed = destAccess.get(stop);
+        long egressSec = seed == null ? 0 : seed.costSec();
+        String node = stop;
+        long t = alightSec;
+        Egress step = seed;
+        while (step != null && step.toNode() != null) {
+            legs.add(Leg.connection(connectionRouteId(step.mode()), step.mode(), node, step.toNode(),
+                    t, t + step.legSec()));
+            t += step.legSec();
+            node = step.toNode();
+            step = destAccess.get(node);
+        }
+        if (node.equals(stop)) {
+            legs.add(Leg.connection("WALK", TravelMode.WALK, stop, destNodeId,
+                    alightSec, alightSec + egressSec));
+        }
         int rides = 0;
         for (Leg leg : legs) {
             if (leg.mode() == TravelMode.BUS || leg.mode() == TravelMode.SUBWAY) {
                 rides++;
             }
         }
-        return new Journey(List.copyOf(legs), destSec, byRound.get(round).get(stop).cost()
-                + destAccessSec, Math.max(0, rides - 1));
+        return new Journey(List.copyOf(legs), alightSec + egressSec, alightCost + egressSec,
+                Math.max(0, rides - 1));
+    }
+
+    /** 연결 leg의 routeId — 기존 엔진과 같은 문자열 규칙(WALK/BIKE). */
+    private static String connectionRouteId(TravelMode mode) {
+        return mode == TravelMode.BIKE ? "BIKE" : "WALK";
     }
 
     /** journey의 leg 서명 — 라운드 간 중복 제거용. */
