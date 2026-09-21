@@ -136,6 +136,9 @@ public final class RaptorFinder {
             round0.put(access.getKey(), new Label(access.getValue(), access.getValue(),
                     new Trace(-1, null, "WALK", TravelMode.WALK, 0, access.getValue(), -1, -1, -1)));
         }
+        // 라운드 0 연결 이완 — 좌표 출발(PLACE-ORIGIN)의 접근 엣지 등, 출발지에서 한 홉.
+        // (이 단계가 없으면 출발지가 노선 정류장이 아닌 좌표 검색이 시작조차 못 한다.)
+        relaxConnections(round0, 0, originAccess.keySet(), minimizeCost);
         byRound.add(round0);
 
         List<Journey> found = new ArrayList<>();
