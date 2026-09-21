@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AI_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,26 @@ class Settings(BaseSettings):
     # LLM 예측기(실험 축). 키가 없으면 llm kind는 명확한 오류로 막힌다.
     crowd_llm_api_key: str | None = None
     crowd_llm_model: str | None = None
+
+    # ── TIME LLM 에이전트(203) — 실시간 재탐색 `AgentStrategy`가 쓰는 게이트웨이 설정 ──
+    # env는 GMS_API_KEY에서 읽는다(.env.example에 이미 항목 있음). TIME_LLM_API_KEY로도
+    # 덮어쓸 수 있게 별칭을 둔다 — 게이트웨이가 여럿으로 갈릴 경우를 대비한 여지다.
+    time_llm_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("TIME_LLM_API_KEY", "GMS_API_KEY")
+    )
+    # 게이트웨이 주소·모델명. **기본값 없음** — 어느 쪽도 아직 확정되지 않았다
+    # (`TOOL_CONTRACT.md` 6절 5번).
+    time_llm_base_url: str | None = None
+    time_llm_model: str | None = None
+    time_llm_timeout_sec: float = 4.0
+    # 세션당 LLM 호출·토큰 상한. **잠정값, 근거 없음** — 실제 프롬프트 크기·게이트웨이 단가를
+    # 보지 못한 채 우선 막아둔 값이다. 표를 확보하면 다시 정한다(트리거 임계값과 같은 처지).
+    time_llm_max_calls_per_session: int = 3
+    time_llm_max_tokens_per_session: int = 8000
+    # 안내 문장 길이 상한. **잠정값** — FE 회신이 팝업 길이 합의를 요청해 우선 숫자를 박아뒀다.
+    time_agent_reason_max_sentences: int = 2
+    time_agent_reason_max_chars: int = 120
+
     # 239: 열차·노드 표(`predictions_train_*.parquet`) 산출 여부. 기본 False — BE 적재 경로가
     # 정해지기 전까지 기존 산출물(`predictions_*.parquet`과 메타 값)을 바꾸지 않는다.
     crowd_train_table: bool = False
