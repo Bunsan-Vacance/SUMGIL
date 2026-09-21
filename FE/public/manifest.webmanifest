@@ -1,0 +1,24 @@
+{
+  "name": "숨길",
+  "short_name": "숨길",
+  "description": "빠르게, 여유롭게 이동하는 길찾기",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#18b98b",
+  "background_color": "#f0f4f3",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

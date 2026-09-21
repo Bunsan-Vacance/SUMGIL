@@ -3,6 +3,8 @@
 # 트리거 anchor로 MR/main/develop 분기를 한 곳에서 정의 — 경로 추가 시 한 곳만 고친다.
 .fe_test_paths: &fe_test_paths
   - "FE/src/**/*"
+  - "FE/index.html"
+  - "FE/public/**/*"
   - "FE/package.json"
   - "FE/package-lock.json"
   - "FE/vite.config.*"
