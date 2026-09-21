@@ -195,35 +195,8 @@ public final class RouteCandidateFinder {
                     edge.mode()));
         }
         // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다 (TransferRule 1곳, 232·234).
-        // WALK를 지나도 유지된 대중교통 노선 집합으로 비교한다.
-        List<Long> transferSecs = new ArrayList<>();
-        Set<String> kept = Set.of();
-        TravelMode prevMode = null;
-        Set<String> prevOptions = Set.of();
-        for (Edge edge : found.edges()) {
-            Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
-            if (prevMode != null) {
-                TransferRule.TransferDecision decision = TransferRule.decideLines(
-                        kept, prevMode, prevOptions, edge.mode(), options);
-                if (decision.transfer()) {
-                    transferSecs.add(rule.transferCost(edge.fromNode(), kept, options));
-                } else if (prevOptions.size() == 1 && options.size() == 1) {
-                    // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙으로
-                    // 그대로 본다 — 단일 노선 그래프에서 232와 바이트 동일. 입력은 집합에서
-                    // 뽑은 단일 노선을 쓴다(엔진·매퍼와 동일 규칙, 2026-09-20 불일치 수정).
-                    TransferRule.TransferDecision legacy = TransferRule.decide(
-                            singleOrNull(kept), prevMode, prevOptions.iterator().next(),
-                            edge.mode(), options.iterator().next());
-                    if (legacy.transfer()) {
-                        transferSecs.add(rule.costWithStation(
-                                0, edge.fromNode(), legacy.costLine(), options.iterator().next()));
-                    }
-                }
-            }
-            prevOptions = options;
-            kept = TransferRule.keptTransitLines(kept, edge.mode(), options);
-            prevMode = edge.mode();
-        }
+        // 어댑터(RAPTOR)도 같은 함수를 쓴다 — 집계 불일치로 매퍼 검증이 깨지는 것을 막는다(217 C2).
+        List<Long> transferSecs = transferSeconds(found.edges(), rule, busRouteIndex);
         // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤
         // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.
         // 인덱스 전달(234 C1·I2): 매퍼가 같은 교집합 규칙으로 BUS 분리를 해야
@@ -238,9 +211,45 @@ public final class RouteCandidateFinder {
                 bikeStock.get()));
     }
 
+    /**
+     * 엣지 열의 노선 전환 경계 환승 소요 목록(232·234 규칙, TransferRule 단일 정의).
+     *
+     * <p>RouteMapper도 같은 규칙으로 TRANSFER leg를 만든다 — RAPTOR 어댑터(217)가 이 값을 그대로
+     * 써서 transferCount·총계를 맞춘다. 규칙이 갈라지면 매퍼 검증(개수 일치)에서 터진다.
+     */
+    public static List<Long> transferSeconds(List<Edge> edges, TransferRule rule,
+                                             BusRouteIndex busRouteIndex) {
+        List<Long> transferSecs = new ArrayList<>();
+        Set<String> kept = Set.of();
+        TravelMode prevMode = null;
+        Set<String> prevOptions = Set.of();
+        for (Edge edge : edges) {
+            Set<String> options = BusRouteIndex.optionsFor(edge, busRouteIndex);
+            if (prevMode != null) {
+                TransferRule.TransferDecision decision = TransferRule.decideLines(
+                        kept, prevMode, prevOptions, edge.mode(), options);
+                if (decision.transfer()) {
+                    transferSecs.add(rule.transferCost(edge.fromNode(), kept, options));
+                } else if (prevOptions.size() == 1 && options.size() == 1) {
+                    // 집합 판정이 닿지 않는 기존 직접 경계(대중교통↔BIKE)는 문자열 규칙 폴백.
+                    TransferRule.TransferDecision legacy = TransferRule.decide(
+                            singleOrNull(kept), prevMode, prevOptions.iterator().next(),
+                            edge.mode(), options.iterator().next());
+                    if (legacy.transfer()) {
+                        transferSecs.add(rule.costWithStation(
+                                0, edge.fromNode(), legacy.costLine(), options.iterator().next()));
+                    }
+                }
+            }
+            prevOptions = options;
+            kept = TransferRule.keptTransitLines(kept, edge.mode(), options);
+            prevMode = edge.mode();
+        }
+        return transferSecs;
+    }
+
     /** leg의 (수단·출발·도착·노선) 순서로 만든 서명. 같으면 사실상 같은 경로로 보고 중복 제거한다. */
-    private static String legSignature(RouteSearchResponse response) {
-        StringBuilder signature = new StringBuilder();
+    private static String legSignature(RouteSearchResponse response) {        StringBuilder signature = new StringBuilder();
         for (RouteLegResponse leg : response.legs()) {
             signature.append(leg.mode()).append(':')
                     .append(leg.fromNodeId()).append("->").append(leg.toNodeId()).append(':')
