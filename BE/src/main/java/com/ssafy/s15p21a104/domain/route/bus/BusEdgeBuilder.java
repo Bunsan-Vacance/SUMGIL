@@ -102,7 +102,7 @@ public final class BusEdgeBuilder {
         return stop.lat() != null && stop.lng() != null;
     }
 
-    static double distanceM(RouteStop a, RouteStop b) {
+    public static double distanceM(RouteStop a, RouteStop b) {
         double dLat = Math.toRadians(b.lat() - a.lat());
         double dLng = Math.toRadians(b.lng() - a.lng());
         double h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
