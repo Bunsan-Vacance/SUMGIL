@@ -58,10 +58,24 @@ print_and_capture() {
   append_output "${text}"
 }
 
+# Discord 알림에는 실패한 점검의 FAIL/WARN 줄만 담는다. 정상 줄까지 넣으면 2000자 제한에
+# 걸려 뒤쪽(lag) 실패가 잘릴 수 있다. FAIL/WARN 줄이 없는 실패(예: 스크립트 예외)는 끝 10줄을 담는다.
+ALERT_OUTPUT=""
+
+append_alert() {
+  local text="$1"
+  if [[ -z "${ALERT_OUTPUT}" ]]; then
+    ALERT_OUTPUT="${text}"
+  else
+    ALERT_OUTPUT="${ALERT_OUTPUT}"$'\n'"${text}"
+  fi
+}
+
 run_check() {
   local title="$1"
   local output
   local check_status
+  local key_lines
   shift
 
   print_and_capture ""
@@ -73,6 +87,12 @@ run_check() {
   fi
   if [[ "${check_status}" -ne 0 ]]; then
     status=1
+    append_alert "${title}"
+    key_lines="$(printf '%s\n' "${output}" | grep -E '^(FAIL|WARN)' || true)"
+    if [[ -z "${key_lines}" ]]; then
+      key_lines="$(printf '%s\n' "${output}" | tail -n 10)"
+    fi
+    append_alert "${key_lines}"
   fi
 }
 
@@ -80,14 +100,21 @@ run_check "[1/3] collection freshness check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_collection_freshness \
     --ai-root "${AI_ROOT}" \
     --bike-max-age-min "${BIKE_MAX_AGE_MIN}" \
-    --weather-max-age-min "${WEATHER_MAX_AGE_MIN}"     --subway-max-age-min "${SUBWAY_MAX_AGE_MIN}"
+    --weather-max-age-min "${WEATHER_MAX_AGE_MIN}" \
+    --subway-max-age-min "${SUBWAY_MAX_AGE_MIN}"
 
 run_check "[2/3] partition count check" \
   "${PYTHON}" -m DATA_ENGINE.monitor.check_partition_counts \
     --ai-root "${AI_ROOT}" \
     --hours "${PARTITION_HOURS}" \
     --bike-min-count "${BIKE_MIN_COUNT}" \
-    --weather-min-count "${WEATHER_MIN_COUNT}"     --subway-min-runs "${SUBWAY_MIN_RUNS}"
+    --weather-min-count "${WEATHER_MIN_COUNT}" \
+    --subway-min-runs "${SUBWAY_MIN_RUNS}"
+
+run_check "[3/3] kafka consumer lag check" \
+  "${PYTHON}" -m DATA_ENGINE.monitor.check_consumer_lag \
+    --warn-min "${LAG_WARN_MIN}" \
+    --fail-min "${LAG_FAIL_MIN}"
 
 printf '\n'
 if [[ "${status}" -eq 0 ]]; then
@@ -96,7 +123,7 @@ else
   print_and_capture "DATA_ENGINE monitor FAILED"
   if [[ "${DISCORD_NOTIFY_ON_FAILURE}" != "0" ]]; then
     "${PYTHON}" -m DATA_ENGINE.monitor.notify_discord \
-      --message "${MONITOR_OUTPUT}"
+      --message "${ALERT_OUTPUT}"
   fi
 fi
 
