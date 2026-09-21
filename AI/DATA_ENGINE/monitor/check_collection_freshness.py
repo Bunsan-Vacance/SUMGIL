@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 from pyarrow import ArrowException
 
 from DATA_ENGINE.collect.common import KST
@@ -75,8 +76,10 @@ def check_latest_file(
         )
 
     try:
-        frame = pd.read_parquet(path, columns=[timestamp_column])
-        timestamps = pd.to_datetime(frame[timestamp_column], errors="coerce")
+        table = pq.read_table(path, columns=[timestamp_column], use_threads=False)
+        timestamps = pd.Series(
+            pd.to_datetime(table.column(timestamp_column).to_pylist(), errors="coerce")
+        )
         latest = timestamps.max()
     except (ArrowException, KeyError, OSError, TypeError, ValueError) as exc:
         return FreshnessResult(
