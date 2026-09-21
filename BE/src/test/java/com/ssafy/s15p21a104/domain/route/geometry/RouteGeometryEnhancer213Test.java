@@ -132,4 +132,30 @@ class RouteGeometryEnhancer213Test {
         assertEquals(1.0, result.get(0).legs().get(0).minutes(), 1e-9);
         assertEquals(1.0, result.get(0).totalMinutes(), 1e-9);
     }
+
+    @Test
+    @DisplayName("동일 좌표 leg는 조회하지 않는다 (0m 접근 왜곡·캐시 오염 방지)")
+    void 동일좌표_조회안함() {
+        AtomicInteger walkCalls = new AtomicInteger();
+        RouteGeometryEnhancer enhancer = new RouteGeometryEnhancer(
+                (routeId, fromLat, fromLng, toLat, toLng) -> Optional.empty(),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> {
+                    walkCalls.incrementAndGet();
+                    return Optional.of(MultiLineStringResponse.of(
+                            List.of(List.of(List.of(127.0, 37.5), List.of(127.01, 37.5)))));
+                },
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> Optional.empty());
+        RouteLegResponse samePoint = new RouteLegResponse(TravelMode.WALK,
+                "N", "N", 37.5, 127.0, "N", "N", 37.5, 127.0,
+                "WALK", 0.0, null, "unavailable", null, null, null);
+        RouteSearchResponse input = new RouteSearchResponse(RouteType.SHORTEST, 0.0,
+                List.of(samePoint), RouteSource.ALGORITHM, null, 0, null);
+
+        List<RouteSearchResponse> result = enhancer.enhanceAll(List.of(input));
+
+        assertEquals(0, walkCalls.get());
+        assertEquals("unavailable", result.get(0).legs().get(0).geometryStatus());
+        assertEquals(0.0, result.get(0).legs().get(0).minutes(), 1e-9);
+        assertEquals(0.0, result.get(0).totalMinutes(), 1e-9);
+    }
 }

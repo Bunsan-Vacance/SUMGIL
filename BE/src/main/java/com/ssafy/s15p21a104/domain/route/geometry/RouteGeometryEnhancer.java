@@ -127,6 +127,11 @@ public final class RouteGeometryEnhancer {
         if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
             return leg;
         }
+        if (samePoint(leg)) {
+            // 같은 좌표(0m leg, 예: 목적지가 정류장 좌표 그 자체인 접근 구간)는 조회를 하지 않는다 —
+            // 유효한 결과가 와도 0m 도보에 외부 경로를 덧붙이면 표시 거리·시간이 왜곡된다.
+            return leg;
+        }
         Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
                 ? walkLookup.find(leg.fromNodeId(), leg.toNodeId(),
                         leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
@@ -136,6 +141,12 @@ public final class RouteGeometryEnhancer {
             return leg;
         }
         return withGeometry(leg, geometry.get());
+    }
+
+    /** 출발·도착이 사실상 같은 점인가(6자리 ≈ 0.1m 미만, 경도 1e-7 ≈ 1cm). */
+    private static boolean samePoint(RouteLegResponse leg) {
+        return Math.abs(leg.fromLat() - leg.toLat()) < 1e-7
+                && Math.abs(leg.fromLng() - leg.toLng()) < 1e-7;
     }
 
     /**
