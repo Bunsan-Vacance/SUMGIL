@@ -28,6 +28,7 @@ import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.mapper.LegContract;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
 import com.ssafy.s15p21a104.domain.route.scoring.CongestionCostModel;
@@ -252,6 +253,8 @@ public class RouteSearchService {
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
         List<RouteSearchResponse> out = new ArrayList<>();
         for (RouteSearchResponse response : six) {
+            List<RouteLegResponse> legs = LegContract.withContractFields(
+                    response.legs(), graphRegistry.rentalIds());
             List<Edge> edges = edgesBySignature.getOrDefault(
                     RouteCandidateFinder.exactSignature(response), List.of());
             AtomicBoolean truncated = new AtomicBoolean(false);
@@ -260,12 +263,12 @@ public class RouteSearchService {
                                     edges, departureTime, congestionPredLookup(truncated))
                             .map(LinkCongestionScorer.Result::weightedAverage);
             Optional<Double> lineScore =
-                    CongestionScorer.score(response.legs(), levelByRouteId);
+                    CongestionScorer.score(legs, levelByRouteId);
             CongestionPrediction prediction = CongestionPredictionResolver.resolve(
                     linkScore, lineScore, truncated.get(),
                     departureTime.toLocalDate(), today);
             out.add(new RouteSearchResponse(response.routeType(), response.totalMinutes(),
-                    response.legs(), response.source(), response.totalDistanceMeters(),
+                    legs, response.source(), response.totalDistanceMeters(),
                     response.transferCount(), prediction));
         }
         return out;

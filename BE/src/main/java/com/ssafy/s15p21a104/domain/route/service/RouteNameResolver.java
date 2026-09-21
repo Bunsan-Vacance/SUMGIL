@@ -154,7 +154,8 @@ public final class RouteNameResolver {
                 leg.geometry(), leg.geometryStatus(),
                 leg.distanceMeters(), null,
                 RouteOptionResponse.of(optionList, names, headways),
-                congestionGrade(leg.fromNodeId(), optionIds)
+                congestionGrade(leg.fromNodeId(), optionIds),
+                leg.transitionType(), leg.fromRentalId(), leg.toRentalId()
         );
     }
 

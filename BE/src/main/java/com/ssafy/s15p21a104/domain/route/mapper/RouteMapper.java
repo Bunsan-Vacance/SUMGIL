@@ -356,7 +356,8 @@ public final class RouteMapper {
                 first.routeId(),
                 sum / 60.0,
                 // KTDB geometry·거리·노선명은 RouteMapper가 모른다(DB 비의존 순수 함수) —
-                // RouteSearchService가 후처리로 채운다.
+                // RouteSearchService가 후처리로 채운다. 계약 필드(236·237·297)도 후처리 몫이라
+                // 16인자 호환 생성자를 쓴다.
                 null, "unavailable",
                 null, null, routeOptions
         );
