@@ -58,12 +58,9 @@ public final class RerouteService {
         }
         // findCandidatesWithPaths가 leg 서명 중복 제거된 서로 다른 후보를 시간순으로 준다.
         // 후보마다 동일 인자로 재탐색하던 기존 toResult는 같은 1등만 반복했다.
-        List<ScoredCandidate> scored;
-        try {
-            scored = candidateFinder.findCandidatesWithPaths(graph, boundaryId, destId, MAX_REMAIN);
-        } catch (RuntimeException e) {
-            return List.of();
-        }
+        // 실패는 은폐하지 않는다(5부 D1, fail-fast) — 연결 불가는 빈 목록으로 구분된다.
+        List<ScoredCandidate> scored =
+                candidateFinder.findCandidatesWithPaths(graph, boundaryId, destId, MAX_REMAIN);
         List<RerouteResult> result = new ArrayList<>();
         for (ScoredCandidate candidate : scored) {
             RouteSearchResponse route = candidate.response();

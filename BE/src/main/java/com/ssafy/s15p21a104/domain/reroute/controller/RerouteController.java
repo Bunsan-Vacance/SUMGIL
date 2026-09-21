@@ -43,7 +43,11 @@ public class RerouteController implements RerouteApi {
                 graphRegistry.transferTimes(),
                 graphRegistry.rentalIds(),
                 graphRegistry.stationInfos(),
-                graphRegistry::bikeStock);
+                graphRegistry::bikeStock,
+                graphRegistry.busRouteIndex(),
+                // replan도 슬롯 RAPTOR 입력으로(5부 D1) — null이면 레거시 폴백(제거는 D2).
+                new RouteCandidateFinder.RaptorInput(
+                        graphRegistry.raptorRouteSetFor(slot.dowType(), slot.timeSlot()), null));
         RerouteService service = new RerouteService(
                 finder,
                 () -> graphRegistry.graphFor(slot.dowType(), slot.timeSlot()));
