@@ -95,6 +95,12 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.currentTarget.blur()
+            }
+          }}
+          enterKeyHint="done"
           placeholder="장소, 역, 주소 검색"
           aria-label="장소 검색어"
         />

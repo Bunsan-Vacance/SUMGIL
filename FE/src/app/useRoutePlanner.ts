@@ -150,7 +150,7 @@ export function useRoutePlanner(
         setMessage('출발지와 도착지는 다른 장소를 선택해 주세요.')
         return false
       }
-      if (searchReturnScreen === 'results' && trip.destination) {
+      if (trip.destination) {
         void trip.search(trip.destination, place)
         go('results')
         return true
