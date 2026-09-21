@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-TOOL_SCHEMA_VERSION = "1.0.0"
+TOOL_SCHEMA_VERSION = "1.1.0"
 """도구 스키마 판. 필드 추가는 minor, 삭제·의미 변경은 major. 이력은 TOOL_CONTRACT.md."""
 
 # ── 도구 이름 상수 ──
@@ -23,11 +23,12 @@ GET_LINE_CONGESTION = "get_line_congestion"
 GET_ETA_STOCK = "get_eta_stock"
 GET_ARRIVALS = "get_arrivals"
 REPLAN_ROUTE = "replan_route"
+BIKE_STATIONS_NEARBY = "bike_stations_nearby"
 
 LOCAL_TOOLS = frozenset({GET_STATION_CONGESTION, GET_LINE_CONGESTION, GET_ETA_STOCK})
 """같은 프로세스의 app.CROWD / app.BIKE 함수를 직접 부르는 도구."""
 
-HTTP_TOOLS = frozenset({GET_ARRIVALS, REPLAN_ROUTE})
+HTTP_TOOLS = frozenset({GET_ARRIVALS, REPLAN_ROUTE, BIKE_STATIONS_NEARBY})
 """BE HTTP API를 부르는 도구."""
 
 # ── 공통 설명 조각 ──
@@ -327,15 +328,82 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
         "errors": ["UPSTREAM_UNAVAILABLE", "INVALID_INPUT"],
-        # TO_BE-time-reroute-contract-01 회신 대기 — 회신이 오면 아래를 스키마에 반영한다.
-        "x_pending": {
-            "handoff": "TO_BE-time-reroute-contract-01",
-            "fields": [
-                "input.exclude_route_ids — 현재 타고 있는 노선을 후보에서 배제·후순위화",
-                "output.source에 'AGENT' 값 추가",
-                "output.reason을 에이전트가 생성 (BE 고정 문구는 fallback)",
+        # FROM_BE-time-reroute-contract-01 회신 결과 — 스키마는 열지 않는다(계획 303-B).
+        "x_resolved": {
+            "handoff": "FROM_BE-time-reroute-contract-01",
+            "items": [
+                (
+                    "input.exclude_route_ids — 보류. BE 216(혼잡 가중 탐색) 이후 하드 제외/가중 "
+                    "페널티 중 방식을 정한다. 그전까지는 응답에서 현재 routeId를 쓰는 대안을 "
+                    "걸러내는 사후 필터링을 쓴다(planner._replan_caller). K=3이라 대안이 0개로 "
+                    "걸러질 수 있다"
+                ),
+                (
+                    "output.source에 'AGENT' 값 추가 — 거절. source는 '누가 탐색했나'라 경로는 "
+                    "항상 ALGORITHM이 맞고, '누가 골랐나'는 축이 다르다. 에이전트가 고른 이유는 "
+                    "라우터 응답의 별도 필드(recommendedBy)에 싣는다 — FE 계약(6.3절)"
+                ),
+                (
+                    "output.reason을 에이전트가 생성 — 확정. BE 응답 필드에는 LLM 문장을 싣지 "
+                    "않기로 했다. BE 고정 문구는 그대로 두고, 에이전트 문장은 에이전트(라우터) "
+                    "응답에 별도로 담는다"
+                ),
             ],
         },
+    },
+    {
+        "name": BIKE_STATIONS_NEARBY,
+        "description": (
+            "기준 좌표 주변의 따릉이 대여소를 가까운 순으로 조회한다. 지하철 대신 따릉이로 "
+            "갈아탈 수 있는 대여소 후보를 고를 때 쓴다. "
+            "availableBikes는 **지금** 재고(Redis)이고 도착 시점 예측이 아니다 — 예측은 각 "
+            "rentalId로 get_eta_stock을 부를 것. 캐시가 없거나 만료됐으면 null이고, 이는 "
+            "에러가 아니다."
+        ),
+        "input_schema": _obj(
+            {
+                "lat": {"type": "number", "description": "기준 위도"},
+                "lng": {"type": "number", "description": "기준 경도"},
+                "radius_meters": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 3000,
+                    "description": "조회 반경(m). 생략하면 500, 최대 3000",
+                },
+                "limit": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "최대 반환 건수. 생략하면 20, 최대 100",
+                },
+            },
+            ["lat", "lng"],
+        ),
+        "output_schema": {
+            "type": "array",
+            "description": "가까운 순으로 정렬된 대여소 목록",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "rentalId": {"type": "string"},
+                    "name": {"type": "string"},
+                    "lat": {"type": "number"},
+                    "lng": {"type": "number"},
+                    "dockCount": {"type": "integer"},
+                    "distanceMeters": {"type": "number"},
+                    "availableBikes": {
+                        "type": ["integer", "null"],
+                        "description": (
+                            "지금 재고(Redis). 도착 시점 예측이 아니다. 캐시가 없거나 만료됐으면 "
+                            "null이고 에러가 아니다 — 신선/오래됨 구분은 이 목록 API에는 없다 "
+                            "(단건 /{rentalId}/stock에만 status가 있다)."
+                        ),
+                    },
+                    "stockUpdatedAt": {"type": ["string", "null"], "format": "date-time"},
+                },
+            },
+        },
+        "errors": ["NOT_FOUND", "INVALID_INPUT", "UPSTREAM_UNAVAILABLE"],
     },
 ]
 

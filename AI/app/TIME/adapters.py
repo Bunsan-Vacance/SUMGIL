@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from app.TIME.registry import (
+    BIKE_STATIONS_NEARBY,
     GET_ARRIVALS,
     GET_ETA_STOCK,
     GET_LINE_CONGESTION,
@@ -87,6 +88,14 @@ def _as_int(args: Mapping[str, Any], key: str) -> int:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise _ArgError(f"'{key}'는 정수여야 한다 (받은 값: {value!r})") from exc
+
+
+def _as_float(args: Mapping[str, Any], key: str) -> float:
+    value = _require(args, key)
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise _ArgError(f"'{key}'는 숫자여야 한다 (받은 값: {value!r})") from exc
 
 
 def _now_kst_iso() -> str:
@@ -258,6 +267,25 @@ class HttpAdapter:
             return {
                 "method": "GET",
                 "url": f"{self.base_url}/api/transit/arrivals",
+                "params": params,
+            }
+
+        if name == BIKE_STATIONS_NEARBY:
+            params = {
+                "lat": _as_float(args, "lat"),
+                "lng": _as_float(args, "lng"),
+            }
+            # radius_meters·limit은 선택값이다 — modes·priority와 같은 이유로 None이면 키
+            # 자체를 뺀다(BE 기본값 500m/20건이 적용되게 한다).
+            radius_meters = args.get("radius_meters")
+            if radius_meters is not None:
+                params["radiusMeters"] = radius_meters
+            limit = args.get("limit")
+            if limit is not None:
+                params["limit"] = limit
+            return {
+                "method": "GET",
+                "url": f"{self.base_url}/api/bike-stations/nearby",
                 "params": params,
             }
 
