@@ -55,6 +55,7 @@ export interface Leg {
   routeId?: string
   busRouteOptions?: BusRouteOption[]
   segmentCongestionLevel?: number
+  segmentCongestionGrade?: SegmentCongestionGrade
   from?: RouteEndpoint
   to?: RouteEndpoint
   geometry?: RouteGeometry

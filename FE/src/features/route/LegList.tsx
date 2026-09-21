@@ -2,6 +2,7 @@ import type { Leg, Route } from './types'
 import { modeIcons } from './ModeIcon'
 import { roundMinutes } from './selectors'
 import { lineColor } from './lineColor'
+import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
 import { isTransitLeg, transitionLabel } from './transitions'
 
 function formatDistance(distanceMeters?: number) {
@@ -10,8 +11,15 @@ function formatDistance(distanceMeters?: number) {
   return `${(distanceMeters / 1000).toFixed(distanceMeters >= 10000 ? 0 : 1)}km`
 }
 
-function formatCongestion(level: number) {
-  return `구간 예상 혼잡도 ${level}%`
+function formatCongestion(leg: Leg) {
+  const grade = segmentCongestionGradeForLeg(leg)
+  if (leg.segmentCongestionGrade && grade) {
+    const presentation = segmentCongestionPresentation(grade)
+    if (presentation) return `구간 예상 혼잡도 ${presentation.label}`
+  }
+  return leg.segmentCongestionLevel === undefined
+    ? undefined
+    : `구간 예상 혼잡도 ${leg.segmentCongestionLevel}%`
 }
 
 function sameBusOptions(left: Leg, right: Leg) {
@@ -34,7 +42,9 @@ export function compactLegs(legs: Leg[]) {
         previous.leg.routeId === leg.routeId &&
         sameBusOptions(previous.leg, leg) &&
         previous.leg.segmentCongestionLevel === undefined &&
-        leg.segmentCongestionLevel === undefined
+        leg.segmentCongestionLevel === undefined &&
+        previous.leg.segmentCongestionGrade === undefined &&
+        leg.segmentCongestionGrade === undefined
       ) {
         const from = previous.leg.from?.name || previous.leg.title.split(' → ')[0]
         const to = leg.to?.name || leg.title.split(' → ').at(-1)
@@ -71,7 +81,7 @@ export default function LegList({
     <ol className="leg-list">
       {legs.map((leg, index) => {
         const Icon = modeIcons[leg.mode]
-        const legCongestionLevel = isTransitLeg(leg) ? leg.segmentCongestionLevel : undefined
+        const legCongestion = isTransitLeg(leg) ? formatCongestion(leg) : undefined
         return (
           <li
             key={index}
@@ -89,7 +99,7 @@ export default function LegList({
               <p>
                 {leg.note} · {formatDistance(leg.distanceMeters)}
                 {transitionLabel(leg.transitionType) && ` · ${transitionLabel(leg.transitionType)}`}
-                {legCongestionLevel !== undefined && ` · ${formatCongestion(legCongestionLevel)}`}
+                {legCongestion && ` · ${legCongestion}`}
               </p>
             </div>
             <span>{roundMinutes(leg.minutes)}분</span>
