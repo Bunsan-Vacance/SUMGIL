@@ -11,9 +11,11 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -112,6 +114,38 @@ class CsvCongestionPredSourceTest {
         IOException e = assertThrows(IOException.class, () -> source(csv).read());
         assertTrue(e.getMessage().contains("99"), e.getMessage());
         assertTrue(e.getMessage().contains("2"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("305-S2b: 날짜가 여럿이면 날짜마다 최신 회차를 모두 읽는다 — 배치가 오늘·내일 2일치를 만든다")
+    void s2b_날짜별_2일치(@TempDir Path dir) throws IOException {
+        // 배치 기본이 --today --tomorrow 라 하루에 파일이 둘 생긴다. 이름만 정렬하면 내일 것만 잡히고
+        // 오늘 것이 영영 안 들어간다 — 조회는 오늘 날짜로 하므로 화면이 빈다.
+        write(dir, "predictions_2026-09-20_093000.csv", TWO_ROWS);
+        writeMeta(dir, "predictions_2026-09-20_093000.csv", 2, "2026-09-21T09:30:00+09:00");
+        write(dir, "predictions_2026-09-21_093000.csv", TWO_ROWS.replace("2026-09-20", "2026-09-21"));
+        writeMeta(dir, "predictions_2026-09-21_093000.csv", 2, "2026-09-21T09:30:00+09:00");
+
+        CongestionPredSource.Loaded loaded = source(dir).read();
+
+        assertEquals(4, loaded.rows().size(), "두 날짜가 다 들어와야 한다");
+        assertEquals(Set.of(LocalDate.of(2026, 9, 20), LocalDate.of(2026, 9, 21)),
+                loaded.stats().predDates());
+    }
+
+    @Test
+    @DisplayName("305-S2c: 같은 날짜가 여러 번이면 그중 최신 회차만 쓴다 — 재생성분이 쌓인다")
+    void s2c_같은_날짜_재생성(@TempDir Path dir) throws IOException {
+        write(dir, "predictions_2026-09-20_093000.csv", TWO_ROWS);
+        writeMeta(dir, "predictions_2026-09-20_093000.csv", 2, "2026-09-20T09:30:00+09:00");
+        write(dir, "predictions_2026-09-20_234300.csv", TWO_ROWS);
+        writeMeta(dir, "predictions_2026-09-20_234300.csv", 2, "2026-09-20T23:43:00+09:00");
+
+        CongestionPredSource.Loaded loaded = source(dir).read();
+
+        assertEquals(2, loaded.rows().size(), "같은 날짜를 두 번 넣지 않는다");
+        assertEquals(OffsetDateTime.parse("2026-09-20T23:43:00+09:00"), loaded.meta().generatedAt(),
+                "늦은 회차의 산출 시각을 쓴다");
     }
 
     @Test

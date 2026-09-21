@@ -7,16 +7,27 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
  * AI CROWD 배치 산출물 CSV 를 읽는 원천. 경로는 <b>파일 또는 폴더</b>다.
  *
- * <p>폴더를 주면 {@code predictions_<날짜>_<시각>.csv} 중 <b>파일명이 가장 늦은 것</b>을 고른다.
- * 배치가 매일 09:30 KST 에 시각이 붙은 새 파일을 만들기 때문에 적재 명령이 날짜마다 달라지면 안 된다.
- * 이름에 생성시각이 들어 있어 사전순 = 시간순이다.
+ * <p>폴더를 주면 {@code predictions_<날짜>_<시각>.csv} 를 <b>대상 날짜마다 한 개씩, 그 날짜의 최신
+ * 회차로</b> 골라 모두 읽는다. 파일 하나만 고르면 안 되는 이유가 두 겹이다:
+ * <ul>
+ *   <li>배치 기본이 {@code --today --tomorrow} 라 <b>한 번 돌 때 날짜가 다른 파일이 둘 생긴다.</b>
+ *       이름만 정렬하면 내일 것만 잡히고 오늘 것이 영영 안 들어간다 — 조회는
+ *       {@code pred_date = 오늘} 로 하므로 화면이 빈 채로 남는다</li>
+ *   <li>같은 날짜를 다시 만들면 {@code _HHMMSS} 가 달라 <b>쌓인다</b>(AI 가 오래된 것을 지우지 않는다).
+ *       그래서 날짜 안에서는 가장 늦은 회차 하나만 쓴다</li>
+ * </ul>
+ *
+ * <p>대상 날짜는 파일명에서 읽는다 — 사이드카의 {@code target_date} 와 같은 값이고, 파일을 열지 않고
+ * 고를 수 있어야 한다.
  *
  * <p>{@code predictions_train_…} 같은 다른 산출물과 parquet·meta 는 이름 규칙으로 걸러진다.
  *
@@ -42,40 +53,64 @@ public final class CsvCongestionPredSource implements CongestionPredSource {
 
     @Override
     public Loaded read() throws IOException {
-        Path csv = resolveCsv();
-        CongestionPredMeta meta = readMeta(csv);
+        List<Path> csvs = resolveCsvs();
 
+        // 파서를 하나만 두고 파일을 이어 먹인다 — 통계(날짜·링크·슬롯·출처)가 전체 기준으로 집계된다.
         var parser = new CongestionPredParser(codes);
-        try (Reader reader = Files.newBufferedReader(csv, StandardCharsets.UTF_8)) {
-            CsvTable.forEachRow(reader, parser::accept);
+        CongestionPredMeta latestMeta = null;
+        int expectedRows = 0;
+        for (Path csv : csvs) {
+            CongestionPredMeta meta = readMeta(csv);
+            expectedRows += meta.rowCount();
+            if (latestMeta == null || meta.generatedAt().isAfter(latestMeta.generatedAt())) {
+                latestMeta = meta;
+            }
+            try (Reader reader = Files.newBufferedReader(csv, StandardCharsets.UTF_8)) {
+                CsvTable.forEachRow(reader, parser::accept);
+            }
         }
         CongestionPredParser.Result parsed = parser.finish();
 
-        if (meta.rowCount() != parsed.stats().sourceRows()) {
-            throw new IOException("사이드카 meta 의 row_count 와 실제 행 수가 다릅니다 — 파일이 잘렸을 수 있습니다: "
-                    + "meta " + meta.rowCount() + " · 실제 " + parsed.stats().sourceRows() + " (" + csv + ")");
+        if (expectedRows != parsed.stats().sourceRows()) {
+            throw new IOException("사이드카 meta 의 row_count 합과 실제 행 수가 다릅니다 — 파일이 잘렸을 수 있습니다: "
+                    + "meta " + expectedRows + " · 실제 " + parsed.stats().sourceRows() + " (" + csvs + ")");
         }
-        return new Loaded(parsed.rows(), parsed.stats(), csv, meta, parser.warnings());
+        // origin 은 대표 파일(가장 늦은 회차) — 로그·문서에 남길 한 줄이다. 전체 목록은 이 뒤 로그가 센다.
+        Path origin = csvs.get(csvs.size() - 1);
+        return new Loaded(parsed.rows(), parsed.stats(), origin, latestMeta, parser.warnings());
     }
 
-    /** 폴더면 최신 산출물을 고르고, 파일이면 그대로 쓴다. 어느 쪽이든 없으면 찾은 경로를 밝힌다. */
-    private Path resolveCsv() throws IOException {
-        if (Files.isDirectory(path)) {
-            try (Stream<Path> files = Files.list(path)) {
-                return files.filter(CsvCongestionPredSource::isArtifact)
-                        .max(Comparator.comparing(p -> p.getFileName().toString()))
-                        .orElseThrow(() -> new IOException(
-                                "혼잡도 예측 산출물이 없습니다: " + path + " 에 predictions_<날짜>_<시각>.csv"));
+    /**
+     * 읽을 파일들. 폴더면 <b>대상 날짜마다 최신 회차 하나씩</b>을 날짜 순으로 돌려주고, 파일이면 그것 하나다.
+     * 어느 쪽이든 없으면 찾은 경로를 밝힌다.
+     */
+    private List<Path> resolveCsvs() throws IOException {
+        if (!Files.isDirectory(path)) {
+            if (!Files.isRegularFile(path)) {
+                throw new IOException("혼잡도 예측 산출물이 없습니다: " + path);
             }
+            return List.of(path);
         }
-        if (!Files.isRegularFile(path)) {
-            throw new IOException("혼잡도 예측 산출물이 없습니다: " + path);
+        Map<String, Path> latestByDate = new TreeMap<>();
+        try (Stream<Path> files = Files.list(path)) {
+            files.filter(CsvCongestionPredSource::isArtifact).forEach(p -> latestByDate.merge(
+                    targetDateOf(p), p,
+                    (a, b) -> a.getFileName().toString().compareTo(b.getFileName().toString()) >= 0 ? a : b));
         }
-        return path;
+        if (latestByDate.isEmpty()) {
+            throw new IOException("혼잡도 예측 산출물이 없습니다: " + path + " 에 predictions_<날짜>_<시각>.csv");
+        }
+        return List.copyOf(latestByDate.values());
     }
 
     private static boolean isArtifact(Path p) {
         return ARTIFACT.matcher(p.getFileName().toString()).matches();
+    }
+
+    /** {@code predictions_2026-09-20_234300.csv} → {@code 2026-09-20}. 이름 규칙은 위 {@link #ARTIFACT} 가 강제한다. */
+    private static String targetDateOf(Path p) {
+        String name = p.getFileName().toString();
+        return name.substring("predictions_".length(), "predictions_".length() + "0000-00-00".length());
     }
 
     private static CongestionPredMeta readMeta(Path csv) throws IOException {
