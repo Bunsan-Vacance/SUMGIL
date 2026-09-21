@@ -52,7 +52,7 @@ class BusEdgeBuilderTest {
     }
 
     @Test
-    @DisplayName("121-T3: 소요시간은 거리/버스 속도다")
+    @DisplayName("121-T3: 소요시간은 거리/버스 실효 속도다")
     void t121_소요시간_산식() {
         Map<String, List<RouteStop>> routes = route("R100",
                 new RouteStop("S1", 1, 37.5000, 127.0000),
@@ -67,6 +67,12 @@ class BusEdgeBuilderTest {
         assertTrue(expected > 0);
         assertTrue(edges.stream().allMatch(e -> e.travelSec() == expected));
         assertTrue(edges.stream().allMatch(e -> e.waitSec() == 0));
+    }
+
+    @Test
+    @DisplayName("121-T5: 버스 실효 속도는 14km/h다 (네이버 표본 12분/8분 보정, 바꾸면 실측 근거 필요)")
+    void t121_실효속도_고정() {
+        assertEquals(14_000.0 / 3600.0, BusEdgeBuilder.METERS_PER_SEC, 1e-9);
     }
 
     @Test

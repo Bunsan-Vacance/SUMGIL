@@ -44,7 +44,7 @@ class WalkEdgeBuilderTest {
     }
 
     @Test
-    @DisplayName("119-T3: 소요시간은 거리/도보 속도다")
+    @DisplayName("119-T3: 소요시간은 직선거리×우회율/도보 속도다")
     void t119_소요시간_산식() {
         Map<String, Stop> stations = Map.of("S1", new Stop("S1", 37.5000, 127.0000));
         Map<String, Stop> rentals = Map.of("R1", new Stop("R1", 37.5000, 127.0045));
@@ -53,10 +53,17 @@ class WalkEdgeBuilderTest {
 
         double dist = WalkEdgeBuilder.distanceM(
                 new Stop("S1", 37.5000, 127.0000), new Stop("R1", 37.5000, 127.0045));
-        int expected = (int) Math.round(dist / WalkEdgeBuilder.METERS_PER_SEC);
+        int expected = (int) Math.round(
+                dist * WalkEdgeBuilder.CIRCUITY / WalkEdgeBuilder.METERS_PER_SEC);
         assertTrue(expected > 0);
         assertTrue(edges.stream().allMatch(e -> e.travelSec() == expected));
         assertTrue(edges.stream().allMatch(e -> e.waitSec() == 0));
+    }
+
+    @Test
+    @DisplayName("119-T5: 우회율은 1.3 고정이다 (바꾸면 재보정 근거 필요)")
+    void t119_우회율_고정() {
+        assertEquals(1.3, WalkEdgeBuilder.CIRCUITY, 1e-9);
     }
 
     @Test

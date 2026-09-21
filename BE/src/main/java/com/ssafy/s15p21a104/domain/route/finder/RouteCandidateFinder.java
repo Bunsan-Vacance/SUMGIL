@@ -140,19 +140,33 @@ public final class RouteCandidateFinder {
     public List<ScoredCandidate> findCandidatesWithPaths(
             RouteGraph graph, String originStationId, String destStationId, int maxCandidates,
             List<TravelMode> allowedModes) {
+        return findCandidatesWithPaths(graph, originStationId, destStationId, maxCandidates,
+                allowedModes, null);
+    }
+
+    /**
+     * 엣지 비용 모델까지 받는 판(S15P21A104-216 혼잡 가중 탐색).
+     *
+     * @param allowedModes 허용 수단. null·빈 목록이면 전체
+     * @param costModel 엣지 이동 비용. null이면 시간 비용
+     */
+    public List<ScoredCandidate> findCandidatesWithPaths(
+            RouteGraph graph, String originStationId, String destStationId, int maxCandidates,
+            List<TravelMode> allowedModes, KShortestPathFinder.EdgeCostModel costModel) {
         // 그래프 슬롯 선택과 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 여기서 넘긴다.
         TransferRule rule = transferRule.withTable(transferTimes);
         ToLongFunction<String> lowerBound = remainingLowerBound(destStationId);
 
         List<FoundPath> paths = new KShortestPathFinder(rule, busRouteIndex)
-                .findK(graph, originStationId, destStationId, maxCandidates, allowedModes, lowerBound);
+                .findK(graph, originStationId, destStationId, maxCandidates, allowedModes,
+                        lowerBound, costModel);
         if (paths.isEmpty() && allowsBus(allowedModes)) {
             // 탐색 작업 상한이 BUS 포함 탐색에서 목적지 후보를 만나기 전에 소진되면 빈 결과가 된다.
             // 같은 조건에서 BUS만 뺀 경로는 존재할 수 있다 — 수단을 추가했다고 기존 경로가
             // 사라지면 안 되므로(운영 빈 결과 회귀, 2026-09-20 보고) 비BUS로 제한 재탐색한다.
             paths = new KShortestPathFinder(rule, busRouteIndex)
                     .findK(graph, originStationId, destStationId, maxCandidates,
-                            withoutBus(allowedModes), lowerBound);
+                            withoutBus(allowedModes), lowerBound, costModel);
         }
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
