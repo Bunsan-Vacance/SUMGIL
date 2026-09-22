@@ -75,6 +75,7 @@ describe('경로 상세 버스 선택', () => {
     )
 
     expect(screen.getByText('120.0%')).toBeTruthy()
+    expect(screen.getByText('120.0%').style.color).toBe('rgb(185, 28, 28)')
     expect(screen.getAllByText('혼잡도 예상')).toHaveLength(1)
     expect(screen.queryByText('요일 평균 기준')).toBeNull()
     expect(screen.queryByText('다른 경로')).toBeNull()

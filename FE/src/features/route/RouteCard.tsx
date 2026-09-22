@@ -2,6 +2,7 @@ import { ArrowLeftRight, ChevronRight } from 'lucide-react'
 import {
   clockTime,
   congestionGradeText,
+  congestionPredictionPresentation,
   congestionPredictionFor,
   formatCongestionPercent,
   routeArrival,
@@ -38,6 +39,7 @@ export default function RouteCard({
   const formattedPercent = prediction
     ? formatCongestionPercent(prediction.congestionPercent)
     : undefined
+  const predictionPresentation = congestionPredictionPresentation(prediction)
   const congestionLabel = prediction
     ? `혼잡도 예상 ${formattedPercent}%${congestionGrade ? ` · ${congestionGrade}` : ''}`
     : '예측 정보 없음'
@@ -98,7 +100,7 @@ export default function RouteCard({
           {prediction ? (
             <>
               <small>혼잡도 예상</small>
-              <strong>{formattedPercent}%</strong>
+              <strong style={{ color: predictionPresentation?.color }}>{formattedPercent}%</strong>
               {congestionGrade && <span>{congestionGrade}</span>}
             </>
           ) : (
