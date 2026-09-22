@@ -1832,21 +1832,7 @@ small {
   margin-top: 16px;
   padding: 12px 0;
 }
-.bike-prediction-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
 .bike-prediction-copy {
-  min-width: 0;
-}
-.bike-prediction-heading {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
   min-width: 0;
 }
 .bike-prediction-card h3 {
@@ -1868,15 +1854,31 @@ small {
   overflow-wrap: anywhere;
   color: var(--muted);
 }
+.bike-prediction-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.bike-prediction-value {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+.bike-prediction-label {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
 .bike-prediction-state .secondary {
   margin-top: 10px;
 }
-.bike-prediction-result {
-  min-width: 0;
-  justify-self: end;
-  text-align: right;
-}
-.bike-prediction-result strong {
+.bike-prediction-value strong {
   display: block;
   margin: 0;
   color: var(--primary-dark);

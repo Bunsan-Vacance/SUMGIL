@@ -109,4 +109,4 @@ SDK 로더는 진행 중인 Promise를 공유하고 실패하면 다시 시도�
 
 ## 도착 시 따릉이 예측 (2026-09-17)
 
-BIKE 구간의 명시적 `from.rentalId`와 `departedAt + 이전 구간 minutes 합`을 사용해 `/api/bike-stations/{rentalId}/prediction?arrivalTime=<offset ISO>`를 조회한다. `VITE_BIKE_PREDICTION_MOCK=true`일 때만 mock을 사용하며, 라이브 요청 실패를 mock으로 대체하지 않는다. `predictedBikes=0`과 `null`을 구분하고 현재 재고 카드와 도착 시 예측 카드를 분리한다. 자세한 계약은 [FE-06-따릉이예측-API-계약](../../../FE-06-따릉이예측-API-계약.md)을 따른다.
+BIKE 구간의 명시적 `from.rentalId`와 `departedAt + 이전 구간 minutes 합`을 사용해 `/api/bike-stations/{rentalId}/prediction?arrivalTime=<offset ISO>`를 조회한다. `VITE_BIKE_PREDICTION_MOCK=true`일 때만 mock을 사용하며, 라이브 요청 실패를 mock으로 대체하지 않는다. `predictedBikes=0`과 `null`을 구분하고 현재 재고와 도착 시 예측을 하나의 상세 카드 안에서 독립된 상태로 표시한다. 현재 재고는 `/api/bike-stations/{rentalId}/stock`을 별도로 조회하며, `AVAILABLE`은 현재 수량, `STALE`은 마지막 확인 시각과 수량, `UNAVAILABLE`은 정보 없음으로 구분한다. 자세한 계약은 [FE-06-따릉이예측-API-계약](../../../FE-06-따릉이예측-API-계약.md)을 따른다.
