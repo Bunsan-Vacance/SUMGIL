@@ -5,6 +5,7 @@ import { previewTripFor } from './preview'
 import { useToast } from '../components/useToast'
 import { useTrip } from '../features/route/useTrip'
 import { useGuidance } from '../features/guidance/useGuidance'
+import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
 import type { RouteRepository } from '../api/contracts'
 import type { Mode, Place } from '../features/route/types'
@@ -78,6 +79,35 @@ export function useRoutePlanner(
     route: guidance.route,
     step: guidance.step,
   })
+  const originRef = useRef(trip.origin)
+  originRef.current = trip.origin
+  const { locate } = useCurrentLocation(
+    (position) => {
+      const { latitude, longitude } = position.coords
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        setMessage('현재 위치를 확인하지 못했어요. 다시 시도해 주세요.')
+        return
+      }
+      if (originRef.current.name.trim()) return
+      trip.setOrigin({
+        id: `current-location:${latitude}:${longitude}`,
+        name: '현재 위치',
+        address: `위도 ${latitude.toFixed(6)}, 경도 ${longitude.toFixed(6)}`,
+        kind: '현재 위치',
+        lat: latitude,
+        lng: longitude,
+      })
+    },
+    setMessage,
+    screen,
+  )
   useEffect(() => {
     if (screen !== navigation.screen) replace(screen)
   }, [screen, navigation.screen, replace])
@@ -118,7 +148,14 @@ export function useRoutePlanner(
     go('search')
   }
   const openBrowse = () => go('browse')
-  const toggleRoutePanel = () => setRoutePanelOpen((open) => !open)
+  const toggleRoutePanel = () => {
+    if (routePanelOpen) {
+      setRoutePanelOpen(false)
+      return
+    }
+    setRoutePanelOpen(true)
+    if (!trip.origin.name.trim()) locate()
+  }
   const closeRoutePanel = () => setRoutePanelOpen(false)
   const returnToRouteInput = () => {
     setRoutePanelOpen(true)
