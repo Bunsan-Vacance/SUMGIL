@@ -965,6 +965,9 @@ describe('따릉이 재고 조회', () => {
     const rendered = renderMap({ origin: bike, route: bikeRoute })
     await waitFor(() => expect(rendered.customOverlays).toHaveLength(2))
     clickBikeMarker(rendered)
+    expect(
+      screen.getByRole('region', { name: '따릉이 실시간 재고' }).querySelector('.sheet-grip'),
+    ).toBeNull()
     fireEvent.click(await screen.findByRole('button', { name: '다시 시도' }))
     const signal = mocks.stock.mock.calls[1][1] as AbortSignal
     fireEvent.click(screen.getByRole('button', { name: '재고 정보 닫기' }))

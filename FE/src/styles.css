@@ -509,12 +509,9 @@ small {
 .bottom-sheet.map-bike-stock-sheet[data-snap='collapsed'] {
   height: auto;
 }
-.map-bike-stock-sheet .sheet-grip {
-  height: 24px;
-  flex-basis: 24px;
-}
 .map-bike-stock-sheet .sheet-body {
   overflow-y: hidden;
+  padding-top: 16px;
   padding-bottom: 10px;
 }
 .bike-stock-sheet {
