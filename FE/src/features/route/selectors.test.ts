@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   arrival,
   congestionBasisText,
+  congestionGradeForPercent,
   congestionGradeText,
+  congestionPredictionPresentation,
   congestionPredictionFor,
   formatCongestionPercent,
   getRoutes,
@@ -116,6 +118,33 @@ describe('경로 선택과 안내 데이터', () => {
     expect(congestionBasisText('RECENT_7D')).toBe('최근 7일 데이터 기반')
     expect(congestionBasisText('PARTIAL')).toBe('일부 기간 데이터 기반')
     expect(congestionBasisText('WEEKDAY_AVERAGE')).toBe('요일 평균 기준')
+  })
+
+  it('전체 혼잡도는 50·100 경계를 사용하고 서버 등급을 우선한다', () => {
+    expect([49.9, 50, 99.9, 100].map(congestionGradeForPercent)).toEqual([
+      'LOW',
+      'MEDIUM',
+      'MEDIUM',
+      'HIGH',
+    ])
+    expect(
+      congestionPredictionPresentation({ congestionPercent: 20, congestionGrade: 'HIGH' }),
+    ).toMatchObject({
+      grade: 'CONGESTED',
+      color: '#b91c1c',
+    })
+    expect(
+      congestionPredictionPresentation({ congestionPercent: 100, congestionGrade: null }),
+    ).toMatchObject({
+      grade: 'CONGESTED',
+      color: '#b91c1c',
+    })
+    expect(
+      (['LOW', 'MEDIUM', 'HIGH'] as const).map(
+        (congestionGrade) =>
+          congestionPredictionPresentation({ congestionPercent: 0, congestionGrade })?.color,
+      ),
+    ).toEqual(['#1d4ed8', '#15803d', '#b91c1c'])
   })
 
   it('혼잡도 퍼센트는 0과 100 초과 값을 포함해 소숫점 첫째 자리로 표시한다', () => {

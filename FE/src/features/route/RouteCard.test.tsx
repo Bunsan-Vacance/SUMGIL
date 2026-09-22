@@ -97,6 +97,29 @@ describe('경로 카드 구간 혼잡도', () => {
     expect(screen.getByRole('button').getAttribute('aria-label')).toContain('68.3%')
   })
 
+  it('전체 혼잡도 숫자를 서버 등급 색상으로 표시한다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
+    render(
+      <RouteCard
+        route={route({
+          congestionPrediction: {
+            congestionPercent: 20,
+            congestionGrade: 'HIGH',
+            dataStatus: 'AVAILABLE',
+            predictionBasis: 'RECENT_7D',
+          },
+        })}
+        onDetail={vi.fn()}
+      />,
+    )
+
+    expect(
+      (document.querySelector('.route-card-prediction strong') as HTMLElement)?.style.color,
+    ).toBe('rgb(185, 28, 28)')
+    expect(document.querySelector('.route-card-prediction')?.textContent).toContain('혼잡')
+  })
+
   it('시간 아래에 경로 막대기를 바로 표시하고 경로 요약 문구는 표시하지 않는다', () => {
     const card = render(
       <RouteCard

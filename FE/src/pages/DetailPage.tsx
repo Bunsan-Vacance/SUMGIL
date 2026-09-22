@@ -4,6 +4,7 @@ import LegList from '../features/route/LegList'
 import BikePrediction from '../features/route/BikePrediction'
 import {
   congestionPredictionFor,
+  congestionPredictionPresentation,
   formatCongestionPercent,
   isCongestionPredictionDate,
   routeArrival,
@@ -94,7 +95,9 @@ export default function DetailPage({
           )}
           {predictionDate && (
             <div>
-              <strong>{prediction ? `${formattedPercent}%` : '정보 없음'}</strong>
+              <strong style={{ color: congestionPredictionPresentation(prediction)?.color }}>
+                {prediction ? `${formattedPercent}%` : '정보 없음'}
+              </strong>
               <small>혼잡도 예상</small>
             </div>
           )}
