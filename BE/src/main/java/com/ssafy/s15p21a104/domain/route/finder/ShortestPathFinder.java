@@ -157,6 +157,16 @@ public final class ShortestPathFinder {
             key = new StateKey(previous.fromLine(), previous.fromKeptLine());
         }
 
+        // 대기 정규화(2026-09-22): 엣지 waitSec을 비용에 실제 부과된 위치(첫 탑승)만 남긴다.
+        // 응답 매퍼가 엣지별 waitSec을 leg waitMinutes로 분리하므로 합계(totalSec)와 일치해야 한다.
+        for (int i = 1; i < edges.size(); i++) {
+            Edge edge = edges.get(i);
+            if (edge.waitSec() != 0) {
+                edges.set(i, new Edge(edge.fromNode(), edge.toNode(), edge.routeId(),
+                        edge.travelSec(), 0, edge.mode()));
+            }
+        }
+
         List<String> stations = new ArrayList<>();
         stations.add(originStationId);
         for (Edge edge : edges) {

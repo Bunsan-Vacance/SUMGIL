@@ -41,8 +41,10 @@ public final class CongestionScorer {
             if (level == null) {
                 continue;
             }
-            weightedSum += level * leg.minutes();
-            knownMinutes += leg.minutes();
+            // 대기 분리(2026-09-22) 후에도 가중치 합은 종전과 같게 유지한다(분리 전 minutes와 동일).
+            double legMinutes = leg.minutes() + (leg.waitMinutes() == null ? 0 : leg.waitMinutes());
+            weightedSum += level * legMinutes;
+            knownMinutes += legMinutes;
         }
         if (knownMinutes <= 0) {
             return Optional.empty();

@@ -62,4 +62,17 @@ class DepartureWait190Test {
 
         assertEquals(200, path.totalSec());
     }
+
+    @Test
+    @DisplayName("190-T4: 대기 분리 — 비용에 부과된 첫 탑승 엣지만 waitSec를 남긴다")
+    void t4_대기_엣지_위치() {
+        RouteGraph graph = graphOf(
+                subwayWait("A", "B", "L1", 100, 60),
+                subwayWait("B", "C", "L1", 100, 60));
+
+        FoundPath path = new ShortestPathFinder(new TransferRule(180)).find(graph, "A", "C");
+
+        assertEquals(60, path.edges().get(0).waitSec());
+        assertEquals(0, path.edges().get(1).waitSec());
+    }
 }

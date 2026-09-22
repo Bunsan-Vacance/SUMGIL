@@ -83,6 +83,28 @@ class RouteMapperTest {
     }
 
     @Test
+    @DisplayName("대기 분리: leg 분은 이동만, 탑승 대기는 waitMinutes로 간다(합은 총계)")
+    void 대기_분리() {
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 120, TravelMode.SUBWAY, 150),
+                new EngineSegment("1002", "1003", "7", 180, TravelMode.SUBWAY, 60)
+        ), 510, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponse(enginePath, stations, RouteType.SHORTEST, RouteSource.MOCK)
+                .orElseThrow();
+
+        assertEquals(510 / 60.0, response.totalMinutes(), TOLERANCE);
+        assertEquals(120 / 60.0, response.legs().get(0).minutes(), TOLERANCE);
+        assertEquals(Double.valueOf(150 / 60.0), response.legs().get(0).waitMinutes());
+        assertEquals(180 / 60.0, response.legs().get(1).minutes(), TOLERANCE);
+        assertEquals(Double.valueOf(60 / 60.0), response.legs().get(1).waitMinutes());
+        double sum = response.legs().stream()
+                .mapToDouble(leg -> leg.minutes() + leg.waitMinutes()).sum();
+        assertEquals(response.totalMinutes(), sum, TOLERANCE);
+    }
+
+    @Test
     @DisplayName("98-T3: 환승 2회 경로는 3개 구간으로 나뉜다")
     void 환승_2회_경로는_3개_구간으로_나뉜다() {
         EnginePath enginePath = new EnginePath(List.of(

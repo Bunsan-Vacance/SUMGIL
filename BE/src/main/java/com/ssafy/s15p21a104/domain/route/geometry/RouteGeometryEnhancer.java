@@ -88,7 +88,11 @@ public final class RouteGeometryEnhancer {
         try {
             List<RouteLegResponse> legs = withGeometry(response.legs());
             // 표시 total은 정정된 legs 합으로 맞춘다 — WALK 정정분까지 반영돼야 FE 표시가 어긋나지 않는다.
-            double totalMinutes = legs.stream().mapToDouble(RouteLegResponse::minutes).sum();
+            // 대기 분리(2026-09-22) 후에는 leg 소요(이동) + waitMinutes 합이다.
+            double totalMinutes = legs.stream()
+                    .mapToDouble(leg -> leg.minutes()
+                            + (leg.waitMinutes() == null ? 0 : leg.waitMinutes()))
+                    .sum();
             return new RouteSearchResponse(
                     response.routeType(), totalMinutes, legs, response.source(),
                     totalDistanceOf(legs), response.transferCount(),
@@ -204,9 +208,10 @@ public final class RouteGeometryEnhancer {
                 leg.mode(),
                 leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), minutes,
+                leg.routeId(), minutes, leg.waitMinutes(),
                 geometry, "available",
-                distance, leg.routeName(), null
+                distance, leg.routeName(), null,
+                null, null, null, null
         );
     }
 

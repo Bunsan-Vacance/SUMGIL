@@ -150,7 +150,7 @@ public final class RouteNameResolver {
                 leg.mode(),
                 leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), leg.minutes(),
+                leg.routeId(), leg.minutes(), leg.waitMinutes(),
                 leg.geometry(), leg.geometryStatus(),
                 leg.distanceMeters(), null,
                 RouteOptionResponse.of(optionList, names, headways),
@@ -216,9 +216,10 @@ public final class RouteNameResolver {
                 leg.mode(),
                 leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), leg.minutes(),
+                leg.routeId(), leg.minutes(), leg.waitMinutes(),
                 leg.geometry(), leg.geometryStatus(),
-                leg.distanceMeters(), routeName, null
+                leg.distanceMeters(), routeName, null,
+                null, null, null, null
         );
     }
 }

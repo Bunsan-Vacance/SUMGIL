@@ -110,7 +110,9 @@ class RaptorRealShapeScaleTest {
             for (ScoredCandidate scored : candidates) {
                 RouteSearchResponse response = scored.response();
                 double legsSum = response.legs().stream()
-                        .mapToDouble(leg -> leg.minutes()).sum();
+                        .mapToDouble(leg -> leg.minutes()
+                                + (leg.waitMinutes() == null ? 0 : leg.waitMinutes()))
+                        .sum();
                 assertEquals(response.totalMinutes(), legsSum, 0.05,
                         "legs 합과 totalMinutes 불일치");
                 long transferLegs = response.legs().stream()
