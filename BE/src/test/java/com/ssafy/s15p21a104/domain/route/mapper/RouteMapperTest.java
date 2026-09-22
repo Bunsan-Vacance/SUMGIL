@@ -259,8 +259,8 @@ class RouteMapperTest {
     }
 
     @Test
-    @DisplayName("122-T4: 동일 BIKE 구간도 대여소 경계에서 나뉜다 (213 T1: 접근 경계 TRANSFER 없음)")
-    void t122_BIKE구간_대여소경계_분할() {
+    @DisplayName("122-T4: 대여소를 경유해도 BIKE는 대여~반납 1 leg로 합쳐진다 (로드맵 1단계)")
+    void t122_BIKE구간_대여소경계_합침() {
         Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
         mixed.put("R1", new StationInfo("R1", "대여소1", 37.5000, 127.0045));
         mixed.put("R2", new StationInfo("R2", "대여소2", 37.5000, 127.0090));
@@ -275,19 +275,16 @@ class RouteMapperTest {
 
         RouteSearchResponse response = RouteMapper
                 .toResponseWithTransfers(enginePath, mixed,
-                        RouteType.SHORTEST, RouteSource.ALGORITHM,
-                        List.of(), Set.of("R1", "R2", "R3"))
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of())
                 .orElseThrow();
 
-        assertEquals(4, response.legs().size());
+        // 경유 대여소(R2)는 leg 경계로 노출되지 않는다 — 대여~반납 1 leg.
+        assertEquals(3, response.legs().size());
         assertEquals(TravelMode.WALK, response.legs().get(0).mode());
         assertEquals(TravelMode.BIKE, response.legs().get(1).mode());
-        assertEquals(TravelMode.BIKE, response.legs().get(2).mode());
-        assertEquals(TravelMode.WALK, response.legs().get(3).mode());
+        assertEquals(TravelMode.WALK, response.legs().get(2).mode());
         assertEquals("R1", response.legs().get(1).fromNodeId());
-        assertEquals("R2", response.legs().get(1).toNodeId());
-        assertEquals("R2", response.legs().get(2).fromNodeId());
-        assertEquals("R3", response.legs().get(2).toNodeId());
+        assertEquals("R3", response.legs().get(1).toNodeId());
     }
 
     @Test
@@ -338,7 +335,7 @@ class RouteMapperTest {
 
         RouteSearchResponse response = RouteMapper
                 .toResponseWithTransfers(enginePath, stops,
-                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), Set.of(), index)
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), index)
                 .orElseThrow();
 
         assertEquals(3, response.legs().size());
@@ -385,7 +382,7 @@ class RouteMapperTest {
 
         RouteSearchResponse response = RouteMapper
                 .toResponseWithTransfers(enginePath, stops,
-                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(), Set.of(), index)
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(), index)
                 .orElseThrow();
 
         assertEquals(1, response.legs().size());
@@ -428,7 +425,7 @@ class RouteMapperTest {
 
         RouteSearchResponse response = RouteMapper
                 .toResponseWithTransfers(enginePath, stops,
-                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), Set.of(), index)
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), index)
                 .orElseThrow();
 
         assertEquals(List.of(TravelMode.BUS, TravelMode.TRANSFER, TravelMode.BUS),
@@ -457,7 +454,7 @@ class RouteMapperTest {
 
         RouteSearchResponse response = RouteMapper
                 .toResponseWithTransfers(enginePath, stops,
-                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(), Set.of(),
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(),
                         BusRouteIndex.build(Map.of(
                                 "108", List.of(
                                         new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
