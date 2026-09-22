@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRoutePlanner } from './app/useRoutePlanner'
 import { screenTitles } from './app/useNavigation'
 import PreviewToolbar from './app/PreviewToolbar'
@@ -14,17 +14,22 @@ import GuidePage from './pages/GuidePage'
 import ArrivalPage from './pages/ArrivalPage'
 import ActiveGuidanceBar from './features/guidance/ActiveGuidanceBar'
 import Modal from './components/Modal'
+import SplashScreen from './components/SplashScreen'
 import { isBackendConfigured, isRouteSearchMockEnabled } from './api/repositories'
 import { isGuidanceMockEnabled } from './api/guidance'
 import { remaining } from './features/route/selectors'
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true)
+  const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
   const { screen, go, trip, guidance, destinationName, modal, setModal } = planner
   const title = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
-    if (screen !== 'search' && screen !== 'browse') title.current?.focus()
-  }, [screen])
+    if (!showSplash && screen !== 'search' && screen !== 'browse') title.current?.focus()
+  }, [screen, showSplash])
+  if (showSplash) return <SplashScreen onComplete={completeSplash} />
+
   return (
     <div className={`workspace workspace-${screen}`}>
       {screen !== 'results' && (
