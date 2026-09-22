@@ -9,10 +9,13 @@ import { GUIDANCE_STORAGE_KEY } from '../features/guidance/useGuidance'
 import { useRoutePlanner } from './useRoutePlanner'
 
 const repository: RouteRepository = { search: async () => routes }
+const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation')
 
 afterEach(() => {
   cleanup()
   sessionStorage.clear()
+  if (originalGeolocation) Object.defineProperty(navigator, 'geolocation', originalGeolocation)
+  else Reflect.deleteProperty(navigator, 'geolocation')
 })
 
 describe('경로와 안내 화면의 수명', () => {
@@ -41,6 +44,85 @@ describe('경로와 안내 화면의 수명', () => {
     expect(result.current.searchTarget).toBe('origin')
     expect(result.current.trip.destination).toBe(places[1])
     expect(search).not.toHaveBeenCalled()
+  })
+
+  it('홈 길찾기를 열 때 위치를 기본 출발지로 적용한다', () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition },
+    })
+    const { result } = renderHook(() => useRoutePlanner(repository))
+
+    expect(getCurrentPosition).not.toHaveBeenCalled()
+    act(() => result.current.toggleRoutePanel())
+    expect(result.current.routePanelOpen).toBe(true)
+    expect(getCurrentPosition).toHaveBeenCalledOnce()
+
+    act(() =>
+      getCurrentPosition.mock.calls[0][0]({
+        coords: { latitude: 37.5, longitude: 127.03 },
+      } as GeolocationPosition),
+    )
+
+    expect(result.current.trip.origin).toMatchObject({
+      name: '현재 위치',
+      lat: 37.5,
+      lng: 127.03,
+    })
+  })
+
+  it('기존 출발지는 보존하고 위치 권한 거부 뒤에도 검색으로 이동한다', () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition },
+    })
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() => result.current.trip.setOrigin(places[0]))
+    act(() => result.current.toggleRoutePanel())
+
+    expect(getCurrentPosition).not.toHaveBeenCalled()
+    expect(result.current.trip.origin).toBe(places[0])
+
+    act(() => result.current.openSearch('origin'))
+    expect(result.current.screen).toBe('search')
+  })
+
+  it('위치 응답 전에 지정한 출발지를 늦은 응답으로 덮어쓰지 않는다', () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition },
+    })
+    const { result } = renderHook(() => useRoutePlanner(repository))
+
+    act(() => result.current.toggleRoutePanel())
+    act(() => result.current.trip.setOrigin(places[0]))
+    act(() =>
+      getCurrentPosition.mock.calls[0][0]({
+        coords: { latitude: 37.5, longitude: 127.03 },
+      } as GeolocationPosition),
+    )
+
+    expect(result.current.trip.origin).toBe(places[0])
+  })
+
+  it('위치 권한을 거부해도 홈 패널을 열어 검색 흐름을 유지한다', () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition },
+    })
+    const { result } = renderHook(() => useRoutePlanner(repository))
+
+    act(() => result.current.toggleRoutePanel())
+    act(() => getCurrentPosition.mock.calls[0][1]({ code: 1 } as GeolocationPositionError))
+
+    expect(result.current.routePanelOpen).toBe(true)
+    expect(result.current.trip.origin.name).toBe('')
+    act(() => result.current.openSearch('origin'))
+    expect(result.current.screen).toBe('search')
   })
 
   it('장소 탐색에서 목적지를 고른 뒤 출발지를 검색하면 결과를 다시 조회한다', async () => {
