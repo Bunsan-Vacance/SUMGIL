@@ -1830,7 +1830,7 @@ small {
 }
 .bike-prediction-card {
   margin-top: 16px;
-  padding: 12px 0;
+  padding: 10px 0;
 }
 .bike-prediction-copy {
   min-width: 0;
@@ -1858,14 +1858,14 @@ small {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 .bike-prediction-value {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-soft);

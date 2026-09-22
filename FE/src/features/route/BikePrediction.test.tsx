@@ -65,7 +65,7 @@ describe('BikePrediction', () => {
     )
     expect(screen.getByText('따릉이 대여 정보')).toBeTruthy()
     expect(screen.getByText('강남 대여소')).toBeTruthy()
-    expect(screen.getByText('샘플')).toBeTruthy()
+    expect(screen.queryByText('샘플')).toBeNull()
     expect(screen.queryByText(/현재 재고가 아니라/)).toBeNull()
     expect(screen.queryByText(/대여 가능성/)).toBeNull()
     expect(screen.queryByText(/모델 산출|산출/)).toBeNull()
