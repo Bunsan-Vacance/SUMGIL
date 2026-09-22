@@ -36,8 +36,8 @@ class LinkCongestionScorerTest {
     }
 
     @Test
-    @DisplayName("소요시간(travelSec) 가중 평균으로 계산한다 — 대기시간은 가중치에 안 들어간다")
-    void 소요시간_가중평균() {
+    @DisplayName("점수는 링크 최대값이다 — 시간 가중 평균이 아니다")
+    void 링크_최대값() {
         Edge first = subwayEdge("A", "B", 600, 300); // 10분, 혼잡도 20
         Edge second = subwayEdge("B", "C", 1800, 0); // 30분, 혼잡도 60
 
@@ -45,8 +45,8 @@ class LinkCongestionScorerTest {
                 List.of(first, second), DEPARTURE,
                 (edge, passThroughTime) -> edge.fromNode().equals("A") ? 20.0 : 60.0).orElseThrow();
 
-        // (20*600 + 60*1800) / (600+1800) = (12000+108000)/2400 = 50
-        assertEquals(50.0, result.weightedAverage(), 1e-9);
+        assertEquals(60.0, result.worstLevel(), 1e-9);
+        assertEquals(second, result.worstEdge());
     }
 
     @Test
@@ -70,7 +70,7 @@ class LinkCongestionScorerTest {
                 List.of(known, unknownDirection), DEPARTURE,
                 (edge, passThroughTime) -> edge.fromNode().equals("A") ? 40.0 : null).orElseThrow();
 
-        assertEquals(40.0, result.weightedAverage(), 1e-9);
+        assertEquals(40.0, result.worstLevel(), 1e-9);
     }
 
     @Test
@@ -86,7 +86,7 @@ class LinkCongestionScorerTest {
                     return 70.0;
                 }).orElseThrow();
 
-        assertEquals(70.0, result.weightedAverage(), 1e-9);
+        assertEquals(70.0, result.worstLevel(), 1e-9);
         // WALK 엣지는 lookup이 안 불려도(비지하철 필터가 먼저 걸러도) 되지만,
         // 불렸다면 통과시각은 누적 반영된 이후 시각이어야 한다.
         assertTrue(seenTimes.isEmpty() || seenTimes.get(0).equals(DEPARTURE.plusSeconds(120)));
