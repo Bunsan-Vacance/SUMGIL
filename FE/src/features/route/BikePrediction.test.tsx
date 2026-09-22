@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { BikeStationRepository, BikeStock } from '../../api/contracts'
 import type { BikePredictionRepository } from '../../api/bikePrediction'
 import type { Route } from './types'
 import BikePrediction from './BikePrediction'
@@ -43,6 +44,12 @@ const unavailablePrediction = {
   predictedBikes: null,
   predictedAt: null,
 }
+const stock: BikeStock = {
+  rentalId: 'ST-1',
+  availableBikes: 6,
+  stockUpdatedAt: '2026-09-17T08:31:00+09:00',
+  status: 'AVAILABLE',
+}
 
 describe('BikePrediction', () => {
   it('첫 BIKE 구간 이전 minutes 합으로 대여소 도착 시각을 요청한다', async () => {
@@ -56,12 +63,91 @@ describe('BikePrediction', () => {
       '2026-09-16T23:33:00.000Z',
       expect.any(AbortSignal),
     )
-    expect(screen.getByText('따릉이 대여 예측')).toBeTruthy()
-    expect(screen.getByText('강남 대여소 · 08:33 도착')).toBeTruthy()
+    expect(screen.getByText('따릉이 대여 정보')).toBeTruthy()
+    expect(screen.getByText('강남 대여소')).toBeTruthy()
     expect(screen.getByText('샘플')).toBeTruthy()
     expect(screen.queryByText(/현재 재고가 아니라/)).toBeNull()
     expect(screen.queryByText(/대여 가능성/)).toBeNull()
     expect(screen.queryByText(/모델 산출|산출/)).toBeNull()
+  })
+
+  it('현재 재고와 도착 시 예측을 같은 카드에 함께 표시한다', async () => {
+    const repository: BikePredictionRepository = {
+      prediction: vi.fn().mockResolvedValue(prediction),
+    }
+    const stockRepository: Pick<BikeStationRepository, 'stock'> = {
+      stock: vi.fn().mockResolvedValue(stock),
+    }
+    render(
+      <BikePrediction route={route} repository={repository} stockRepository={stockRepository} />,
+    )
+    await waitFor(() => expect(screen.getByText('6대')).toBeTruthy())
+    expect(screen.getByText('현재')).toBeTruthy()
+    expect(screen.getByText('08:33')).toBeTruthy()
+    expect(screen.getByText('4대 예상')).toBeTruthy()
+    expect(stockRepository.stock).toHaveBeenCalledWith('ST-1', expect.any(AbortSignal))
+  })
+
+  it('현재 재고와 예측 수량이 0대여도 0을 표시한다', async () => {
+    const repository: BikePredictionRepository = {
+      prediction: vi.fn().mockResolvedValue({ ...prediction, predictedBikes: 0 }),
+    }
+    const stockRepository: Pick<BikeStationRepository, 'stock'> = {
+      stock: vi.fn().mockResolvedValue({ ...stock, availableBikes: 0 }),
+    }
+    render(
+      <BikePrediction route={route} repository={repository} stockRepository={stockRepository} />,
+    )
+    await waitFor(() => expect(screen.getByText('0대 예상')).toBeTruthy())
+    expect(screen.getByText('0대')).toBeTruthy()
+  })
+
+  it('오래된 재고는 현재가 아닌 마지막 확인 시각으로 표시한다', async () => {
+    const repository: BikePredictionRepository = {
+      prediction: vi.fn().mockResolvedValue(prediction),
+    }
+    const stockRepository: Pick<BikeStationRepository, 'stock'> = {
+      stock: vi.fn().mockResolvedValue({ ...stock, availableBikes: 2, status: 'STALE' }),
+    }
+    render(
+      <BikePrediction route={route} repository={repository} stockRepository={stockRepository} />,
+    )
+    await waitFor(() => expect(screen.getByText('마지막 확인 08:31')).toBeTruthy())
+    expect(screen.getByText('2대')).toBeTruthy()
+    expect(screen.queryByText('현재')).toBeNull()
+  })
+
+  it('재고 UNAVAILABLE과 API 오류를 별도로 안내하고 오류는 재시도한다', async () => {
+    const repository: BikePredictionRepository = {
+      prediction: vi.fn().mockResolvedValue(prediction),
+    }
+    const stockRepository: Pick<BikeStationRepository, 'stock'> = {
+      stock: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ...stock,
+          availableBikes: null,
+          stockUpdatedAt: null,
+          status: 'UNAVAILABLE',
+        })
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockResolvedValueOnce(stock),
+    }
+    const { rerender } = render(
+      <BikePrediction route={route} repository={repository} stockRepository={stockRepository} />,
+    )
+    await waitFor(() => expect(screen.getByText('재고 정보 없음')).toBeTruthy())
+    rerender(
+      <BikePrediction
+        route={{ ...route, id: 'retry-stock' }}
+        repository={repository}
+        stockRepository={stockRepository}
+      />,
+    )
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(screen.getByText('현재 재고를 불러오지 못했어요.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '재고 다시 시도' }))
+    await waitFor(() => expect(screen.getByText('6대')).toBeTruthy())
   })
 
   it('명시적인 rentalId가 없으면 API를 호출하지 않는다', () => {
@@ -125,5 +211,34 @@ describe('BikePrediction', () => {
     await waitFor(() => expect(screen.getByText('4대 예상')).toBeTruthy())
     await act(async () => resolveFirst(prediction))
     expect(screen.getByText('4대 예상')).toBeTruthy()
+  })
+
+  it('경로가 바뀐 뒤 이전 재고 응답을 표시하지 않는다', async () => {
+    let resolveFirst!: (value: BikeStock) => void
+    let resolveSecond!: (value: BikeStock) => void
+    const stockRepository: Pick<BikeStationRepository, 'stock'> = {
+      stock: vi
+        .fn()
+        .mockImplementationOnce(() => new Promise((yes) => (resolveFirst = yes)))
+        .mockImplementationOnce(() => new Promise((yes) => (resolveSecond = yes))),
+    }
+    const { rerender } = render(
+      <BikePrediction route={route} repository={null} stockRepository={stockRepository} />,
+    )
+    const nextRoute = {
+      ...route,
+      id: 'next-stock-route',
+      legs: route.legs.map((leg) =>
+        leg.mode === 'bike' ? { ...leg, from: { name: '새 대여소', rentalId: 'ST-9' } } : leg,
+      ),
+    }
+    rerender(
+      <BikePrediction route={nextRoute} repository={null} stockRepository={stockRepository} />,
+    )
+    await act(async () => resolveSecond({ ...stock, rentalId: 'ST-9', availableBikes: 9 }))
+    await waitFor(() => expect(screen.getByText('9대')).toBeTruthy())
+    await act(async () => resolveFirst({ ...stock, availableBikes: 1 }))
+    expect(screen.queryByText('1대')).toBeNull()
+    expect(screen.getByText('9대')).toBeTruthy()
   })
 })
