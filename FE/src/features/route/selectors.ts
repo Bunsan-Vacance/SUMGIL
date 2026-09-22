@@ -5,7 +5,9 @@ import type {
   Mode,
   Priority,
   Route,
+  SegmentCongestionGrade,
 } from './types'
+import { segmentCongestionPresentation } from './segmentCongestion'
 
 function predictionPercent(route: Route, now = new Date()) {
   const prediction = congestionPredictionFor(route, now)
@@ -86,6 +88,30 @@ const congestionPercentFormatter = new Intl.NumberFormat('ko-KR', {
 
 export function formatCongestionPercent(value: number) {
   return congestionPercentFormatter.format(value)
+}
+
+export function congestionGradeForPercent(value?: number | null): CongestionGrade | undefined {
+  if (value === undefined || value === null || !Number.isFinite(value) || value < 0)
+    return undefined
+  if (value < 50) return 'LOW'
+  if (value < 100) return 'MEDIUM'
+  return 'HIGH'
+}
+
+export function congestionPredictionPresentation(
+  prediction?: Pick<CongestionPrediction, 'congestionPercent' | 'congestionGrade'> | null,
+) {
+  const grade =
+    prediction?.congestionGrade ?? congestionGradeForPercent(prediction?.congestionPercent)
+  const segmentGrade: SegmentCongestionGrade | undefined =
+    grade === 'LOW'
+      ? 'RELAXED'
+      : grade === 'MEDIUM'
+        ? 'NORMAL'
+        : grade === 'HIGH'
+          ? 'CONGESTED'
+          : undefined
+  return segmentCongestionPresentation(segmentGrade)
 }
 
 export function congestionGradeText(value: CongestionGrade | null) {
