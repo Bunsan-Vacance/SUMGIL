@@ -20,7 +20,7 @@
 | 시트 높이·드래그                              | `useBottomSheet`                  | 해당 페이지가 마운트된 동안 유지                                                                                            |
 | SDK 지도·마커 인스턴스                        | `useKakaoMap`의 ref               | 일반 화면 상태와 분리, 정리 시 마커 제거·observer 해제                                                                      |
 | 선택한 지도 장소 정보                         | `KakaoMap`                        | 마커 선택 시 표시, 닫기·Escape·장소 변경 시 제거                                                                            |
-| 위치 요청 중                                  | `useCurrentLocation`              | 홈 길찾기 또는 출발 검색 버튼 클릭으로만 시작, 화면/대상 변경 후 늦은 응답 무시                                             |
+| 위치 요청 중                                  | `useCurrentLocation`              | 홈 진입·재진입, 홈 길찾기 또는 출발 검색 버튼으로 시작, 화면/대상 변경 후 늦은 응답 무시                                    |
 | 안내 구간 현재 단계                           | `useGuidance`의 `step`            | 원본 `Route.legs` 인덱스를 `LegList.activeIndex`로 전달하고 `aria-current="step"`과 현재 단계 class를 표시                  |
 | 토스트                                        | `useToast`                        | 2.8초 후 또는 화면 변경 시 제거                                                                                             |
 

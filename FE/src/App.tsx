@@ -41,7 +41,13 @@ export default function App() {
             screen !== 'results' && (
               <KakaoMap
                 key={screen}
-                origin={screen === 'guide' ? guidance.origin || trip.origin : trip.origin}
+                origin={
+                  screen === 'home'
+                    ? null
+                    : screen === 'guide'
+                      ? guidance.origin || trip.origin
+                      : trip.origin
+                }
                 destination={
                   screen === 'guide'
                     ? guidance.destination
@@ -52,6 +58,7 @@ export default function App() {
                 route={
                   screen === 'guide' ? guidance.route : screen === 'detail' ? trip.selected : null
                 }
+                autoLocate={screen === 'home'}
                 onMessage={planner.setMessage}
               />
             )}
