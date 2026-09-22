@@ -68,10 +68,13 @@ class LagResult:
 
 def fetch_offsets(bootstrap: str, group_id: str, topics: list[str]) -> tuple[Offsets, Offsets]:
     """Return (end offsets, committed offsets) keyed by (topic, partition)."""
-    from kafka import KafkaAdminClient, KafkaConsumer, TopicPartition
+    from kafka import KafkaConsumer, TopicPartition
 
-    consumer = KafkaConsumer(bootstrap_servers=bootstrap, enable_auto_commit=False)
-    admin = KafkaAdminClient(bootstrap_servers=bootstrap)
+    consumer = KafkaConsumer(
+        bootstrap_servers=bootstrap,
+        group_id=group_id,
+        enable_auto_commit=False,
+    )
     try:
         partitions = []
         for topic in topics:
@@ -80,14 +83,14 @@ def fetch_offsets(bootstrap: str, group_id: str, topics: list[str]) -> tuple[Off
         end = {
             (tp.topic, tp.partition): off for tp, off in consumer.end_offsets(partitions).items()
         }
-        raw = admin.list_consumer_group_offsets(group_id)
-        committed = {
-            (tp.topic, tp.partition): meta.offset for tp, meta in raw.items() if tp.topic in topics
-        }
+        committed = {}
+        for tp in partitions:
+            offset = consumer.committed(tp)
+            if offset is not None:
+                committed[(tp.topic, tp.partition)] = offset
         return end, committed
     finally:
         consumer.close()
-        admin.close()
 
 
 def load_history(path: Path) -> list[Sample]:
