@@ -140,7 +140,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `1` | 50% ≤ x < 100% | 보통 |
 | `2` | ≥ 100% | 혼잡 |
 
-**임계값을 BE에 하드코딩하지 말 것.** `GET /crowd/meta`의 `grade_thresholds`를 읽어 쓴다 — 바뀔 수 있다(국토부 고시의 150/170/190은 우리 타깃 분포에서 판별력이 없어 50/100을 쓰고 있다).
+**2026-09-22 결정**(통지문 `TO_BE-crowd-grade-scheme-01.md`): 표시 등급은 FE가 수치(`congestionLevel` = `level`/`congestion_pct`)를 자체 임계값(40/70/100, 4단계, `segmentCongestionGradeForLevel`)으로 등급화한다. 따라서 이 `grade`와 `GET /crowd/meta`의 `grade_thresholds`는 **참고값**일 뿐, BE·FE 표시 경로 어디에서도 읽지 않는다. 필드는 스키마 호환을 위해 그대로 남긴다. 국토부 고시의 150/170/190은 우리 타깃 분포에서 판별력이 없어 쓰지 않는다. 버스는 범주형 혼잡도를 BE가 같은 % 스케일("정원 대비 %")로 환산해 경로 가중치 계산에 쓴다.
 
 ---
 
@@ -166,7 +166,7 @@ AI는 **요청 시점에 모델을 돌리지 않는다.** 하루 1회 배치가 
 | `recent_dates_available` | `[…]` | D−1 수집기가 쌓은 최근 실측 날짜 |
 | `events_coverage_end` | `"2026-12-27"` | (200) `crowd_events_files`에 나열된 이벤트 표들을 합친 최대 date. 읽은 표가 하나도 없으면 `null` |
 | `events_available` | `true` | (200) `target_date`가 `events_coverage_end` 이내인지. `false`면 그 날짜의 경기·축제 칸은 "없었다"가 아니라 "표가 안 덮는다"는 뜻(0-채움 자체는 유지) |
-| `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값 |
+| `grade_thresholds` | `[50.0, 100.0]` | 등급 임계값(참고값 — 표시 등급은 FE 규칙, 2절) |
 | `rows` | `21606` | 표 행 수 |
 | `status_counts` | `{"ok": 20892, "no_calibration": 585, "segment_truncated": 129}` | 상태별 행 수 |
 | `lookup_substituted_rows` | `334` | (197, 옛 `clipped_rows`) `pred_source="lookup_negative"`인 행 수 |
