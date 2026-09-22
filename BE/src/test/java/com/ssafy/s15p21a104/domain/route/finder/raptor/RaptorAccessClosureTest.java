@@ -79,16 +79,16 @@ class RaptorAccessClosureTest {
     }
 
     @Test
-    @DisplayName("A5: 연속 자전거 상한(240초 = 1km) 초과 접근 사슬은 잘린다")
+    @DisplayName("A5: 연속 자전거 상한(480초 = 2km) 초과 접근 사슬은 잘린다")
     void a5_접근상한() {
         List<RaptorFinder.Connection> connections = List.of(
                 new RaptorFinder.Connection("PLACE-ORIGIN", "R1", 60, TravelMode.WALK),
-                new RaptorFinder.Connection("R1", "R2", 120, TravelMode.BIKE),
-                new RaptorFinder.Connection("R2", "R3", 130, TravelMode.BIKE)); // 누적 250 > 240
+                new RaptorFinder.Connection("R1", "R2", 240, TravelMode.BIKE),
+                new RaptorFinder.Connection("R2", "R3", 250, TravelMode.BIKE)); // 누적 490 > 480
 
         Map<String, RaptorFinder.Access> access = RaptorAccessClosure.from("PLACE-ORIGIN", connections);
 
-        assertEquals(120, access.get("R2").bikeRunSec());
+        assertEquals(240, access.get("R2").bikeRunSec());
         assertFalse(access.containsKey("R3"), "상한 초과 자전거 사슬이 남았다");
     }
 }
