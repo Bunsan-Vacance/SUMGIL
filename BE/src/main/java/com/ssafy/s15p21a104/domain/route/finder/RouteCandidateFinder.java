@@ -278,11 +278,15 @@ public final class RouteCandidateFinder {
 
         // K 후보 전략(217): 첫 스캔 후, 직전 후보의 첫 탑승 구간을 금지해가며 재스캔한다.
         // 라운드별 최선만 나오는 RAPTOR에서 서로 다른 후보를 maxCandidates까지 채운다.
+        // 비탑승(전부 연결) 1등이면 금지할 탑승 구간이 없어 수집이 붕괴하므로, 그때는
+        // 연결 단독 후보를 건너뛰고 탑승 대안을 계속 모은다(1건만 나가던 원인).
         List<FoundPath> collected = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         Set<String> bannedSegments = new LinkedHashSet<>();
         List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route> currentRoutes =
                 routes;
+        boolean skipConnectionOnly = false;
+        boolean requireTransit = false;
         int runs = 0;
         while (collected.size() < maxCandidates && runs <= RAPTOR_MAX_BAN_RUNS) {
             runs++;
@@ -301,10 +305,13 @@ public final class RouteCandidateFinder {
                     finder.find(originStationId, destStationId,
                             new com.ssafy.s15p21a104.domain.route.finder.raptor
                                     .RaptorFinder.AccessTables(originAccess, destAccess),
-                            RAPTOR_MAX_ROUNDS, minimizeCost);
+                            RAPTOR_MAX_ROUNDS, minimizeCost, requireTransit);
             boolean addedNew = false;
             for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey journey
                     : journeys) {
+                if (skipConnectionOnly && !hasTransit(journey)) {
+                    continue;
+                }
                 java.util.Optional<FoundPath> path =
                         com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorPathAdapter
                                 .toFoundPath(journey, currentRoutes,
@@ -322,7 +329,14 @@ public final class RouteCandidateFinder {
             }
             Edge firstTransit = firstTransitSegment(collected.get(collected.size() - 1));
             if (firstTransit == null) {
-                break;
+                // 마지막 후보가 비탑승 — 금지할 탑승 구간이 없다. 연결 단독을 건너뛰고
+                // 탑승 대안을 한 번 더 모은다(이미 건너뛰었으면 더 없음).
+                if (skipConnectionOnly) {
+                    break;
+                }
+                skipConnectionOnly = true;
+                requireTransit = true; // 엔진도 '탑승 있는 최선'을 반환하도록(K 수집 붕괴 방지)
+                continue;
             }
             bannedSegments.add(firstTransit.fromNode() + "->" + firstTransit.toNode());
             currentRoutes = com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSetBuilder
@@ -332,6 +346,17 @@ public final class RouteCandidateFinder {
             }
         }
         return collected;
+    }
+
+    /** journey에 탑승(BUS·SUBWAY) leg가 있는가 — 비탑승(전부 연결) 판정용. */
+    private static boolean hasTransit(
+            com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Journey journey) {
+        for (com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Leg leg : journey.legs()) {
+            if (leg.mode() == TravelMode.BUS || leg.mode() == TravelMode.SUBWAY) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 경로의 첫 대중교통 구간 — K 전략에서 다음 후보를 위해 금지할 구간. */
