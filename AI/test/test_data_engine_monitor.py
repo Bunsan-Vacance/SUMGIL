@@ -572,3 +572,28 @@ def test_discord_main_dry_run_returns_zero(capsys):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "DRY_RUN discord notification skipped" in captured.out
+
+
+def test_discord_main_loads_dotenv_before_resolving_defaults(monkeypatch):
+    loaded = []
+
+    def fake_load_dotenv():
+        loaded.append(True)
+        monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/from-env")
+
+    posted = []
+
+    class Response:
+        status_code = 204
+        text = ""
+
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    monkeypatch.setattr("DATA_ENGINE.monitor.notify_discord.load_dotenv", fake_load_dotenv)
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.notify_discord.requests.post",
+        lambda url, **_kwargs: posted.append(url) or Response(),
+    )
+
+    assert discord_main(["--message", "test", "--server-name", "server"]) == 0
+    assert loaded == [True]
+    assert posted == ["https://discord.example/from-env"]

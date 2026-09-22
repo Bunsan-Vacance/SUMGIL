@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
+from collections import namedtuple
 from datetime import datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -209,6 +212,44 @@ def test_run_check_rejects_bad_thresholds(tmp_path):
             fail_min=5,
             subway_window=WINDOW,
         )
+
+
+def test_fetch_offsets_uses_consumer_committed_offsets(monkeypatch):
+    topic_partition = namedtuple("TopicPartition", "topic partition")
+    instances = []
+
+    class FakeConsumer:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.closed = False
+            instances.append(self)
+
+        def partitions_for_topic(self, topic):
+            return {0} if topic == "bike.stock" else {1}
+
+        def end_offsets(self, partitions):
+            return {tp: 20 + tp.partition for tp in partitions}
+
+        def committed(self, partition):
+            return 10 if partition.topic == "bike.stock" else None
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setitem(
+        sys.modules,
+        "kafka",
+        SimpleNamespace(KafkaConsumer=FakeConsumer, TopicPartition=topic_partition),
+    )
+
+    end, committed = check_consumer_lag.fetch_offsets(
+        "kafka:9092", "ai-spark", ["bike.stock", "weather.nowcast"]
+    )
+
+    assert instances[0].kwargs["group_id"] == "ai-spark"
+    assert end == {("bike.stock", 0): 20, ("weather.nowcast", 1): 21}
+    assert committed == {("bike.stock", 0): 10}
+    assert instances[0].closed
 
 
 # ---- consumer 상태 파일 기반 검사 (파싱·저장 실패) ----
