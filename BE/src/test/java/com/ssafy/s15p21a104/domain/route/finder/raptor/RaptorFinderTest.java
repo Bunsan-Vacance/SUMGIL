@@ -181,13 +181,13 @@ class RaptorFinderTest {
     }
 
     @Test
-    @DisplayName("R11: 접근 자전거 누적이 상한(240초)을 넘으면 그 연결로 확장하지 않는다")
+    @DisplayName("R11: 접근 자전거 누적이 상한(480초)을 넘으면 그 연결로 확장하지 않는다")
     void r11_자전거상한() {
         List<RaptorFinder.Connection> over = List.of(
-                new RaptorFinder.Connection("R1", "S", 110, TravelMode.BIKE)); // 200 + 110 = 310 > 240
+                new RaptorFinder.Connection("R1", "S", 200, TravelMode.BIKE)); // 300 + 200 = 500 > 480
         Map<String, RaptorFinder.Access> origin = Map.of(
                 "PLACE-ORIGIN", new RaptorFinder.Access(0, null, 0, TravelMode.WALK, 0),
-                "R1", new RaptorFinder.Access(200, "PLACE-ORIGIN", 200, TravelMode.BIKE, 200));
+                "R1", new RaptorFinder.Access(300, "PLACE-ORIGIN", 300, TravelMode.BIKE, 300));
         Map<String, RaptorFinder.Egress> dest = Map.of(
                 "D", new RaptorFinder.Egress(0, null, 0, TravelMode.WALK, 0));
 
@@ -199,7 +199,7 @@ class RaptorFinderTest {
 
         RaptorFinder allowed = new RaptorFinder(
                 List.of(route("B1", 0, "S", "100", "D")),
-                List.of(new RaptorFinder.Connection("R1", "S", 30, TravelMode.BIKE))); // 230 ≤ 240
+                List.of(new RaptorFinder.Connection("R1", "S", 170, TravelMode.BIKE))); // 470 ≤ 480
         assertTrue(!allowed.find("PLACE-ORIGIN", "PLACE-DEST",
                 new RaptorFinder.AccessTables(origin, dest), 3, false).isEmpty(),
                 "상한 이내 자전거 확장이 막혔다");
