@@ -1,4 +1,4 @@
-"""후보 선택·안내 문장 생성(S15P21A104-203) — 계획 1절의 ④⑤ 노드.
+"""후보 선택·안내 문장 생성(S15P21A104-203/302) — 계획 1절의 ④⑤ 노드.
 
 여기가 **LLM을 갈아끼우는 유일한 자리**다. ①트리거·②후보·③프리페치는 두 구현에서 완전히
 같고, 이 모듈만 바뀐다. 그래야 7절 비교가 '표현의 차이'만 재고 '입력의 차이'를 재지 않는다
@@ -7,9 +7,9 @@
 `RuleStrategy`는 LLM·API 키 없이 완전히 동작한다. 기준선이면서 동시에 **운영 폴백**이다 —
 게이트웨이가 죽어도 재안내는 계속 나간다.
 
-**경로를 다시 쓰지 않는다.** 전략은 후보를 *가리키기만* 하고, legs·소요시간·거리는 BE 응답을
-그대로 들고 나간다. `AgentStrategy`가 `chosen_index`만 받는 것도 같은 이유다 — LLM이 경로를
-다시 쓰게 두면 역 이름과 분이 조용히 각색된다.
+**후보를 가리키기만 한다.** 전략은 `candidate_index`만 내고, 하차역→대안 도보 합성과
+대안→목적지 경로 연결(⑥)은 `service.py`가 선택 **이후**에 한다(계획 2.5절) — 전략 자리에서는
+아직 경로가 없다.
 """
 
 from __future__ import annotations
@@ -19,30 +19,34 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Protocol
 
 from app.TIME.context import AgentContext, CandidateContext
 from app.TIME.llm import LlmClient, LlmError, LlmResult
 from app.TIME.llm_budget import LlmBudget
+from app.TIME.station_index import WALK_SPEED_M_PER_MIN
+from app.TIME.trigger import StockReading
 
-DEFAULT_TRANSFER_PENALTY_MIN = 4.0
-DEFAULT_CONGESTION_PENALTY_MIN = 3.0
+DEFAULT_WALK_SPEED_M_PER_MIN = WALK_SPEED_M_PER_MIN
+"""`station_index.WALK_SPEED_M_PER_MIN`과 같은 값이다 — 후보 순위 근사(여기)와 실제 `walkLeg`
+합성(`service.build_walk_leg`)이 다른 속도를 쓰면 순위와 표시 분(分)이 어긋난다."""
+DEFAULT_EMPTY_PENALTY_MIN = 10.0
 """점수 가중치 기본값. **잠정값**이다 — 근거는 `app/core/config.py`의 time_score_* 주석."""
 
 
 @dataclass(frozen=True)
 class ScoreWeights:
-    transfer_penalty_min: float = DEFAULT_TRANSFER_PENALTY_MIN
-    congestion_penalty_min: float = DEFAULT_CONGESTION_PENALTY_MIN
+    walk_speed_m_per_min: float = DEFAULT_WALK_SPEED_M_PER_MIN
+    empty_penalty_min: float = DEFAULT_EMPTY_PENALTY_MIN
 
     @classmethod
     def from_settings(cls, settings: object) -> ScoreWeights:
+        # walk_speed_m_per_min은 `Settings`에 대응 노브가 없다 — `station_index.WALK_SPEED_M_PER_MIN`
+        # (67)을 상수로 박아뒀다(도보 속도는 후보 사이 상대 순위에만 쓰여 절댓값 튜닝 필요성이
+        # 낮다). 고갈 페널티만 `Settings` 노브다.
         return cls(
-            transfer_penalty_min=getattr(
-                settings, "time_score_transfer_penalty_min", DEFAULT_TRANSFER_PENALTY_MIN
-            ),
-            congestion_penalty_min=getattr(
-                settings, "time_score_congestion_penalty_min", DEFAULT_CONGESTION_PENALTY_MIN
+            empty_penalty_min=getattr(
+                settings, "time_score_empty_penalty_min", DEFAULT_EMPTY_PENALTY_MIN
             ),
         )
 
@@ -54,22 +58,20 @@ class RerouteProposal:
     candidate_index: int
     """`AgentContext.usable_candidates`에서의 위치. 경로 본문이 아니라 **가리키는 값**이다."""
 
-    route: dict[str, Any]
-    """고른 잔여 경로. BE 응답 그대로 — 전략이 가공하지 않는다."""
-
     reason: str
     """안내 문장. `RerouteResponse.reason` 자리에 들어간다."""
 
-    source: str
-    """`ALGORITHM`(규칙) 또는 `AGENT`(LLM). 후자는 BE 회신 대기 중이다
-    (`TO_BE-time-reroute-contract-01` 2번)."""
+    recommended_by: str
+    """`ALGORITHM`(규칙) 또는 `AGENT`(LLM). BE `replan_route`의 `source`(=탐색 주체, 항상
+    `ALGORITHM`)와는 다른 축이다 — "누가 골랐나"는 별도 필드로 싣기로 했다
+    (`TOOL_CONTRACT.md` 6절 2번)."""
 
     score: float | None = None
     """규칙 전략이 매긴 점수. LLM 전략은 None. 204 평가에서 두 선택을 견줄 때 쓴다."""
 
 
-SOURCE_ALGORITHM = "ALGORITHM"
-SOURCE_AGENT = "AGENT"
+RECOMMENDED_BY_ALGORITHM = "ALGORITHM"
+RECOMMENDED_BY_AGENT = "AGENT"
 
 
 class RerouteStrategy(Protocol):
@@ -81,7 +83,10 @@ class RerouteStrategy(Protocol):
 class RuleStrategy:
     """LLM 없는 기준선. 점수가 가장 낮은 후보를 고르고 템플릿으로 문장을 만든다.
 
-    점수식: `잔여소요(분) + 환승 횟수 × 환승페널티 + 혼잡등급 × 혼잡페널티` (작을수록 좋다)
+    점수식: `도보소요(분) + p_empty × 고갈페널티` (작을수록 좋다). 도보소요는
+    `distance_m / walk_speed_m_per_min`으로 근사한다(직선거리 기준 — 계획 2.5절의 도보 합성
+    ×1.3 보정은 ⑥에서 실제 `walkLeg`를 만들 때만 쓰고, 여기 점수식은 후보 사이 상대 비교용이라
+    보정 없이도 순위는 같다).
 
     **가중치는 잠정값이다.** 실제 후보 분포를 보지 못했다 — 트리거 임계값과 같은 처지라
     `Settings` 노브로 빼두고, 표를 확보하면 같이 다시 정한다.
@@ -95,205 +100,128 @@ class RuleStrategy:
         if not ctx.has_alternative:
             return None
 
-        best: tuple[float, int, dict[str, Any]] | None = None
-        for index, candidate in enumerate(ctx.usable_candidates):
-            for route in candidate.routes:
-                score = self.score(route)
-                if score is None:
-                    continue  # 소요시간을 못 읽은 경로는 점수를 매길 수 없다. 지어내지 않는다
-                if best is None or score < best[0]:
-                    best = (score, index, route)
+        best_index: int | None = None
+        best_key: tuple[float, float] | None = None
+        for index, candidate_ctx in enumerate(ctx.usable_candidates):
+            score = self.score(candidate_ctx)
+            if score is None:
+                continue  # 값을 못 읽은 후보는 점수를 매길 수 없다. 지어내지 않는다
+            key = (score, candidate_ctx.candidate.distance_m)  # 동점이면 가까운 쪽
+            if best_key is None or key < best_key:
+                best_key = key
+                best_index = index
 
-        if best is None:
+        if best_index is None or best_key is None:
             # 후보는 있는데 하나도 점수를 못 냈다 — 응답 모양이 예상과 다르다는 뜻이라
             # 임의로 하나를 고르지 않는다(모르는 채로 안내하지 않는다).
             return None
 
-        score, index, route = best
-        candidate = ctx.usable_candidates[index]
+        candidate_ctx = ctx.usable_candidates[best_index]
         return RerouteProposal(
-            candidate_index=index,
-            route=route,
-            reason=build_reason(ctx, candidate, route),
-            source=SOURCE_ALGORITHM,
-            score=score,
+            candidate_index=best_index,
+            reason=build_reason(ctx, candidate_ctx),
+            recommended_by=RECOMMENDED_BY_ALGORITHM,
+            score=best_key[0],
         )
 
-    def score(self, route: Mapping[str, Any]) -> float | None:
-        """작을수록 좋다. 소요시간을 못 읽으면 None."""
-        return _score_route(route, self.weights)
+    def score(self, candidate_ctx: CandidateContext) -> float | None:
+        """작을수록 좋다. 판단 근거(비어 있을 확률)를 아예 못 읽으면 None."""
+        return _score_candidate(candidate_ctx, self.weights)
 
 
-def _score_route(route: Mapping[str, Any], weights: ScoreWeights) -> float | None:
-    """`RuleStrategy.score`의 실제 계산. 모듈 함수로 뺀 이유는 `_best_route`(아래)도 같은
-    식으로 후보 안의 경로를 고르게 하기 위해서다 — `describe_candidate`와 `AgentStrategy`가
-    "선택 후보의 경로"를 규칙 전략과 같은 방식으로 고르게 한다."""
-    minutes = _total_minutes(route)
-    if minutes is None:
+def _score_candidate(candidate_ctx: CandidateContext, weights: ScoreWeights) -> float | None:
+    reading = candidate_ctx.reading
+    if reading is None:
         return None
-    transfers = _transfer_count(route) or 0
-    grade = _max_grade(route) or 0
-    return (
-        minutes + transfers * weights.transfer_penalty_min + grade * weights.congestion_penalty_min
-    )
+    p_empty = _p_empty_or_proxy(reading)
+    if p_empty is None:
+        return None
+    walk_minutes = candidate_ctx.candidate.distance_m / weights.walk_speed_m_per_min
+    return walk_minutes + p_empty * weights.empty_penalty_min
 
 
-def _best_route(
-    routes: Sequence[Mapping[str, Any]], weights: ScoreWeights
-) -> Mapping[str, Any] | None:
-    """후보 안에서 점수가 가장 낮은 경로. 점수를 못 낸 경로는 건너뛴다(`RuleStrategy.decide`와
-    같은 규칙). `describe_candidate`·`AgentStrategy`가 같은 방식으로 경로를 고르는 한곳이다."""
-    best: tuple[float, Mapping[str, Any]] | None = None
-    for route in routes:
-        score = _score_route(route, weights)
-        if score is None:
-            continue
-        if best is None or score < best[0]:
-            best = (score, route)
-    return best[1] if best else None
+def _p_empty_or_proxy(reading: StockReading) -> float | None:
+    """`p_empty`가 없으면(분류기 미탑재) `predicted_stock`으로 거친 근사치를 쓴다.
+
+    근사 규칙을 값을 지어내는 것과 구분해 명시적으로 남긴다 — 예측 재고가 1대 이하면 "거의
+    확실히 빈다"(1.0), 그 밖이면 "비지 않을 것"(0.0)으로 본다. `predicted_stock`마저 없으면
+    판단 근거가 아예 없어 `None`을 돌려주고, 그 후보는 점수를 매기지 않는다(지어내지 않는다).
+    """
+    if reading.p_empty is not None:
+        return reading.p_empty
+    if reading.predicted_stock is not None:
+        return 1.0 if reading.predicted_stock <= 1 else 0.0
+    return None
 
 
 # ── 안내 문장 ──
 
 
-def build_reason(ctx: AgentContext, candidate: CandidateContext, route: Mapping[str, Any]) -> str:
-    """템플릿으로 문장을 만든다. **`decision.facts`와 경로에 실제로 있는 값만 쓴다.**
+def build_reason(ctx: AgentContext, candidate_ctx: CandidateContext) -> str:
+    """템플릿으로 문장을 만든다. **대상·후보에 실제로 있는 값만 쓴다.**
 
-    규칙 전략이 LLM보다 정직한 지점이 여기다 — 템플릿은 자리에 넣을 값이 없으면 그 문장을
-    통째로 빼지, 그럴듯한 숫자를 만들지 않는다.
-
-    문구가 **"지금 혼잡하다"가 아니라 "도착할 시점에 혼잡해진다"**인 이유는 CROWD가 하루 1회
-    배치 산출물이기 때문이다(`facts["is_prediction"]`). 실시간인 척하면 데이터-검증-리포트의
-    "추정 데이터는 변화율로 쓴다" 원칙을 깨는 것이다.
+    규칙 전략이 LLM보다 정직한 지점이 여기다 — 자리에 넣을 값이 없으면 그 괄호를 통째로 빼지,
+    그럴듯한 숫자를 만들지 않는다. 두 문장(대상 상태 → 대안 제안) 이내, 120자 이내를 겨냥한다
+    (`Settings.time_agent_reason_max_*`와 같은 잠정 상한).
     """
-    facts = ctx.decision.facts
-    parts: list[str] = []
+    target_name = ctx.target.name or "이 대여소"
+    sentence1 = f"{target_name}은 도착 시점에 자전거가 없을 가능성이 높습니다"
+    predicted_stock = ctx.target_reading.predicted_stock
+    if predicted_stock is not None:
+        sentence1 += f"(예상 재고 {predicted_stock:.1f}대)"
+    sentence1 += "."
 
-    where = candidate.candidate.stop.name
-    eta = candidate.candidate.eta_minutes
-    if where:
-        parts.append(f"{where}에서 내려 갈아타시는 건 어떨까요.")
-    else:
-        parts.append("다음 역에서 내려 갈아타시는 건 어떨까요.")
+    alt = candidate_ctx.candidate.station
+    alt_name = alt.name or "이 대여소"
+    distance_m = round(candidate_ctx.candidate.distance_m)
+    sentence2 = f"{distance_m}m 떨어진 {alt_name}로 바꾸시면 어떨까요."
 
-    worst = facts.get("worst_station_name")
-    worst_eta = facts.get("worst_eta_minutes")
-    grade_from = facts.get("worst_grade_from")
-    grade_to = facts.get("worst_grade_to")
-    if worst and worst_eta is not None and grade_from is not None and grade_to is not None:
-        parts.append(
-            f"{worst_eta}분 뒤 {worst} 도착 시점에 혼잡도가 "
-            f"{grade_from}등급에서 {grade_to}등급으로 올라갈 것으로 보입니다."
-        )
-    elif worst:
-        parts.append(f"{worst} 부근이 지금보다 혼잡해질 것으로 보입니다.")
-
-    minutes = _total_minutes(route)
-    transfers = _transfer_count(route)
-    if minutes is not None:
-        tail = f"갈아타면 남은 거리는 약 {round(minutes)}분"
-        if transfers is not None:
-            tail += f", 환승 {transfers}회"
-        parts.append(tail + "입니다.")
-
-    if eta is not None and where:
-        parts.append(f"{where}까지는 약 {eta}분 남았습니다.")
-
-    # 공휴일에 일요일 배율을 빌려 쓴 값이면 그 사실을 밝힌다(SERVING_CONTRACT.md 2절).
-    # 숨기면 사용자가 평소와 같은 정확도로 믿는다.
-    if facts.get("calibration_fallback_used"):
-        parts.append("(공휴일이라 일요일 기준 혼잡도로 추정한 값입니다.)")
-
-    return " ".join(parts)
+    return f"{sentence1} {sentence2}"
 
 
-# ── 경로 읽기 ──
-# BE 응답은 `{reason, source, route:{...}}`이지만 래퍼 없이 경로 객체가 오는 모양도 받아 둔다 —
-# 응답 모양이 회신 대기 중이라(`TO_BE-time-reroute-contract-01`) 한쪽만 보면 조용히 0점이 된다.
+# ── 후보 요약(LLM 프롬프트·204 평가 접점) ──
 
 
-def _route_body(route: Mapping[str, Any]) -> Mapping[str, Any]:
-    inner = route.get("route")
-    return inner if isinstance(inner, Mapping) else route
-
-
-def _total_minutes(route: Mapping[str, Any]) -> float | None:
-    body = _route_body(route)
-    value = body.get("totalMinutes")
-    if isinstance(value, (int, float)):
-        return float(value)
-    # totalMinutes가 없으면 legs 합으로 낸다. 계약상 둘은 0.01분 이내로 일치한다.
-    legs = body.get("legs")
-    if not isinstance(legs, Sequence) or isinstance(legs, (str, bytes)):
-        return None
-    total = 0.0
-    found = False
-    for leg in legs:
-        if isinstance(leg, Mapping) and isinstance(leg.get("minutes"), (int, float)):
-            total += float(leg["minutes"])
-            found = True
-    return total if found else None
-
-
-def _transfer_count(route: Mapping[str, Any]) -> int | None:
-    value = _route_body(route).get("transferCount")
-    return int(value) if isinstance(value, int) else None
-
-
-def _max_grade(route: Mapping[str, Any]) -> int | None:
-    """경로 구간 중 가장 혼잡한 등급. BE 응답에 없으면 None(0으로 치지 않는다).
-
-    없는 것을 0(=쾌적)으로 치면 혼잡 정보가 없는 경로가 가장 좋아 보인다. None을 돌려주고
-    호출자가 `or 0`으로 중립 처리하되, 그 선택이 보이는 자리에 있게 한다.
-    """
-    legs = _route_body(route).get("legs")
-    if not isinstance(legs, Sequence) or isinstance(legs, (str, bytes)):
-        return None
-    grades = [
-        int(leg["congestionGrade"])
-        for leg in legs
-        if isinstance(leg, Mapping) and isinstance(leg.get("congestionGrade"), int)
-    ]
-    return max(grades) if grades else None
-
-
-# ── 후보 요약(LLM 프롬프트·A/C 접점) ──
-
-
-def describe_candidate(ctx: AgentContext, index: int, weights: ScoreWeights | None = None) -> str:
+def describe_candidate(ctx: AgentContext, index: int) -> str:
     """후보 하나(`ctx.usable_candidates[index]`)를 한 줄 한국어 요약으로 바꾼다.
 
-    **이 함수가 `AgentStrategy`와 다른 청크(C, 따릉이 트리거·후보) 사이의 유일한 접점이다.**
-    203 마스터 설계 3.0절대로 트리거 원천이 혼잡도에서 따릉이로 바뀌면 후보의 정체가 "경로"에서
-    "대여소"로 바뀌지만, 프롬프트가 후보를 문장으로 읽는 자리는 여기 하나뿐이다 — C는 이 함수만
-    확장하고(예: 대여소 재고 문구 추가) `AgentStrategy` 본문은 건드리지 않는다.
-
-    `RuleStrategy`가 점수 매기는 것과 같은 경로 선택(`_best_route`)을 쓴다 — 프롬프트에 보여주는
-    경로와 규칙 전략이 실제로 고르는 경로가 다르면 LLM이 잘못된 근거로 판단하게 된다. `weights`를
-    받는 이유도 같다 — 호출자가 `RuleStrategy`와 다른 가중치를 쓰면 "규칙과 같은 경로"라는 위
-    약속이 깨지므로, 기본값(`None` → `ScoreWeights()`)에 기대지 말고 실제로 쓰는 가중치를 전달할
-    것. 값을 못 읽은 항목은 자리를 통째로 뺀다(`build_reason`과 같은 원칙 — 없는 숫자를 지어내지
-    않는다).
+    값을 못 읽은 항목은 자리를 통째로 뺀다(`build_reason`과 같은 원칙 — 없는 숫자를 지어내지
+    않는다). `usable_candidates`만 대상이라 `reading`은 항상 채워져 있지만, 그 안의 개별 필드
+    (`current_stock`·`predicted_stock`·`p_empty`)는 여전히 `None`일 수 있다.
     """
-    candidate = ctx.usable_candidates[index]
-    where = candidate.candidate.stop.name or "이름 미상 역"
-    eta = candidate.candidate.eta_minutes
+    candidate_ctx = ctx.usable_candidates[index]
+    station = candidate_ctx.candidate.station
+    reading = candidate_ctx.reading
+    name = station.name or "이름 미상 대여소"
+    distance_m = round(candidate_ctx.candidate.distance_m)
 
-    bits = [f"{index}. {where} — {eta}분 후 도착"]
-
-    route = _best_route(candidate.routes, weights or ScoreWeights())
-    if route is not None:
-        minutes = _total_minutes(route)
-        if minutes is not None:
-            bits.append(f"잔여 {round(minutes)}분")
-        transfers = _transfer_count(route)
-        if transfers is not None:
-            bits.append(f"환승 {transfers}회")
-        grade = _max_grade(route)
-        if grade is not None:
-            bits.append(f"최고 혼잡 {grade}등급")
+    bits = [f"{index}. {name} — 도보 약 {distance_m}m"]
+    if reading is not None:
+        if reading.current_stock is not None:
+            bits.append(f"현재 {reading.current_stock}대")
+        if reading.predicted_stock is not None:
+            bits.append(f"도착 시 예상 {reading.predicted_stock:.1f}대")
+        if reading.p_empty is not None:
+            bits.append(f"비어 있을 확률 {reading.p_empty * 100:.0f}%")
 
     return ", ".join(bits)
+
+
+def _target_facts_lines(ctx: AgentContext) -> list[str]:
+    """대상 대여소 사실을 줄 목록으로. `describe_candidate`와 같은 원칙 — 없는 값은 줄 자체를
+    뺀다. `_build_user_prompt`와 `_allowed_numbers`가 같은 줄을 본다(둘이 어긋나면 프롬프트에
+    안 보여준 숫자가 허용되거나, 보여준 숫자가 막힌다)."""
+    reading = ctx.target_reading
+    lines = [f"- 대여소: {ctx.target.name or '이 대여소'}", f"- 도착까지: {ctx.eta_minutes}분"]
+    if reading.current_stock is not None:
+        lines.append(f"- 현재 재고: {reading.current_stock}대")
+    if reading.predicted_stock is not None:
+        lines.append(f"- 도착 시 예상 재고: {reading.predicted_stock:.1f}대")
+    if reading.p_empty is not None:
+        lines.append(f"- 비어 있을 확률: {reading.p_empty * 100:.0f}%")
+    if reading.model_horizon_min is not None:
+        lines.append(f"- 예측 horizon: {reading.model_horizon_min}분")
+    return lines
 
 
 # ── LLM 전략 ──
@@ -315,10 +243,10 @@ class RejectReason(StrEnum):
     """`reason`에 facts·후보 요약 어디에도 없는 숫자가 나왔다 — 지어낸 값일 가능성이 크다."""
 
     WRONG_CANDIDATE_NAME = "WRONG_CANDIDATE_NAME"
-    """선택하지 않은 다른 후보의 역 이름이 `reason`에 등장한다."""
+    """선택하지 않은 다른 후보의 대여소 이름이 `reason`에 등장한다."""
 
     MISSING_CHOSEN_NAME = "MISSING_CHOSEN_NAME"
-    """선택한 후보에 역 이름이 있는데 `reason`이 그 이름을 언급하지 않는다."""
+    """선택한 후보에 이름이 있는데 `reason`이 그 이름을 언급하지 않는다."""
 
     TOO_LONG = "TOO_LONG"
     """문장 수·글자 수 상한을 넘었다(잠정값, `Settings.time_agent_reason_max_*`)."""
@@ -332,31 +260,32 @@ def _system_prompt(max_sentences: int, max_chars: int) -> str:
     않도록 인자로 받아 그대로 박아 넣는다 — 프롬프트 문구와 검증 로직의 숫자가 따로 놀면
     LLM은 지켰다고 생각한 규칙에 걸려 탈락한다."""
     return (
-        "당신은 지하철 실시간 재탐색 안내 에이전트다. 아래 [사실]과 [후보] 목록만 보고 후보 중 "
-        '하나를 골라 정확히 이 JSON 형식으로만 답하라: {"chosen_index": <정수>, "reason": <문자열>}. '
+        "당신은 따릉이 재고 고갈 재안내 에이전트다. 아래 [사실]·[대상 대여소]·[후보] 목록만 "
+        "보고 후보 중 하나를 골라 정확히 이 JSON 형식으로만 답하라: "
+        '{"chosen_index": <정수>, "reason": <문자열>}. '
         "chosen_index는 [후보] 목록의 번호 그대로여야 한다. "
-        "reason에는 경로·역 이름·숫자를 새로 만들지 말고 [사실]과 [후보]에 실제로 나온 값만 "
-        f"인용해 한국어 {max_sentences}문장 이내, {max_chars}자 이내로 써라. "
-        "data_status가 'calibration_fallback'이면 그 사실을 밝히고, "
-        "'no_lookup'류 결측값은 혼잡으로 해석하지 말 것 — 각 필드의 의미는 도구 설명을 따른다."
+        "reason에는 대여소 이름·숫자를 새로 만들지 말고 [사실]·[대상 대여소]·[후보]에 실제로 "
+        f"나온 값만 인용해 한국어 {max_sentences}문장 이내, {max_chars}자 이내로 써라."
     )
 
 
-def _build_user_prompt(ctx: AgentContext, weights: ScoreWeights) -> str:
-    """`decision.facts`를 표로, `describe_candidate()` 결과를 번호 목록으로 늘어놓는다.
+def _build_user_prompt(ctx: AgentContext) -> str:
+    """`decision.facts`·대상 사실·`describe_candidate()` 결과를 그대로 문장으로 옮긴다.
 
     두 전략이 같은 입력을 보게 하는 `AgentContext`(`context.py` 모듈 docstring)를 그대로
-    문장으로 옮기는 자리라, 여기서 값을 가공하지 않는다 — facts에 없는 값을 계산해 넣으면
-    `AgentStrategy`와 `RuleStrategy`가 보는 "사실"이 달라진다. `weights`는 `describe_candidate`로
-    그대로 넘겨 프롬프트에 보여주는 경로가 실제 폴백(`RuleStrategy`)이 고르는 경로와 같게 한다.
+    옮기는 자리라, 여기서 값을 가공하지 않는다 — 없는 값을 계산해 넣으면 `AgentStrategy`와
+    `RuleStrategy`가 보는 "사실"이 달라진다.
     """
     lines = ["[사실]"]
     for key, value in ctx.decision.facts.items():
         lines.append(f"- {key}: {value}")
     lines.append("")
+    lines.append("[대상 대여소]")
+    lines.extend(_target_facts_lines(ctx))
+    lines.append("")
     lines.append("[후보]")
     for i in range(len(ctx.usable_candidates)):
-        lines.append(describe_candidate(ctx, i, weights))
+        lines.append(describe_candidate(ctx, i))
     return "\n".join(lines)
 
 
@@ -369,15 +298,17 @@ def _numbers_in(text: str) -> set[float]:
     return {float(m) for m in _NUMBER_RE.findall(text)}
 
 
-def _allowed_numbers(ctx: AgentContext, weights: ScoreWeights) -> set[float]:
+def _allowed_numbers(ctx: AgentContext) -> set[float]:
     """`reason`이 지어내지 않았는지 검사할 숫자 허용집합.
 
-    `decision.facts`의 수치 값 + 프롬프트에 실제로 보여준 후보 요약(`describe_candidate`)에
-    나온 숫자를 모은다 — 둘 다 LLM이 프롬프트에서 **실제로 본** 숫자라 안전한 허용집합이다.
-    facts의 불린 값은 `isinstance(x, int)`가 True로 나와 숫자로 섞일 수 있어 따로 뺀다.
-    `weights`는 `describe_candidate`가 프롬프트에 보여준 것과 같은 경로를 고르도록
-    `_build_user_prompt`와 같은 값을 받는다 — 안 그러면 프롬프트에는 없던 숫자가 허용집합에
-    섞이거나, 프롬프트에 있던 숫자가 빠질 수 있다.
+    `decision.facts`의 수치 값 + 프롬프트에 실제로 보여준 대상 사실 줄(`_target_facts_lines`) +
+    후보 요약(`describe_candidate`)에 나온 숫자를 모은다 — 전부 LLM이 프롬프트에서 **실제로
+    본** 숫자라 안전한 허용집합이다. facts의 불린 값은 `isinstance(x, int)`가 True로 나와
+    숫자로 섞일 수 있어 따로 뺀다.
+
+    `p_empty`는 프롬프트에 **퍼센트로 보여준다**(예: "62%") — 하지만 LLM이 원값(0.62)을 그대로
+    인용할 수도 있어 텍스트에서 뽑은 숫자만으로는 부족하다. 그래서 대상·후보 각각의 원본
+    `p_empty` 값도 직접 허용집합에 더한다(퍼센트로 보여준 값과 원값을 **둘 다** 허용).
     """
     numbers: set[float] = set()
     for value in ctx.decision.facts.values():
@@ -385,8 +316,18 @@ def _allowed_numbers(ctx: AgentContext, weights: ScoreWeights) -> set[float]:
             continue
         if isinstance(value, (int, float)):
             numbers.add(float(value))
+
+    for line in _target_facts_lines(ctx):
+        numbers |= _numbers_in(line)
+    if ctx.target_reading.p_empty is not None:
+        numbers.add(float(ctx.target_reading.p_empty))
+
     for i in range(len(ctx.usable_candidates)):
-        numbers |= _numbers_in(describe_candidate(ctx, i, weights))
+        numbers |= _numbers_in(describe_candidate(ctx, i))
+        reading = ctx.usable_candidates[i].reading
+        if reading is not None and reading.p_empty is not None:
+            numbers.add(float(reading.p_empty))
+
     return numbers
 
 
@@ -424,13 +365,9 @@ class AgentStrategy:
     docstring이 못박은 "LLM을 갈아끼우는 유일한 자리"의 실제 구현이다.
 
     환각 검사(`RejectReason` 6종 — LLM 오류·예산 초과 포함 8종)를 통과해야 LLM의 선택을 쓴다.
-    **하나라도 탈락하면 `fallback`의 결과를 그대로 돌려준다**(source도 `fallback`이 정한 값
-    그대로, 보통 `RuleStrategy`라 `SOURCE_ALGORITHM`). 이 청크(203-A)가 끝나도 서비스 동작이
-    나빠질 수 없다는 계획 전제가 여기서 지켜진다.
-
-    `weights`를 안 주면 `fallback`의 가중치를 물려받는다 — 프롬프트에 보여주는 경로·최종
-    채택 경로가 `fallback`이 실제로 고르는 경로와 어긋나면 안 되기 때문이다(`describe_candidate`
-    docstring 참고).
+    **하나라도 탈락하면 `fallback`의 결과를 그대로 돌려준다**(`recommended_by`도 `fallback`이
+    정한 값 그대로, 보통 `RuleStrategy`라 `RECOMMENDED_BY_ALGORITHM`). 이 청크가 끝나도 서비스
+    동작이 나빠질 수 없다는 계획 전제가 여기서 지켜진다.
     """
 
     def __init__(
@@ -439,22 +376,12 @@ class AgentStrategy:
         fallback: RerouteStrategy,
         *,
         budget: LlmBudget | None = None,
-        weights: ScoreWeights | None = None,
         max_sentences: int = 2,
         max_chars: int = 120,
     ) -> None:
         self.client = client
         self.fallback = fallback
         self.budget = budget if budget is not None else LlmBudget()
-        # weights를 안 주면 fallback(보통 RuleStrategy)의 가중치를 그대로 물려받는다 —
-        # 그래야 이 전략이 프롬프트에 보여주고 최종 route로 고르는 경로가 fallback이 실제로
-        # 고르는 경로와 같아진다. RuleStrategy가 아닌 폴백처럼 `weights` 속성이 없으면
-        # 기본값으로 떨어진다.
-        self.weights = (
-            weights
-            if weights is not None
-            else (getattr(fallback, "weights", None) or ScoreWeights())
-        )
         self.max_sentences = max_sentences
         self.max_chars = max_chars
         self.rejections: Counter[RejectReason] = Counter()
@@ -469,12 +396,17 @@ class AgentStrategy:
         if not ctx.has_alternative:
             return None
 
+        # 후보가 하나뿐이면 고를 게 없다 — LLM을 부르는 것 자체가 낭비이고, 탈락으로 세면
+        # 204 집계에 "판단을 못 했다"는 잘못된 신호가 섞인다(판단할 필요가 없었을 뿐이다).
+        if len(ctx.usable_candidates) == 1:
+            return self.fallback.decide(ctx)
+
         budget_error = self.budget.check()
         if budget_error is not None:
             return self._reject(RejectReason.BUDGET_EXCEEDED, ctx)
 
         system = _system_prompt(self.max_sentences, self.max_chars)
-        outcome = self.client.complete(system=system, user=_build_user_prompt(ctx, self.weights))
+        outcome = self.client.complete(system=system, user=_build_user_prompt(ctx))
         if isinstance(outcome, LlmError):
             return self._reject(RejectReason.LLM_ERROR, ctx)
         self.last_usage = outcome
@@ -489,14 +421,14 @@ class AgentStrategy:
         if not (0 <= chosen_index < len(candidates)):
             return self._reject(RejectReason.INDEX_OUT_OF_RANGE, ctx)
 
-        if not _numbers_in(reason) <= _allowed_numbers(ctx, self.weights):
+        if not _numbers_in(reason) <= _allowed_numbers(ctx):
             return self._reject(RejectReason.UNKNOWN_NUMBER, ctx)
 
-        chosen_name = candidates[chosen_index].candidate.stop.name
+        chosen_name = candidates[chosen_index].candidate.station.name
         other_names = {
-            c.candidate.stop.name
+            c.candidate.station.name
             for i, c in enumerate(candidates)
-            if i != chosen_index and c.candidate.stop.name
+            if i != chosen_index and c.candidate.station.name
         }
         if any(name in reason for name in other_names):
             return self._reject(RejectReason.WRONG_CANDIDATE_NAME, ctx)
@@ -507,19 +439,27 @@ class AgentStrategy:
         if _sentence_count(reason) > self.max_sentences or len(reason) > self.max_chars:
             return self._reject(RejectReason.TOO_LONG, ctx)
 
-        chosen = candidates[chosen_index]
-        # RuleStrategy와 같은 방식·같은 가중치로 고른 경로. 못 고르면(응답 모양이 예상과
-        # 다르면) 첫 경로로 물러난다 — `usable`이 보장하듯 routes는 비어 있지 않다.
-        best = _best_route(chosen.routes, self.weights)
-        route = best if best is not None else chosen.routes[0]
         return RerouteProposal(
             candidate_index=chosen_index,
-            route=route,
             reason=reason,
-            source=SOURCE_AGENT,
+            recommended_by=RECOMMENDED_BY_AGENT,
             score=None,
         )
 
     def _reject(self, reason: RejectReason, ctx: AgentContext) -> RerouteProposal | None:
         self.rejections[reason] += 1
         return self.fallback.decide(ctx)
+
+
+__all__ = [
+    "RECOMMENDED_BY_AGENT",
+    "RECOMMENDED_BY_ALGORITHM",
+    "AgentStrategy",
+    "RejectReason",
+    "RerouteProposal",
+    "RerouteStrategy",
+    "RuleStrategy",
+    "ScoreWeights",
+    "build_reason",
+    "describe_candidate",
+]

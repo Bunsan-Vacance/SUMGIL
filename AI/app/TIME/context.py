@@ -1,69 +1,45 @@
-"""후보 생성·프리페치가 주고받는 타입(S15P21A104-203).
+"""후보 생성·프리페치가 주고받는 타입(S15P21A104-203/302).
+
+**입력이 대여소로 바뀌었다.** 이전 판(경로상 하차 후보 `Stop`/`DropCandidate`)은 트리거 원천이
+CROWD 혼잡 급등에서 따릉이 재고 고갈로 바뀌면서 폐기했다(`AI/app/TIME/AGENT_DESIGN.md` 2.2절
+결정). 여기서 '후보'는 하차역이 아니라 **주변 따릉이 대여소**다.
 
 `trigger.py`와 마찬가지로 **순수 데이터**다. 두 전략(`RuleStrategy`·`AgentStrategy`)이 완전히
 같은 입력을 보게 하는 것이 목적이고, 그래야 7절 비교가 '표현의 차이'만 재게 된다
 (`AI/CLAUDE.md` 모델 비교 하드 룰 2·3번).
-
-**정차역 목록을 인자로 받는 이유**: BE `RouteLegResponse`는 같은 노선의 연속 구간을 leg 하나로
-합쳐서(`RouteMapper.toLeg`) 중간 정차역이 응답에 남지 않는다. 그 목록을 어디서 얻을지는 BE 회신
-대기 중이라(`TO_BE-time-station-sequence-01`), 공급원과 로직을 분리해 둔다 — 회신이 오면
-공급원만 연결하면 된다.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
-from app.TIME.trigger import TriggerDecision
-
-
-@dataclass(frozen=True)
-class Stop:
-    """경로상 정차역 하나. 두 ID를 같이 들고 다닌다.
-
-    `station_no`는 CROWD 혼잡도 조회 키(int), `station_id`는 BE `replan`의 `boundaryId`(str)다.
-    대응 규칙이 아직 확정되지 않아(`TO_BE-time-station-sequence-01` 3절) 둘 중 하나만 채워질 수
-    있다 — 그래서 각각 nullable이고, 쓰는 쪽이 필요한 것이 있는지 확인한다.
-    """
-
-    seq: int
-    """경로 진행 순서. 작을수록 먼저 지난다."""
-
-    station_id: str | None = None
-    station_no: int | None = None
-    name: str | None = None
-    is_transfer: bool = False
-    """환승 가능 역인지. 모르면 False — 모른다고 후보에서 빼지는 않는다(`candidates.py` 참고)."""
+from app.TIME.station_index import RentalStation
+from app.TIME.trigger import StockReading, TriggerResult
 
 
 @dataclass(frozen=True)
-class DropCandidate:
-    """하차 후보역 하나. `replan`의 `boundaryId`가 될 자리다."""
+class RentalCandidate:
+    """주변 대여소 후보 하나. `StationIndex.nearby()`가 낸 (역, 거리) 쌍을 그대로 옮겨 담는다."""
 
-    stop: Stop
-    eta_minutes: int
-    """현재 위치에서 이 역까지 걸리는 분. 도착 슬롯 계산과 안내 문장에 쓴다."""
-
-    rank_hint: int = 0
-    """정렬 힌트(작을수록 우선). 환승역 우대 같은 약한 선호만 담고, **최종 선택은 하지 않는다** —
-    선택은 전략(④)의 몫이다."""
+    station: RentalStation
+    distance_m: float
 
 
 @dataclass(frozen=True)
 class CandidateContext:
     """후보 하나에 딸린 프리페치 결과."""
 
-    candidate: DropCandidate
-    routes: list[dict[str, Any]] = field(default_factory=list)
-    """`replan_route`가 준 잔여 경로 후보. **BE 응답 그대로**다 — legs·소요시간을 가공하지 않는다."""
+    candidate: RentalCandidate
 
-    error: dict[str, Any] | None = None
-    """조회가 실패했으면 `ToolError`를 직렬화한 것. 실패를 빈 목록으로 감추지 않는다."""
+    reading: StockReading | None = None
+    """`get_eta_stock` 조회 결과. 조회가 실패했으면 `None`이고 `error`가 대신 채워진다."""
+
+    error: dict[str, object] | None = None
+    """조회가 실패했으면 `ToolError`를 직렬화한 것. 실패를 성공처럼 감추지 않는다."""
 
     @property
     def usable(self) -> bool:
-        return self.error is None and bool(self.routes)
+        return self.error is None and self.reading is not None
 
 
 @dataclass(frozen=True)
@@ -74,14 +50,20 @@ class AgentContext:
     (계획 1.1절), 두 전략이 같은 입력을 보는 근거이기도 하다.
     """
 
-    decision: TriggerDecision
+    decision: TriggerResult
     """트리거 판정. `facts`가 안내 문장이 인용할 사실 집합이다."""
 
-    candidates: list[CandidateContext] = field(default_factory=list)
-    current_route_id: str | None = None
-    """지금 타고 있는 노선. `exclude_route_ids`가 확정되기 전까지는 이 값으로 사후 필터링한다
-    (`TO_BE-time-reroute-contract-01` 1번)."""
+    target: RentalStation
+    """도착 시점에 비어 있을 것으로 예측된 대상 대여소."""
 
+    target_reading: StockReading
+    """대상 대여소의 `get_eta_stock` 결과. 트리거를 세운 바로 그 조회값이다."""
+
+    eta_minutes: int
+    """대상 대여소까지 남은 분. 후보마다 같은 값으로 `get_eta_stock`을 부른다(`planner.prefetch`)
+    — 그래야 '지금 대상은 몇 분 뒤'와 '후보는 몇 분 뒤'가 다른 시점을 가리키지 않는다."""
+
+    candidates: list[CandidateContext] = field(default_factory=list)
     dest_station_id: str | None = None
 
     @property
@@ -93,3 +75,6 @@ class AgentContext:
         """쓸 수 있는 대안이 하나라도 있는지. False면 전략을 부르지 않고 기존 안내를 유지한다 —
         '대안 없음'과 '조회 실패'를 뭉개지 않으려고 `usable`이 둘 다 본다."""
         return bool(self.usable_candidates)
+
+
+__all__ = ["AgentContext", "CandidateContext", "RentalCandidate"]

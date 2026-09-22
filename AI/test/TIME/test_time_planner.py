@@ -1,487 +1,306 @@
-"""도구 프리페치 검증(S15P21A104-203).
+"""도구 프리페치 검증(S15P21A104-203/302).
 
 여기서 고정하려는 것은 넷이다.
 
-1. **호출 수** — `get_line_congestion`은 노선 전체를 한 슬롯 단위로 주므로 역 수가 아니라
-   슬롯 수만큼만 불러야 한다. 이 성질이 깨지면 폴링마다 BE·CROWD 호출이 역 수만큼 늘어난다.
-2. **값을 지어내지 않는다** — 조회 실패·응답에 없는 역이 값으로 채워지지 않고 상태로 드러나는지.
-3. **실패를 감추지 않는다** — 후보 하나가 실패해도 나머지가 살아남고, 그 실패가 `error`에 남는지.
-4. **사후 필터링** — `exclude_route_ids` 회신 전까지 현재 노선을 쓰는 경로를 걸러내는지.
+1. **dict → StockReading 변환** — `get_eta_stock` 응답 필드가 tolerant하게 옮겨지는지(없는
+   필드는 0이 아니라 `None`).
+2. **`ToolError` 통과** — 실패는 그대로 `ToolError`로 돌아온다.
+3. **같은 eta_minutes** — 후보 전부가 대상과 같은 도착 시각 기준으로 조회되는지.
+4. **부분 실패를 감추지 않는다** — 후보 하나가 실패해도 나머지는 살아남고, 그 실패가 `error`에
+   남아 `usable`이 False가 된다.
 
-테스트는 **실제 네트워크·parquet·LLM을 쓰지 않는다.** 어댑터는 호출을 기록하고 미리 정한 응답을
+테스트는 **실제 네트워크·parquet를 쓰지 않는다.** 어댑터는 호출을 기록하고 미리 정한 응답을
 돌려주는 가짜다(202 `test_time_adapters.py`와 같은 방침).
 """
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 
-from app.TIME.context import DropCandidate, Stop
+from app.TIME.context import RentalCandidate
 from app.TIME.guard import ToolGuard
-from app.TIME.planner import (
-    STATUS_NOT_IN_RESPONSE,
-    prefetch,
-    readings_for_trigger,
-    slot_of,
-)
-from app.TIME.registry import GET_LINE_CONGESTION, REPLAN_ROUTE
+from app.TIME.planner import prefetch, read_stock
+from app.TIME.registry import GET_ETA_STOCK
 from app.TIME.schemas import ToolError, ToolErrorCode
-from app.TIME.trigger import SKIP_NO_DATA, STATUS_NO_DATA, TriggerDecision, evaluate
-
-NOW = datetime(2026, 9, 20, 8, 20)
-"""고정 시각. 08:20이면 현재 슬롯은 08:00이고 15분 뒤는 08:30 슬롯이다."""
-
-DECISION = TriggerDecision(fired=True)
-"""프리페치는 트리거 판정을 그대로 싣고 다니기만 한다 — 내용은 이 파일의 관심사가 아니다."""
-
-
-# ── 가짜 어댑터 ──
+from app.TIME.station_index import RentalStation
+from app.TIME.trigger import StockReading, TriggerResult
 
 
 class FakeAdapter:
-    """도구 이름·인자를 기록하고 미리 정한 응답을 돌려준다.
+    """도구 이름·인자를 기록하고 `rental_id`별 미리 정한 응답을 돌려준다."""
 
-    `planner.prefetch`는 이제 `replan_route`를 순차로 부르지만(BE 회신 8번), 락은 그대로 둔다 —
-    가드 동시성 테스트(`test_time_guard.py`)처럼 이 가짜 어댑터를 다른 곳에서 병렬로 쓸 수도 있어
-    기록 자체의 스레드 안전성까지 이 클래스가 보장하지 않을 이유는 없다.
-    """
-
-    def __init__(
-        self,
-        *,
-        line: Mapping[tuple[str, str], Any] | None = None,
-        replan: Mapping[str, Any] | None = None,
-    ) -> None:
-        self.line = dict(line or {})
-        self.replan = dict(replan or {})
+    def __init__(self, responses: Mapping[str, Any] | None = None) -> None:
+        self.responses = dict(responses or {})
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self._lock = threading.Lock()
 
     def call(self, name: str, args: Mapping[str, Any]) -> Any:
-        with self._lock:
-            self.calls.append((name, dict(args)))
-        if name == GET_LINE_CONGESTION:
-            key = (str(args["date"]), str(args["time_slot_30min"]))
-            return self.line.get(key, _line_response(key[0], key[1], []))
-        if name == REPLAN_ROUTE:
-            return self.replan.get(str(args["boundary_id"]), [])
-        return ToolError.invalid_input(f"가짜 어댑터가 모르는 도구 '{name}'")
+        self.calls.append((name, dict(args)))
+        if name != GET_ETA_STOCK:
+            return ToolError.invalid_input(f"가짜 어댑터가 모르는 도구 '{name}'")
+        rental_id = str(args["rental_id"])
+        if rental_id not in self.responses:
+            return ToolError.not_found(f"{rental_id} 실시간 재고를 확인할 수 없다")
+        return self.responses[rental_id]
 
-    def names(self, name: str) -> list[dict[str, Any]]:
-        return [args for called, args in self.calls if called == name]
-
-
-def _line_response(date: str, slot: str, stations: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"date": date, "line": "2호선", "time_slot_30min": slot, "stations": stations}
-
-
-def _station_row(
-    station_no: int,
-    *,
-    pct: float = 50.0,
-    grade: int = 1,
-    status: str = "ok",
-    direction: str = "내선",
-) -> dict[str, Any]:
-    return {
-        "station_no": station_no,
-        "station_name": f"역{station_no}",
-        "direction": direction,
-        "congestion_pct": pct,
-        "grade": grade,
-        "data_status": status,
-        "pred_source": "model",
-    }
-
-
-def _stop(seq: int, *, station_no: int | None = None, station_id: str | None = None) -> Stop:
-    return Stop(
-        seq=seq,
-        station_id=station_id if station_id is not None else f"S{seq}",
-        station_no=station_no if station_no is not None else 200 + seq,
-        name=f"역{200 + seq}",
-    )
-
-
-def _candidate(seq: int, **kwargs: Any) -> DropCandidate:
-    return DropCandidate(stop=_stop(seq, **kwargs), eta_minutes=seq * 2)
-
-
-def _route(route_id: str, *, minutes: float = 12.0) -> dict[str, Any]:
-    """BE `replan` 대안 하나. legs의 `routeId`가 사후 필터링의 판단 근거다."""
-    return {
-        "reason": "테스트용 대안",
-        "source": "ALGORITHM",
-        "route": {
-            "totalMinutes": minutes,
-            "legs": [
-                {"mode": "SUBWAY", "routeId": route_id, "fromNodeId": "A", "toNodeId": "B"},
-            ],
-        },
-    }
+    def eta_calls(self) -> list[dict[str, Any]]:
+        return [args for name, args in self.calls if name == GET_ETA_STOCK]
 
 
 def _guard() -> ToolGuard:
     return ToolGuard()
 
 
-# ── 슬롯 계산 ──
+def _station(rental_id: str, **overrides: Any) -> RentalStation:
+    fields: dict[str, Any] = {
+        "rental_id": rental_id,
+        "name": rental_id,
+        "lat": 37.5665,
+        "lng": 126.9780,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": None,
+    }
+    fields.update(overrides)
+    return RentalStation(**fields)
 
 
-def test_슬롯은_30분_단위_시작_시각으로_내림한다():
-    assert slot_of(datetime(2026, 9, 20, 8, 0)) == "08:00"
-    assert slot_of(datetime(2026, 9, 20, 8, 29, 59)) == "08:00"
-    assert slot_of(datetime(2026, 9, 20, 8, 30)) == "08:30"
-    assert slot_of(datetime(2026, 9, 20, 0, 5)) == "00:00"
-    assert slot_of(datetime(2026, 9, 20, 23, 59)) == "23:30"
+def _candidate(
+    rental_id: str, *, distance_m: float = 100.0, **station_overrides: Any
+) -> RentalCandidate:
+    return RentalCandidate(station=_station(rental_id, **station_overrides), distance_m=distance_m)
 
 
-def test_도착_슬롯은_eta를_더한_시각으로_정해진다():
-    adapter = FakeAdapter(
-        line={
-            ("2026-09-20", "08:00"): _line_response("2026-09-20", "08:00", [_station_row(201)]),
-            ("2026-09-20", "08:30"): _line_response("2026-09-20", "08:30", [_station_row(201)]),
-        }
+def _eta_stock_response(**overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "rental_id": "X",
+        "eta_minutes": 10,
+        "current_stock": 3,
+        "predicted_stock": 1.5,
+        "p_empty": 0.6,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10,
+    }
+    body.update(overrides)
+    return body
+
+
+def _target_reading() -> StockReading:
+    return StockReading(
+        current_stock=0,
+        predicted_stock=0.2,
+        p_empty=0.9,
+        p_full=0.0,
+        source="lightgbm",
+        model_horizon_min=10,
     )
 
-    readings = readings_for_trigger(
-        [(_stop(1, station_no=201), 15)],
+
+DECISION = TriggerResult(fired=True, reason="p_empty", facts={"eta_minutes": 10})
+"""프리페치는 트리거 판정을 그대로 싣고 다니기만 한다 — 내용은 이 파일의 관심사가 아니다."""
+
+
+# ── read_stock: dict → StockReading ──
+
+
+def test_응답_딕셔너리가_StockReading으로_변환된다():
+    adapter = FakeAdapter({"A": _eta_stock_response()})
+
+    result = read_stock("A", 10, adapter=adapter, guard=_guard())
+
+    assert isinstance(result, StockReading)
+    assert result.current_stock == 3
+    assert result.predicted_stock == 1.5
+    assert result.p_empty == 0.6
+    assert result.p_full == 0.0
+    assert result.source == "lightgbm"
+    assert result.model_horizon_min == 10
+
+
+def test_없는_필드는_0이_아니라_None으로_읽힌다():
+    adapter = FakeAdapter({"A": {"rental_id": "A", "eta_minutes": 10}})
+
+    result = read_stock("A", 10, adapter=adapter, guard=_guard())
+
+    assert isinstance(result, StockReading)
+    assert result.current_stock is None
+    assert result.predicted_stock is None
+    assert result.p_empty is None
+    assert result.p_full is None
+    assert result.source is None
+    assert result.model_horizon_min is None
+
+
+def test_인자가_그대로_전달된다():
+    adapter = FakeAdapter({"A": _eta_stock_response()})
+
+    read_stock("A", 12, adapter=adapter, guard=_guard())
+
+    assert adapter.eta_calls() == [{"rental_id": "A", "eta_minutes": 12}]
+
+
+# ── read_stock: ToolError 통과 ──
+
+
+def test_ToolError는_그대로_통과한다():
+    adapter = FakeAdapter()  # "A"에 대한 응답이 없어 not_found
+
+    result = read_stock("A", 10, adapter=adapter, guard=_guard())
+
+    assert isinstance(result, ToolError)
+    assert result.error == ToolErrorCode.NOT_FOUND
+
+
+def test_예산이_없으면_BUDGET_EXCEEDED를_돌려준다():
+    adapter = FakeAdapter({"A": _eta_stock_response()})
+    guard = ToolGuard(tool_budgets={GET_ETA_STOCK: 0})
+
+    result = read_stock("A", 10, adapter=adapter, guard=guard)
+
+    assert isinstance(result, ToolError)
+    assert result.error == ToolErrorCode.BUDGET_EXCEEDED
+    assert adapter.calls == []  # 막힌 호출은 어댑터까지 가지 않는다
+
+
+# ── prefetch: 같은 eta_minutes ──
+
+
+def test_모든_후보가_같은_eta로_조회된다():
+    adapter = FakeAdapter(
+        {
+            "A": _eta_stock_response(rental_id="A"),
+            "B": _eta_stock_response(rental_id="B"),
+            "C": _eta_stock_response(rental_id="C"),
+        }
+    )
+    candidates = [_candidate("A"), _candidate("B"), _candidate("C")]
+
+    ctx = prefetch(
+        decision=DECISION,
+        target=_station("TARGET"),
+        target_reading=_target_reading(),
+        eta_minutes=10,
+        candidates=candidates,
         adapter=adapter,
         guard=_guard(),
-        line="2호선",
-        now=NOW,  # 08:20 + 15분 = 08:35 → 08:30 슬롯
     )
 
-    assert readings[0].now.time_slot_30min == "08:00"
-    assert readings[0].on_arrival.time_slot_30min == "08:30"
-
-
-def test_자정을_넘는_도착은_다음_날_표를_조회한다():
-    """CROWD 표는 날짜별이라 같은 날로 물으면 다른 날 값을 읽는다."""
-    adapter = FakeAdapter()
-
-    readings = readings_for_trigger(
-        [(_stop(1, station_no=201), 15)],
-        adapter=adapter,
-        guard=_guard(),
-        line="2호선",
-        now=datetime(2026, 9, 20, 23, 50),
-    )
-
-    dates = {args["date"] for args in adapter.names(GET_LINE_CONGESTION)}
-    assert dates == {"2026-09-20", "2026-09-21"}
-    assert readings[0].on_arrival.time_slot_30min == "00:00"
-
-
-# ── 호출 수 ──
-
-
-def test_역이_많아도_서로_다른_슬롯_수만큼만_조회한다():
-    """`get_line_congestion`은 노선 전체를 한 슬롯 단위로 준다 — 역마다 부르면 안 된다."""
-    rows = [_station_row(200 + i) for i in range(1, 11)]
-    adapter = FakeAdapter(
-        line={
-            ("2026-09-20", "08:00"): _line_response("2026-09-20", "08:00", rows),
-            ("2026-09-20", "08:30"): _line_response("2026-09-20", "08:30", rows),
-            ("2026-09-20", "09:00"): _line_response("2026-09-20", "09:00", rows),
-        }
-    )
-    # 앞쪽 10개 역: 절반은 08:30 슬롯, 절반은 09:00 슬롯에 도착한다.
-    upcoming = [(_stop(i, station_no=200 + i), 15 if i <= 5 else 45) for i in range(1, 11)]
-
-    readings = readings_for_trigger(
-        upcoming, adapter=adapter, guard=_guard(), line="2호선", now=NOW
-    )
-
-    assert len(readings) == 10
-    calls = adapter.names(GET_LINE_CONGESTION)
-    assert len(calls) == 3  # 현재 슬롯 1 + 도착 슬롯 2
-    assert {args["time_slot_30min"] for args in calls} == {"08:00", "08:30", "09:00"}
-
-
-def test_조회할_역이_없으면_도구를_아예_부르지_않는다():
-    adapter = FakeAdapter()
-
-    assert readings_for_trigger([], adapter=adapter, guard=_guard(), line="2호선", now=NOW) == []
-    assert adapter.calls == []
-
-
-# ── 결측 처리 ──
-
-
-def test_응답에_없는_역은_빼지_않고_값만_비운다():
-    """빼면 트리거가 보는 목록이 짧아져 결측이 '문제없음'처럼 보인다. 남기면 결측으로 건너뛴다."""
-    present = [_station_row(201), _station_row(203)]
-    adapter = FakeAdapter(
-        line={
-            ("2026-09-20", "08:00"): _line_response("2026-09-20", "08:00", present),
-            ("2026-09-20", "08:30"): _line_response("2026-09-20", "08:30", present),
-        }
-    )
-    upcoming = [(_stop(i, station_no=200 + i), 15) for i in (1, 2, 3)]
-
-    readings = readings_for_trigger(
-        upcoming, adapter=adapter, guard=_guard(), line="2호선", now=NOW
-    )
-
-    assert [r.station_no for r in readings] == [201, 202, 203]
-    missing = readings[1]
-    assert missing.now.congestion_pct is None and missing.now.grade is None
-    assert missing.now.data_status == STATUS_NOT_IN_RESPONSE
-    assert missing.on_arrival.data_status == STATUS_NOT_IN_RESPONSE
-    assert not missing.comparable  # 트리거가 결측으로 건너뛴다
-    assert readings[0].comparable and readings[2].comparable
-
-
-def test_조회가_실패하면_값을_지어내지_않고_판단_근거_없음이_된다():
-    adapter = FakeAdapter(
-        line={
-            ("2026-09-20", "08:00"): ToolError.upstream_unavailable("CROWD 표를 읽지 못했다"),
-            ("2026-09-20", "08:30"): ToolError.upstream_unavailable("CROWD 표를 읽지 못했다"),
-        }
-    )
-    guard = _guard()
-    upcoming = [(_stop(i, station_no=200 + i), 15) for i in (1, 2)]
-
-    readings = readings_for_trigger(upcoming, adapter=adapter, guard=guard, line="2호선", now=NOW)
-
-    assert len(readings) == 2
-    for reading in readings:
-        assert reading.now.congestion_pct is None and reading.now.grade is None
-        assert reading.on_arrival.congestion_pct is None and reading.on_arrival.grade is None
-        assert reading.now.data_status == STATUS_NO_DATA
-    # '조회 실패'가 '혼잡하지 않음'으로 읽히면 안 된다 — 트리거는 근거 없음으로 접는다.
-    assert evaluate(readings).skip_reason == SKIP_NO_DATA
-    # 실패의 실제 원인은 가드 호출 로그에 남는다.
-    codes = {log.result_code for log in guard.logs()}
-    assert codes == {ToolErrorCode.UPSTREAM_UNAVAILABLE.value}
-
-
-def test_방향을_지정하면_그_방향_행만_쓰고_반대_방향으로_대체하지_않는다():
-    adapter = FakeAdapter(
-        line={
-            ("2026-09-20", "08:00"): _line_response(
-                "2026-09-20",
-                "08:00",
-                [
-                    _station_row(201, pct=30.0, direction="내선"),
-                    _station_row(201, pct=90.0, direction="외선"),
-                ],
-            ),
-            ("2026-09-20", "08:30"): _line_response(
-                "2026-09-20", "08:30", [_station_row(201, pct=95.0, direction="외선")]
-            ),
-        }
-    )
-
-    readings = readings_for_trigger(
-        [(_stop(1, station_no=201), 15)],
-        adapter=adapter,
-        guard=_guard(),
-        line="2호선",
-        now=NOW,
-        direction="내선",
-    )
-
-    assert readings[0].now.congestion_pct == 30.0
-    # 도착 슬롯에 '내선'이 없다 — 외선 값(95.0)으로 대체하면 상승폭이 통째로 가짜가 된다.
-    assert readings[0].on_arrival.congestion_pct is None
-    assert readings[0].on_arrival.data_status == STATUS_NOT_IN_RESPONSE
-
-
-# ── 후보별 프리페치 ──
-
-
-def test_후보_수만큼_replan을_부른다():
-    candidates = [_candidate(i) for i in range(1, 4)]
-    adapter = FakeAdapter(replan={f"S{i}": [_route("2호선")] for i in range(1, 4)})
-
-    context = prefetch(
-        DECISION,
-        candidates,
-        adapter=adapter,
-        guard=_guard(),
-        dest_station_id="DEST",
-    )
-
-    calls = adapter.names(REPLAN_ROUTE)
+    calls = adapter.eta_calls()
     assert len(calls) == 3
-    # 순차 호출이라 호출 순서가 후보 순서와 같다(BE 회신 8번 — CPU 1개 조건에서 순차 권고).
-    assert [args["boundary_id"] for args in calls] == ["S1", "S2", "S3"]
-    assert [c.candidate for c in context.candidates] == candidates  # 결과 순서는 후보 순서
-    assert context.has_alternative
-    assert all(args["dest_station_id"] == "DEST" for args in calls)
+    assert {c["eta_minutes"] for c in calls} == {10}
+    # 순차 호출이라 어댑터가 받은 순서도 후보 순서와 같다.
+    assert [c["rental_id"] for c in calls] == ["A", "B", "C"]
+    assert len(ctx.candidates) == 3
+    assert all(c.usable for c in ctx.candidates)
 
 
-def test_예산_3을_넘는_네번째_replan은_BUDGET_EXCEEDED다():
-    """`guard.DEFAULT_TOOL_BUDGETS[REPLAN_ROUTE]`가 3이 됐다(BE 회신 8번 — K=3 + 순차 호출
-    권고). 하차 후보 상한(`candidates.MAX_CANDIDATES`)은 아직 5라 4·5번째 후보는 어댑터까지
-    가지 못하고 가드에서 막힌다."""
-    candidates = [_candidate(i) for i in range(1, 6)]
-    adapter = FakeAdapter(replan={f"S{i}": [_route("2호선")] for i in range(1, 6)})
+def test_context_필드가_그대로_담긴다():
+    target = _station("TARGET")
+    target_reading = _target_reading()
+    adapter = FakeAdapter({"A": _eta_stock_response(rental_id="A")})
 
-    context = prefetch(
-        DECISION,
-        candidates,
+    ctx = prefetch(
+        decision=DECISION,
+        target=target,
+        target_reading=target_reading,
+        eta_minutes=10,
+        candidates=[_candidate("A")],
         adapter=adapter,
-        guard=ToolGuard(),  # 기본 예산 — REPLAN_ROUTE=3
-        dest_station_id="DEST",
+        guard=_guard(),
+        dest_station_id="DEST-1",
     )
 
-    calls = adapter.names(REPLAN_ROUTE)
-    assert len(calls) == 3  # 4·5번째는 가드가 막아 어댑터까지 가지 않는다
-    assert [args["boundary_id"] for args in calls] == ["S1", "S2", "S3"]
-    fourth, fifth = context.candidates[3], context.candidates[4]
-    for blocked in (fourth, fifth):
-        assert blocked.error is not None
-        assert blocked.error["error"] == ToolErrorCode.BUDGET_EXCEEDED.value
-        assert blocked.routes == []
-    assert [c.candidate for c in context.candidates] == candidates  # 결과 순서는 후보 순서 유지
+    assert ctx.decision is DECISION
+    assert ctx.target is target
+    assert ctx.target_reading is target_reading
+    assert ctx.eta_minutes == 10
+    assert ctx.dest_station_id == "DEST-1"
+
+
+# ── prefetch: 부분 실패를 감추지 않는다 ──
 
 
 def test_후보_하나가_실패해도_나머지는_살아남는다():
     adapter = FakeAdapter(
-        replan={
-            "S1": [_route("2호선")],
-            "S2": ToolError.upstream_unavailable("BE가 응답하지 않는다"),
-            "S3": [_route("2호선")],
-        }
+        {"A": _eta_stock_response(rental_id="A"), "C": _eta_stock_response(rental_id="C")}
     )
+    candidates = [_candidate("A"), _candidate("B"), _candidate("C")]
 
-    context = prefetch(
-        DECISION,
-        [_candidate(i) for i in range(1, 4)],
+    ctx = prefetch(
+        decision=DECISION,
+        target=_station("TARGET"),
+        target_reading=_target_reading(),
+        eta_minutes=10,
+        candidates=candidates,
         adapter=adapter,
         guard=_guard(),
-        dest_station_id="DEST",
     )
 
-    failed = context.candidates[1]
+    failed = ctx.candidates[1]
     assert failed.error is not None
-    assert failed.error["error"] == ToolErrorCode.UPSTREAM_UNAVAILABLE.value
-    assert failed.routes == []  # 실패를 빈 목록 '대안 없음'으로 감추지 않는다
+    assert failed.error["error"] == ToolErrorCode.NOT_FOUND.value
+    assert failed.reading is None
     assert not failed.usable
-    assert [c.candidate.stop.station_id for c in context.usable_candidates] == ["S1", "S3"]
+    assert [c.candidate.station.rental_id for c in ctx.usable_candidates] == ["A", "C"]
+    assert ctx.has_alternative
 
 
-def test_현재_노선을_쓰는_경로는_사후_필터링된다():
-    """`exclude_route_ids` 회신 전까지의 우회(TO_BE-time-reroute-contract-01 1번)."""
-    adapter = FakeAdapter(
-        replan={"S1": [_route("2호선"), _route("9호선"), _route("2호선", minutes=30.0)]}
-    )
-
-    context = prefetch(
-        DECISION,
-        [_candidate(1)],
-        adapter=adapter,
-        guard=_guard(),
-        dest_station_id="DEST",
-        current_route_id="2호선",
-    )
-
-    routes = context.candidates[0].routes
-    assert len(routes) == 1
-    assert routes[0]["route"]["legs"][0]["routeId"] == "9호선"
-    assert context.current_route_id == "2호선"
-    # 요청 파라미터가 아니라 응답을 걸러서 처리한다 — 회신이 오면 이 단언이 바뀐다.
-    assert "exclude_route_ids" not in adapter.names(REPLAN_ROUTE)[0]
-
-
-def test_필터_후_0개면_그_후보는_쓸_수_없지만_실패는_아니다():
-    adapter = FakeAdapter(replan={"S1": [_route("2호선")], "S2": [_route("9호선")]})
-
-    context = prefetch(
-        DECISION,
-        [_candidate(1), _candidate(2)],
-        adapter=adapter,
-        guard=_guard(),
-        dest_station_id="DEST",
-        current_route_id="2호선",
-    )
-
-    filtered_out = context.candidates[0]
-    assert filtered_out.routes == []
-    assert filtered_out.error is None  # '대안 없음'이지 '조회 실패'가 아니다
-    assert not filtered_out.usable
-    assert context.has_alternative  # 두 번째 후보는 남았다
-
-
-def test_모든_후보가_걸러지면_대안이_없다():
-    adapter = FakeAdapter(replan={"S1": [_route("2호선")], "S2": [_route("2호선")]})
-
-    context = prefetch(
-        DECISION,
-        [_candidate(1), _candidate(2)],
-        adapter=adapter,
-        guard=_guard(),
-        dest_station_id="DEST",
-        current_route_id="2호선",
-    )
-
-    assert not context.has_alternative
-    assert all(c.error is None for c in context.candidates)
-
-
-def test_가드가_막으면_예산_초과가_error에_드러난다():
-    adapter = FakeAdapter(replan={"S1": [_route("9호선")]})
-    guard = ToolGuard(tool_budgets={REPLAN_ROUTE: 0})
-
-    context = prefetch(
-        DECISION,
-        [_candidate(1)],
-        adapter=adapter,
-        guard=guard,
-        dest_station_id="DEST",
-    )
-
-    error = context.candidates[0].error
-    assert error is not None
-    assert error["error"] == ToolErrorCode.BUDGET_EXCEEDED.value
-    assert error["retryable"] is False
-    assert not context.has_alternative
-    assert adapter.calls == []  # 막힌 호출은 어댑터까지 가지 않는다
-    assert guard.logs()[0].blocked
-
-
-def test_후보가_없으면_도구를_부르지_않고_대안도_없다():
+def test_후보가_없으면_도구를_부르지_않는다():
     adapter = FakeAdapter()
 
-    context = prefetch(DECISION, [], adapter=adapter, guard=_guard(), dest_station_id="DEST")
+    ctx = prefetch(
+        decision=DECISION,
+        target=_station("TARGET"),
+        target_reading=_target_reading(),
+        eta_minutes=10,
+        candidates=[],
+        adapter=adapter,
+        guard=_guard(),
+    )
 
-    assert context.candidates == []
-    assert not context.has_alternative
-    assert context.decision is DECISION
+    assert ctx.candidates == []
+    assert not ctx.has_alternative
     assert adapter.calls == []
 
 
-def test_station_id가_없는_후보는_조용히_빠지지_않고_오류로_남는다():
-    adapter = FakeAdapter(replan={"S2": [_route("9호선")]})
-    candidates = [
-        DropCandidate(stop=Stop(seq=1, station_id=None, station_no=201), eta_minutes=4),
-        _candidate(2),
-    ]
+# ── prefetch: 가드가 쓰인다 ──
 
-    context = prefetch(
-        DECISION, candidates, adapter=adapter, guard=_guard(), dest_station_id="DEST"
+
+def test_가드가_사용된다():
+    adapter = FakeAdapter({"A": _eta_stock_response(rental_id="A")})
+    guard = ToolGuard()
+
+    prefetch(
+        decision=DECISION,
+        target=_station("TARGET"),
+        target_reading=_target_reading(),
+        eta_minutes=10,
+        candidates=[_candidate("A")],
+        adapter=adapter,
+        guard=guard,
     )
 
-    assert context.candidates[0].error is not None
-    assert context.candidates[0].error["error"] == ToolErrorCode.INVALID_INPUT.value
-    assert len(adapter.names(REPLAN_ROUTE)) == 1  # 부를 수 있는 후보만 불렀다
-    assert [c.candidate.stop.seq for c in context.usable_candidates] == [2]
+    assert guard.total_calls == 1
+    assert GET_ETA_STOCK in guard.stats()
 
 
-def test_배열이_아닌_replan_응답은_해석하지_않고_실패로_남긴다():
-    adapter = FakeAdapter(replan={"S1": {"routes": [_route("9호선")]}})
+def test_예산이_소진되면_후보가_예산_초과_오류로_남는다():
+    adapter = FakeAdapter({"A": _eta_stock_response(rental_id="A")})
+    guard = ToolGuard(tool_budgets={GET_ETA_STOCK: 0})
 
-    context = prefetch(
-        DECISION, [_candidate(1)], adapter=adapter, guard=_guard(), dest_station_id="DEST"
+    ctx = prefetch(
+        decision=DECISION,
+        target=_station("TARGET"),
+        target_reading=_target_reading(),
+        eta_minutes=10,
+        candidates=[_candidate("A")],
+        adapter=adapter,
+        guard=guard,
     )
 
-    error = context.candidates[0].error
+    error = ctx.candidates[0].error
     assert error is not None
-    assert error["error"] == ToolErrorCode.UPSTREAM_UNAVAILABLE.value
-    assert context.candidates[0].routes == []
+    assert error["error"] == ToolErrorCode.BUDGET_EXCEEDED.value
+    assert adapter.calls == []  # 막힌 호출은 어댑터까지 가지 않는다
+    assert not ctx.has_alternative

@@ -53,6 +53,22 @@ LLM 에이전트(203)가 호출할 도구를 **한 벌**로 정의하고, 실제
 `registry.tool_names()`는 정의 순서를 유지한다. LLM 요청의 `tools` 배열 순서가 프롬프트 캐시
 프리픽스에 들어가므로, 순서가 매번 달라지면 캐시가 통째로 무효화된다.
 
+### 1.2 `bike_stations_nearby` 출력 스키마 정정 — 2026-09-22 (203/302)
+
+`registry.TOOLS`의 `bike_stations_nearby` 출력 스키마는 `availableBikes`·`stockUpdatedAt`을
+갖고 있다고 적고 있지만(1.1.0에서 넣음), **실제 BE DTO를 확인한 결과 `rentalId, name, lat, lng,
+dockCount, distanceMeters`뿐**이다 — 재고·갱신 시각 필드가 없다. 1.1.0 시점의 설명이 틀렸다.
+
+그 사이 대안 후보 탐색은 이 도구가 아니라 AI 로컬 색인(`station_index.py` +
+`latest_stock.parquet`)으로 옮겨갔다(`AGENT_DESIGN.md` 2.3절 — 판정·후보 생성을 한 원천으로
+통일하려는 목적도 있었다). 그래서 이 도구는 지금 에이전트 경로에서 **쓰이지 않는다** — 나중에
+로컬 색인이 죽었을 때의 폴백 자리로 남겨둔다.
+
+스키마 자체는 **고치지 않는다.** 지금 고치면 이 문서 머리말의 "스키마 판" 규약상 minor/major
+판올림이 필요한데, 실사용이 없는 도구 하나 때문에 develop-AI에 이미 머지된 판과 어긋나게
+만들 이유가 없다. 정정은 다음에 실제로 스키마를 바꿀 일이 생길 때(예: 이 도구를 다시 쓰게 될 때)
+같이 반영한다.
+
 ---
 
 ## 2. 오류 — 예외가 아니라 값이다
@@ -114,6 +130,19 @@ CROWD 서비스의 `None`은 "그 날짜 예측 표가 없다"(배치 미실행)
 | `source` (따릉이) | `lightgbm_global_fallback` — 학습에 없던 신규 대여소라 전역 평균으로 낸 값 |
 | `status` (도착) | `STALE` — 수집 지연. 도착 시각을 그대로 믿지 않는다 |
 
+**트리거(203/302)가 실제로 쓰는 필드 — 2026-09-22.** `get_eta_stock`의 결측 신호가 프롬프트 밖,
+규칙 트리거(`trigger.evaluate`, `trigger.py`)에서도 그대로 쓰인다는 것을 여기 적어둔다 — 이
+표의 값들이 LLM 프롬프트뿐 아니라 결정론적 판정에도 들어간다는 뜻이다.
+
+- `source == "lightgbm_global_fallback"` → `REASON_LOW_CONFIDENCE`(`low_confidence`)로 트리거
+  자체를 접는다. 신뢰 신호 하나를 "쓰되 밝힌다" 수준이 아니라 트리거 근거에서 아예 뺀다.
+- `model_horizon_min`이 없음(`None`) → `REASON_HORIZON_OUT_OF_RANGE`(`horizon_out_of_range`).
+  `eta_minutes`가 상한을 넘은 경우와 같은 사유로 묶는다 — 둘 다 "이 예측을 학습 horizon 밖에서
+  근거로 쓰는 상황"이라서다.
+- `p_empty`·`predicted_stock`이 `None`이면 **그 필드가 관여하는 조건에서 빠질 뿐, 0으로 읽지
+  않는다**(`trigger.py` 6번 규칙 — "`None`은 0이 아니다"). "값이 없다"를 "재고가 가득하다/비어
+  있지 않다"로 잘못 해석하지 않기 위해서다.
+
 ### 3.3 혼잡도는 실시간이 아니다
 
 CROWD는 **하루 1회 배치** 산출물이다. `get_line_congestion` 설명에 이 사실을 넣어, 에이전트가
@@ -157,6 +186,15 @@ BE 주소가 아직 확정되지 않았는데(→ 6절) 주소가 없다고 계�
 호출했으나, BE 회신(`FROM_BE-time-reroute-contract-01` 8번)에 따르면 prod BE가 CPU 1개 전제라
 동시 호출도 BE 스레드에서 실질적으로 직렬 처리된다 — 병렬로 보내 봐야 이득이 없고, 오히려 한
 재안내 요청이 BE 스레드 여러 개를 동시에 점유해 일반 탐색 요청을 굶긴다.
+
+**`replan_route`의 새 호출 패턴 — 2026-09-22 (302, `service.py` ⑥).** 후보마다 `replan_route`를
+부르던 프리페치 단계와 별개로, 전략이 대안을 **하나** 고른 뒤에도 `replan_route`를 부른다 —
+이쪽은 후보 탐색이 아니라 "고른 대안을 거쳐 잔여 경로를 잇는" 호출이라 **제안 하나당 정확히
+1회**다. `boundary_id`에는 하차역 노드 대신 **선택된 대안 대여소의 `rental_id`**를 넣는다 —
+BE `containsNode`가 대여소 ID도 노드로 받아준다는 전제인데, 그 첫 leg가 실제로 그 대여소에서
+시작하는지(첫 leg가 BIKE가 되는지)는 아직 코드로 확인하지 못했고 dev BE 수동 호출로 확인할
+계획이다(`.claude/plans/S15P21A104-203-302-bike-reroute-nearby.md` 3.2절). `modes`·`priority`는
+넘기지 않는다 — 전 수단 허용·기본 우선순위(`fast`)를 그대로 쓴다.
 
 ### 4.3 결과는 JSON 직렬화 가능하다
 
@@ -260,3 +298,4 @@ monkeypatch하며, 가드는 시계를 주입받아 `sleep` 없이 검증한다.
 | 1.0.0 | 2026-09-20 | 최초. 도구 5종·오류 5종·로컬/HTTP 어댑터·가드 |
 | 1.1.0 | 2026-09-21 | bike_stations_nearby 도구·순차 호출·replan 예산 3·BE 회신 반영 |
 | 1.2.0 | 2026-09-22 | LLM 게이트웨이 클라이언트·세션 비용 가드·AgentStrategy |
+| — | 2026-09-22 | 문서만: nearby DTO 정정 메모·트리거 필드 사용 메모·replan 1회 패턴 (스키마 불변) |
