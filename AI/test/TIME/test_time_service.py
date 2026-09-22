@@ -2,375 +2,484 @@
 
 여기서 고정하려는 것은 넷이다.
 
-1. **안 부르는 것** — 트리거가 안 서면 `get_arrivals`·`replan_route`를 부르지 않는다. 폴링이
-   30~60초마다 도는데 여기가 새면 BE·LLM 비용이 그대로 곱해진다.
-2. **네 상태가 섞이지 않는다** — 특히 `no_alternative`(대안이 없다)와 `unavailable`(물어보지
-   못했다). 뭉개면 조회 장애를 "이 경로가 최선"이라고 말하게 된다.
-3. **주입** — 전략·가드를 호출자가 넣는다. 전략이 하드코딩되면 204 비교에서 두 전략을 같은
-   파이프라인에 태울 수 없고, 가드가 전역이면 동시 사용자끼리 예산을 나눠 쓴다.
-4. **예외가 새지 않는다** — 어느 단계에서 터져도 `unavailable`이지 500이 아니다.
+1. **단계별 실패 매핑이 안 섞인다** — `service.py` 모듈 docstring의 표(target_unknown·
+   stock_unknown·no_nearby_station·all_candidates_failed·no_strategy·strategy_undecided·
+   boundary_missing·route_unavailable·route_malformed) 하나하나가 제 상태·사유로 나온다.
+2. **안 부르는 것** — 트리거가 안 서면 후보·경로를 조회하지 않는다. 대안 선택이 끝나기 전에는
+   `replan_route`(BE 비용)를 부르지 않는다.
+3. **⑥ 경로 연결·도보 합성** — `replan_route`가 준 원소의 안쪽 `route`만 싣고, 실패(빈 배열·
+   `ToolError`·`route` 없음)는 전부 `unavailable`이다(`route: null` 제안 금지). `walkLeg`는
+   GeoJSON `[lng, lat]` 순서와 `estimated` 표시를 지킨다.
+4. **예외가 새지 않는다. `force_trigger`도 `stock_unknown`은 못 건너뛴다** — 어느 단계가
+   터져도 `unavailable`(`internal_error`)이지 500이 아니고, 강제 트리거는 임계값만 건너뛸 뿐
+   조회 실패까지 덮어쓰지 않는다.
 
-실제 네트워크·parquet·LLM을 쓰지 않는다(`test_time_planner.py`와 같은 방침).
+실제 네트워크·parquet·LLM을 쓰지 않는다(`test_time_planner.py`와 같은 방침). `RuleStrategy`
+(`app.TIME.strategy`)를 기본 전략으로 쓴다 — 점수식 자체는 `test_time_strategy.py`가 이미
+고정했으므로 여기서는 "어떤 후보가 골렸는지"만 확인하면 되게, 성공 경로의 고정 픽스처는 항상
+후보 하나만 조회 가능하게(usable) 만든다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 
-from app.TIME.context import AgentContext, Stop
+import pytest
+
 from app.TIME.guard import ToolGuard
-from app.TIME.registry import GET_ARRIVALS, GET_LINE_CONGESTION, REPLAN_ROUTE
+from app.TIME.registry import GET_ETA_STOCK, REPLAN_ROUTE
 from app.TIME.schemas import ToolError
-from app.TIME.service import RerouteStatus, propose_reroute
-from app.TIME.strategy import SOURCE_ALGORITHM, RerouteProposal, RuleStrategy
+from app.TIME.service import (
+    REASON_ALL_CANDIDATES_FAILED,
+    REASON_BOUNDARY_MISSING,
+    REASON_INTERNAL_ERROR,
+    REASON_NO_NEARBY_STATION,
+    REASON_NO_STRATEGY,
+    REASON_ROUTE_MALFORMED,
+    REASON_ROUTE_UNAVAILABLE,
+    REASON_STRATEGY_UNDECIDED,
+    REASON_TARGET_UNKNOWN,
+    WALK_DETOUR_FACTOR,
+    Boundary,
+    RerouteStatus,
+    build_walk_leg,
+    propose_reroute,
+)
+from app.TIME.station_index import (
+    WALK_SPEED_M_PER_MIN,
+    InMemoryStationIndex,
+    RentalStation,
+    haversine_m,
+)
+from app.TIME.strategy import RuleStrategy
+from app.TIME.trigger import (
+    REASON_BELOW_THRESHOLD,
+    REASON_COOLDOWN,
+    REASON_FORCED,
+    REASON_HORIZON_OUT_OF_RANGE,
+    REASON_STOCK_UNKNOWN,
+)
 
-NOW = datetime(2026, 9, 20, 8, 20)
-"""08:20 — 현재 슬롯 08:00, 15분 뒤 도착이면 08:30 슬롯이다."""
+TARGET_ID = "TARGET"
+ALT_A_ID = "ALT-A"
+ALT_B_ID = "ALT-B"
+DEST_ID = "DEST-1"
 
-LINE = "2호선"
+BOUNDARY = Boundary(leg_index=1, node_id="ND-221", lat=37.5665, lng=126.9780)
 
-STOPS = [
-    Stop(seq=1, station_id="ST-1", station_no=201, name="역삼"),
-    Stop(seq=2, station_id="ST-2", station_no=202, name="강남"),
-    Stop(seq=3, station_id="ST-3", station_no=203, name="교대", is_transfer=True),
-    Stop(seq=4, station_id="ST-4", station_no=204, name="서초"),
-    Stop(seq=5, station_id="ST-5", station_no=205, name="방배"),
-]
 
-ETA = {2: 3, 3: 6, 4: 10, 5: 14}
-"""현재 위치(seq=1)에서 각 역까지 남은 분."""
+def _station(
+    rental_id: str,
+    *,
+    lat: float = 37.5665,
+    lng: float = 126.9780,
+    current_stock: int | None = 5,
+    name: str | None = None,
+) -> RentalStation:
+    return RentalStation(
+        rental_id=rental_id,
+        name=name or rental_id,
+        lat=lat,
+        lng=lng,
+        rack_count=10,
+        current_stock=current_stock,
+        updated_at=None,
+    )
 
-LIVE_ARRIVALS = {"status": "LIVE", "trains": [{"train_id": "T-1", "direction": "내선"}]}
+
+TARGET_STATION = _station(TARGET_ID, name="역삼")
+ALT_A_STATION = _station(ALT_A_ID, lat=37.5666, lng=126.9780, name="교대")  # 대상에서 ~11m
+ALT_B_STATION = _station(ALT_B_ID, lat=37.5700, lng=126.9780, name="강남")  # 대상에서 ~390m
+
+
+def _index(*extra: RentalStation) -> InMemoryStationIndex:
+    return InMemoryStationIndex([TARGET_STATION, *extra])
+
+
+DEFAULT_INDEX = _index(ALT_A_STATION, ALT_B_STATION)
+
+
+def _eta(**overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "rental_id": "X",
+        "eta_minutes": 10,
+        "current_stock": 3,
+        "predicted_stock": 5.0,
+        "p_empty": 0.1,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10,
+    }
+    body.update(overrides)
+    return body
+
+
+FIRED_TARGET = _eta(current_stock=0, predicted_stock=0.3, p_empty=0.9)
+"""p_empty 0.9 ≥ 기본 임계(0.7) — 트리거가 선다."""
+
+BELOW_THRESHOLD_TARGET = _eta(current_stock=3, predicted_stock=5.0, p_empty=0.3)
+"""p_empty·predicted_stock 둘 다 여유 — 트리거가 안 선다."""
+
+GOOD_ALT = _eta(current_stock=4, predicted_stock=4.0, p_empty=0.1)
+"""대안 후보의 조회 결과 — 재고 여유, 비어 있을 확률 낮음."""
+
+
+def _route_element(**route_overrides: Any) -> dict[str, Any]:
+    """BE `replan_route` 응답 원소 하나. 기본 `route`는 데모 예시(FE-04 편지 2.3절)를 옮겼다."""
+    route: dict[str, Any] = {
+        "routeType": "BIKE_SUBWAY",
+        "totalMinutes": 20.0,
+        "source": "ALGORITHM",
+        "totalDistanceMeters": 6000.0,
+        "transferCount": 0,
+        "legs": [{"mode": "BIKE", "minutes": 20.0, "routeId": None}],
+    }
+    route.update(route_overrides)
+    return {"reason": "BE 고정 문구", "source": "ALGORITHM", "route": route}
 
 
 # ── 가짜 어댑터 ──
 
 
 class FakeAdapter:
-    """도구 호출을 기록하고 미리 정한 응답을 돌려준다.
+    """`get_eta_stock`은 `rental_id`별 미리 정한 응답을, `replan_route`는 고정된 응답을 낸다.
 
-    `spike`가 True면 08:30 슬롯의 서초·방배가 지금보다 2등급·30%p 올라 트리거가 선다.
+    `replan=None`(기본)이면 성공 원소 하나를 돌려준다 — 대부분의 테스트가 ⑥까지 통과하는 것을
+    전제로 하고, ⑥ 자체를 검증하는 테스트만 `replan`을 명시로 덮어쓴다.
     """
 
-    def __init__(
-        self,
-        *,
-        spike: bool = True,
-        arrivals: Any = None,
-        replan: Mapping[str, Any] | None = None,
-        no_data: bool = False,
-    ) -> None:
-        self.spike = spike
-        self.arrivals = LIVE_ARRIVALS if arrivals is None else arrivals
-        self.replan = dict(replan) if replan is not None else None
-        self.no_data = no_data
+    def __init__(self, *, eta_stock: Mapping[str, Any] | None = None, replan: Any = None) -> None:
+        self.eta_stock = dict(eta_stock or {})
+        self.replan = [_route_element()] if replan is None else replan
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def call(self, name: str, args: Mapping[str, Any]) -> Any:
         self.calls.append((name, dict(args)))
-        if name == GET_LINE_CONGESTION:
-            return self._congestion(str(args["time_slot_30min"]))
-        if name == GET_ARRIVALS:
-            return self.arrivals
+        if name == GET_ETA_STOCK:
+            rental_id = str(args["rental_id"])
+            if rental_id not in self.eta_stock:
+                return ToolError.not_found(f"{rental_id} 실시간 재고를 확인할 수 없다")
+            return self.eta_stock[rental_id]
         if name == REPLAN_ROUTE:
-            if self.replan is None:
-                return [_route(minutes=20.0)]
-            return self.replan.get(str(args["boundary_id"]), [])
+            return self.replan
         return ToolError.invalid_input(f"가짜 어댑터가 모르는 도구 '{name}'")
 
     def count(self, name: str) -> int:
         return sum(1 for called, _ in self.calls if called == name)
 
-    def _congestion(self, slot: str) -> Any:
-        if self.no_data:
-            # 배치가 안 돈 날. 행은 오지만 값이 null이고 상태가 `no_data`다.
-            return {
-                "date": "2026-09-20",
-                "line": LINE,
-                "time_slot_30min": slot,
-                "stations": [
-                    {
-                        "station_no": stop.station_no,
-                        "station_name": stop.name,
-                        "congestion_pct": None,
-                        "grade": None,
-                        "data_status": "no_data",
-                    }
-                    for stop in STOPS
-                ],
-            }
-        rising = self.spike and slot == "08:30"
-        stations = [
-            {
-                "station_no": stop.station_no,
-                "station_name": stop.name,
-                "congestion_pct": 80.0 if rising and stop.seq >= 4 else 50.0,
-                "grade": 3 if rising and stop.seq >= 4 else 1,
-                "data_status": "ok",
-            }
-            for stop in STOPS
-        ]
-        return {
-            "date": "2026-09-20",
-            "line": LINE,
-            "time_slot_30min": slot,
-            "stations": stations,
-        }
+    def replan_calls(self) -> list[dict[str, Any]]:
+        return [args for name, args in self.calls if name == REPLAN_ROUTE]
 
 
-def _route(*, minutes: float) -> dict[str, Any]:
-    return {
-        "reason": "BE 고정 문구",
-        "source": SOURCE_ALGORITHM,
-        "route": {
-            "totalMinutes": minutes,
-            "transferCount": 0,
-            "legs": [{"minutes": minutes, "routeId": "L3"}],
-        },
-    }
-
-
-class RecordingStrategy:
-    """호출 여부만 보는 전략. `proposal`이 None이면 "고를 게 없다"를 흉내 낸다."""
-
-    def __init__(self, proposal: RerouteProposal | None = None) -> None:
-        self.proposal = proposal
-        self.seen: list[AgentContext] = []
-
-    def decide(self, ctx: AgentContext) -> RerouteProposal | None:
-        self.seen.append(ctx)
-        return self.proposal
-
-
-def run(adapter: FakeAdapter, *, strategy: Any = None, guard: ToolGuard | None = None, **kwargs):
+def run(adapter: FakeAdapter, **kwargs: Any):
+    """`propose_reroute` 호출 도우미. 자주 바뀌지 않는 인자는 기본값을 깔아준다."""
     return propose_reroute(
-        stops=STOPS,
-        current_seq=1,
-        current_station_id="ST-1",
-        eta_minutes_by_seq=ETA,
-        line=LINE,
-        now=NOW,
-        dest_station_id="ST-9",
+        rental_id=kwargs.pop("rental_id", TARGET_ID),
+        eta_to_rental_minutes=kwargs.pop("eta", 10),
+        step=kwargs.pop("step", 0),
+        dest_station_id=DEST_ID,
+        boundary=kwargs.pop("boundary") if "boundary" in kwargs else BOUNDARY,
         adapter=adapter,
-        guard=guard or ToolGuard(),
-        strategy=strategy if strategy is not None else RuleStrategy(),
+        guard=kwargs.pop("guard", None) or ToolGuard(),
+        strategy=kwargs.pop("strategy") if "strategy" in kwargs else RuleStrategy(),
+        station_index=kwargs.pop("index", None) or DEFAULT_INDEX,
         **kwargs,
     )
 
 
-# ── 트리거가 안 서면 아무것도 안 부른다 ──
+# ── ① 대상 조회 ──
 
 
-def test_트리거가_안_서면_도착정보도_경로도_부르지_않는다():
-    adapter = FakeAdapter(spike=False)
+def test_대상_대여소가_색인에_없으면_target_unknown이다():
+    adapter = FakeAdapter()
+
+    outcome = run(adapter, rental_id="NOPE")
+
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_TARGET_UNKNOWN
+    assert outcome.target is None
+    assert adapter.calls == []  # 좌표를 모르면 재고 조회조차 하지 않는다
+
+
+# ── ③ 트리거 ──
+
+
+def test_재고_조회가_실패하면_stock_unknown_unavailable이다():
+    adapter = FakeAdapter(eta_stock={})  # TARGET 응답 없음 → ToolError
+
+    outcome = run(adapter)
+
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_STOCK_UNKNOWN
+    assert outcome.target is not None
+    assert outcome.target_reading is None
+    assert adapter.count(REPLAN_ROUTE) == 0
+
+
+def test_임계_미달이면_no_trigger다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: BELOW_THRESHOLD_TARGET})
 
     outcome = run(adapter)
 
     assert outcome.status is RerouteStatus.NO_TRIGGER
-    assert outcome.proposal is None
-    assert adapter.count(GET_ARRIVALS) == 0
+    assert outcome.reason == REASON_BELOW_THRESHOLD
+    assert outcome.target_reading is not None
+    assert adapter.count(GET_ETA_STOCK) == 1  # 후보 조회로 번지지 않는다
     assert adapter.count(REPLAN_ROUTE) == 0
 
 
-def test_트리거가_안_서면_전략도_부르지_않는다():
-    strategy = RecordingStrategy()
-
-    run(FakeAdapter(spike=False), strategy=strategy)
-
-    assert strategy.seen == []
-
-
-def test_쿨다운_중이면_트리거가_서지_않는다():
-    # 같은 이동에서 팝업이 반복해 뜨는 것을 막는다. 혼잡 급등 자체는 그대로다.
-    adapter = FakeAdapter(spike=True)
+def test_쿨다운_중이면_no_trigger다():
+    # 고갈 조건(p_empty 0.9)은 충족해도 쿨다운이 먼저 막는다.
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET})
 
     outcome = run(adapter, seconds_since_last_fire=10.0)
 
     assert outcome.status is RerouteStatus.NO_TRIGGER
-    assert outcome.detail == "cooldown"
-    assert adapter.count(REPLAN_ROUTE) == 0
+    assert outcome.reason == REASON_COOLDOWN
 
 
-def test_앞쪽_정차역이_없으면_혼잡도도_안_읽는다():
-    adapter = FakeAdapter()
+def test_ETA가_horizon_밖이면_no_trigger다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET})
 
-    outcome = propose_reroute(
-        stops=STOPS,
-        current_seq=99,  # 이미 목적지 근처
-        current_station_id="ST-5",
-        eta_minutes_by_seq=ETA,
-        line=LINE,
-        now=NOW,
-        dest_station_id="ST-9",
-        adapter=adapter,
-        guard=ToolGuard(),
-        strategy=RuleStrategy(),
-    )
+    outcome = run(adapter, eta=40)
 
     assert outcome.status is RerouteStatus.NO_TRIGGER
-    assert adapter.calls == []
+    assert outcome.reason == REASON_HORIZON_OUT_OF_RANGE
 
 
-# ── 네 상태 ──
+# ── ④ 후보 생성 ──
 
 
-def test_추천이_나오면_proposal이다():
-    outcome = run(FakeAdapter())
+def test_주변에_대여소가_없으면_no_alternative다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET})
 
-    assert outcome.status is RerouteStatus.PROPOSAL
-    assert outcome.proposal is not None
-    assert outcome.fired
-    assert outcome.context is not None
-
-
-def test_배치_표가_없으면_no_trigger가_아니라_unavailable이다():
-    # "혼잡하지 않다"가 아니라 "판단할 근거가 없다"이다. 이 둘을 뭉개면 배치가 멈춘 날
-    # 재안내가 조용히 죽은 것을 아무도 모른다.
-    outcome = run(FakeAdapter(no_data=True))
-
-    assert outcome.status is RerouteStatus.UNAVAILABLE
-    assert outcome.detail == "no_data"
-
-
-def test_대안이_비면_no_alternative다():
-    # BE가 빈 배열을 준 것은 오류가 아니라 "갈아탈 경로가 없다"이다.
-    adapter = FakeAdapter(replan={})
-
-    outcome = run(adapter)
+    outcome = run(adapter, index=_index())  # 대상 혼자뿐인 색인
 
     assert outcome.status is RerouteStatus.NO_ALTERNATIVE
-    assert adapter.count(REPLAN_ROUTE) > 0
-
-
-def test_경로_조회가_전부_실패하면_unavailable이다():
-    class Failing(FakeAdapter):
-        def call(self, name: str, args: Mapping[str, Any]) -> Any:
-            result = super().call(name, args)
-            if name == REPLAN_ROUTE:
-                return ToolError.upstream_unavailable("BE 미기동")
-            return result
-
-    outcome = run(Failing())
-
-    assert outcome.status is RerouteStatus.UNAVAILABLE
-    assert outcome.detail == "후보 경로 조회 실패"
-
-
-def test_도착정보를_못_읽으면_no_alternative가_아니라_unavailable이다():
-    # `candidates.generate`는 LIVE가 아니면 후보를 만들지 않는다. 그 0개를 "내릴 역이 없다"로
-    # 읽으면 조회 장애가 사용자에게 판단으로 전달된다.
-    adapter = FakeAdapter(arrivals=ToolError.upstream_unavailable("BE 미기동"))
-
-    outcome = run(adapter)
-
-    assert outcome.status is RerouteStatus.UNAVAILABLE
-    assert outcome.detail == "도착 정보를 읽지 못했다"
+    assert outcome.reason == REASON_NO_NEARBY_STATION
     assert adapter.count(REPLAN_ROUTE) == 0
 
 
-def test_운행시간_밖이면_도착정보는_읽혔어도_후보가_없다():
-    # status가 LIVE가 아니면 탈 열차를 모른다 — 실패와 같은 칸에 둔다.
-    outcome = run(FakeAdapter(arrivals={"status": "OUTSIDE_WINDOW", "trains": []}))
+# ── ⑤ 프리페치·선택 ──
+
+
+def test_후보_조회가_전부_실패하면_unavailable이다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET})  # ALT 응답이 전혀 없다
+
+    outcome = run(adapter)
 
     assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_ALL_CANDIDATES_FAILED
+    assert adapter.count(REPLAN_ROUTE) == 0
 
 
-def test_전략이_경로를_하나도_못_읽으면_unavailable이다():
-    # 대안은 받았는데 점수를 하나도 못 냈다 = 응답 모양이 예상과 다르다. "대안 없음"이 아니다.
-    outcome = run(FakeAdapter(), strategy=RecordingStrategy(proposal=None))
+def test_일부_후보만_실패해도_추천은_나온다():
+    # ALT_B는 조회에 없어 실패로 남지만, ALT_A가 살아있어 추천이 나온다.
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT})
+
+    outcome = run(adapter)
+
+    assert outcome.status is RerouteStatus.PROPOSAL
+    assert outcome.alternative is not None
+    assert outcome.alternative.candidate.station.rental_id == ALT_A_ID
+
+
+def test_전략이_없으면_no_strategy_unavailable이다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT})
+
+    outcome = run(adapter, strategy=None)
 
     assert outcome.status is RerouteStatus.UNAVAILABLE
-    assert outcome.detail == "전략이 경로를 하나도 읽지 못했다"
+    assert outcome.reason == REASON_NO_STRATEGY
+    assert adapter.count(REPLAN_ROUTE) == 0
 
 
-# ── 주입 ──
+class _NoneStrategy:
+    """대안이 있어도 하나도 못 고르는 전략 — "대안 없음"과 뭉개지지 않는지 확인한다."""
+
+    def decide(self, ctx: Any) -> None:
+        return None
 
 
-def test_전략을_주입받는다():
-    # 204 비교가 같은 파이프라인에 두 전략을 태울 수 있어야 한다.
-    picked = RerouteProposal(
-        candidate_index=0, route={}, reason="가짜 전략 문장", source="AGENT", score=None
+def test_전략이_고르지_못하면_strategy_undecided_unavailable이다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT})
+
+    outcome = run(adapter, strategy=_NoneStrategy())
+
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_STRATEGY_UNDECIDED
+    assert adapter.count(REPLAN_ROUTE) == 0
+
+
+# ── ⑥ 경로 연결·도보 합성 ──
+
+
+def test_경계가_없으면_boundary_missing_unavailable이다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT})
+
+    outcome = run(adapter, boundary=None)
+
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_BOUNDARY_MISSING
+    assert outcome.proposal is not None  # 대안까지는 골랐다 — 경로만 못 이었다
+    assert outcome.alternative is not None
+    assert adapter.count(REPLAN_ROUTE) == 0
+
+
+def test_경로_재탐색이_실패하면_route_unavailable이다():
+    adapter = FakeAdapter(
+        eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT},
+        replan=ToolError.upstream_unavailable("BE 미기동"),
     )
-    strategy = RecordingStrategy(proposal=picked)
 
-    outcome = run(FakeAdapter(), strategy=strategy)
+    outcome = run(adapter)
 
-    assert outcome.proposal is picked
-    assert outcome.proposal.reason == "가짜 전략 문장"
-    assert len(strategy.seen) == 1
-
-
-def test_두_전략이_같은_입력을_본다():
-    # 모델 비교 하드 룰 2·3번 — 표현만 다르고 근거는 같아야 한다.
-    left, right = RecordingStrategy(), RecordingStrategy()
-
-    run(FakeAdapter(), strategy=left)
-    run(FakeAdapter(), strategy=right)
-
-    assert left.seen[0].decision.facts == right.seen[0].decision.facts
-    assert len(left.seen[0].usable_candidates) == len(right.seen[0].usable_candidates)
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_ROUTE_UNAVAILABLE
+    assert outcome.boundary == BOUNDARY
 
 
-def test_가드를_하나로_공유한다():
-    # 파이프라인 전체가 한 인스턴스를 쓴다. 단계마다 새로 만들면 예산이 아무것도 못 막는다.
-    guard = ToolGuard()
+def test_경로_재탐색이_빈_배열이면_route_unavailable이다():
+    # BE 계약상 빈 배열은 오류가 아니다 — 그래도 route:null 제안은 금지라 unavailable로 묶는다.
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT}, replan=[])
 
-    run(FakeAdapter(), guard=guard)
+    outcome = run(adapter)
 
-    assert guard.total_calls > 0
-    assert set(guard.stats()) >= {GET_LINE_CONGESTION, GET_ARRIVALS, REPLAN_ROUTE}
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_ROUTE_UNAVAILABLE
 
 
-def test_가드_예산이_떨어지면_그_이상_부르지_않는다():
-    adapter = FakeAdapter()
-    guard = ToolGuard(tool_budgets={REPLAN_ROUTE: 1})
+def test_원소에_route가_없으면_route_malformed이다():
+    adapter = FakeAdapter(
+        eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT},
+        replan=[{"reason": "BE 고정 문구", "source": "ALGORITHM"}],  # route 키 없음
+    )
 
-    outcome = run(adapter, guard=guard)
+    outcome = run(adapter)
 
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_ROUTE_MALFORMED
+
+
+def test_성공하면_proposal이고_필요한_필드가_다_채워진다():
+    inner_route = {
+        "routeType": "BIKE_SUBWAY",
+        "totalMinutes": 21.5,
+        "source": "ALGORITHM",
+        "totalDistanceMeters": 6120.0,
+        "transferCount": 1,
+        "legs": [{"mode": "BIKE", "minutes": 8.0, "routeId": None}],
+    }
+    adapter = FakeAdapter(
+        eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT},
+        replan=[_route_element(**inner_route)],
+    )
+
+    outcome = run(adapter)
+
+    assert outcome.status is RerouteStatus.PROPOSAL
+    assert outcome.reason == outcome.proposal.reason  # 사용자 문장 = proposal.reason
+    assert outcome.target is TARGET_STATION
+    assert outcome.alternative is not None
+    assert outcome.alternative.candidate.station.rental_id == ALT_A_ID
+    assert outcome.boundary == BOUNDARY  # 요청받은 경계를 그대로 에코
+    assert outcome.route == inner_route  # 바깥 reason·source는 버리고 안쪽 route만
+
+    walk_leg = outcome.walk_leg
+    assert walk_leg is not None
+    assert walk_leg["mode"] == "WALK"
+    assert walk_leg["fromNodeId"] == BOUNDARY.node_id
+    assert walk_leg["fromNodeName"] is None
+    assert walk_leg["toNodeId"] == ALT_A_ID
+    assert walk_leg["toNodeName"] == ALT_A_STATION.name
+    assert walk_leg["routeId"] is None
+    assert walk_leg["routeName"] is None
+    assert walk_leg["geometryStatus"] == "estimated"
+    assert walk_leg["estimated"] is True
+    coords = walk_leg["geometry"]["coordinates"][0]
+    assert coords[0] == [BOUNDARY.lng, BOUNDARY.lat]  # GeoJSON [lng, lat] 순서
+    assert coords[1] == [ALT_A_STATION.lng, ALT_A_STATION.lat]
+
+
+def test_build_walk_leg_거리와_소요시간은_보정된_같은_값에서_나온다():
+    boundary = Boundary(leg_index=1, node_id="221", lat=37.500658, lng=127.03643)
+    station = _station("ST-1290", lat=37.49, lng=127.03, name="역삼로")
+
+    leg = build_walk_leg(boundary, station)
+
+    straight_m = haversine_m(boundary.lat, boundary.lng, station.lat, station.lng)
+    walk_m = straight_m * WALK_DETOUR_FACTOR
+    assert leg["distanceMeters"] == round(walk_m)
+    assert leg["minutes"] == pytest.approx(round(walk_m / WALK_SPEED_M_PER_MIN, 1))
+    assert leg["geometry"] == {
+        "type": "MultiLineString",
+        "coordinates": [[[boundary.lng, boundary.lat], [station.lng, station.lat]]],
+    }
+
+
+# ── force_trigger — 임계값은 건너뛰어도 조회 실패는 못 건너뛴다 ──
+
+
+def test_force_trigger는_임계_미달을_건너뛴다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: BELOW_THRESHOLD_TARGET, ALT_A_ID: GOOD_ALT})
+
+    outcome = run(adapter, force_trigger=True)
+
+    assert outcome.status is RerouteStatus.PROPOSAL
+    assert outcome.trigger is not None
+    assert outcome.trigger.reason == REASON_FORCED
+
+
+def test_force_trigger여도_재고를_모르면_stock_unknown이다():
+    adapter = FakeAdapter(eta_stock={})  # TARGET 조회 자체가 실패
+
+    outcome = run(adapter, force_trigger=True)
+
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_STOCK_UNKNOWN
+
+
+# ── replan 호출 모양 ──
+
+
+def test_replan은_선택된_대안의_rental_id로_한_번만_불린다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT})
+
+    outcome = run(adapter, step=3)
+
+    assert outcome.status is RerouteStatus.PROPOSAL
     assert adapter.count(REPLAN_ROUTE) == 1
-    # 예산에 막힌 후보는 실패로 남고, 살아남은 후보가 있으면 추천은 그대로 나온다.
-    assert outcome.status in {RerouteStatus.PROPOSAL, RerouteStatus.NO_ALTERNATIVE}
+    assert adapter.replan_calls() == [
+        {"step": 3, "boundary_id": ALT_A_ID, "dest_station_id": DEST_ID}
+    ]
 
 
 # ── 예외가 새지 않는다 ──
 
 
-def test_전략이_터져도_예외가_새지_않는다():
-    class Exploding:
-        def decide(self, ctx: AgentContext) -> RerouteProposal | None:
-            raise RuntimeError("전략 내부 버그")
+class _ExplodingStrategy:
+    def decide(self, ctx: Any) -> None:
+        raise RuntimeError("전략 내부 버그")
 
-    outcome = run(FakeAdapter(), strategy=Exploding())
+
+def test_전략이_터져도_예외가_새지_않는다():
+    adapter = FakeAdapter(eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT})
+
+    outcome = run(adapter, strategy=_ExplodingStrategy())
 
     assert outcome.status is RerouteStatus.UNAVAILABLE
-    assert "RuntimeError" in (outcome.detail or "")
+    assert outcome.reason == REASON_INTERNAL_ERROR
+
+
+class _ExplodingAdapter(FakeAdapter):
+    def call(self, name: str, args: Mapping[str, Any]) -> Any:
+        raise ValueError("어댑터 내부 버그")
 
 
 def test_어댑터가_터져도_예외가_새지_않는다():
-    class Exploding(FakeAdapter):
-        def call(self, name: str, args: Mapping[str, Any]) -> Any:
-            raise ValueError("어댑터 내부 버그")
-
-    outcome = run(Exploding())
+    outcome = run(_ExplodingAdapter())
 
     assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_INTERNAL_ERROR
     assert outcome.proposal is None
-
-
-def test_정차역_목록이_비어도_죽지_않는다():
-    outcome = propose_reroute(
-        stops=[],
-        current_seq=1,
-        current_station_id="ST-1",
-        eta_minutes_by_seq={},
-        line=LINE,
-        now=NOW,
-        dest_station_id="ST-9",
-        adapter=FakeAdapter(),
-        guard=ToolGuard(),
-        strategy=RuleStrategy(),
-    )
-
-    assert outcome.status is RerouteStatus.NO_TRIGGER
