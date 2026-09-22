@@ -744,8 +744,12 @@ station별 최신값 파일도 갱신한다.
 data/BIKE/raw/realtime/latest_stock.parquet
 ```
 
-컬럼은 `rental_id`, `current_stock`, `updated_at`이다. `rental_id`는 Kafka envelope의
-`entity_id`를 사용하고, `current_stock`은 payload의 `parkingBikeTotCnt`를 사용한다.
+컬럼은 `rental_id`, `current_stock`, `updated_at`, `station_name`, `lat`, `lng`,
+`rack_count`다. `rental_id`는 Kafka envelope의 `entity_id`를 사용하고, `current_stock`은
+payload의 `parkingBikeTotCnt`를 사용한다. `station_name`은 `stationName`, `lat`/`lng`는
+`stationLatitude`/`stationLongitude`(float 변환 실패 또는 0.0이면 결측 — 서울 좌표는 0.0이
+될 수 없다), `rack_count`는 `rackTotCnt`(int 변환 실패 시 결측)에서 채운다. 이 네 컬럼은
+결측이어도 행을 버리지 않는다(행을 버리는 기준은 `rental_id`·`parkingBikeTotCnt` 결측뿐).
 `updated_at`은 `freshness_at` 기준이며, 따릉이는 `source_generated_at`이 없으면 `ingested_at`을
 KST naive datetime으로 저장한다. 같은 대여소의 이전 값은 더 최신 `updated_at` 이벤트로만
 갱신된다. 최신 이벤트보다 `updated_at`이 30분 넘게 오래된 대여소는 폐쇄·삭제된 대여소의
@@ -916,7 +920,7 @@ Redis는 AI EC2에 별도로 새로 띄우지 않는다. 현재 Redis 캐싱 전
 | 경로 | 내용 | 출처 | 시간 해상도 | 쓰이는 곳 |
 | --- | --- | --- | --- | --- |
 | `data/BIKE/raw/realtime/` | 대여소별 실시간 재고 Kafka 스냅샷 | `DATA_ENGINE.stream.kafka_consumer`가 `bike.stock` 수집 | producer 발행 주기 | 배치·재고 분포·시간패턴·공간구조 |
-| `data/BIKE/raw/realtime/latest_stock.parquet` | Kafka `bike.stock` 기반 대여소별 최신 재고(`rental_id`, `current_stock`, `updated_at`) | `DATA_ENGINE.stream.kafka_consumer`가 `bike.stock` consume 시 atomic replace로 갱신 | 최신 1회 | BIKE 실시간 ETA 재고 API의 현재고 입력 |
+| `data/BIKE/raw/realtime/latest_stock.parquet` | Kafka `bike.stock` 기반 대여소별 최신 재고(`rental_id`, `current_stock`, `updated_at`, `station_name`, `lat`, `lng`, `rack_count`) | `DATA_ENGINE.stream.kafka_consumer`가 `bike.stock` consume 시 atomic replace로 갱신 | 최신 1회 | BIKE 실시간 ETA 재고 API의 현재고 입력 |
 | `data/BIKE/raw/rental_history/` | 대여소별 이용정보 **월별 집계** (OA-15182) | 수동 다운로드 | 월 단위 | 정류소/자치구 월간 총량 참고용 — **날씨 분석엔 미사용** |
 | `data/BIKE/raw/station_5min/` | 대여소별 5분단위 이용현황 O-D (OA-21229) | 수동 다운로드 | 5분(집계 시 시간 단위로 묶음) | **날씨-수요 핵심 분석 (3번 섹션)** |
 | `data/BIKE/raw/station_master/` | 대여소 좌표 (OA-21235) | 수동 다운로드 | - | 공간분석 좌표 조인 (4번 섹션) |

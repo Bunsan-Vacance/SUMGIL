@@ -24,7 +24,15 @@ TOPIC_BASE_DIRS = {
 }
 BIKE_STOCK_TOPIC = "bike.stock"
 BIKE_LATEST_STOCK_RELATIVE_PATH = Path("data/BIKE/raw/realtime/latest_stock.parquet")
-BIKE_LATEST_STOCK_COLUMNS = ["rental_id", "current_stock", "updated_at"]
+BIKE_LATEST_STOCK_COLUMNS = [
+    "rental_id",
+    "current_stock",
+    "updated_at",
+    "station_name",
+    "lat",
+    "lng",
+    "rack_count",
+]
 BIKE_LATEST_STOCK_TTL = pd.Timedelta(minutes=30)
 
 
@@ -80,6 +88,37 @@ def _naive_kst(value: datetime) -> datetime:
     return value.astimezone(KST).replace(tzinfo=None)
 
 
+def _optional_str(value: Any) -> str | None:
+    """결측·빈 문자열은 None으로 정규화한다."""
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_float(value: Any) -> float | None:
+    """결측·빈 값·변환 실패는 None. 서울 좌표는 0.0이 될 수 없어 0.0도 결측으로 본다."""
+    if value in (None, ""):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result == 0.0:
+        return None
+    return result
+
+
+def _optional_int(value: Any) -> int | None:
+    """결측·빈 값·변환 실패는 None."""
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _bike_latest_stock_rows(events: list[KafkaEvent]) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for event in events:
@@ -103,6 +142,10 @@ def _bike_latest_stock_rows(events: list[KafkaEvent]) -> pd.DataFrame:
                 "rental_id": rental_id,
                 "current_stock": current_stock,
                 "updated_at": _naive_kst(event.freshness_time),
+                "station_name": _optional_str(payload.get("stationName")),
+                "lat": _optional_float(payload.get("stationLatitude")),
+                "lng": _optional_float(payload.get("stationLongitude")),
+                "rack_count": _optional_int(payload.get("rackTotCnt")),
             }
         )
 
