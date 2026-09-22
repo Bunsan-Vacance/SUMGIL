@@ -109,10 +109,10 @@ class RouteSearchIntegrationTest {
     }
 
     @Test
-    @DisplayName("IT2: 역전 — 따릉이 지름길이 이기면 BIKE legs로 응답한다 (대여소 경계 분할)")
+    @DisplayName("IT2: 역전 — 따릉이 지름길이 이기면 BIKE legs로 응답한다 (대여~반납 1 leg)")
     void it2_역전_따릉이우위() {
         // 지하철 A→C 직통 900초 vs 따릉이 A→R1→C 240초. 자전거가 이겨야 한다.
-        // 122 경계 분할로 대여소 양단이 보인다.
+        // 로드맵 1단계(2026-09-22): 경유 대여소는 leg로 노출하지 않는다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 900),
                 bike("A", "R1", 120),
@@ -123,12 +123,10 @@ class RouteSearchIntegrationTest {
         // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다 — 최소 1개, 가장 빠른 건 BIKE.
         assertTrue(result.size() >= 1);
         assertEquals(RouteType.SHORTEST, result.get(0).routeType());
-        assertEquals(2, result.get(0).legs().size());
+        assertEquals(1, result.get(0).legs().size());
         assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.BIKE));
         assertEquals("A", result.get(0).legs().get(0).fromNodeId());
-        assertEquals("R1", result.get(0).legs().get(0).toNodeId());
-        assertEquals("R1", result.get(0).legs().get(1).fromNodeId());
-        assertEquals("C", result.get(0).legs().get(1).toNodeId());
+        assertEquals("C", result.get(0).legs().get(0).toNodeId());
         assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes(), 1e-9);
     }
 
@@ -226,12 +224,10 @@ class RouteSearchIntegrationTest {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertEquals(2, result.size());
-        assertEquals(2, result.get(0).legs().size());
+        assertEquals(1, result.get(0).legs().size());
         assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.WALK));
         assertEquals("A", result.get(0).legs().get(0).fromNodeId());
-        assertEquals("R1", result.get(0).legs().get(0).toNodeId());
-        assertEquals("R1", result.get(0).legs().get(1).fromNodeId());
-        assertEquals("C", result.get(0).legs().get(1).toNodeId());
+        assertEquals("C", result.get(0).legs().get(0).toNodeId());
         assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes(), 1e-9);
     }
 
@@ -295,13 +291,11 @@ class RouteSearchIntegrationTest {
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 
         assertTrue(result.size() >= 1);
-        assertEquals(4, result.get(0).legs().size());
+        // 로드맵 1단계(2026-09-22): 경유 대여소(R2)는 leg로 노출하지 않는다 — 대여~반납 1 leg.
+        assertEquals(3, result.get(0).legs().size());
         assertEquals(TravelMode.BIKE, result.get(0).legs().get(1).mode());
-        assertEquals(TravelMode.BIKE, result.get(0).legs().get(2).mode());
         assertEquals("R1", result.get(0).legs().get(1).fromNodeId());
-        assertEquals("R2", result.get(0).legs().get(1).toNodeId());
-        assertEquals("R2", result.get(0).legs().get(2).fromNodeId());
-        assertEquals("R3", result.get(0).legs().get(2).toNodeId());
+        assertEquals("R3", result.get(0).legs().get(1).toNodeId());
     }
 
     @Test
