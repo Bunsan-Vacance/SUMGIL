@@ -69,10 +69,13 @@ public final class RaptorRouteSetBuilder {
                     unresolved.add(row);
                 }
             }
-            // 체인 연결: from→to 인접 맵으로 시작점(진입 0)에서 걷는다.
+            // 체인 연결: 방향 그룹마다 **모든** 체인을 조립한다(진입 0 시작점들 + 남은 순환).
+            // 행 순서와 무관하게 결정적이어야 한다 — 예전 구현은 시작점 하나와 나가는 구간
+            // 하나(putIfAbsent)만 골라, 지선·분기가 섞인 2호선에서 본선 체인이 통째로 빠질 수
+            // 있었다(prod 슬롯별 flakiness: Parallel Seq Scan 행 순서 + 슬롯 캐시 고정).
             List<List<Segment>> ordered = new ArrayList<>();
             for (List<Segment> group : chains.values()) {
-                ordered.add(chain(group, lineId));
+                ordered.addAll(chains(group));
             }
             // 규칙 보류 링크(반전 3개)는 체인 끝/시작에 붙인다. 못 붙이면 버린다(값을 지어내지 않음).
             for (RouteEdgeRow row : unresolved) {
@@ -279,47 +282,73 @@ public final class RaptorRouteSetBuilder {
         out.add(new RaptorFinder.Route(routeId, mode, List.copyOf(stops), travel, waits));
     }
 
-    /** 그룹을 from→to 인접으로 이어 순서 배열을 만든다. 진입 0인 시작점이 없으면 순환선으로 취급. */
-    private static List<Segment> chain(List<Segment> group, String lineId) {
-        Map<String, Segment> outgoing = new LinkedHashMap<>();
-        Map<String, Integer> inDegree = new LinkedHashMap<>();
+    /**
+     * 방향 그룹의 구간들을 체인들로 조립한다 — 진입 0 시작점마다 하나씩, 남은 순환은 각각.
+     * 입력 행 순서에 의존하지 않는다(TreeMap·정렬된 시작점). 순환은 두 바퀴로 펼친다.
+     */
+    private static List<List<Segment>> chains(List<Segment> group) {
+        Map<String, List<Segment>> outgoing = new java.util.TreeMap<>();
+        Map<String, Integer> inDegree = new java.util.TreeMap<>();
         for (Segment segment : group) {
-            outgoing.putIfAbsent(segment.from(), segment);
-            inDegree.putIfAbsent(segment.from(), 0);
+            outgoing.computeIfAbsent(segment.from(), key -> new ArrayList<>()).add(segment);
             inDegree.merge(segment.to(), 1, Integer::sum);
+            inDegree.putIfAbsent(segment.from(), 0);
         }
-        String start = null;
+        for (List<Segment> candidates : outgoing.values()) {
+            candidates.sort(Comparator.comparing(Segment::to));
+        }
+        java.util.Set<Segment> used = new java.util.HashSet<>();
+        List<List<Segment>> chains = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
-            if (entry.getValue() == 0) {
-                start = entry.getKey();
-                break;
+            if (entry.getValue() != 0) {
+                continue;
+            }
+            List<Segment> chain = walkFrom(entry.getKey(), outgoing, used);
+            if (!chain.isEmpty()) {
+                chains.add(chain);
             }
         }
-        if (start == null) {
-            // 순환선: 임의 시작으로 사이클을 걷고 두 바퀴로 펼친다(한 바퀴 이내 순환 표현).
-            start = group.get(0).from();
-            List<Segment> cycle = walk(outgoing, start);
-            List<Segment> doubled = new ArrayList<>(cycle);
-            doubled.addAll(cycle);
-            if (cycle.size() != inDegree.size()) {
-                log.debug("지하철 순환선 절단? {} 사이클 {} / 정점 {}", lineId, cycle.size(), inDegree.size());
+        // 남은 구간(순환 등) — 남은 정점 중 사전순 최소에서 걷는다. 시작으로 되돌아오면 순환.
+        for (String start : outgoing.keySet()) {
+            List<Segment> cycle = walkFrom(start, outgoing, used);
+            if (cycle.isEmpty()) {
+                continue;
             }
-            return doubled;
+            boolean closed = cycle.get(cycle.size() - 1).to().equals(start);
+            if (closed) {
+                List<Segment> doubled = new ArrayList<>(cycle);
+                doubled.addAll(cycle);
+                chains.add(doubled);
+            } else {
+                chains.add(cycle);
+            }
         }
-        return walk(outgoing, start);
+        return chains;
     }
 
-    private static List<Segment> walk(Map<String, Segment> outgoing, String start) {
+    /** 사용하지 않은 구간을 따라가며 체인 하나를 소비한다. 이미 지난 정점에서 멈춘다. */
+    private static List<Segment> walkFrom(String start, Map<String, List<Segment>> outgoing,
+                                          java.util.Set<Segment> used) {
         List<Segment> segments = new ArrayList<>();
         java.util.Set<String> visited = new java.util.HashSet<>();
         String current = start;
-        while (outgoing.containsKey(current)) {
-            Segment segment = outgoing.get(current);
-            if (!visited.add(current)) {
-                break; // 사이클 보호
+        while (visited.add(current)) {
+            List<Segment> candidates = outgoing.get(current);
+            Segment next = null;
+            if (candidates != null) {
+                for (Segment candidate : candidates) {
+                    if (!used.contains(candidate)) {
+                        next = candidate;
+                        break;
+                    }
+                }
             }
-            segments.add(segment);
-            current = segment.to();
+            if (next == null) {
+                break;
+            }
+            used.add(next);
+            segments.add(next);
+            current = next.to();
         }
         return segments;
     }
