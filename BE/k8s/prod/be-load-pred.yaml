@@ -40,6 +40,11 @@ spec:
               imagePullPolicy: IfNotPresent
               args:
                 - "--load.sources=bikepred,crowdpred"
+                # 설정 이름은 load.<소스>.path 다. application-load.yml 의 csv-path 는
+                # 어디에도 안 붙는 죽은 키라 그 이름으로는 안 덮인다(2026-09-22 컨테이너 실측).
+                # 환경변수 대신 인자로 두어 실제 이름이 드러나게 한다.
+                - "--load.bikepred.path=/ai-data/BIKE/serving"
+                - "--load.crowdpred.path=/ai-data/CROWD/serving"
               envFrom:
                 # DB_URL·DB_USERNAME 등 (낮 파드와 같은 값)
                 - configMapRef:
@@ -47,15 +52,12 @@ spec:
                 - secretRef:
                     name: data-secret
               env:
-                # be-config 의 SPRING_PROFILES_ACTIVE=prod 를 덮는다. load 프로파일은
-                # 웹서버를 안 띄우고 StaticLoadRunner 만 돌린 뒤 종료한다.
+                # load 만 주면 logback 의 appender 가 하나도 안 걸린다 — springProfile 이
+                # "local, default" 와 "prod" 뿐이라 기동 실패 스택까지 삼켜진다(실측).
+                # prod 를 함께 켜서 CONSOLE_JSON 으로 남기고, load 가 웹서버를 끄고
+                # StaticLoadRunner 만 돌린 뒤 종료시킨다.
                 - name: SPRING_PROFILES_ACTIVE
-                  value: load
-                # application-load.yml 의 기본값은 저장소 기준 상대경로라 컨테이너에선 안 맞는다.
-                - name: LOAD_BIKEPRED_CSVPATH
-                  value: /ai-data/BIKE/serving
-                - name: LOAD_CROWDPRED_PATH
-                  value: /ai-data/CROWD/serving
+                  value: prod,load
               volumeMounts:
                 - name: ai-data
                   mountPath: /ai-data
