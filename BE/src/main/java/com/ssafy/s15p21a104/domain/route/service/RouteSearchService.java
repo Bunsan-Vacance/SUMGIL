@@ -16,6 +16,7 @@ import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
+import com.ssafy.s15p21a104.domain.route.dto.request.RequestedDeparture;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
@@ -148,7 +149,7 @@ public class RouteSearchService {
         findStation(originStationId);
         findStation(destStationId);
         // 생략 시 현재 시각 기준. 슬롯은 탐색 그래프 선택에도 쓴다(190).
-        LocalDateTime effectiveDepartureTime = departureTime != null ? departureTime : LocalDateTime.now();
+        LocalDateTime effectiveDepartureTime = RequestedDeparture.resolve(departureTime, clock);
         DepartureSlot departureSlot = DepartureSlot.of(effectiveDepartureTime);
         RouteGraph slotGraph = graphRegistry.graphFor(departureSlot.dowType(), departureSlot.timeSlot());
         if (slotGraph == null) {
@@ -531,8 +532,7 @@ public class RouteSearchService {
             throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
 
-        DepartureSlot coordSlot = DepartureSlot.of(
-                request.departureTime() != null ? request.departureTime() : LocalDateTime.now());
+        DepartureSlot coordSlot = DepartureSlot.of(RequestedDeparture.resolve(request.departureTime(), clock));
         RouteGraph slotGraph = graphRegistry.graphFor(coordSlot.dowType(), coordSlot.timeSlot());
         if (slotGraph == null) {
             throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
@@ -570,8 +570,7 @@ public class RouteSearchService {
                 graphRegistry.busRouteIndex(),
                 raptorInputFor(coordSlot.dowType(), coordSlot.timeSlot(), accessEdges));
         // 214·216: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
-        LocalDateTime coordDeparture =
-                request.departureTime() != null ? request.departureTime() : LocalDateTime.now();
+        LocalDateTime coordDeparture = RequestedDeparture.resolve(request.departureTime(), clock);
         SixResult coordAssembled = sixRoutes(coordFinder, augmentedGraph,
                 PLACE_ORIGIN_ID, PLACE_DEST_ID, request.modes(), coordDeparture);
         List<RouteSearchResponse> coordNamed =
