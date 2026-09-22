@@ -6,7 +6,7 @@ export type TransitionType = 'BOARDING' | 'ALIGHTING' | 'TRANSFER' | 'BIKE_RENTA
 export type CongestionGrade = 'LOW' | 'MEDIUM' | 'HIGH'
 export type SegmentCongestionGrade = 'RELAXED' | 'NORMAL' | 'CONGESTED' | 'SATURATED'
 export type CongestionDataStatus = 'AVAILABLE' | 'LINE1_TRUNCATED' | 'NO_CALIBRATION' | 'NO_LOOKUP'
-export type CongestionPredictionBasis = 'RECENT_7D' | 'PARTIAL' | 'WEEKDAY_AVERAGE'
+export type CongestionPredictionBasis = 'RECENT_7D' | 'PARTIAL' | 'WEEKDAY_AVERAGE' | 'LIVE'
 
 export interface CongestionPrediction {
   congestionPercent: number | null
