@@ -204,7 +204,8 @@ function mapCongestionPrediction(value: unknown): CongestionPrediction | undefin
     basis !== null &&
     basis !== 'RECENT_7D' &&
     basis !== 'PARTIAL' &&
-    basis !== 'WEEKDAY_AVERAGE'
+    basis !== 'WEEKDAY_AVERAGE' &&
+    basis !== 'LIVE'
   ) {
     throw new RepositoryError('invalid-response', '혼잡도 예측 기준 응답이 올바르지 않아요.')
   }
