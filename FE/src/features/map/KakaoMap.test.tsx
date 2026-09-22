@@ -31,6 +31,10 @@ const origin = {
   lat: 37.498,
   lng: 127.028,
 }
+const position = {
+  coords: { latitude: 37.5, longitude: 127.03 },
+} as GeolocationPosition
+let originalGeolocation: PropertyDescriptor | undefined
 
 class FakeResizeObserver {
   static callbacks: Array<() => void> = []
@@ -218,6 +222,7 @@ function renderMap(
     places?: Place[]
     route?: Route | null
     onPlaceSelect?: (place: Place) => void
+    autoLocate?: boolean
   } = {},
 ) {
   const markerClickHandlers: Array<() => void> = []
@@ -232,6 +237,7 @@ function renderMap(
       places={options.places}
       route={options.route}
       onPlaceSelect={options.onPlaceSelect}
+      autoLocate={options.autoLocate}
       onMessage={vi.fn()}
     />,
   )
@@ -251,6 +257,7 @@ function clickBikeMarker(rendered: ReturnType<typeof renderMap>, index = 0) {
 }
 
 beforeEach(() => {
+  originalGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation')
   mocks.stock.mockReset().mockResolvedValue({
     rentalId: 'ST-1',
     status: 'UNAVAILABLE',
@@ -269,12 +276,56 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  if (originalGeolocation) Object.defineProperty(navigator, 'geolocation', originalGeolocation)
+  else Reflect.deleteProperty(navigator, 'geolocation')
   history.replaceState(null, '', '#home')
   vi.unstubAllGlobals()
   vi.clearAllMocks()
 })
 
 describe('일반 지도 장소 마커', () => {
+  it('홈 지도는 준비되면 현재 위치로 자동 이동한다', async () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition },
+    })
+    const rendered = renderMap({ autoLocate: true })
+    vi.stubGlobal('kakao', { maps: rendered.maps })
+
+    await waitFor(() => expect(getCurrentPosition).toHaveBeenCalledOnce())
+    act(() => getCurrentPosition.mock.calls[0][0](position))
+
+    const point = FakeMap.instances[0].panTo.mock.calls[0][0]
+    expect(point).toBeInstanceOf(FakeLatLng)
+    expect((point as FakeLatLng).getLat()).toBe(position.coords.latitude)
+    expect((point as FakeLatLng).getLng()).toBe(position.coords.longitude)
+    expect(getCurrentPosition).toHaveBeenCalledOnce()
+  })
+
+  it('홈으로 재진입하면 지도 재생성 후 현재 위치를 다시 조회한다', async () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { getCurrentPosition },
+    })
+    const rendered = renderMap({ autoLocate: true })
+    vi.stubGlobal('kakao', { maps: rendered.maps })
+    await waitFor(() => expect(getCurrentPosition).toHaveBeenCalledOnce())
+    act(() => getCurrentPosition.mock.calls[0][0](position))
+
+    rendered.rerender(
+      <KakaoMap
+        key="home-reentry"
+        origin={origin}
+        destination={null}
+        autoLocate
+        onMessage={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(getCurrentPosition).toHaveBeenCalledTimes(2))
+  })
+
   it('주소가 없어도 대여소 메타데이터를 정보 카드에 표시한다', async () => {
     const station: Place = {
       id: 'bike-station:ST-0',

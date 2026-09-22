@@ -224,6 +224,7 @@ export default function KakaoMap({
   showPlaceInfo = true,
   focusedPlace,
   route,
+  autoLocate = false,
 }: {
   origin?: Place | null
   destination?: Place | null
@@ -233,6 +234,7 @@ export default function KakaoMap({
   showPlaceInfo?: boolean
   focusedPlace?: Place | null
   route?: Route | null
+  autoLocate?: boolean
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [bikeStationsVisible, setBikeStationsVisible] = useState(true)
@@ -308,6 +310,12 @@ export default function KakaoMap({
     bikeStationsVisible,
   )
   const { locating, locate } = useCurrentLocation(showPosition, onMessage, locationScope)
+  const autoLocateRequested = useRef(false)
+  useEffect(() => {
+    if (!autoLocate || status !== 'ready' || autoLocateRequested.current) return
+    autoLocateRequested.current = true
+    locate()
+  }, [autoLocate, locate, status])
   const showCongestionPreview =
     status !== 'ready' && Boolean(effectiveRoute) && isCongestionPreview(location.search)
   useEffect(() => {
