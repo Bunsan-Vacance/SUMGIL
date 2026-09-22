@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * S15P21A104-157(원래 S15P21A104-153 범위): 혼잡도 기반 경로 스코어링 순수 함수 검증.
+ *
+ * <p>2026-09-22 표시·정렬 기준 변경 — 시간 가중 평균이 아니라 "가장 혼잡한 구간(최대)"을 쓴다.
  */
 class CongestionScorerTest {
 
@@ -23,8 +25,8 @@ class CongestionScorerTest {
         List<RouteLegResponse> highCongestion = List.of(subwayLeg("L2", 10.0));
         Map<String, Double> levels = Map.of("L1", 30.0, "L2", 80.0);
 
-        double lowScore = CongestionScorer.score(lowCongestion, levels).orElseThrow();
-        double highScore = CongestionScorer.score(highCongestion, levels).orElseThrow();
+        double lowScore = CongestionScorer.worst(lowCongestion, levels).orElseThrow().level();
+        double highScore = CongestionScorer.worst(highCongestion, levels).orElseThrow().level();
 
         assertTrue(lowScore < highScore);
         assertEquals(30.0, lowScore);
@@ -32,17 +34,17 @@ class CongestionScorerTest {
     }
 
     @Test
-    @DisplayName("여러 SUBWAY leg는 소요시간 가중 평균으로 계산한다")
-    void 다중구간_가중평균() {
+    @DisplayName("여러 SUBWAY leg 중 가장 혼잡한 leg의 값과 그 leg를 돌려준다")
+    void 다중구간_최대() {
         List<RouteLegResponse> legs = List.of(
-                subwayLeg("L1", 10.0), // 혼잡도 20, 10분
-                subwayLeg("L2", 30.0)); // 혼잡도 60, 30분
+                subwayLeg("L1", 10.0), // 혼잡도 20
+                subwayLeg("L2", 30.0)); // 혼잡도 60
         Map<String, Double> levels = Map.of("L1", 20.0, "L2", 60.0);
 
-        double score = CongestionScorer.score(legs, levels).orElseThrow();
+        CongestionScorer.Worst worst = CongestionScorer.worst(legs, levels).orElseThrow();
 
-        // (20*10 + 60*30) / (10+30) = (200+1800)/40 = 50
-        assertEquals(50.0, score, 1e-9);
+        assertEquals(60.0, worst.level(), 1e-9);
+        assertEquals("L2", worst.leg().routeId());
     }
 
     @Test
@@ -51,7 +53,7 @@ class CongestionScorerTest {
         List<RouteLegResponse> legs = List.of(subwayLeg("L1", 10.0), walkLeg(5.0));
         Map<String, Double> levels = Map.of(); // 노선 혼잡도 자체가 없음
 
-        Optional<Double> score = CongestionScorer.score(legs, levels);
+        Optional<CongestionScorer.Worst> score = CongestionScorer.worst(legs, levels);
 
         assertTrue(score.isEmpty());
     }
@@ -61,12 +63,13 @@ class CongestionScorerTest {
     void 모르는노선_제외() {
         List<RouteLegResponse> legs = List.of(
                 subwayLeg("L1", 10.0), // 혼잡도 앎
-                subwayLeg("UNKNOWN", 100.0)); // 혼잡도 모름 — 100분짜리라도 점수에 안 섞인다
+                subwayLeg("UNKNOWN", 100.0)); // 혼잡도 모름 — 0으로 채우지 않는다
         Map<String, Double> levels = Map.of("L1", 40.0);
 
-        double score = CongestionScorer.score(legs, levels).orElseThrow();
+        CongestionScorer.Worst worst = CongestionScorer.worst(legs, levels).orElseThrow();
 
-        assertEquals(40.0, score, 1e-9);
+        assertEquals(40.0, worst.level(), 1e-9);
+        assertEquals("L1", worst.leg().routeId());
     }
 
     @Test
@@ -75,9 +78,9 @@ class CongestionScorerTest {
         List<RouteLegResponse> legs = List.of(subwayLeg("L1", 10.0), walkLeg(999.0));
         Map<String, Double> levels = Map.of("L1", 40.0);
 
-        double score = CongestionScorer.score(legs, levels).orElseThrow();
+        CongestionScorer.Worst worst = CongestionScorer.worst(legs, levels).orElseThrow();
 
-        assertEquals(40.0, score, 1e-9);
+        assertEquals(40.0, worst.level(), 1e-9);
     }
 
     private RouteLegResponse subwayLeg(String routeId, double minutes) {

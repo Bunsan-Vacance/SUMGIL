@@ -427,9 +427,9 @@ public class RouteSearchService {
             Optional<Double> linkScore = edges.isEmpty() ? Optional.empty()
                     : LinkCongestionScorer.score(
                                     edges, departureTime, congestionPredLookup(truncated))
-                            .map(LinkCongestionScorer.Result::weightedAverage);
-            Optional<Double> lineScore =
-                    CongestionScorer.score(legs, levelByRouteId);
+                            .map(LinkCongestionScorer.Result::worstLevel);
+            Optional<Double> lineScore = CongestionScorer.worst(legs, levelByRouteId)
+                    .map(CongestionScorer.Worst::level);
             CongestionPrediction prediction = CongestionPredictionResolver.resolve(
                     linkScore, lineScore, truncated.get(),
                     departureTime.toLocalDate(), today);
