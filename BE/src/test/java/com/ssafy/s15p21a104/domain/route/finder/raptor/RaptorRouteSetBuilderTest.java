@@ -88,6 +88,44 @@ class RaptorRouteSetBuilderTest {
     }
 
     @Test
+    @DisplayName("S6: 지선이 섞여도 본선 체인이 빠지지 않는다 — 행 순서 무관·결정적")
+    void s6_분기_본선누락방지() {
+        List<RouteEdgeRow> main = List.of(
+                row("201", "202", "1002", 60, 0),
+                row("202", "203", "1002", 60, 0),
+                row("203", "204", "1002", 60, 0),
+                row("202", "201", "1002", 60, 0),
+                row("203", "202", "1002", 60, 0),
+                row("204", "203", "1002", 60, 0));
+        List<RouteEdgeRow> branch = List.of(
+                row("250", "251", "1002", 60, 0),
+                row("251", "250", "1002", 60, 0));
+
+        // 지선 행이 먼저 오는 순서 — 예전 구현은 시작점으로 지선을 골라 본선을 버릴 수 있었다.
+        List<RouteEdgeRow> branchFirst = new java.util.ArrayList<>(branch);
+        branchFirst.addAll(main);
+        List<RouteEdgeRow> mainFirst = new java.util.ArrayList<>(main);
+        mainFirst.addAll(branch);
+
+        List<String> branchFirstRoutes = routeStops(RaptorRouteSetBuilder.subwayRoutes(branchFirst));
+        List<String> mainFirstRoutes = routeStops(RaptorRouteSetBuilder.subwayRoutes(mainFirst));
+
+        assertEquals(mainFirstRoutes, branchFirstRoutes, "행 순서에 따라 노선 조립이 달라졌다");
+        assertTrue(branchFirstRoutes.stream().anyMatch(route -> route.contains("201>202>203>204")),
+                "본선 체인이 빠졌다: " + branchFirstRoutes);
+        assertTrue(branchFirstRoutes.stream().anyMatch(route -> route.contains("250>251")),
+                "지선 체인이 빠졌다: " + branchFirstRoutes);
+    }
+
+    /** 노선 집합을 순서 무관 비교용 문자열로 — routeId + 정차 순서. */
+    private static List<String> routeStops(List<RaptorFinder.Route> routes) {
+        return routes.stream()
+                .map(route -> route.routeId() + ":" + String.join(">", route.stops()))
+                .sorted()
+                .toList();
+    }
+
+    @Test
     @DisplayName("S5: 연결 — 도보(역↔대여소)·자전거(대여소↔대여소)")
     void s5_연결() {
         Map<String, BikeEdgeBuilder.Stop> stations =
