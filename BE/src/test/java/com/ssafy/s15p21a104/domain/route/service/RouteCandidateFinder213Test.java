@@ -60,8 +60,8 @@ class RouteCandidateFinder213Test {
     void t4_모드필터() {
         List<RouteSearchResponse> candidates = RouteTestFixtures.serviceWith(graphOf(
                 subway("A", "C", "L1", 300),
-                RouteTestFixtures.bike("A", "R1", 400),
-                RouteTestFixtures.bike("R1", "C", 400)), Set.of())
+                RouteTestFixtures.bike("A", "R1", 100),
+                RouteTestFixtures.bike("R1", "C", 100)), Set.of())
                 .search("A", "C", null, null, null);
 
         List<RouteSearchResponse> filtered =

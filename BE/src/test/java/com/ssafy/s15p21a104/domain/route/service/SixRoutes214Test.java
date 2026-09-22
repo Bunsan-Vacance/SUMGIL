@@ -78,9 +78,9 @@ class SixRoutes214Test {
                 subway("504", "503", "L3", 300),
                 subway("501", "505", "L4", 250),
                 subway("505", "503", "L4", 250),
-                bike("501", "R1", 250),
-                bike("R1", "503", 250),
-                bike("502", "R1", 100)));
+                bike("501", "R1", 120),
+                bike("R1", "503", 120),
+                bike("502", "R1", 80)));
         lenient().when(graphRegistry.graphFor(
                 org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenAnswer(invocation -> graphRegistry.graph());

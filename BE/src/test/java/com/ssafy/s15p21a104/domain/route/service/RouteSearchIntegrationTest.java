@@ -154,18 +154,18 @@ class RouteSearchIntegrationTest {
     @Test
     @DisplayName("IT4: 모드 필터 — BIKE만 허용하면 자전거 후보만 남는다(185: 이제 후보를 실제로 만든다)")
     void it4_모드필터_BIKE만_필터() {
-        // 지하철 직통 300초가 더 빠르지만, BIKE 필터를 걸면 자전거 후보(800초)만 응답에 남아야 한다.
+        // 지하철 직통 300초가 더 빠르지만, BIKE 필터를 걸면 자전거 후보(200초)만 응답에 남아야 한다.
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 subway("A", "C", "L1", 300),
-                bike("A", "R1", 400),
-                bike("R1", "C", 400)));
+                bike("A", "R1", 100),
+                bike("R1", "C", 100)));
 
         List<RouteSearchResponse> result =
                 routeSearchService.search("A", "C", List.of(TravelMode.BIKE), null, null);
 
         assertEquals(1, result.size());
         assertTrue(result.get(0).legs().stream().allMatch(leg -> leg.mode() == TravelMode.BIKE));
-        assertEquals((400 + 400) / 60.0, result.get(0).totalMinutes(), 1e-9);
+        assertEquals((100 + 100) / 60.0, result.get(0).totalMinutes(), 1e-9);
     }
 
     @Test

@@ -75,12 +75,12 @@ public final class RaptorFinder {
         }
     }
 
-    /** 접근 사슬 한 칸 — 정점 도달 비용과 직전 구간(추적용). {@code fromNode == null}이면 시드(출발지). */
-    public record Access(int costSec, String fromNode, int legSec, TravelMode mode) {
+    /** 접근 사슬 한 칸 — 정점 도달 비용·직전 구간·연속 자전거 누적(추적·상한용). {@code fromNode == null}이면 시드(출발지). */
+    public record Access(int costSec, String fromNode, int legSec, TravelMode mode, int bikeRunSec) {
     }
 
-    /** 이탈 사슬 한 칸 — 정점에서 도착지까지의 비용과 다음 구간(추적용). {@code toNode == null}이면 시드(도착지). */
-    public record Egress(int costSec, String toNode, int legSec, TravelMode mode) {
+    /** 이탈 사슬 한 칸 — 정점에서 도착지까지의 비용·다음 구간·연속 자전거 누적. {@code toNode == null}이면 시드(도착지). */
+    public record Egress(int costSec, String toNode, int legSec, TravelMode mode, int bikeRunSec) {
     }
 
     /** 경계(접근·이탈 closure)가 만든 테이블 묶음 — 비용 + 경로 사슬(5부 R-A1). */
@@ -142,11 +142,11 @@ public final class RaptorFinder {
         Objects.requireNonNull(destAccess, "destAccess");
         Map<String, Access> accesses = new HashMap<>();
         for (Map.Entry<String, Integer> entry : originAccess.entrySet()) {
-            accesses.put(entry.getKey(), new Access(entry.getValue(), null, 0, TravelMode.WALK));
+            accesses.put(entry.getKey(), new Access(entry.getValue(), null, 0, TravelMode.WALK, 0));
         }
         Map<String, Egress> egresses = new HashMap<>();
         for (Map.Entry<String, Integer> entry : destAccess.entrySet()) {
-            egresses.put(entry.getKey(), new Egress(entry.getValue(), null, 0, TravelMode.WALK));
+            egresses.put(entry.getKey(), new Egress(entry.getValue(), null, 0, TravelMode.WALK, 0));
         }
         return find(originNodeId, destNodeId, new AccessTables(accesses, egresses),
                 maxRounds, minimizeCost);
@@ -183,7 +183,8 @@ public final class RaptorFinder {
                     ? new Trace(-1, null, "WALK", TravelMode.WALK, 0, value.costSec(), -1, -1, -1)
                     : new Trace(0, value.fromNode(), connectionRouteId(value.mode()), value.mode(),
                             value.costSec() - value.legSec(), value.costSec(), -1, -1, -1);
-            round0.put(access.getKey(), new Label(value.costSec(), value.costSec(), 0, trace));
+            round0.put(access.getKey(), new Label(value.costSec(), value.costSec(), 0,
+                    value.bikeRunSec(), trace));
         }
         // 라운드 0 연결 이완 — 사슬 없는 단순 맵(기존 API)의 출발지 접근 한 홉 호환.
         relaxConnections(round0, 0, originAccess.keySet(), minimizeCost);
@@ -253,7 +254,7 @@ public final class RaptorFinder {
                     continue;
                 }
                 long arrival = bestDepart + (prefix[i] - prefix[bestIdx]);
-                Label label = new Label(arrival, arrival, bestBoarding.rides() + 1,
+                Label label = new Label(arrival, arrival, bestBoarding.rides() + 1, 0,
                         new Trace(round - 1, stops.get(bestIdx),
                         route.routeId(), route.mode(), bestDepart, arrival, routeIndex, bestIdx, i));
                 if (relax(current, stops.get(i), label)) {
@@ -278,7 +279,7 @@ public final class RaptorFinder {
                             route.travelSec()[seg]);
                     time += route.travelSec()[seg];
                     cost += segCost;
-                    Label label = new Label(time, cost, boarding.rides() + 1,
+                    Label label = new Label(time, cost, boarding.rides() + 1, 0,
                             new Trace(round - 1, stops.get(i),
                             route.routeId(), route.mode(), boarding.time() + wait, time,
                             routeIndex, i, j));
@@ -303,9 +304,16 @@ public final class RaptorFinder {
             }
             Label from = current.get(stop);
             for (Connection connection : connections) {
+                boolean bike = connection.mode() == TravelMode.BIKE;
+                int bikeRun = bike ? from.bikeRunSec() + connection.sec() : 0;
+                if (bike && bikeRun > com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder
+                        .MAX_ACT_SEC) {
+                    continue; // 대여 1회 상한 초과 — 가지치기(5부 T3)
+                }
                 long time = from.time() + connection.sec();
                 long cost = from.cost() + connection.sec();
-                Label label = new Label(time, cost, from.rides(), new Trace(round, connection.from(),
+                Label label = new Label(time, cost, from.rides(), bikeRun,
+                        new Trace(round, connection.from(),
                         connection.mode() == TravelMode.BIKE ? "BIKE" : "WALK",
                         connection.mode(), from.time(), time, -1, -1, -1));
                 if (relax(current, connection.to(), label)) {
@@ -424,8 +432,8 @@ public final class RaptorFinder {
         return signature.toString();
     }
 
-    /** rides = 이 라벨 사슬의 탑승(BUS·SUBWAY) 횟수 — requireTransit 필터용. */
-    private record Label(long time, long cost, int rides, Trace trace) {
+    /** rides = 이 라벨 사슬의 탑승(BUS·SUBWAY) 횟수 · bikeRunSec = 연속 자전거 누적(대여 1회 상한용). */
+    private record Label(long time, long cost, int rides, int bikeRunSec, Trace trace) {
     }
 
     private record Trace(int prevRound, String boardStop, String routeId, TravelMode mode,
