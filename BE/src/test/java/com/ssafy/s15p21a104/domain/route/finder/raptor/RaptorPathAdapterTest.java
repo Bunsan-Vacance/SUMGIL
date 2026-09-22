@@ -138,7 +138,7 @@ class RaptorPathAdapterTest {
         }
         Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
                 new RouteMapper.EnginePath(segments, path.totalSec(), path.transferCount()),
-                infos, RouteType.SHORTEST, RouteSource.ALGORITHM, transferSecs, java.util.Set.of(),
+                infos, RouteType.SHORTEST, RouteSource.ALGORITHM, transferSecs,
                 index);
 
         assertTrue(response.isPresent(), "매퍼가 어댑터 산출 FoundPath를 거부했다");

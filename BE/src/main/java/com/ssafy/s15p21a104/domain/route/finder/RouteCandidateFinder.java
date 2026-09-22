@@ -427,7 +427,7 @@ public final class RouteCandidateFinder {
         Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
                 new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
                 stationInfos, RouteType.SHORTEST, RouteSource.ALGORITHM,
-                transferSecs, rentalIds, busRouteIndex);
+                transferSecs, busRouteIndex);
         return response.filter(r -> BikeStockGate.passesEdges(
                 found.edges().stream().map(Edge::fromNode).toList(),
                 found.edges().stream().map(Edge::mode).toList(),
