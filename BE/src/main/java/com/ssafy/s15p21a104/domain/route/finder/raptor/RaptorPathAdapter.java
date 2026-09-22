@@ -22,8 +22,8 @@ import java.util.Optional;
  *       FE가 "버스 번호만 다른 후보"를 한 카드로 묶는 계약(234) 유지.</li>
  *   <li><b>C2</b> — 환승 표는 {@link RouteCandidateFinder#transferSeconds}와 동일 함수(단일 규칙).
  *       매퍼의 개수 검증(transferSeconds.size == transferCount)과 어긋나지 않는다.</li>
- *   <li>승차 대기 — 첫 엣지면 {@code waitSec} 필드(190 AC3), 아니면 탑승 구간 travelSec에 합산
- *       (매퍼가 첫 엣지의 waitSec만 leg 분에 반영하므로 총계 일치를 위해).</li>
+ *   <li>승차 대기 — 탑승 엣지의 {@code waitSec} 필드에 그대로 싣는다(이동 소요에 합산하지 않는다).
+ *       총계에는 모든 탑승 대기를 포함한다 — 응답 매퍼가 leg별 {@code waitMinutes}로 분리한다.</li>
  * </ul>
  *
  * <p>순수 로직 — DB·Spring 비의존.
@@ -59,7 +59,7 @@ public final class RaptorPathAdapter {
         }
         List<Long> transfers = RouteCandidateFinder.transferSeconds(edges, transferRule, busRouteIndex);
         long totalSec = edges.stream().mapToLong(Edge::travelSec).sum()
-                + edges.get(0).waitSec()
+                + edges.stream().mapToLong(Edge::waitSec).sum()
                 + transfers.stream().mapToLong(Long::longValue).sum();
         List<String> stations = new ArrayList<>();
         stations.add(edges.get(0).fromNode());
@@ -78,14 +78,8 @@ public final class RaptorPathAdapter {
         for (int i = leg.boardIndex(); i < leg.alightIndex(); i++) {
             int travel = route.travelSec()[i];
             int wait = i == leg.boardIndex() ? route.boardWaitSec()[i] : 0;
-            if (wait > 0 && !edges.isEmpty()) {
-                // 첫 엣지가 아니면 waitSec을 매퍼가 안 보므로 탑승 구간 소요에 합산한다.
-                edges.add(new Edge(route.stops().get(i), route.stops().get(i + 1), routeId,
-                        travel + wait, 0, route.mode()));
-            } else {
-                edges.add(new Edge(route.stops().get(i), route.stops().get(i + 1), routeId,
-                        travel, wait, route.mode()));
-            }
+            edges.add(new Edge(route.stops().get(i), route.stops().get(i + 1), routeId,
+                    travel, wait, route.mode()));
         }
     }
 

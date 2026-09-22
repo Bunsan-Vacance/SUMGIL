@@ -65,7 +65,11 @@ public final class RerouteService {
         for (ScoredCandidate candidate : scored) {
             RouteSearchResponse route = candidate.response();
             // 잔여 legs만 담고 totalMinutes는 잔여 합과 일치시킨다(FE §5.2 ±0.01).
-            double sum = route.legs().stream().mapToDouble(RouteLegResponse::minutes).sum();
+            // 대기 분리(2026-09-22) 후에는 leg 소요(이동) + waitMinutes 합이다.
+            double sum = route.legs().stream()
+                    .mapToDouble(leg -> leg.minutes()
+                            + (leg.waitMinutes() == null ? 0 : leg.waitMinutes()))
+                    .sum();
             RouteSearchResponse remain = new RouteSearchResponse(
                     route.routeType(), sum, route.legs(), RouteSource.ALGORITHM,
                     route.totalDistanceMeters(), route.transferCount(),

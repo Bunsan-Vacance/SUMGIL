@@ -409,13 +409,11 @@ public final class RouteCandidateFinder {
     private Optional<RouteSearchResponse> toCandidate(FoundPath found, TransferRule rule) {
         List<Edge> edges = found.edges();
         List<RouteMapper.EngineSegment> segments = new java.util.ArrayList<>();
-        for (int i = 0; i < edges.size(); i++) {
-            Edge edge = edges.get(i);
-            // 첫 승차 대기(waitSec)는 첫 leg에 포함시켜 totalMinutes-leg 합을 맞춘다(190 AC3).
-            long seconds = edge.travelSec() + (i == 0 ? edge.waitSec() : 0);
+        for (Edge edge : edges) {
+            // 대기는 leg 소요에 합산하지 않는다 — 매퍼가 leg별 waitMinutes로 분리한다(2026-09-22).
             segments.add(new RouteMapper.EngineSegment(
-                    edge.fromNode(), edge.toNode(), edge.routeId(), seconds,
-                    edge.mode()));
+                    edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec(),
+                    edge.mode(), edge.waitSec()));
         }
         // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다 (TransferRule 1곳, 232·234).
         // 어댑터(RAPTOR)도 같은 함수를 쓴다 — 집계 불일치로 매퍼 검증이 깨지는 것을 막는다(217 C2).

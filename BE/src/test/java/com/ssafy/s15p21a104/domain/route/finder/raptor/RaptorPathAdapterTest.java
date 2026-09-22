@@ -94,8 +94,8 @@ class RaptorPathAdapterTest {
     }
 
     @Test
-    @DisplayName("A3: 좌표 접근 — 접근 WALK이 첫 엣지면 버스 대기는 탑승 구간 소요에 합산")
-    void a3_좌표접근시대기합산() {
+    @DisplayName("A3: 좌표 접근 — 탑승 대기는 합산하지 않고 탑승 엣지 waitSec로 남긴다")
+    void a3_좌표접근시대기_분리() {
         List<RaptorFinder.Route> routes = List.of(
                 route("r1", TravelMode.BUS, 30, "A", "100", "B"));
         RaptorFinder finder = new RaptorFinder(routes, List.of());
@@ -107,8 +107,31 @@ class RaptorPathAdapterTest {
 
         assertEquals(TravelMode.WALK, path.edges().get(0).mode());
         assertEquals(0, path.edges().get(0).waitSec());
-        assertEquals(100 + 30, path.edges().get(1).travelSec()); // 대기 합산
-        assertEquals(60 + 130, path.totalSec());
+        assertEquals(100, path.edges().get(1).travelSec()); // 이동만 — 대기 합산 금지
+        assertEquals(30, path.edges().get(1).waitSec());   // 대기는 탑승 엣지에 분리
+        assertEquals(60 + 100 + 30, path.totalSec());
+    }
+
+    @Test
+    @DisplayName("A5: 두 번째 탑승 대기도 자기 탑승 엣지 waitSec로 남는다(합산 금지)")
+    void a5_중간탑승대기_분리() {
+        List<RaptorFinder.Route> routes = List.of(
+                route("s1", TravelMode.SUBWAY, 30, "A", "100", "B"),
+                route("s2", TravelMode.SUBWAY, 45, "B", "100", "D"));
+        RaptorFinder finder = new RaptorFinder(routes, List.of());
+        RaptorFinder.Journey journey = finder
+                .find("A", "D", Map.of("A", 0), Map.of("D", 0), 3, false).get(0);
+
+        FoundPath path = RaptorPathAdapter
+                .toFoundPath(journey, routes, TRANSFER_180, null).orElseThrow();
+
+        assertEquals(2, path.edges().size());
+        assertEquals(100, path.edges().get(0).travelSec());
+        assertEquals(30, path.edges().get(0).waitSec());
+        assertEquals(100, path.edges().get(1).travelSec());
+        assertEquals(45, path.edges().get(1).waitSec());
+        // 이동 200 + 대기 75 + 환승 180(B 환승역)
+        assertEquals(100 + 30 + 100 + 45 + 180, path.totalSec());
     }
 
     @Test
@@ -127,10 +150,9 @@ class RaptorPathAdapterTest {
         List<Long> transferSecs = RouteCandidateFinder.transferSeconds(
                 path.edges(), TRANSFER_180, index);
         List<RouteMapper.EngineSegment> segments = new ArrayList<>();
-        for (int i = 0; i < path.edges().size(); i++) {
-            Edge edge = path.edges().get(i);
+        for (Edge edge : path.edges()) {
             segments.add(new RouteMapper.EngineSegment(edge.fromNode(), edge.toNode(),
-                    edge.routeId(), edge.travelSec() + (i == 0 ? edge.waitSec() : 0), edge.mode()));
+                    edge.routeId(), edge.travelSec(), edge.mode(), edge.waitSec()));
         }
         Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
         for (String id : List.of("A", "B", "C", "D", "E")) {
@@ -143,7 +165,9 @@ class RaptorPathAdapterTest {
 
         assertTrue(response.isPresent(), "매퍼가 어댑터 산출 FoundPath를 거부했다");
         RouteSearchResponse route = response.get();
-        double legsSum = route.legs().stream().mapToDouble(leg -> leg.minutes()).sum();
+        double legsSum = route.legs().stream()
+                .mapToDouble(leg -> leg.minutes() + (leg.waitMinutes() == null ? 0 : leg.waitMinutes()))
+                .sum();
         assertEquals(route.totalMinutes(), legsSum, 0.02);
         assertEquals(path.transferCount(), route.transferCount());
         assertEquals(1, route.legs().stream()

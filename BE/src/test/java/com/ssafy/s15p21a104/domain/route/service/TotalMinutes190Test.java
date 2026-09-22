@@ -65,7 +65,13 @@ class TotalMinutes190Test {
         RouteSearchResponse first = result.get(0);
         // 이동 200 + 첫 승차 대기 60 = 260초 = 4.333분.
         assertEquals((100 + 100 + 60) / 60.0, first.totalMinutes(), 1e-9);
-        double sum = first.legs().stream().mapToDouble(RouteLegResponse::minutes).sum();
+        // leg 소요는 이동만, 탑승 대기는 waitMinutes로 분리 — 합(이동+대기)은 총계와 일치한다.
+        RouteLegResponse leg = first.legs().get(0);
+        assertEquals(200 / 60.0, leg.minutes(), 1e-9);
+        assertEquals(60 / 60.0, leg.waitMinutes(), 1e-9);
+        double sum = first.legs().stream()
+                .mapToDouble(l -> l.minutes() + (l.waitMinutes() == null ? 0 : l.waitMinutes()))
+                .sum();
         assertEquals(first.totalMinutes(), sum, 1e-9);
     }
 }
