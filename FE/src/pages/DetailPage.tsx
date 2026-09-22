@@ -109,16 +109,21 @@ export default function DetailPage({
                   {leg.from?.name || '출발 정류장'} → {leg.to?.name || '도착 정류장'}
                 </h4>
                 {options.length ? (
-                  <div className="bus-options-list">
-                    {options.map((option) => (
-                      <div className="bus-option" key={option.routeId}>
-                        <strong>{busOptionLabel(option)}</strong>
-                        <span>
-                          {option.headwayMin ? `약 ${option.headwayMin}분 간격` : '배차 정보 없음'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <details className="bus-options-details" open={options.length === 1}>
+                    <summary>이용 가능한 버스 {options.length}개 노선</summary>
+                    <div className="bus-options-list">
+                      {options.map((option) => (
+                        <div className="bus-option" key={option.routeId}>
+                          <strong>{busOptionLabel(option)}</strong>
+                          <span>
+                            {option.headwayMin
+                              ? `약 ${option.headwayMin}분 간격`
+                              : '배차 정보 없음'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 ) : (
                   <p className="bus-options-empty">버스 노선 정보를 확인하지 못했어요.</p>
                 )}

@@ -102,6 +102,11 @@ describe('경로 상세 버스 선택', () => {
 
     const region = screen.getByRole('region', { name: '이용 가능한 버스' })
     expect(region.textContent).toContain('transfer → destination')
+    const disclosure = region.querySelector('details')
+    expect(disclosure?.open).toBe(false)
+    expect(screen.getByText('이용 가능한 버스 2개 노선')).toBeTruthy()
+    fireEvent.click(screen.getByText('이용 가능한 버스 2개 노선'))
+    expect(disclosure?.open).toBe(true)
     expect(region.textContent).toContain('108번')
     expect(region.textContent).toContain('약 10분 간격')
     expect(region.textContent).toContain('143번')

@@ -46,7 +46,7 @@
 - 역 ID가 있는 기존 GET `/api/routes/search`는 여러 경로 후보를 배열로 반환하며, 좌표 기반 POST `/api/routes/search/coordinate`도 같은 후보 변환 규칙을 사용한다. 요청 `modes`에는 `WALK`가 항상 포함되고 응답 구간에는 `WALK`·`TRANSFER`가 포함될 수 있다. 서버는 속도·혼잡 후보를 최대 6개까지 만들 수 있고, 저장소는 응답 후보와 중복 `ALTERNATIVE`를 보존한다. 화면은 TIME에서 시간순, COMFORT에서 유효한 `congestionPrediction`만 혼잡도순으로 정렬하고 예측값이 없는 후보를 뒤에 둔다. `LOW_CONGESTION`은 서버 분류를 근거로 하며, 혼잡 후보가 비어도 빠른 후보를 유지하고 mock·0%·임의 순위를 만들지 않는다. `SHORTEST`는 `빠른 경로`, `ALTERNATIVE`는 `다른 경로`, `SHORTEST_WITH_BIKE`는 `따릉이 포함 경로`로 표시한다. 요청한 이동수단으로 필터한 결과가 비어도 조회 성공으로 처리해 `해당 수단으로는 경로가 없어요`를 표시한다. 현재 최신 BE 응답에는 `congestionPrediction`이 없어 예측 정보 없음으로 표시한다. `/api/congestion` 통계 응답을 신규 예측으로 변환하지 않는다.
 - 지하철·버스 구간 혼잡도는 `legs[].congestionLevel` 선택 숫자 필드와 `legs[].congestionGrade` 선택 등급 필드(`RELAXED`/`NORMAL`/`CONGESTED`/`SATURATED`/`null`)로 받는다. 등급이 있으면 FE가 숫자로 다시 계산한 등급보다 우선하고, 숫자만 있으면 기존 퍼센트·등급 변환을 유지한다. 누락·null이면 표시하지 않으며 WALK·BIKE 구간에는 적용하지 않는다.
 - 경로 구간 표시명은 서버 `routeName`을 우선하며, 없으면 `routeId`의 노선 매핑을 적용한다. `BIKE`는 `자전거`, `WALK`는 `도보`로 표시하고 원본 ID는 보존한다.
-- BUS 구간의 `routeOptions`는 `{ routeId, routeName, headwayMin }` 목록으로 검증해 구간에 보존한다. `routeName`과 `headwayMin`은 null일 수 있으며, 상세 화면은 각 버스 번호와 확인 가능한 배차간격을 표시한다. 이 목록은 표시 전용이므로 별도 경로 후보를 만들거나 탐색·집계에 사용하지 않는다. `routeOptions: null`인 기존 응답은 종전의 다중 경로 그룹화 방식과 호환하고, 빈 배열은 해당 구간의 공통 운행 노선 정보가 없다는 뜻으로 표시한다.
+- BUS 구간의 `routeOptions`는 `{ routeId, routeName, headwayMin }` 목록으로 검증해 구간에 보존한다. `routeName`과 `headwayMin`은 null일 수 있으며, 상세 화면은 각 버스 번호와 확인 가능한 배차간격을 표시한다. 여러 노선이면 기본으로 접어 두고 펼치면 노선별 배차간격을 표시한다. 이 목록은 표시 전용이므로 별도 경로 후보를 만들거나 탐색·집계에 사용하지 않는다. `routeOptions: null`인 기존 응답은 종전의 다중 경로 그룹화 방식과 호환하고, 빈 배열은 해당 구간의 공통 운행 노선 정보가 없다는 뜻으로 표시한다.
 
 화면의 `getRoutes`도 API 후보의 routeType을 확인해 허용 수단만 필터링하고 서버 배열 순서를 유지한다. 샘플 후보만 우선순위에 따라 로컬 정렬한다.
 

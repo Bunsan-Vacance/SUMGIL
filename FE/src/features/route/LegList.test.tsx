@@ -50,6 +50,35 @@ describe('구간 이동 안내', () => {
     expect(screen.queryByText(/구간 예상 혼잡도/)).toBeNull()
   })
 
+  it('같은 버스 구간의 여러 노선을 요약해 표시한다', () => {
+    const route: Route = {
+      id: 'bus-options',
+      label: '버스 경로',
+      minutes: 8,
+      transfers: 0,
+      modes: ['bus'],
+      legs: [
+        {
+          mode: 'bus',
+          title: '정류장 A → 정류장 B',
+          note: '108번 · 143번 · 420번 · N26',
+          minutes: 8,
+          busRouteOptions: [
+            { routeId: '108' },
+            { routeId: '143' },
+            { routeId: '420' },
+            { routeId: 'N26' },
+          ],
+        },
+      ],
+    }
+
+    render(<LegList route={route} />)
+
+    expect(screen.getByText('이용 가능한 버스 4개 노선 · 거리 준비중입니다')).toBeTruthy()
+    expect(screen.queryByText(route.legs[0].note)).toBeNull()
+  })
+
   it('구간 혼잡도 등급만 있으면 등급 라벨을 표시한다', () => {
     const route: Route = {
       id: 'route-with-grade',

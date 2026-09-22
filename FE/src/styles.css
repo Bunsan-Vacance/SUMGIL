@@ -1879,6 +1879,26 @@ small {
   display: grid;
   gap: 7px;
 }
+.bus-options-details {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: var(--surface-soft);
+}
+.bus-options-details > summary {
+  min-height: 44px;
+  padding: 12px 11px;
+  color: var(--primary-dark);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bus-options-details[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.bus-options-details > .bus-options-list {
+  padding: 8px;
+}
 .bus-options-list button,
 .bus-option {
   display: flex;
