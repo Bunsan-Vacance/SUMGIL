@@ -70,22 +70,32 @@ public final class RaptorAccessClosure {
         record Entry(String node, int cost) {
         }
         Map<String, Integer> best = new HashMap<>();
+        Map<String, Integer> bestBikeRun = new HashMap<>();
         Map<String, RaptorFinder.Access> out = new HashMap<>();
         PriorityQueue<Entry> queue = new PriorityQueue<>(Comparator.comparingInt(Entry::cost));
         best.put(originNodeId, 0);
-        out.put(originNodeId, new RaptorFinder.Access(0, null, 0, TravelMode.WALK));
+        bestBikeRun.put(originNodeId, 0);
+        out.put(originNodeId, new RaptorFinder.Access(0, null, 0, TravelMode.WALK, 0));
         queue.add(new Entry(originNodeId, 0));
         while (!queue.isEmpty()) {
             Entry entry = queue.poll();
             if (entry.cost() > best.getOrDefault(entry.node(), INF)) {
                 continue; // 낡은 항목
             }
+            int run = bestBikeRun.getOrDefault(entry.node(), 0);
             for (RaptorFinder.Connection connection : bySource.getOrDefault(entry.node(), List.of())) {
+                boolean bike = connection.mode() == TravelMode.BIKE;
+                int nextRun = bike ? run + connection.sec() : 0;
+                if (bike && nextRun > com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder
+                        .MAX_ACT_SEC) {
+                    continue; // 대여 1회 상한 초과 — 가지치기(5부 T3)
+                }
                 int nextCost = entry.cost() + connection.sec();
                 if (nextCost < best.getOrDefault(connection.to(), INF)) {
                     best.put(connection.to(), nextCost);
+                    bestBikeRun.put(connection.to(), nextRun);
                     out.put(connection.to(), new RaptorFinder.Access(
-                            nextCost, entry.node(), connection.sec(), connection.mode()));
+                            nextCost, entry.node(), connection.sec(), connection.mode(), nextRun));
                     queue.add(new Entry(connection.to(), nextCost));
                 }
             }
@@ -99,22 +109,32 @@ public final class RaptorAccessClosure {
         record Entry(String node, int cost) {
         }
         Map<String, Integer> best = new HashMap<>();
+        Map<String, Integer> bestBikeRun = new HashMap<>();
         Map<String, RaptorFinder.Egress> out = new HashMap<>();
         PriorityQueue<Entry> queue = new PriorityQueue<>(Comparator.comparingInt(Entry::cost));
         best.put(destNodeId, 0);
-        out.put(destNodeId, new RaptorFinder.Egress(0, null, 0, TravelMode.WALK));
+        bestBikeRun.put(destNodeId, 0);
+        out.put(destNodeId, new RaptorFinder.Egress(0, null, 0, TravelMode.WALK, 0));
         queue.add(new Entry(destNodeId, 0));
         while (!queue.isEmpty()) {
             Entry entry = queue.poll();
             if (entry.cost() > best.getOrDefault(entry.node(), INF)) {
                 continue; // 낡은 항목
             }
+            int run = bestBikeRun.getOrDefault(entry.node(), 0);
             for (RaptorFinder.Connection connection : byTarget.getOrDefault(entry.node(), List.of())) {
+                boolean bike = connection.mode() == TravelMode.BIKE;
+                int nextRun = bike ? run + connection.sec() : 0;
+                if (bike && nextRun > com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder
+                        .MAX_ACT_SEC) {
+                    continue; // 대여 1회 상한 초과 — 가지치기(5부 T3)
+                }
                 int nextCost = entry.cost() + connection.sec();
                 if (nextCost < best.getOrDefault(connection.from(), INF)) {
                     best.put(connection.from(), nextCost);
+                    bestBikeRun.put(connection.from(), nextRun);
                     out.put(connection.from(), new RaptorFinder.Egress(
-                            nextCost, entry.node(), connection.sec(), connection.mode()));
+                            nextCost, entry.node(), connection.sec(), connection.mode(), nextRun));
                     queue.add(new Entry(connection.from(), nextCost));
                 }
             }

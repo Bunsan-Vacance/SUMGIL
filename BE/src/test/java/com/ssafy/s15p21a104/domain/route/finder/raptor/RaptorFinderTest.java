@@ -180,6 +180,31 @@ class RaptorFinderTest {
         assertEquals(TravelMode.WALK, walkToA.mode());
     }
 
+    @Test
+    @DisplayName("R11: 접근 자전거 누적이 상한(240초)을 넘으면 그 연결로 확장하지 않는다")
+    void r11_자전거상한() {
+        List<RaptorFinder.Connection> over = List.of(
+                new RaptorFinder.Connection("R1", "S", 110, TravelMode.BIKE)); // 200 + 110 = 310 > 240
+        Map<String, RaptorFinder.Access> origin = Map.of(
+                "PLACE-ORIGIN", new RaptorFinder.Access(0, null, 0, TravelMode.WALK, 0),
+                "R1", new RaptorFinder.Access(200, "PLACE-ORIGIN", 200, TravelMode.BIKE, 200));
+        Map<String, RaptorFinder.Egress> dest = Map.of(
+                "D", new RaptorFinder.Egress(0, null, 0, TravelMode.WALK, 0));
+
+        RaptorFinder blocked = new RaptorFinder(
+                List.of(route("B1", 0, "S", "100", "D")), over);
+        assertTrue(blocked.find("PLACE-ORIGIN", "PLACE-DEST",
+                new RaptorFinder.AccessTables(origin, dest), 3, false).isEmpty(),
+                "상한 초과 자전거 확장이 일어났다");
+
+        RaptorFinder allowed = new RaptorFinder(
+                List.of(route("B1", 0, "S", "100", "D")),
+                List.of(new RaptorFinder.Connection("R1", "S", 30, TravelMode.BIKE))); // 230 ≤ 240
+        assertTrue(!allowed.find("PLACE-ORIGIN", "PLACE-DEST",
+                new RaptorFinder.AccessTables(origin, dest), 3, false).isEmpty(),
+                "상한 이내 자전거 확장이 막혔다");
+    }
+
     // 연결망 다중 홉(대여소 체인)은 엔진이 아니라 경계가 접근·이탈 테이블로 공급한다(5부 R-A1).
     // 커버리지: RaptorAccessClosureTest(단위) · RouteRaptorAccessChainTest(경계 통합).
 }
