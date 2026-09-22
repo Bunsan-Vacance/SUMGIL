@@ -7,8 +7,8 @@
 Description=Run subway-ridership-daily twice a day
 
 [Timer]
-OnCalendar=*-*-* 09:00:00
-OnCalendar=*-*-* 13:00:00
+OnCalendar=*-*-* 09:00:00 Asia/Seoul
+OnCalendar=*-*-* 13:00:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=300
 
