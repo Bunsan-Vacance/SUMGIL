@@ -47,7 +47,8 @@ test('307-C1: 적재 CronJob 이 kustomize 결과에 포함된다', () => {
 
 test('307-C2: 매일 01:00 UTC(10:00 KST)에 돈다 — 두 AI 배치 뒤', () => {
   const doc = cronJobDoc(render());
-  assert.match(doc, /schedule:\s*"0 1 \* \* \*"/, '일정이 "0 1 * * *" 여야 한다');
+  // 따옴표 유무는 kustomize 의 직렬화 방식이라 계약이 아니다 — 값만 본다.
+  assert.match(doc, /schedule:\s*"?0 1 \* \* \*"?/, '일정이 0 1 * * * (01:00 UTC) 여야 한다');
 });
 
 test('307-C3: AI 산출물이 있는 워커 노드에 고정된다', () => {
