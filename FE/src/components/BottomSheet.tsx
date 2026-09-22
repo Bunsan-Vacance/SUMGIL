@@ -10,6 +10,7 @@ interface Props {
   ariaLabel?: string
   initialSnap?: Snap
   preferredSnap?: Snap
+  draggable?: boolean
   className?: string
 }
 export default function BottomSheet({
@@ -19,6 +20,7 @@ export default function BottomSheet({
   ariaLabel = '경로 안내 패널',
   initialSnap = 'default',
   preferredSnap,
+  draggable = true,
   className = '',
 }: Props) {
   const { ref, snap, dragHeight, gripProps } = useBottomSheet(initialSnap, preferredSnap)
@@ -31,9 +33,11 @@ export default function BottomSheet({
       style={dragHeight ? { height: dragHeight } : undefined}
       aria-label={ariaLabel}
     >
-      <button className="sheet-grip" {...gripProps}>
-        <span />
-      </button>
+      {draggable && (
+        <button className="sheet-grip" {...gripProps}>
+          <span />
+        </button>
+      )}
       <div ref={bodyRef} className="sheet-body scrollbar-auto">
         {children}
       </div>

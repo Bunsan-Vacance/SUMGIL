@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { bikePredictionRepository } from '../../api/repositories'
+import { bikePredictionRepository, bikeStockRepository } from '../../api/repositories'
 import type { BikePrediction, BikePredictionRepository } from '../../api/bikePrediction'
+import type { BikeStationRepository, BikeStock } from '../../api/contracts'
 import type { Leg, Route } from './types'
 
 interface PredictionTarget {
@@ -12,6 +13,12 @@ interface PredictionTarget {
 type PredictionState =
   | { status: 'loading' }
   | { status: 'success'; value: BikePrediction }
+  | { status: 'error' }
+  | { status: 'unavailable'; message: string }
+
+type StockState =
+  | { status: 'loading' }
+  | { status: 'success'; value: BikeStock }
   | { status: 'error' }
   | { status: 'unavailable'; message: string }
 
@@ -41,6 +48,12 @@ function predictionTarget(route: Route): PredictionTarget | null {
   return null
 }
 
+function stockTarget(route: Route): { leg: Leg; rentalId: string } | null {
+  const leg = route.legs.find((candidate) => candidate.mode === 'bike')
+  const rentalId = leg?.from?.rentalId?.trim()
+  return leg && rentalId ? { leg, rentalId } : null
+}
+
 export function bikePredictionTargetForRoute(route: Route) {
   return predictionTarget(route)
 }
@@ -54,16 +67,26 @@ function displayTime(value: string) {
   }).format(new Date(value))
 }
 
+function updatedTime(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? displayTime(value) : value
+}
+
 export default function BikePrediction({
   route,
   repository = bikePredictionRepository,
+  stockRepository = bikeStockRepository,
 }: {
   route: Route
   repository?: BikePredictionRepository | null
+  stockRepository?: Pick<BikeStationRepository, 'stock'> | null
 }) {
   const hasBikeLeg = route.legs.some((leg) => leg.mode === 'bike')
   const target = useMemo(() => predictionTarget(route), [route])
+  const stockTargetForRoute = useMemo(() => stockTarget(route), [route])
   const [retryKey, setRetryKey] = useState(0)
+  const [stockRetryKey, setStockRetryKey] = useState(0)
   const [state, setState] = useState<PredictionState>(() =>
     target
       ? { status: 'loading' }
@@ -71,6 +94,11 @@ export default function BikePrediction({
           status: 'unavailable',
           message: unavailableMessage(route),
         },
+  )
+  const [stockState, setStockState] = useState<StockState>(() =>
+    stockTargetForRoute
+      ? { status: 'loading' }
+      : { status: 'unavailable', message: '현재 따릉이 재고를 확인할 수 없어요.' },
   )
 
   useEffect(() => {
@@ -98,8 +126,33 @@ export default function BikePrediction({
     return () => controller.abort()
   }, [repository, retryKey, route, target])
 
+  useEffect(() => {
+    if (!stockTargetForRoute) {
+      setStockState({ status: 'unavailable', message: '현재 따릉이 재고를 확인할 수 없어요.' })
+      return
+    }
+    if (!stockRepository) {
+      setStockState({ status: 'unavailable', message: '현재 따릉이 재고를 확인할 수 없어요.' })
+      return
+    }
+    const controller = new AbortController()
+    setStockState({ status: 'loading' })
+    stockRepository
+      .stock(stockTargetForRoute.rentalId, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setStockState({ status: 'success', value })
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setStockState({ status: 'error' })
+      })
+    return () => controller.abort()
+  }, [route, stockRepository, stockRetryKey, stockTargetForRoute])
+
   const retry = () => {
     if (state.status === 'error') setRetryKey((value) => value + 1)
+  }
+  const retryStock = () => {
+    if (stockState.status === 'error') setStockRetryKey((value) => value + 1)
   }
 
   const currentPrediction =
@@ -109,57 +162,95 @@ export default function BikePrediction({
     new Date(state.value.arrivalTime).getTime() === new Date(target.arrivalTime).getTime()
       ? state.value
       : null
+  const currentStock =
+    stockState.status === 'success' &&
+    stockTargetForRoute &&
+    stockState.value.rentalId === stockTargetForRoute.rentalId
+      ? stockState.value
+      : null
 
   if (!hasBikeLeg) return null
 
   return (
-    <section className="bike-prediction-card" aria-label="따릉이 대여 예측">
-      <div className="bike-prediction-summary">
-        <div className="bike-prediction-copy">
-          <div className="bike-prediction-heading">
-            <h3>따릉이 대여 예측</h3>
-            {currentPrediction?.source === 'MOCK' && (
-              <small className="bike-prediction-source">샘플</small>
-            )}
-          </div>
-          {target && (
-            <p className="bike-prediction-arrival">
-              {target.leg.from?.name
-                ? `${target.leg.from.name} · ${displayTime(target.arrivalTime)} 도착`
-                : `${displayTime(target.arrivalTime)} 도착`}
-            </p>
+    <section className="bike-prediction-card" aria-label="따릉이 현재 재고 및 도착 예측">
+      <div className="bike-prediction-copy">
+        <h3>따릉이 대여 정보</h3>
+        {(target || stockTargetForRoute)?.leg.from?.name && (
+          <p className="bike-prediction-arrival">
+            {(target || stockTargetForRoute)?.leg.from?.name}
+          </p>
+        )}
+      </div>
+      <div className="bike-prediction-values">
+        <div className="bike-prediction-value" aria-label="현재 따릉이 재고">
+          {currentStock?.status === 'AVAILABLE' && currentStock.availableBikes !== null ? (
+            <>
+              <span className="bike-prediction-label">현재</span>
+              <strong>{currentStock.availableBikes}대</strong>
+            </>
+          ) : currentStock?.status === 'STALE' ? (
+            <>
+              <span className="bike-prediction-label">
+                마지막 확인 {updatedTime(currentStock.stockUpdatedAt)}
+              </span>
+              <strong>
+                {currentStock.availableBikes === null
+                  ? '재고 정보 없음'
+                  : `${currentStock.availableBikes}대`}
+              </strong>
+            </>
+          ) : currentStock ? (
+            <strong>재고 정보 없음</strong>
+          ) : stockState.status === 'loading' || stockState.status === 'success' ? (
+            <span className="bike-prediction-state" role="status">
+              현재 재고 확인 중…
+            </span>
+          ) : stockState.status === 'error' ? (
+            <div className="bike-prediction-state" role="alert">
+              <p>현재 재고를 불러오지 못했어요.</p>
+              <button className="secondary" onClick={retryStock}>
+                재고 다시 시도
+              </button>
+            </div>
+          ) : (
+            <span className="bike-prediction-state" role="status">
+              {stockState.message}
+            </span>
           )}
         </div>
-        {currentPrediction && (
-          <div className="bike-prediction-result">
-            {currentPrediction.status === 'UNAVAILABLE' ? (
+        <div className="bike-prediction-value" aria-label="도착 시 따릉이 예상">
+          <span className="bike-prediction-label">
+            {target ? displayTime(target.arrivalTime) : '도착 시'}
+          </span>
+          {currentPrediction ? (
+            currentPrediction.status === 'UNAVAILABLE' ? (
               <strong>도착 시 예측 정보 없음</strong>
             ) : currentPrediction.predictedBikes === null ? (
               <strong>예측 수량 없음</strong>
             ) : (
               <strong>{currentPrediction.predictedBikes}대 예상</strong>
-            )}
-          </div>
-        )}
-      </div>
-      {state.status === 'error' && (
-        <div className="bike-prediction-state" role="alert">
-          <p>도착 시 따릉이 예측을 불러오지 못했어요.</p>
-          <button className="secondary" onClick={retry}>
-            다시 시도
-          </button>
+            )
+          ) : state.status === 'error' ? (
+            <div className="bike-prediction-state" role="alert">
+              <p>도착 시 따릉이 예측을 불러오지 못했어요.</p>
+              <button className="secondary" onClick={retry}>
+                다시 시도
+              </button>
+            </div>
+          ) : state.status === 'unavailable' ? (
+            <p className="bike-prediction-state" role="status">
+              {state.message}
+            </p>
+          ) : (
+            <p className="bike-prediction-state" role="status">
+              도착 시 재고를 예측하고 있어요…
+            </p>
+          )}
+          {currentPrediction?.source === 'MOCK' && (
+            <small className="bike-prediction-source">샘플</small>
+          )}
         </div>
-      )}
-      {state.status === 'unavailable' && (
-        <p className="bike-prediction-state" role="status">
-          {state.message}
-        </p>
-      )}
-      {(state.status === 'success' && !currentPrediction) || state.status === 'loading' ? (
-        <p className="bike-prediction-state" role="status">
-          도착 시 재고를 예측하고 있어요…
-        </p>
-      ) : null}
+      </div>
     </section>
   )
 }
