@@ -56,6 +56,15 @@ class Settings(BaseSettings):
     time_llm_base_url: str | None = None
     time_llm_model: str | None = None
     time_llm_timeout_sec: float = 4.0
+    # BE 재안내 API(POST /api/routes/replan 등) 주소. 회신값 http://be:8080, 무인증
+    # (`.claude/handoff/TO_FE-bike-reroute-04.md`). env는 BE_BASE_URL에서도 읽는다 —
+    # time_llm_api_key와 같은 패턴으로 별칭을 둔다.
+    time_be_base_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("TIME_BE_BASE_URL", "BE_BASE_URL")
+    )
+    time_be_timeout_sec: float = 3.0
+    # 재안내 추천(`recommendationId`)의 유효 기간(초). 라우터가 `validUntil` 계산에 쓴다.
+    time_recommendation_ttl_sec: float = 600.0
     # 세션당 LLM 호출·토큰 상한. **잠정값, 근거 없음** — 실제 프롬프트 크기·게이트웨이 단가를
     # 보지 못한 채 우선 막아둔 값이다. 표를 확보하면 다시 정한다(트리거 임계값과 같은 처지).
     time_llm_max_calls_per_session: int = 3
