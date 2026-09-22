@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { bikePredictionRepository, bikeStockRepository } from '../../api/repositories'
+import {
+  bikePredictionRepository,
+  bikeStockRepository,
+  isBikePredictionMockEnabled,
+} from '../../api/repositories'
 import type { BikePrediction, BikePredictionRepository } from '../../api/bikePrediction'
 import type { BikeStationRepository, BikeStock } from '../../api/contracts'
 import type { Leg, Route } from './types'
@@ -246,7 +250,7 @@ export default function BikePrediction({
               도착 시 재고를 예측하고 있어요…
             </p>
           )}
-          {currentPrediction?.source === 'MOCK' && (
+          {isBikePredictionMockEnabled && currentPrediction?.source === 'MOCK' && (
             <small className="bike-prediction-source">샘플</small>
           )}
         </div>
