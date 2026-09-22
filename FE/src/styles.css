@@ -56,24 +56,28 @@ button {
   display: grid;
   place-items: center;
   padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
-  color: var(--primary-dark);
-  background: #f0f4f3;
+  color: #fff;
+  background: var(--primary);
 }
 .launch-splash-content {
   display: grid;
   justify-items: center;
-  gap: 22px;
+  gap: 24px;
+  width: min(100%, 440px);
 }
-.launch-splash img {
+.launch-splash-icon {
   width: min(144px, 34vw);
   height: min(144px, 34vw);
   border-radius: 28px;
   box-shadow: 0 14px 30px #087c6330;
 }
 .launch-splash h1 {
-  font-size: clamp(20px, 5vw, 26px);
+  max-width: 390px;
+  text-align: center;
+  font-size: clamp(19px, 5vw, 25px);
   font-weight: 750;
   letter-spacing: -1px;
+  line-height: 1.45;
 }
 h1,
 h2,
