@@ -15,6 +15,12 @@ public final class BikeEdgeBuilder {
     /** BIKE 엣지 연결 반경(m). 이보다 먼 쌍은 잇지 않는다. */
     public static final double RADIUS_M = 1000.0;
 
+    /**
+     * 대여 1회(연속 BIKE 구간) 상한(초) — 1km ÷ 15km/h = 240초(5부 T3 결정: act 총거리 1km 상수).
+     * 초과하는 연속 자전거 구간은 접근·이탈 closure·엔진 이완·후보 필터에서 제외한다.
+     */
+    public static final int MAX_ACT_SEC = 240;
+
     /** 자전거 속도(m/s). 15km/h. */
     public static final double METERS_PER_SEC = 15_000.0 / 3600.0;
 
