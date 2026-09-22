@@ -21,6 +21,15 @@ class BusCongestionWindowTest {
 
     private static final Clock FIXED =
             Clock.fixed(Instant.parse("2026-09-21T09:45:00+09:00"), ZoneOffset.of("+09:00"));
+
+    /**
+     * 같은 순간을 <b>UTC 시계</b>로 본 것 (S15P21A104-306). prod 컨테이너가 UTC 라
+     * {@code ClockConfig} 의 {@code Clock.systemDefaultZone()} 이 이 모양이 된다.
+     * {@code departureTime} 은 FE 가 보내는 <b>서울 벽시계</b>라, 서버 시간대가 무엇이든
+     * 판정은 같아야 한다.
+     */
+    private static final Clock FIXED_UTC =
+            Clock.fixed(Instant.parse("2026-09-21T09:45:00+09:00"), ZoneOffset.UTC);
     private static final Duration WINDOW = Duration.ofMinutes(10);
 
     private static LocalDateTime at(String time) {
@@ -71,5 +80,24 @@ class BusCongestionWindowTest {
     void w7_창_0() {
         assertFalse(BusCongestionWindow.isLive(at("09:45:01"), FIXED, Duration.ZERO));
         assertTrue(BusCongestionWindow.isLive(null, FIXED, Duration.ZERO), "시각 없음은 언제나 지금");
+    }
+
+    @Test
+    @DisplayName("306-W8: 서버 시계가 UTC 여도 서울 벽시계 \"지금\" 이면 붙인다 — prod 결함 재현")
+    void w8_서버_UTC_서울_지금() {
+        assertTrue(BusCongestionWindow.isLive(at("09:45:00"), FIXED_UTC, WINDOW));
+    }
+
+    @Test
+    @DisplayName("306-W9: 서버 시계가 UTC 여도 UTC 벽시계 값은 \"지금\" 이 아니다 — 계약은 서울 벽시계다")
+    void w9_서버_UTC_UTC벽시계() {
+        assertFalse(BusCongestionWindow.isLive(at("00:45:00"), FIXED_UTC, WINDOW));
+    }
+
+    @Test
+    @DisplayName("306-W10: 서버 시계가 UTC 여도 창 밖(+11분)은 여전히 안 붙인다 — 창을 넓혀 통과시킨 게 아니다")
+    void w10_서버_UTC_창_밖() {
+        assertFalse(BusCongestionWindow.isLive(at("09:56:00"), FIXED_UTC, WINDOW), "11분 뒤");
+        assertFalse(BusCongestionWindow.isLive(at("11:45:00"), FIXED_UTC, WINDOW), "2시간 뒤");
     }
 }
