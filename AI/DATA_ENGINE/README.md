@@ -79,7 +79,7 @@ bash DATA_ENGINE/scripts/install_data_engine_services.sh --enable-now
 ### 지하철 D−1 승하차 수집(`subway_ridership_daily`, 143)
 
 원천 `getStnPsgr`(OA-22723)는 **어제치를 오전 중에 올리고 최근 7일만 남긴다** — 하루라도 놓치면 그 날은
-영구 결손이다. 그래서 상시 폴링이 아니라 `subway-ridership-daily.timer`가 09:00·13:00에
+영구 결손이다. 그래서 상시 폴링이 아니라 `subway-ridership-daily.timer`가 09:00·13:00(**Asia/Seoul** — 서버 TZ는 UTC)에
 `subway-ridership-daily.service`(oneshot)를 띄우고, 서비스는 어제부터 7일 중 **누적 파일에 없는 날짜만**
 받는다(하루 ≈67회 호출, 첫 실행 ≈460회; 둘째 회차에 이미 있으면 호출 0회). `Persistent=true`라 서버가
 꺼져 있던 회차도 켜지면 바로 실행한다. 설치는 위 스크립트가 함께 한다.
