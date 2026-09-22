@@ -67,15 +67,20 @@ test('307-C5: 따릉이·혼잡도 두 예측을 함께 적재한다', () => {
   assert.match(doc, /--load\.sources=bikepred,crowdpred/, '두 소스를 모두 지정해야 한다');
 });
 
-test('307-C6: load 프로파일로 덮어 웹서버 없이 적재만 하고 끝난다', () => {
+test('307-C6: prod 프로파일을 함께 켠다 — load 만 주면 로그가 한 줄도 안 남는다', () => {
   const doc = cronJobDoc(render());
-  assert.match(doc, /name:\s*SPRING_PROFILES_ACTIVE\s*\n\s*value:\s*load/, 'be-config 의 prod 프로파일을 load 로 덮어야 한다');
+  // logback-spring.xml 의 appender 는 springProfile "local, default" 와 "prod" 에만 걸려 있다.
+  // load 만 주면 어느 쪽도 안 맞아 appender 가 0개가 되고, 기동 실패 스택조차 삼켜진다
+  // (2026-09-22 컨테이너 실측: 배너 뒤 14줄에서 끊기고 종료코드 1).
+  assert.match(doc, /name:\s*SPRING_PROFILES_ACTIVE\s*\n\s*value:\s*prod,load/, 'prod,load 여야 로그가 남는다');
 });
 
-test('307-C7: 읽을 경로를 마운트 지점으로 덮는다', () => {
+test('307-C7: 읽을 경로를 명령행 인자로 덮는다 — 실제 설정 이름을 쓴다', () => {
   const doc = cronJobDoc(render());
-  assert.match(doc, /name:\s*LOAD_BIKEPRED_CSVPATH/, '따릉이 경로를 덮어야 한다');
-  assert.match(doc, /name:\s*LOAD_CROWDPRED_PATH/, '혼잡도 경로를 덮어야 한다');
+  // 설정 이름은 load.bikepred.path · load.crowdpred.path 다. application-load.yml 의
+  // csv-path 키는 어디에도 안 붙는 죽은 키라 그 이름으로는 안 덮인다(2026-09-22 실측).
+  assert.match(doc, /--load\.bikepred\.path=\/ai-data\/BIKE\/serving/, '따릉이 경로를 인자로 덮어야 한다');
+  assert.match(doc, /--load\.crowdpred\.path=\/ai-data\/CROWD\/serving/, '혼잡도 경로를 인자로 덮어야 한다');
 });
 
 test('307-C8: 겹쳐 돌지 않고, 실패 기록이 남는다', () => {
