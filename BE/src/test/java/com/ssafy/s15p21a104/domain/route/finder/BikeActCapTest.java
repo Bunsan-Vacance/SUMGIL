@@ -31,9 +31,9 @@ class BikeActCapTest {
     }
 
     @Test
-    @DisplayName("C1: 연속 자전거 260초(>240) 경로는 후보에서 제외된다")
+    @DisplayName("C1: 연속 자전거 520초(>480, 2km 초과) 경로는 후보에서 제외된다")
     void c1_상한초과_제외() {
-        var graph = graphOf(bike("A", "B", 130), bike("B", "C", 130));
+        var graph = graphOf(bike("A", "B", 260), bike("B", "C", 260));
 
         List<ScoredCandidate> candidates =
                 finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
@@ -42,13 +42,24 @@ class BikeActCapTest {
     }
 
     @Test
-    @DisplayName("C2: 연속 자전거 220초(≤240) 경로는 유지된다")
+    @DisplayName("C2: 연속 자전거 480초(≤480, 2km 경계) 경로는 유지된다")
     void c2_상한이내_유지() {
-        var graph = graphOf(bike("A", "B", 110), bike("B", "C", 110));
+        var graph = graphOf(bike("A", "B", 240), bike("B", "C", 240));
 
         List<ScoredCandidate> candidates =
                 finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
 
         assertFalse(candidates.isEmpty(), "상한 이내 자전거 경로가 사라졌다");
+    }
+
+    @Test
+    @DisplayName("C3: 역삼→한티급 1.5km(360초) 경로는 유지된다 (2026-09-22 상향 근거)")
+    void c3_역삼한티급_유지() {
+        var graph = graphOf(bike("A", "B", 180), bike("B", "C", 180));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
+
+        assertFalse(candidates.isEmpty(), "1.5km 자전거 경로가 사라졌다");
     }
 }
