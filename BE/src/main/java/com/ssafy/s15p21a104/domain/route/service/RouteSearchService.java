@@ -37,6 +37,7 @@ import com.ssafy.s15p21a104.domain.route.scoring.BusCrowdingScale;
 import com.ssafy.s15p21a104.domain.route.scoring.CongestionCostModel;
 import com.ssafy.s15p21a104.domain.route.scoring.CongestionPredictionResolver;
 import com.ssafy.s15p21a104.domain.route.scoring.RouteScoreRanker;
+import com.ssafy.s15p21a104.domain.route.scoring.WorstCongestionPicker;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
@@ -417,6 +418,17 @@ public class RouteSearchService {
             }
         }
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        // BUS 실시간 등급(297) — 정렬과 같은 축·같은 캐시. 지금 출발일 때만 채워진다.
+        Function<String, Map<String, BusArrival>> busCongestion = stopId -> Map.of();
+        if (BusCongestionWindow.isLive(departureTime, clock, busCongestionProperties.nowWindow())) {
+            Set<String> stops = RouteNameResolver.busBoardingStops(six);
+            if (!stops.isEmpty()) {
+                busCongestionReader.prefetch(stops);
+                busCongestion = busCongestionReader::forStop;
+            }
+        }
+        RouteScoreRanker.BusLevelLookup busLevels = busLevelLookup(busCongestion);
+        Map<String, RouteMapper.StationInfo> stationInfos = graphRegistry.stationInfos();
         List<RouteSearchResponse> out = new ArrayList<>();
         for (RouteSearchResponse response : six) {
             List<RouteLegResponse> legs = LegContract.withContractFields(
@@ -424,20 +436,42 @@ public class RouteSearchService {
             List<Edge> edges = edgesBySignature.getOrDefault(
                     RouteCandidateFinder.exactSignature(response), List.of());
             AtomicBoolean truncated = new AtomicBoolean(false);
-            Optional<Double> linkScore = edges.isEmpty() ? Optional.empty()
-                    : LinkCongestionScorer.score(
-                                    edges, departureTime, congestionPredLookup(truncated))
-                            .map(LinkCongestionScorer.Result::worstLevel);
-            Optional<Double> lineScore = CongestionScorer.worst(legs, levelByRouteId)
-                    .map(CongestionScorer.Worst::level);
+            Optional<LinkCongestionScorer.Result> linkResult = edges.isEmpty() ? Optional.empty()
+                    : LinkCongestionScorer.score(edges, departureTime, congestionPredLookup(truncated));
+            Optional<CongestionPredictionResolver.Worst> worst = WorstCongestionPicker.pick(
+                    linkResult,
+                    id -> {
+                        RouteMapper.StationInfo info = stationInfos.get(id);
+                        return info == null ? id : info.name();
+                    },
+                    worstBusLeg(legs, busLevels),
+                    CongestionScorer.worst(legs, levelByRouteId));
             CongestionPrediction prediction = CongestionPredictionResolver.resolve(
-                    linkScore, lineScore, truncated.get(),
-                    departureTime.toLocalDate(), today);
+                    worst, truncated.get(), departureTime.toLocalDate(), today);
             out.add(new RouteSearchResponse(response.routeType(), response.totalMinutes(),
                     legs, response.source(), response.totalDistanceMeters(),
                     response.transferCount(), prediction));
         }
         return out;
+    }
+
+    /** BUS leg 중 가장 혼잡한 leg(공통 축 수치). 아는 값이 없으면 빈 값. */
+    private static Optional<CongestionScorer.Worst> worstBusLeg(
+            List<RouteLegResponse> legs, RouteScoreRanker.BusLevelLookup busLevels) {
+        CongestionScorer.Worst worst = null;
+        for (RouteLegResponse leg : legs) {
+            if (leg.mode() != TravelMode.BUS) {
+                continue;
+            }
+            Double level = busLevels.levelOf(leg);
+            if (level == null) {
+                continue;
+            }
+            if (worst == null || level > worst.level()) {
+                worst = new CongestionScorer.Worst(level, leg);
+            }
+        }
+        return Optional.ofNullable(worst);
     }
 
     /**
