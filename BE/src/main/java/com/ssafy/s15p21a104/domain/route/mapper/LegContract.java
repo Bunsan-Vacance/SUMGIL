@@ -45,7 +45,8 @@ public final class LegContract {
             out.add(new RouteLegResponse(
                     leg.mode(), leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
                     leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                    leg.routeId(), leg.minutes(), leg.geometry(), leg.geometryStatus(),
+                    leg.routeId(), leg.minutes(), leg.waitMinutes(),
+                    leg.geometry(), leg.geometryStatus(),
                     leg.distanceMeters(), leg.routeName(), leg.routeOptions(),
                     leg.congestionGrade(),
                     type,

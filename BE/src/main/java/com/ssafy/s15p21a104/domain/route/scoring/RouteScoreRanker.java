@@ -240,7 +240,10 @@ public final class RouteScoreRanker {
                 if (level == null) {
                     continue;
                 }
-                long sec = Math.max(0, Math.round((leg.minutes() == null ? 0 : leg.minutes()) * 60));
+                // 대기 분리(2026-09-22) 후에도 가중치 합은 종전과 같게 유지한다.
+                double legMinutes = (leg.minutes() == null ? 0 : leg.minutes())
+                        + (leg.waitMinutes() == null ? 0 : leg.waitMinutes());
+                long sec = Math.max(0, Math.round(legMinutes * 60));
                 weightedSum += level * sec;
                 weightedSec += sec;
             }

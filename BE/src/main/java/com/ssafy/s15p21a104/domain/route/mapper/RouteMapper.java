@@ -27,14 +27,21 @@ public final class RouteMapper {
     private RouteMapper() {
     }
 
-    /** 엔진이 내놓은 이동 한 칸: 역에서 역으로의 이동과 소요 시간(초). */
+    /** 엔진이 내놓은 이동 한 칸: 역에서 역으로의 이동과 소요 시간(초), 탑승 대기(초). */
     public record EngineSegment(
             String fromStationId,
             String toStationId,
             String routeId,
             long seconds,
-            TravelMode mode
+            TravelMode mode,
+            long waitSeconds
     ) {
+
+        /** 승차 대기 없는 기존 형태(2026-09-22 이전) — 대기 0. */
+        public EngineSegment(String fromStationId, String toStationId, String routeId,
+                             long seconds, TravelMode mode) {
+            this(fromStationId, toStationId, routeId, seconds, mode, 0);
+        }
     }
 
     /** 엔진 탐색 결과: 이동 순서·전체 소요 시간(초)·환승 횟수. */
@@ -236,8 +243,10 @@ public final class RouteMapper {
                 info.stationId(), info.name(), info.lat(), info.lng(),
                 info.stationId(), info.name(), info.lat(), info.lng(),
                 null, seconds / 60.0,
+                0.0,
                 null, "unavailable",
-                null, null, null);
+                null, null, null,
+                null, null, null, null);
     }
 
     private static List<EngineSegment> validate(
@@ -310,11 +319,13 @@ public final class RouteMapper {
         StationInfo from = requireStation(stationsById, first.fromStationId());
         StationInfo to = requireStation(stationsById, last.toStationId());
         long sum = 0;
+        long waitSum = 0;
         for (EngineSegment segment : group) {
             if (segment.mode() == null || segment.mode() != first.mode()) {
                 throw new IllegalArgumentException("묶음 안의 수단이 다르다");
             }
             sum += segment.seconds();
+            waitSum += segment.waitSeconds();
         }
         List<RouteOptionResponse> routeOptions = null;
         if (first.mode() == TravelMode.BUS && busOptionsOrNull != null) {
@@ -327,11 +338,13 @@ public final class RouteMapper {
                 to.stationId(), to.name(), to.lat(), to.lng(),
                 first.routeId(),
                 sum / 60.0,
+                waitSum / 60.0,
                 // KTDB geometry·거리·노선명은 RouteMapper가 모른다(DB 비의존 순수 함수) —
                 // RouteSearchService가 후처리로 채운다. 계약 필드(236·237·297)도 후처리 몫이라
-                // 16인자 호환 생성자를 쓴다.
+                // 나머지는 null로 둔다.
                 null, "unavailable",
-                null, null, routeOptions
+                null, null, routeOptions,
+                null, null, null, null
         );
     }
 

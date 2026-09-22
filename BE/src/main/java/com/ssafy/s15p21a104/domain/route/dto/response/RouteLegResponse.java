@@ -15,6 +15,12 @@ public record RouteLegResponse(
         Double toLng,
         String routeId,
         Double minutes,
+        /**
+         * 탑승 대기(분). leg 소요({@link #minutes})에서 분리한 값으로, 총 소요 시간
+         * ({@code totalMinutes})에는 포함된다(2026-09-22 — 이동 시간이 대기로 부풀려
+         * 보이던 문제). null이면 미상(구 생성자 경로).
+         */
+        Double waitMinutes,
         /** KTDB 실선로 좌표(미승인 필드). 매칭 안 되면 null — {@link #geometryStatus} 참고. */
         MultiLineStringResponse geometry,
         /** "available" | "unavailable". */
@@ -63,7 +69,7 @@ public record RouteLegResponse(
     /**
      * 부가 필드 없이 만드는 기존 형태(S15P21A104-234 까지의 16인자). 등급은 {@code RouteNameResolver}
      * 가, 전환 구분·대여소 ID는 {@code LegContract} 가 후처리로 붙이므로 매퍼·기하 보강 단계는
-     * 이 생성자를 쓴다.
+     * 이 생성자를 쓴다. 대기 분리 이전 형태라 {@code waitMinutes}는 null.
      */
     public RouteLegResponse(
             TravelMode mode,
@@ -74,14 +80,30 @@ public record RouteLegResponse(
             Double distanceMeters, String routeName,
             List<RouteOptionResponse> routeOptions) {
         this(mode, fromNodeId, fromNodeName, fromLat, fromLng, toNodeId, toNodeName, toLat, toLng,
-                routeId, minutes, geometry, geometryStatus, distanceMeters, routeName, routeOptions,
-                null, null, null, null);
+                routeId, minutes, null, geometry, geometryStatus, distanceMeters, routeName,
+                routeOptions, null, null, null, null);
+    }
+
+    /** 부가 필드(등급·전환·대여소)만 있고 대기 분리 전인 기존 형태(297까지) — {@code waitMinutes} null. */
+    public RouteLegResponse(
+            TravelMode mode,
+            String fromNodeId, String fromNodeName, Double fromLat, Double fromLng,
+            String toNodeId, String toNodeName, Double toLat, Double toLng,
+            String routeId, Double minutes,
+            MultiLineStringResponse geometry, String geometryStatus,
+            Double distanceMeters, String routeName,
+            List<RouteOptionResponse> routeOptions,
+            String congestionGrade, TransitionType transitionType,
+            String fromRentalId, String toRentalId) {
+        this(mode, fromNodeId, fromNodeName, fromLat, fromLng, toNodeId, toNodeName, toLat, toLng,
+                routeId, minutes, null, geometry, geometryStatus, distanceMeters, routeName,
+                routeOptions, congestionGrade, transitionType, fromRentalId, toRentalId);
     }
 
     /** 같은 leg 에 혼잡 등급만 바꿔 끼운다. */
     public RouteLegResponse withCongestionGrade(String grade) {
         return new RouteLegResponse(mode, fromNodeId, fromNodeName, fromLat, fromLng,
-                toNodeId, toNodeName, toLat, toLng, routeId, minutes,
+                toNodeId, toNodeName, toLat, toLng, routeId, minutes, waitMinutes,
                 geometry, geometryStatus, distanceMeters, routeName, routeOptions, grade,
                 transitionType, fromRentalId, toRentalId);
     }
