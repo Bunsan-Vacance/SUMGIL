@@ -22,6 +22,11 @@ function formatCongestion(leg: Leg) {
     : `구간 예상 혼잡도 ${formatCongestionPercent(leg.segmentCongestionLevel)}%`
 }
 
+function formatLegNote(leg: Leg) {
+  const busOptionCount = leg.mode === 'bus' ? leg.busRouteOptions?.length || 0 : 0
+  return busOptionCount > 1 ? `이용 가능한 버스 ${busOptionCount}개 노선` : leg.note
+}
+
 function sameBusOptions(left: Leg, right: Leg) {
   if (left.busRouteOptions === undefined && right.busRouteOptions === undefined) return true
   if (!left.busRouteOptions || !right.busRouteOptions) return false
@@ -97,7 +102,7 @@ export default function LegList({
                 {leg.title}
               </strong>
               <p>
-                {leg.note} · {formatDistance(leg.distanceMeters)}
+                {formatLegNote(leg)} · {formatDistance(leg.distanceMeters)}
                 {transitionLabel(leg.transitionType) && ` · ${transitionLabel(leg.transitionType)}`}
                 {legCongestion && ` · ${legCongestion}`}
               </p>
