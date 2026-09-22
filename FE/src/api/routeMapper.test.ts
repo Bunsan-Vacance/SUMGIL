@@ -156,6 +156,28 @@ describe('경로 응답 확장 필드', () => {
     })
   })
 
+  it('LIVE 근거(BUS 실시간)를 수용한다', () => {
+    const route = mapBackendRoute(
+      response({
+        congestionPrediction: {
+          congestionPercent: 70,
+          congestionGrade: 'MEDIUM',
+          dataStatus: 'AVAILABLE',
+          predictionBasis: 'LIVE',
+        },
+      }),
+      0,
+      '2026-09-17T00:00:00.000Z',
+    )
+
+    expect(route.congestionPrediction).toEqual({
+      congestionPercent: 70,
+      congestionGrade: 'MEDIUM',
+      dataStatus: 'AVAILABLE',
+      predictionBasis: 'LIVE',
+    })
+  })
+
   it.each([
     {
       congestionPercent: -1,
