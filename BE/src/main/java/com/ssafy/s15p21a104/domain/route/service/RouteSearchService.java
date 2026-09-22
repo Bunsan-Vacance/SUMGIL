@@ -21,6 +21,7 @@ import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.CongestionPrediction;
+import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
@@ -237,7 +238,121 @@ public class RouteSearchService {
         // 완전 중복(속도∩혼잡)·유사경로(탄 것만 비교) 제거 후 부족분은 전체 후보에서 채운다.
         List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
                 speed, calm, pool, SPEED_ROUTES + CALM_ROUTES);
+        six = ensureBikeFreeCandidate(six, finder, graph, originStationId, destStationId, modes);
         return new SixResult(six, timeScored, calmScored);
+    }
+
+    /**
+     * "지하철만" 후보 최소 1개 보장(2026-09-22) — 자전거·버스 혼합 후보가 슬롯을 채우면
+     * 전 구간 지하철 후보가 6건 밖으로 밀려날 수 있다(예: 역삼→한티, prod: 분당선 승차 대기로
+     * 지하철만 11.8분이 혼합 후보들 뒤로, 게다가 자전거/버스 라벨이 지하철 라벨을 가림).
+     * 6건에 없으면 허용 수단 안에서 {WALK,SUBWAY}로 1회 더 탐색해 마지막 대안 슬롯에 넣고,
+     * 지하철이 아예 없으면 {WALK,SUBWAY,BUS}(자전거 없는 대중교통)로 한 번 더 시도한다.
+     */
+    static List<RouteSearchResponse> ensureBikeFreeCandidate(List<RouteSearchResponse> six,
+            RouteCandidateFinder finder, RouteGraph graph, String originStationId,
+            String destStationId, List<TravelMode> modes) {
+        if (six.stream().anyMatch(RouteSearchService::isSubwayOnly)) {
+            return six;
+        }
+        if (allows(modes, TravelMode.SUBWAY)) {
+            RouteSearchResponse subway = bestWithModes(finder, graph, originStationId, destStationId,
+                    allowedModes(modes, List.of(TravelMode.WALK, TravelMode.SUBWAY)),
+                    RouteSearchService::isSubwayOnly);
+            if (subway != null) {
+                return replaceLastAlternative(six, subway);
+            }
+        }
+        if (six.stream().anyMatch(RouteSearchService::isBikeFreeTransit)) {
+            return six;
+        }
+        if (allows(modes, TravelMode.SUBWAY) || allows(modes, TravelMode.BUS)) {
+            RouteSearchResponse transit = bestWithModes(finder, graph, originStationId, destStationId,
+                    allowedModes(modes, List.of(TravelMode.WALK, TravelMode.SUBWAY, TravelMode.BUS)),
+                    RouteSearchService::isBikeFreeTransit);
+            if (transit != null) {
+                return replaceLastAlternative(six, transit);
+            }
+        }
+        return six;
+    }
+
+    /** 요청이 해당 수단을 허용하는가(요청 수단이 비면 전체 허용). */
+    private static boolean allows(List<TravelMode> modes, TravelMode mode) {
+        return modes == null || modes.isEmpty() || modes.contains(mode);
+    }
+
+    /** 보장 조건을 만족하는 최선 후보 탐색 1회 — 검증을 통과하는 후보가 없으면 null. */
+    private static RouteSearchResponse bestWithModes(RouteCandidateFinder finder, RouteGraph graph,
+            String originStationId, String destStationId, List<TravelMode> allowedModes,
+            java.util.function.Predicate<RouteSearchResponse> valid) {
+        if (allowedModes.isEmpty()) {
+            return null;
+        }
+        List<ScoredCandidate> extra = finder.findCandidatesWithPaths(
+                graph, originStationId, destStationId, 3, allowedModes);
+        for (ScoredCandidate candidate : extra) {
+            if (valid.test(candidate.response())) {
+                return candidate.response();
+            }
+        }
+        return null;
+    }
+
+    /** 마지막 ALTERNATIVE 자리를 대체(없으면 6 미만일 때만 덧붙인다). */
+    private static List<RouteSearchResponse> replaceLastAlternative(List<RouteSearchResponse> six,
+            RouteSearchResponse candidate) {
+        RouteSearchResponse alternative = new RouteSearchResponse(
+                RouteType.ALTERNATIVE, candidate.totalMinutes(), candidate.legs(),
+                candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount(),
+                candidate.congestionPrediction());
+        List<RouteSearchResponse> out = new ArrayList<>(six);
+        for (int i = out.size() - 1; i >= 0; i--) {
+            if (out.get(i).routeType() == RouteType.ALTERNATIVE) {
+                out.set(i, alternative);
+                return List.copyOf(out);
+            }
+        }
+        if (out.size() < SPEED_ROUTES + CALM_ROUTES) {
+            out.add(alternative);
+        }
+        return List.copyOf(out);
+    }
+
+    /** 지하철 leg 포함 + 자전거·버스 leg 없음. */
+    private static boolean isSubwayOnly(RouteSearchResponse response) {
+        boolean subway = false;
+        for (RouteLegResponse leg : response.legs()) {
+            if (leg.mode() == TravelMode.BIKE || leg.mode() == TravelMode.BUS) {
+                return false;
+            }
+            if (leg.mode() == TravelMode.SUBWAY) {
+                subway = true;
+            }
+        }
+        return subway;
+    }
+
+    /** 자전거 leg 없이 대중교통(SUBWAY·BUS) leg를 포함한 후보인가. */
+    private static boolean isBikeFreeTransit(RouteSearchResponse response) {
+        boolean transit = false;
+        for (RouteLegResponse leg : response.legs()) {
+            if (leg.mode() == TravelMode.BIKE) {
+                return false;
+            }
+            if (leg.mode() == TravelMode.SUBWAY || leg.mode() == TravelMode.BUS) {
+                transit = true;
+            }
+        }
+        return transit;
+    }
+
+    /** 요청 허용 수단과 후보 모드의 교집합. 요청이 비면 후보 모드 그대로. */
+    private static List<TravelMode> allowedModes(List<TravelMode> modes, List<TravelMode> candidates) {
+        if (modes == null || modes.isEmpty()) {
+            return candidates;
+        }
+        return candidates.stream().filter(modes::contains).toList();
     }
 
     /**
