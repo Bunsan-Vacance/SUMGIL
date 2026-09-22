@@ -158,6 +158,15 @@ public final class RaptorFinder {
      */
     public List<Journey> find(String originNodeId, String destNodeId, AccessTables accessTables,
                               int maxRounds, boolean minimizeCost) {
+        return find(originNodeId, destNodeId, accessTables, maxRounds, minimizeCost, false);
+    }
+
+    /**
+     * @param requireTransit true면 탑승(BUS·SUBWAY) leg가 있는 최선만 journey로 돌려준다 —
+     *        비탑승(전부 연결) 최단이 1등일 때 탑승 대안을 얻기 위한 모드(K 후보 수집)
+     */
+    public List<Journey> find(String originNodeId, String destNodeId, AccessTables accessTables,
+                              int maxRounds, boolean minimizeCost, boolean requireTransit) {
         Objects.requireNonNull(accessTables, "accessTables");
         Map<String, Access> originAccess = accessTables.origin();
         Map<String, Egress> destAccess = accessTables.dest();
@@ -174,7 +183,7 @@ public final class RaptorFinder {
                     ? new Trace(-1, null, "WALK", TravelMode.WALK, 0, value.costSec(), -1, -1, -1)
                     : new Trace(0, value.fromNode(), connectionRouteId(value.mode()), value.mode(),
                             value.costSec() - value.legSec(), value.costSec(), -1, -1, -1);
-            round0.put(access.getKey(), new Label(value.costSec(), value.costSec(), trace));
+            round0.put(access.getKey(), new Label(value.costSec(), value.costSec(), 0, trace));
         }
         // 라운드 0 연결 이완 — 사슬 없는 단순 맵(기존 API)의 출발지 접근 한 홉 호환.
         relaxConnections(round0, 0, originAccess.keySet(), minimizeCost);
@@ -198,7 +207,8 @@ public final class RaptorFinder {
             }
             byRound.add(current);
 
-            Journey best = bestJourney(byRound, destAccess, minimizeCost, originNodeId, destNodeId);
+            Journey best = bestJourney(byRound, destAccess, minimizeCost, originNodeId, destNodeId,
+                    requireTransit);
             if (best != null && best.totalCost() < prevBest) {
                 if (seen.add(signatureOf(best))) {
                     found.add(best);
@@ -227,6 +237,7 @@ public final class RaptorFinder {
             }
             long bestDepart = INF;
             int bestIdx = -1;
+            Label bestBoarding = null;
             for (int i = 1; i < n; i++) {
                 // 탑승 후보 갱신은 i-1 정류장까지 반영된 뒤 i로 전진한다.
                 Label boarding = prev.get(stops.get(i - 1));
@@ -235,13 +246,15 @@ public final class RaptorFinder {
                     if (depart < bestDepart) {
                         bestDepart = depart;
                         bestIdx = i - 1;
+                        bestBoarding = boarding;
                     }
                 }
                 if (bestIdx < 0) {
                     continue;
                 }
                 long arrival = bestDepart + (prefix[i] - prefix[bestIdx]);
-                Label label = new Label(arrival, arrival, new Trace(round - 1, stops.get(bestIdx),
+                Label label = new Label(arrival, arrival, bestBoarding.rides() + 1,
+                        new Trace(round - 1, stops.get(bestIdx),
                         route.routeId(), route.mode(), bestDepart, arrival, routeIndex, bestIdx, i));
                 if (relax(current, stops.get(i), label)) {
                     improved = true;
@@ -265,7 +278,8 @@ public final class RaptorFinder {
                             route.travelSec()[seg]);
                     time += route.travelSec()[seg];
                     cost += segCost;
-                    Label label = new Label(time, cost, new Trace(round - 1, stops.get(i),
+                    Label label = new Label(time, cost, boarding.rides() + 1,
+                            new Trace(round - 1, stops.get(i),
                             route.routeId(), route.mode(), boarding.time() + wait, time,
                             routeIndex, i, j));
                     if (relax(current, stops.get(j), label)) {
@@ -291,7 +305,7 @@ public final class RaptorFinder {
             for (Connection connection : connections) {
                 long time = from.time() + connection.sec();
                 long cost = from.cost() + connection.sec();
-                Label label = new Label(time, cost, new Trace(round, connection.from(),
+                Label label = new Label(time, cost, from.rides(), new Trace(round, connection.from(),
                         connection.mode() == TravelMode.BIKE ? "BIKE" : "WALK",
                         connection.mode(), from.time(), time, -1, -1, -1));
                 if (relax(current, connection.to(), label)) {
@@ -315,7 +329,7 @@ public final class RaptorFinder {
     /** 라운드별 최선 도착 journey. 하차 정류장 → 도착지 접근 비용을 더해 비교한다. */
     private Journey bestJourney(List<Map<String, Label>> byRound,
                                 Map<String, Egress> destAccess, boolean minimizeCost,
-                                String originNodeId, String destNodeId) {
+                                String originNodeId, String destNodeId, boolean requireTransit) {
         long bestTotal = INF;
         int bestRound = -1;
         String bestStop = null;
@@ -324,6 +338,9 @@ public final class RaptorFinder {
             for (Map.Entry<String, Egress> dest : destAccess.entrySet()) {
                 Label label = labels.get(dest.getKey());
                 if (label == null) {
+                    continue;
+                }
+                if (requireTransit && label.rides() < 1) {
                     continue;
                 }
                 long base = minimizeCost ? label.cost() : label.time();
@@ -407,7 +424,8 @@ public final class RaptorFinder {
         return signature.toString();
     }
 
-    private record Label(long time, long cost, Trace trace) {
+    /** rides = 이 라벨 사슬의 탑승(BUS·SUBWAY) 횟수 — requireTransit 필터용. */
+    private record Label(long time, long cost, int rides, Trace trace) {
     }
 
     private record Trace(int prevRound, String boardStop, String routeId, TravelMode mode,
