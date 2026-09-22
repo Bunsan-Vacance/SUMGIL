@@ -17,8 +17,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * calm 크로스모달 채점 테스트(5부 C1) — 지하철 링크 점수와 BUS 등급(공통 축)을
- * 타고 있는 시간으로 가중 평균해 비교한다.
+ * calm 크로스모달 채점 테스트(5부 C1) — 지하철 링크 최대값과 BUS 등급(공통 축)을
+ * 같은 축에서 비교한다(2026-09-22: 가중 평균 → 최대값).
  */
 class RouteScoreRankerBusTest {
 
@@ -30,10 +30,20 @@ class RouteScoreRankerBusTest {
     }
 
     private static ScoredCandidate candidate(String routeId, TravelMode mode, int travelSec) {
-        Edge edge = new Edge("A", "B", routeId, travelSec, 0, mode);
-        FoundPath path = new FoundPath(List.of("A", "B"), List.of(edge), travelSec, 0);
+        return candidateOf(routeId, mode, new Edge("A", "B", routeId, travelSec, 0, mode));
+    }
+
+    private static ScoredCandidate candidateOf(String routeId, TravelMode mode, Edge... edges) {
+        int totalSec = 0;
+        java.util.ArrayList<String> nodes = new java.util.ArrayList<>();
+        nodes.add(edges[0].fromNode());
+        for (Edge edge : edges) {
+            totalSec += edge.travelSec();
+            nodes.add(edge.toNode());
+        }
+        FoundPath path = new FoundPath(nodes, List.of(edges), totalSec, 0);
         RouteSearchResponse response = new RouteSearchResponse(
-                RouteType.ALTERNATIVE, travelSec / 60.0, List.of(leg(mode, travelSec / 60.0)),
+                RouteType.ALTERNATIVE, totalSec / 60.0, List.of(leg(mode, totalSec / 60.0)),
                 RouteSource.ALGORITHM, null, 0, null);
         return new ScoredCandidate(response, path);
     }
@@ -76,15 +86,22 @@ class RouteScoreRankerBusTest {
     }
 
     @Test
-    @DisplayName("B3: 가중 평균 — 지하철 30분(140) + 버스 40분(70)이면 (140·1800+70·2400)/4200")
-    void b3_가중평균() {
+    @DisplayName("B3: 평균이면 지하철이 1등이지만, 최대 기준이면 버스가 1등이다")
+    void b3_최대값이_순위를_바꾼다() {
+        // 지하철: 30분 구간 10 + 1분 구간 200 → 평균 16.1, 최대 200
+        ScoredCandidate subway = candidateOf("L1", TravelMode.SUBWAY,
+                new Edge("A", "B", "L1", 1800, 0, TravelMode.SUBWAY),
+                new Edge("B", "C", "L1", 60, 0, TravelMode.SUBWAY));
         ScoredCandidate bus = candidate("BUS", TravelMode.BUS, 2400);
-        LinkCongestionScorer.LinkLevelLookup link = (edge, t) -> null;
+        LinkCongestionScorer.LinkLevelLookup lookup = (edge, t) ->
+                TravelMode.SUBWAY == edge.mode()
+                        ? (edge.fromNode().equals("A") ? 10.0 : 200.0) : null;
 
         List<RouteSearchResponse> ranked = ranker.topCalmByLink(
-                List.of(bus), DEPART, link, 3, BUS_70);
+                List.of(subway, bus), DEPART, lookup, 3, BUS_70);
 
-        assertEquals(1, ranked.size());
+        assertEquals(2, ranked.size());
         assertEquals(RouteType.LOW_CONGESTION, ranked.get(0).routeType());
+        assertEquals(40.0, ranked.get(0).totalMinutes(), 0.01); // 최대 70인 버스가 1등
     }
 }

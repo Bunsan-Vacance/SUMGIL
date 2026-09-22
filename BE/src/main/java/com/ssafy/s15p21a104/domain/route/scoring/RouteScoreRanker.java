@@ -122,8 +122,8 @@ public final class RouteScoreRanker {
 
         Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
         for (RouteSearchResponse candidate : candidates) {
-            CongestionScorer.score(candidate.legs(), levelByRouteId)
-                    .ifPresent(score -> scoreByCandidate.put(candidate, score));
+            CongestionScorer.worst(candidate.legs(), levelByRouteId)
+                    .ifPresent(worst -> scoreByCandidate.put(candidate, worst.level()));
         }
         if (scoreByCandidate.isEmpty()) {
             return List.of();
@@ -188,7 +188,7 @@ public final class RouteScoreRanker {
             LinkCongestionScorer.LinkLevelLookup lookup, int n, BusLevelLookup busLevels) {
         Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
         for (ScoredCandidate candidate : candidates) {
-            Double score = combinedScore(candidate, departureTime, lookup, busLevels);
+            Double score = worstScore(candidate, departureTime, lookup, busLevels);
             if (score != null) {
                 scoreByCandidate.put(candidate.response(), score);
             }
@@ -219,17 +219,15 @@ public final class RouteScoreRanker {
     }
 
     /**
-     * 지하철 링크(통과 시각) + BUS 등급(공통 축)을 <b>타고 있는 시간</b>으로 가중 평균한
-     * 크로스모달 점수(5부 C1). 아는 값이 하나도 없으면 null — 혼잡도로 비교할 수 없는 후보다.
+     * 지하철 링크 최대값 + BUS 등급(공통 축) 중 <b>최대</b> — "가장 혼잡한 구간" 기준
+     * (2026-09-22 표시·정렬 통일). 아는 값이 하나도 없으면 null — 혼잡도로 비교할 수 없는 후보다.
      */
-    private static Double combinedScore(ScoredCandidate candidate, LocalDateTime departureTime,
+    private static Double worstScore(ScoredCandidate candidate, LocalDateTime departureTime,
             LinkCongestionScorer.LinkLevelLookup lookup, BusLevelLookup busLevels) {
-        double weightedSum = 0;
-        long weightedSec = 0;
+        Double worst = null;
         var link = LinkCongestionScorer.score(candidate.path().edges(), departureTime, lookup);
         if (link.isPresent()) {
-            weightedSum += link.get().weightedAverage() * link.get().weightedSec();
-            weightedSec += link.get().weightedSec();
+            worst = link.get().worstLevel();
         }
         if (busLevels != null) {
             for (RouteLegResponse leg : candidate.response().legs()) {
@@ -240,17 +238,11 @@ public final class RouteScoreRanker {
                 if (level == null) {
                     continue;
                 }
-                // 대기 분리(2026-09-22) 후에도 가중치 합은 종전과 같게 유지한다.
-                double legMinutes = (leg.minutes() == null ? 0 : leg.minutes())
-                        + (leg.waitMinutes() == null ? 0 : leg.waitMinutes());
-                long sec = Math.max(0, Math.round(legMinutes * 60));
-                weightedSum += level * sec;
-                weightedSec += sec;
+                if (worst == null || level > worst) {
+                    worst = level;
+                }
             }
         }
-        if (weightedSec <= 0) {
-            return null;
-        }
-        return weightedSum / weightedSec;
+        return worst;
     }
 }

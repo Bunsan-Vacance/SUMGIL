@@ -37,6 +37,7 @@ import com.ssafy.s15p21a104.domain.route.scoring.BusCrowdingScale;
 import com.ssafy.s15p21a104.domain.route.scoring.CongestionCostModel;
 import com.ssafy.s15p21a104.domain.route.scoring.CongestionPredictionResolver;
 import com.ssafy.s15p21a104.domain.route.scoring.RouteScoreRanker;
+import com.ssafy.s15p21a104.domain.route.scoring.WorstCongestionPicker;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
@@ -170,10 +171,11 @@ public class RouteSearchService {
         return withContractFields(named, assembled, effectiveDepartureTime);
     }
 
-    /** 탐색 결과 묶음 — 최종 6건과 점수 계산에 쓴 원본 후보. */
+    /** 탐색 결과 묶음 — 최종 6건과 점수 계산에 쓴 원본 후보(주입 후보 포함). */
     private record SixResult(List<RouteSearchResponse> six,
                              List<ScoredCandidate> timeScored,
-                             List<ScoredCandidate> calmScored) {
+                             List<ScoredCandidate> calmScored,
+                             List<ScoredCandidate> injected) {
     }
 
     /**
@@ -238,8 +240,9 @@ public class RouteSearchService {
         // 완전 중복(속도∩혼잡)·유사경로(탄 것만 비교) 제거 후 부족분은 전체 후보에서 채운다.
         List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
                 speed, calm, pool, SPEED_ROUTES + CALM_ROUTES);
-        six = ensureBikeFreeCandidate(six, finder, graph, originStationId, destStationId, modes);
-        return new SixResult(six, timeScored, calmScored);
+        Injection injection = ensureBikeFreeCandidate(
+                six, finder, graph, originStationId, destStationId, modes);
+        return new SixResult(injection.six(), timeScored, calmScored, injection.injected());
     }
 
     /**
@@ -248,33 +251,47 @@ public class RouteSearchService {
      * 지하철만 11.8분이 혼합 후보들 뒤로, 게다가 자전거/버스 라벨이 지하철 라벨을 가림).
      * 6건에 없으면 허용 수단 안에서 {WALK,SUBWAY}로 1회 더 탐색해 마지막 대안 슬롯에 넣고,
      * 지하철이 아예 없으면 {WALK,SUBWAY,BUS}(자전거 없는 대중교통)로 한 번 더 시도한다.
+     *
+     * <p>주입한 후보는 응답만이 아니라 원본 경로({@link ScoredCandidate})까지 돌려준다 —
+     * 계약 채점(링크 혼잡)이 이 후보만 원본 엣지를 못 찾아 노선 통계로 폴백하던 결함을 막는다.
+     *
+     * @return 6건과 주입 후보(없으면 빈 목록)
      */
-    static List<RouteSearchResponse> ensureBikeFreeCandidate(List<RouteSearchResponse> six,
+    static Injection ensureBikeFreeCandidate(List<RouteSearchResponse> six,
             RouteCandidateFinder finder, RouteGraph graph, String originStationId,
             String destStationId, List<TravelMode> modes) {
         if (six.stream().anyMatch(RouteSearchService::isSubwayOnly)) {
-            return six;
+            return new Injection(six, List.of());
         }
         if (allows(modes, TravelMode.SUBWAY)) {
-            RouteSearchResponse subway = bestWithModes(finder, graph, originStationId, destStationId,
+            ScoredCandidate subway = bestWithModes(finder, graph, originStationId, destStationId,
                     allowedModes(modes, List.of(TravelMode.WALK, TravelMode.SUBWAY)),
                     RouteSearchService::isSubwayOnly);
             if (subway != null) {
-                return replaceLastAlternative(six, subway);
+                return new Injection(
+                        replaceLastAlternative(six, subway.response()), List.of(subway));
             }
         }
         if (six.stream().anyMatch(RouteSearchService::isBikeFreeTransit)) {
-            return six;
+            return new Injection(six, List.of());
         }
         if (allows(modes, TravelMode.SUBWAY) || allows(modes, TravelMode.BUS)) {
-            RouteSearchResponse transit = bestWithModes(finder, graph, originStationId, destStationId,
+            ScoredCandidate transit = bestWithModes(finder, graph, originStationId, destStationId,
                     allowedModes(modes, List.of(TravelMode.WALK, TravelMode.SUBWAY, TravelMode.BUS)),
                     RouteSearchService::isBikeFreeTransit);
             if (transit != null) {
-                return replaceLastAlternative(six, transit);
+                return new Injection(
+                        replaceLastAlternative(six, transit.response()), List.of(transit));
             }
         }
-        return six;
+        return new Injection(six, List.of());
+    }
+
+    /**
+     * @param six 최종 후보 목록
+     * @param injected 보장용으로 주입한 후보의 원본 경로(없으면 빈 목록)
+     */
+    record Injection(List<RouteSearchResponse> six, List<ScoredCandidate> injected) {
     }
 
     /** 요청이 해당 수단을 허용하는가(요청 수단이 비면 전체 허용). */
@@ -283,7 +300,7 @@ public class RouteSearchService {
     }
 
     /** 보장 조건을 만족하는 최선 후보 탐색 1회 — 검증을 통과하는 후보가 없으면 null. */
-    private static RouteSearchResponse bestWithModes(RouteCandidateFinder finder, RouteGraph graph,
+    private static ScoredCandidate bestWithModes(RouteCandidateFinder finder, RouteGraph graph,
             String originStationId, String destStationId, List<TravelMode> allowedModes,
             java.util.function.Predicate<RouteSearchResponse> valid) {
         if (allowedModes.isEmpty()) {
@@ -293,7 +310,7 @@ public class RouteSearchService {
                 graph, originStationId, destStationId, 3, allowedModes);
         for (ScoredCandidate candidate : extra) {
             if (valid.test(candidate.response())) {
-                return candidate.response();
+                return candidate;
             }
         }
         return null;
@@ -380,15 +397,8 @@ public class RouteSearchService {
     private List<RouteSearchResponse> withContractFields(List<RouteSearchResponse> six,
             SixResult assembled, LocalDateTime departureTime) {
         DepartureSlot slot = DepartureSlot.of(departureTime);
-        Map<String, List<Edge>> edgesBySignature = new HashMap<>();
-        for (ScoredCandidate scored : assembled.timeScored()) {
-            edgesBySignature.putIfAbsent(
-                    RouteCandidateFinder.exactSignature(scored.response()), scored.path().edges());
-        }
-        for (ScoredCandidate scored : assembled.calmScored()) {
-            edgesBySignature.putIfAbsent(
-                    RouteCandidateFinder.exactSignature(scored.response()), scored.path().edges());
-        }
+        Map<String, List<Edge>> edgesBySignature = edgesBySignature(
+                assembled.timeScored(), assembled.calmScored(), assembled.injected());
         // stat 폴백용 LINE 레벨 — 최종 후보의 SUBWAY 노선만 묶어 조회한다.
         Set<String> subwayRouteIds = new HashSet<>();
         for (RouteSearchResponse response : six) {
@@ -408,6 +418,17 @@ public class RouteSearchService {
             }
         }
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        // BUS 실시간 등급(297) — 정렬과 같은 축·같은 캐시. 지금 출발일 때만 채워진다.
+        Function<String, Map<String, BusArrival>> busCongestion = stopId -> Map.of();
+        if (BusCongestionWindow.isLive(departureTime, clock, busCongestionProperties.nowWindow())) {
+            Set<String> stops = RouteNameResolver.busBoardingStops(six);
+            if (!stops.isEmpty()) {
+                busCongestionReader.prefetch(stops);
+                busCongestion = busCongestionReader::forStop;
+            }
+        }
+        RouteScoreRanker.BusLevelLookup busLevels = busLevelLookup(busCongestion);
+        Map<String, RouteMapper.StationInfo> stationInfos = graphRegistry.stationInfos();
         List<RouteSearchResponse> out = new ArrayList<>();
         for (RouteSearchResponse response : six) {
             List<RouteLegResponse> legs = LegContract.withContractFields(
@@ -415,20 +436,58 @@ public class RouteSearchService {
             List<Edge> edges = edgesBySignature.getOrDefault(
                     RouteCandidateFinder.exactSignature(response), List.of());
             AtomicBoolean truncated = new AtomicBoolean(false);
-            Optional<Double> linkScore = edges.isEmpty() ? Optional.empty()
-                    : LinkCongestionScorer.score(
-                                    edges, departureTime, congestionPredLookup(truncated))
-                            .map(LinkCongestionScorer.Result::weightedAverage);
-            Optional<Double> lineScore =
-                    CongestionScorer.score(legs, levelByRouteId);
+            Optional<LinkCongestionScorer.Result> linkResult = edges.isEmpty() ? Optional.empty()
+                    : LinkCongestionScorer.score(edges, departureTime, congestionPredLookup(truncated));
+            Optional<CongestionPredictionResolver.Worst> worst = WorstCongestionPicker.pick(
+                    linkResult,
+                    id -> {
+                        RouteMapper.StationInfo info = stationInfos.get(id);
+                        return info == null ? id : info.name();
+                    },
+                    worstBusLeg(legs, busLevels),
+                    CongestionScorer.worst(legs, levelByRouteId));
             CongestionPrediction prediction = CongestionPredictionResolver.resolve(
-                    linkScore, lineScore, truncated.get(),
-                    departureTime.toLocalDate(), today);
+                    worst, truncated.get(), departureTime.toLocalDate(), today);
             out.add(new RouteSearchResponse(response.routeType(), response.totalMinutes(),
                     legs, response.source(), response.totalDistanceMeters(),
                     response.transferCount(), prediction));
         }
         return out;
+    }
+
+    /** BUS leg 중 가장 혼잡한 leg(공통 축 수치). 아는 값이 없으면 빈 값. */
+    private static Optional<CongestionScorer.Worst> worstBusLeg(
+            List<RouteLegResponse> legs, RouteScoreRanker.BusLevelLookup busLevels) {
+        CongestionScorer.Worst worst = null;
+        for (RouteLegResponse leg : legs) {
+            if (leg.mode() != TravelMode.BUS) {
+                continue;
+            }
+            Double level = busLevels.levelOf(leg);
+            if (level == null) {
+                continue;
+            }
+            if (worst == null || level > worst.level()) {
+                worst = new CongestionScorer.Worst(level, leg);
+            }
+        }
+        return Optional.ofNullable(worst);
+    }
+
+    /**
+     * 후보 서명 → 원본 엣지 맵(2026-09-22). 보장용 주입 후보까지 포함해야 링크 혼잡 채점이
+     * 이 후보만 노선 통계로 폴백하지 않는다. 같은 서명이 여러 번이면 첫 엣지를 유지한다.
+     */
+    static Map<String, List<Edge>> edgesBySignature(List<ScoredCandidate> timeScored,
+            List<ScoredCandidate> calmScored, List<ScoredCandidate> injected) {
+        Map<String, List<Edge>> bySignature = new HashMap<>();
+        for (List<ScoredCandidate> group : List.of(timeScored, calmScored, injected)) {
+            for (ScoredCandidate scored : group) {
+                bySignature.putIfAbsent(
+                        RouteCandidateFinder.exactSignature(scored.response()), scored.path().edges());
+            }
+        }
+        return bySignature;
     }
 
     /** 슬롯 고정 혼잡도 조회 — 탐색 비용 모델에 넘긴다(216). */
