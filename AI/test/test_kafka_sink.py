@@ -7,6 +7,7 @@ from test_kafka_event_parser import BE_SAMPLE_EVENTS
 
 from DATA_ENGINE.stream.kafka_events import parse_kafka_event
 from DATA_ENGINE.stream.kafka_sink import (
+    BIKE_LATEST_STOCK_COLUMNS,
     base_dir_for_topic,
     dedupe_events,
     latest_stock_path,
@@ -208,13 +209,15 @@ def test_update_bike_latest_stock_writes_station_snapshot(tmp_path):
 
     assert path == latest_stock_path(ai_root=tmp_path)
     df = pd.read_parquet(path)
-    assert df.to_dict("records") == [
-        {
-            "rental_id": "ST-4",
-            "current_stock": 5,
-            "updated_at": pd.Timestamp("2026-09-14T09:00:03"),
-        }
-    ]
+    assert list(df.columns) == BIKE_LATEST_STOCK_COLUMNS
+    record = df.to_dict("records")[0]
+    assert record["rental_id"] == "ST-4"
+    assert record["current_stock"] == 5
+    assert record["updated_at"] == pd.Timestamp("2026-09-14T09:00:03")
+    assert pd.isna(record["station_name"])
+    assert pd.isna(record["lat"])
+    assert pd.isna(record["lng"])
+    assert pd.isna(record["rack_count"])
 
 
 def test_update_bike_latest_stock_upserts_newer_station_value(tmp_path):
@@ -335,3 +338,112 @@ def test_update_bike_latest_stock_skips_invalid_stock_payload(tmp_path):
 
     assert path is None
     assert not latest_stock_path(ai_root=tmp_path).exists()
+
+
+def test_update_bike_latest_stock_populates_extra_columns_from_sample_event(tmp_path):
+    sample = BE_SAMPLE_EVENTS["bike.stock"]
+    event = parse_kafka_event(sample, topic="bike.stock", partition=0, offset=1)
+
+    path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(path)
+    assert list(df.columns) == BIKE_LATEST_STOCK_COLUMNS
+    row = df.iloc[0]
+    assert row["rental_id"] == "ST-4"
+    assert row["current_stock"] == 5
+    assert row["station_name"] == "102. 망원역 1번출구 앞"
+    assert row["lat"] == 37.55564880
+    assert row["lng"] == 126.91062927
+    assert row["rack_count"] == 15
+
+
+def test_update_bike_latest_stock_keeps_row_when_coordinates_missing_or_invalid(tmp_path):
+    event = _event(
+        "bike.stock",
+        "ST-9",
+        payload={
+            "stationId": "ST-9",
+            "parkingBikeTotCnt": "3",
+            "stationLatitude": "",
+            "stationLongitude": "not-a-number",
+            "rackTotCnt": "not-an-int",
+        },
+    )
+
+    path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(path)
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["rental_id"] == "ST-9"
+    assert row["current_stock"] == 3
+    assert pd.isna(row["station_name"])
+    assert pd.isna(row["lat"])
+    assert pd.isna(row["lng"])
+    assert pd.isna(row["rack_count"])
+
+
+def test_update_bike_latest_stock_treats_zero_coordinates_as_missing(tmp_path):
+    event = _event(
+        "bike.stock",
+        "ST-9",
+        payload={
+            "stationId": "ST-9",
+            "parkingBikeTotCnt": "3",
+            "stationLatitude": "0",
+            "stationLongitude": "0.0",
+        },
+    )
+
+    path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(path)
+    assert pd.isna(df.loc[0, "lat"])
+    assert pd.isna(df.loc[0, "lng"])
+
+
+def test_update_bike_latest_stock_upserts_over_legacy_three_column_file(tmp_path):
+    path = latest_stock_path(ai_root=tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = pd.DataFrame(
+        [
+            {
+                "rental_id": "ST-1",
+                "current_stock": 2,
+                "updated_at": pd.Timestamp("2026-09-14T08:55:00"),
+            }
+        ]
+    )
+    legacy.to_parquet(path, index=False)
+
+    event = _event(
+        "bike.stock",
+        "ST-4",
+        payload={
+            "stationId": "ST-4",
+            "parkingBikeTotCnt": "5",
+            "stationName": "102. 망원역 1번출구 앞",
+            "stationLatitude": "37.55564880",
+            "stationLongitude": "126.91062927",
+            "rackTotCnt": "15",
+        },
+    )
+
+    result_path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(result_path)
+    assert list(df.columns) == BIKE_LATEST_STOCK_COLUMNS
+    assert set(df["rental_id"]) == {"ST-1", "ST-4"}
+
+    legacy_row = df.loc[df["rental_id"] == "ST-1"].iloc[0]
+    assert legacy_row["current_stock"] == 2
+    assert pd.isna(legacy_row["station_name"])
+    assert pd.isna(legacy_row["lat"])
+    assert pd.isna(legacy_row["lng"])
+    assert pd.isna(legacy_row["rack_count"])
+
+    new_row = df.loc[df["rental_id"] == "ST-4"].iloc[0]
+    assert new_row["station_name"] == "102. 망원역 1번출구 앞"
+    assert new_row["lat"] == 37.55564880
+    assert new_row["lng"] == 126.91062927
+    assert new_row["rack_count"] == 15
