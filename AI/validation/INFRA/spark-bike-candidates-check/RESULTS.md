@@ -164,6 +164,32 @@ horizon 필터·NaN 제외·dow_type(토/일/평일) 분기를 실제 로직과 
 재학습이 이 경로를 타고, 그 결과가 지금과 동일한 서빙 체인(`refresh_avg.py` →
 `bike-avg-batch` → BE)에 그대로 들어간다.
 
+## 10. 서버(EC2, `j15a104a`) 실측 — 재고 raw 누적을 실제로 상시 배치로 배포
+
+"사람이 가끔 켜는 것"이 아니라 **서버가 스스로 도는 상시 운영**을 만들려고, 4번(재고 raw
+누적)을 `DATA_ENGINE/spark/jobs/bike_realtime_reprocess.py`로 정식 승격하고 EC2에 배포했다.
+
+- Java 21(`default-jdk-headless`) 서버에 신규 설치
+- `DATA_ENGINE/spark/` 공통 모듈 + 잡 코드 scp 배포
+- systemd `bike-realtime-reprocess.service`/`.timer` 설치, **매주 일 04:00(Asia/Seoul)** 자동 실행으로 등록
+
+**서버 실측(3코어·4GB, 로컬 22코어와 다른 환경)**:
+
+| | pandas | Spark |
+| --- | --- | --- |
+| 파일 수 | 4,366개 | 4,366개 |
+| 시간 | 367.1초 | **96.6초** |
+| 비율 | — | **0.263(Spark 3.8배 빠름)** |
+| 결과 | 120,748행 | 120,748행 — **완전 일치**(오차 3.6e-15) |
+
+로컬(22코어, 4.4배)보다는 배수가 약간 작지만(3.8배) **코어가 22개에서 3개로 줄어도 Spark
+우위가 거의 그대로 유지된다** — 이 작업의 병목이 CPU 병렬도가 아니라 파일 I/O라서다(273
+§2.6 "병렬도의 대가가 메모리다"와 같은 결의 관찰). 실제 산출물(`data/BIKE/processed/
+realtime_stock_profile/part.parquet`)도 정상 생성 확인.
+
+출력은 서빙에 연결하지 않았다 — 품질 리포트용이며, `refresh_avg.py`(avg 서빙 경로)는
+그대로 둔다.
+
 ## 원본
 
 `results.jsonl`(같은 폴더) — 3~7절(대여이력·재고 raw) 실행 조건·수치 원본.

@@ -102,6 +102,11 @@ install_service "bike-avg-batch.timer" "bike-avg-batch.timer"
 # 245: CROWD 혼잡도 예측 배치 — crowd-batch-predict.timer 가 매일 09:30(Asia/Seoul)에 띄운다.
 install_service "crowd-batch-predict.service" "crowd-batch-predict.service"
 install_service "crowd-batch-predict.timer" "crowd-batch-predict.timer"
+# 274: 따릉이 재고 raw 누적 재집계(Spark, 품질 리포트) — 매주 일 04:00(Asia/Seoul).
+# Java(default-jdk-headless)가 서버에 없으면 실행이 실패한다 — 설치 안내는
+# DATA_ENGINE/README.md "따릉이 재고 raw 누적 재집계" 절 참고.
+install_service "bike-realtime-reprocess.service" "bike-realtime-reprocess.service"
+install_service "bike-realtime-reprocess.timer" "bike-realtime-reprocess.timer"
 
 sudo systemctl daemon-reload
 
@@ -110,10 +115,12 @@ if [[ "${ENABLE_NOW}" -eq 1 ]]; then
   sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl enable --now bike-avg-batch.timer
   sudo systemctl enable --now crowd-batch-predict.timer
+  sudo systemctl enable --now bike-realtime-reprocess.timer
   sudo systemctl status data-engine-kafka-consumer.service --no-pager
   sudo systemctl list-timers --no-pager subway-ridership-daily.timer
   sudo systemctl list-timers --no-pager bike-avg-batch.timer
   sudo systemctl list-timers --no-pager crowd-batch-predict.timer
+  sudo systemctl list-timers --no-pager bike-realtime-reprocess.timer
 else
   cat <<'EOF'
 
@@ -124,9 +131,11 @@ else
   sudo systemctl enable --now subway-ridership-daily.timer
   sudo systemctl enable --now bike-avg-batch.timer
   sudo systemctl enable --now crowd-batch-predict.timer
+  sudo systemctl enable --now bike-realtime-reprocess.timer
   sudo systemctl status data-engine-kafka-consumer.service --no-pager
   sudo systemctl list-timers subway-ridership-daily.timer
   sudo systemctl list-timers bike-avg-batch.timer
   sudo systemctl list-timers crowd-batch-predict.timer
+  sudo systemctl list-timers bike-realtime-reprocess.timer
 EOF
 fi
