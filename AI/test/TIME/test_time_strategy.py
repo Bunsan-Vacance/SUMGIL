@@ -26,6 +26,7 @@ from app.TIME.strategy import (
     _allowed_numbers,
     _build_user_prompt,
     _numbers_in,
+    _system_prompt,
     build_reason,
     describe_candidate,
 )
@@ -330,6 +331,29 @@ def test_사실_블록에_있던_숫자는_제거_후에도_허용된다():
 
     assert old_block_numbers  # 이 픽스처는 실제로 숫자를 낸다(공집합이면 검사가 무의미하다)
     assert old_block_numbers <= _allowed_numbers(ctx)
+
+
+# ── 시스템 프롬프트 — 331 3단계: 230자 압축 + 선택 기준 1문장 ──
+
+
+def test_시스템_프롬프트는_230자_이내이고_선택_기준과_형식_상한을_담는다():
+    prompt = _system_prompt(2, 120)
+
+    assert len(prompt) <= 230
+    # 선택 기준(RuleStrategy.score와 같은 방향 — 낮은 p_empty 우선, 비슷하면 가까운 거리).
+    assert "비어 있을 확률" in prompt
+    assert "가까운" in prompt
+    # JSON 형식 · chosen_index 규칙.
+    assert '{"chosen_index": <정수>, "reason": <문자열>}' in prompt
+    assert "chosen_index" in prompt
+    assert "[후보]" in prompt
+    # 문장·글자 상한 인자가 하드코딩이 아니라 그대로 박힌다 — 값을 바꾸면 문구도 바뀐다.
+    assert "2문장" in prompt
+    assert "120자" in prompt
+    prompt2 = _system_prompt(3, 150)
+    assert "3문장" in prompt2
+    assert "150자" in prompt2
+    assert len(prompt2) <= 230
 
 
 # ── 설정 ──
