@@ -11,6 +11,8 @@ FE 통합용 `POST /time/reroute/check` 4상태 실응답. 손으로 쓴 예시�
 
 `recommendationId`(`uuid4`)는 고정값(`00000000-0000-0000-0000-000000000000`)으로, `validUntil`은 테스트 고정 시각(2026-09-23 09:00 KST) 기준으로 저장돼 있다 — 실제 응답과는 다르다.
 
+`reroute_check_proposal.json`의 `route.legs[0]`은 첫 leg 검증(324, `service._pick_route_from_alternative`)을 통과하도록 `fromNodeId`가 선택된 대안(`alternative.rentalId`)과 같다 — BE가 이 값을 보장하지 않으므로(`FROM_BE-bike-reroute-route-02.md` 1번) 가짜 BE 응답에서 직접 맞춰준 값이다.
+
 ## 재생성
 
 ```bash

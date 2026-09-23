@@ -84,7 +84,8 @@
         {
           "mode": "BIKE",
           "minutes": 20.0,
-          "routeId": null
+          "routeId": null,
+          "fromNodeId": "ST-ALT-A"
         }
       ]
     }

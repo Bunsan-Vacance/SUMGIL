@@ -119,6 +119,8 @@ def _eta(**overrides: Any) -> dict[str, Any]:
 
 
 def _route_element() -> dict[str, Any]:
+    # 첫 leg는 ALT_A_ID(고정 시나리오의 선택된 대안)에서 출발하는 BIKE다 — 324 첫 leg 검증
+    # 가드(`service._pick_route_from_alternative`)를 통과해야 proposal이 난다.
     return {
         "reason": "BE 고정 문구",
         "source": "ALGORITHM",
@@ -128,7 +130,7 @@ def _route_element() -> dict[str, Any]:
             "source": "ALGORITHM",
             "totalDistanceMeters": 6000.0,
             "transferCount": 0,
-            "legs": [{"mode": "BIKE", "minutes": 20.0, "routeId": None}],
+            "legs": [{"mode": "BIKE", "minutes": 20.0, "routeId": None, "fromNodeId": ALT_A_ID}],
         },
     }
 
