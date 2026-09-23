@@ -1,6 +1,6 @@
 import type { Leg, Route } from './types'
 import { modeIcons } from './ModeIcon'
-import { formatCongestionPercent, roundMinutes } from './selectors'
+import { roundMinutes } from './selectors'
 import { lineColor } from './lineColor'
 import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
 import { isTransitLeg, transitionLabel } from './transitions'
@@ -12,14 +12,7 @@ function formatDistance(distanceMeters?: number) {
 }
 
 function formatCongestion(leg: Leg) {
-  const grade = segmentCongestionGradeForLeg(leg)
-  if (leg.segmentCongestionGrade && grade) {
-    const presentation = segmentCongestionPresentation(grade)
-    if (presentation) return `구간 예상 혼잡도 ${presentation.label}`
-  }
-  return leg.segmentCongestionLevel === undefined
-    ? undefined
-    : `구간 예상 혼잡도 ${formatCongestionPercent(leg.segmentCongestionLevel)}%`
+  return segmentCongestionPresentation(segmentCongestionGradeForLeg(leg))
 }
 
 function formatLegNote(leg: Leg) {
@@ -104,7 +97,11 @@ export default function LegList({
               <p>
                 {formatLegNote(leg)} · {formatDistance(leg.distanceMeters)}
                 {transitionLabel(leg.transitionType) && ` · ${transitionLabel(leg.transitionType)}`}
-                {legCongestion && ` · ${legCongestion}`}
+                {legCongestion && (
+                  <span style={{ color: legCongestion.color, fontWeight: 700 }}>
+                    {' · '}구간 예상 혼잡도 {legCongestion.label}
+                  </span>
+                )}
               </p>
             </div>
             <span>{roundMinutes(leg.minutes)}분</span>

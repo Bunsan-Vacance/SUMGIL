@@ -72,7 +72,6 @@ export default function App() {
               origin={trip.origin}
               destination={trip.destination}
               openSearch={planner.openSearch}
-              openBrowse={planner.openBrowse}
               routePanelOpen={planner.routePanelOpen}
               toggleRoutePanel={planner.toggleRoutePanel}
               closeRoutePanel={planner.closeRoutePanel}

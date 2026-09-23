@@ -3,9 +3,10 @@ import BottomSheet from '../components/BottomSheet'
 import LegList from '../features/route/LegList'
 import BikePrediction from '../features/route/BikePrediction'
 import {
+  congestionGradeForPercent,
+  congestionGradeText,
   congestionPredictionFor,
   congestionPredictionPresentation,
-  formatCongestionPercent,
   isCongestionPredictionDate,
   routeArrival,
   roundMinutes,
@@ -44,8 +45,12 @@ export default function DetailPage({
   const legacyBusOptions = selectedGroup ? busRouteOptions(selectedGroup.variants) : []
   const predictionDate = isCongestionPredictionDate(selected.departedAt)
   const prediction = congestionPredictionFor(selected)
-  const formattedPercent = prediction
-    ? formatCongestionPercent(prediction.congestionPercent)
+  const congestionGrade = prediction
+    ? congestionGradeText(
+        prediction.congestionGrade ??
+          congestionGradeForPercent(prediction.congestionPercent) ??
+          null,
+      )
     : undefined
   return (
     <>
@@ -96,7 +101,7 @@ export default function DetailPage({
           {predictionDate && (
             <div>
               <strong style={{ color: congestionPredictionPresentation(prediction)?.color }}>
-                {prediction ? `${formattedPercent}%` : '정보 없음'}
+                {congestionGrade ?? '정보 없음'}
               </strong>
               <small>혼잡도 예상</small>
             </div>
