@@ -38,14 +38,14 @@ function route(overrides: Partial<Route> = {}): Route {
 }
 
 describe('경로 카드 구간 혼잡도', () => {
-  it('최근 7일 근거 문구 없이 우측 요약에 예측 수치와 등급을 표시한다', () => {
+  it('최근 7일 근거 문구 없이 우측 요약에 등급만 표시한다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     render(<RouteCard route={route()} onDetail={vi.fn()} />)
 
     const prediction = document.querySelector('.route-card-prediction')
     expect(prediction?.textContent).toContain('혼잡도 예상')
-    expect(prediction?.textContent).toContain('68.0%')
+    expect(prediction?.textContent).not.toContain('%')
     expect(prediction?.textContent).toContain('보통')
     expect(screen.queryByText('최근 7일 데이터 기반')).toBeNull()
   })
@@ -76,7 +76,7 @@ describe('경로 카드 구간 혼잡도', () => {
     expect(screen.getByRole('button', { name: /예측 정보 없음/ })).toBeTruthy()
   })
 
-  it('혼잡도 퍼센트를 소숫점 첫째 자리까지 반올림해 표시하고 접근성 라벨에도 반영한다', () => {
+  it('혼잡도 수치는 화면과 접근성 라벨에서 등급 글자로 표시한다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     render(
@@ -93,11 +93,13 @@ describe('경로 카드 구간 혼잡도', () => {
       />,
     )
 
-    expect(document.querySelector('.route-card-prediction')?.textContent).toContain('68.3%')
-    expect(screen.getByRole('button').getAttribute('aria-label')).toContain('68.3%')
+    expect(document.querySelector('.route-card-prediction')?.textContent).toContain('혼잡')
+    expect(document.querySelector('.route-card-prediction')?.textContent).not.toContain('%')
+    expect(screen.getByRole('button').getAttribute('aria-label')).toContain('혼잡도 예상 혼잡')
+    expect(screen.getByRole('button').getAttribute('aria-label')).not.toContain('%')
   })
 
-  it('전체 혼잡도 숫자를 서버 등급 색상으로 표시한다', () => {
+  it('전체 혼잡도 등급 글자에 서버 등급 색상을 적용한다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     render(

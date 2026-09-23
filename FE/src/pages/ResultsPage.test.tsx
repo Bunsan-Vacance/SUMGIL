@@ -188,7 +188,7 @@ describe('경로 결과 상태', () => {
     expect(onBackToInput).toHaveBeenCalledOnce()
   })
 
-  it('경로 카드에 혼잡도 예상 퍼센트·등급을 표시하고 근거 문구는 숨긴다', () => {
+  it('경로 카드에 혼잡도 등급 글자만 표시하고 근거 문구는 숨긴다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
@@ -196,9 +196,9 @@ describe('경로 결과 상태', () => {
     expect(screen.getAllByText('혼잡도 예상')).toHaveLength(2)
     const predictions = document.querySelectorAll('.route-card-prediction')
     expect(predictions).toHaveLength(2)
-    expect(predictions[0].textContent).toContain('68.0%')
+    expect(predictions[0].textContent).not.toContain('%')
     expect(predictions[0].textContent).toContain('보통')
-    expect(predictions[1].textContent).toContain('42.0%')
+    expect(predictions[1].textContent).not.toContain('%')
     expect(predictions[1].textContent).toContain('여유')
     expect(screen.queryByText('최근 7일 데이터 기반')).toBeNull()
     expect(screen.queryByText(/혼잡 \d+구간/)).toBeNull()

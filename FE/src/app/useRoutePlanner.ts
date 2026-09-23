@@ -62,7 +62,7 @@ export function useRoutePlanner(
   const { message, setMessage } = useToast()
   const [searchTarget, setSearchTarget] = useState<'origin' | 'destination'>('destination')
   const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
-  const [routePanelOpen, setRoutePanelOpen] = useState(false)
+  const [routePanelOpen, setRoutePanelOpen] = useState(true)
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
   const [arrivals, setArrivals] = useState<TrainArrival[]>([])
   const [arrivalStatus, setArrivalStatus] = useState<GuidanceRequestStatus>('idle')

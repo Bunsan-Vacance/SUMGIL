@@ -4,7 +4,6 @@ interface Props {
   origin: Place
   destination: Place | null
   openSearch: (target: 'origin' | 'destination') => void
-  openBrowse: () => void
   routePanelOpen: boolean
   toggleRoutePanel: () => void
   closeRoutePanel: () => void
@@ -15,7 +14,6 @@ export default function HomePage({
   origin,
   destination,
   openSearch,
-  openBrowse,
   routePanelOpen,
   toggleRoutePanel,
   closeRoutePanel,
@@ -25,15 +23,6 @@ export default function HomePage({
   return (
     <>
       <div className="home-topbar" hidden={routePanelOpen}>
-        <button
-          type="button"
-          className="home-search-button"
-          aria-label="장소, 역, 주소 검색"
-          onClick={openBrowse}
-        >
-          <Search size={20} />
-          <span>장소, 역, 주소 검색</span>
-        </button>
         <button
           type="button"
           className="primary home-route-button"

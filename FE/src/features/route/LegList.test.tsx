@@ -8,7 +8,7 @@ import LegList, { compactLegs } from './LegList'
 afterEach(cleanup)
 
 describe('구간 이동 안내', () => {
-  it('실제 구간 혼잡도 숫자와 거리를 함께 표시한다', () => {
+  it('실제 구간 혼잡도 등급 글자와 색을 거리와 함께 표시한다', () => {
     const route: Route = {
       id: 'route',
       label: '빠른 경로',
@@ -32,7 +32,11 @@ describe('구간 이동 안내', () => {
     render(<LegList route={route} />)
 
     expect(screen.getByText('도보 · 거리 준비중입니다')).toBeTruthy()
-    expect(screen.getByText('2호선 · 1.2km · 구간 예상 혼잡도 20.3%')).toBeTruthy()
+    const congestion = screen.getByText('여유')
+    expect(congestion.style.color).toBe('rgb(29, 78, 216)')
+    expect(congestion.closest('p')?.textContent).toBe(
+      '2호선 · 1.2km · 구간 예상 혼잡도 여유',
+    )
   })
 
   it('구간 혼잡도 값이 없으면 혼잡도 숫자를 표시하지 않는다', () => {
