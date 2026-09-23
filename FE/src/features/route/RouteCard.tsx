@@ -1,8 +1,6 @@
 import { ArrowLeftRight, ChevronRight } from 'lucide-react'
 import {
   clockTime,
-  congestionGradeForPercent,
-  congestionGradeText,
   congestionPredictionPresentation,
   congestionPredictionFor,
   routeArrival,
@@ -35,14 +33,8 @@ export default function RouteCard({
   const finalLeg = displayLegs.at(-1)
   const destination = finalLeg?.to?.name || finalLeg?.title.split(' → ').at(-1)
   const prediction = congestionPredictionFor(route)
-  const congestionGrade = prediction
-    ? congestionGradeText(
-        prediction.congestionGrade ??
-          congestionGradeForPercent(prediction.congestionPercent) ??
-          null,
-      )
-    : undefined
-  const predictionPresentation = congestionPredictionPresentation(prediction)
+  const predictionPresentation = congestionPredictionPresentation(prediction, route.legs)
+  const congestionGrade = predictionPresentation?.label
   const congestionLabel = prediction
     ? `혼잡도 예상 ${congestionGrade ?? '정보 없음'}`
     : '예측 정보 없음'

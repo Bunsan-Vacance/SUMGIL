@@ -8,11 +8,19 @@ export type SegmentCongestionGrade = 'RELAXED' | 'NORMAL' | 'CONGESTED' | 'SATUR
 export type CongestionDataStatus = 'AVAILABLE' | 'LINE1_TRUNCATED' | 'NO_CALIBRATION' | 'NO_LOOKUP'
 export type CongestionPredictionBasis = 'RECENT_7D' | 'PARTIAL' | 'WEEKDAY_AVERAGE' | 'LIVE'
 
+export interface WorstSegmentCongestion {
+  mode: 'SUBWAY' | 'BUS'
+  fromNodeId: string | null
+  toNodeId: string | null
+  congestionPercent: number | null
+}
+
 export interface CongestionPrediction {
   congestionPercent: number | null
   congestionGrade: CongestionGrade | null
   dataStatus: CongestionDataStatus
   predictionBasis: CongestionPredictionBasis | null
+  worstSegment?: WorstSegmentCongestion | null
 }
 export interface Place {
   id: string

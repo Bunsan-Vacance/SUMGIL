@@ -12,6 +12,7 @@ import type {
   RouteSource,
   SegmentCongestionGrade,
   TransitionType,
+  WorstSegmentCongestion,
 } from '../features/route/types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -209,6 +210,19 @@ function mapCongestionPrediction(value: unknown): CongestionPrediction | undefin
   ) {
     throw new RepositoryError('invalid-response', '혼잡도 예측 기준 응답이 올바르지 않아요.')
   }
+  const worstSegment = value.worstSegment
+  if (
+    worstSegment !== undefined &&
+    worstSegment !== null &&
+    (!isRecord(worstSegment) ||
+      (worstSegment.mode !== 'SUBWAY' && worstSegment.mode !== 'BUS') ||
+      (worstSegment.fromNodeId != null && !text(worstSegment.fromNodeId)) ||
+      (worstSegment.toNodeId != null && !text(worstSegment.toNodeId)) ||
+      (worstSegment.congestionPercent !== null &&
+        !finite(worstSegment.congestionPercent, 0, Number.MAX_VALUE)))
+  ) {
+    throw new RepositoryError('invalid-response', '최악 구간 혼잡도 응답이 올바르지 않아요.')
+  }
   const hasPredictionValues = percent !== null && grade !== null && basis !== null
   const hasAnyPredictionValue = percent !== null || grade !== null || basis !== null
   if (
@@ -222,6 +236,19 @@ function mapCongestionPrediction(value: unknown): CongestionPrediction | undefin
     congestionGrade: grade as CongestionGrade | null,
     dataStatus: dataStatus as CongestionDataStatus,
     predictionBasis: basis as CongestionPredictionBasis | null,
+    ...(worstSegment !== undefined
+      ? {
+          worstSegment:
+            worstSegment === null
+              ? null
+              : {
+                  mode: worstSegment.mode as WorstSegmentCongestion['mode'],
+                  fromNodeId: text(worstSegment.fromNodeId) ?? null,
+                  toNodeId: text(worstSegment.toNodeId) ?? null,
+                  congestionPercent: worstSegment.congestionPercent as number | null,
+                },
+        }
+      : {}),
   }
 }
 
