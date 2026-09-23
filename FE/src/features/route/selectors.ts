@@ -6,8 +6,13 @@ import type {
   Priority,
   Route,
   SegmentCongestionGrade,
+  WorstSegmentCongestion,
 } from './types'
-import { segmentCongestionPresentation } from './segmentCongestion'
+import {
+  segmentCongestionGradeForLeg,
+  segmentCongestionGradeForLevel,
+  segmentCongestionPresentation,
+} from './segmentCongestion'
 
 function predictionPercent(route: Route, now = new Date()) {
   const prediction = congestionPredictionFor(route, now)
@@ -99,8 +104,15 @@ export function congestionGradeForPercent(value?: number | null): CongestionGrad
 }
 
 export function congestionPredictionPresentation(
-  prediction?: Pick<CongestionPrediction, 'congestionPercent' | 'congestionGrade'> | null,
+  prediction?: Pick<
+    CongestionPrediction,
+    'congestionPercent' | 'congestionGrade' | 'worstSegment'
+  > | null,
+  legs?: Route['legs'],
 ) {
+  const worstSegmentGrade = worstSegmentGradeFor(prediction?.worstSegment, legs)
+  if (worstSegmentGrade) return segmentCongestionPresentation(worstSegmentGrade)
+
   const grade =
     prediction?.congestionGrade ?? congestionGradeForPercent(prediction?.congestionPercent)
   const segmentGrade: SegmentCongestionGrade | undefined =
@@ -112,6 +124,25 @@ export function congestionPredictionPresentation(
           ? 'CONGESTED'
           : undefined
   return segmentCongestionPresentation(segmentGrade)
+}
+
+function worstSegmentGradeFor(
+  worstSegment?: WorstSegmentCongestion | null,
+  legs?: Route['legs'],
+): SegmentCongestionGrade | undefined {
+  if (!worstSegment) return undefined
+  if (worstSegment.mode === 'BUS') {
+    const leg = legs?.find(
+      (leg) =>
+        leg.mode === 'bus' &&
+        !!worstSegment.fromNodeId &&
+        !!worstSegment.toNodeId &&
+        leg.from?.id === worstSegment.fromNodeId &&
+        leg.to?.id === worstSegment.toNodeId,
+    )
+    return leg ? segmentCongestionGradeForLeg(leg) : undefined
+  }
+  return segmentCongestionGradeForLevel(worstSegment.congestionPercent ?? undefined)
 }
 
 export function congestionGradeText(value: CongestionGrade | null) {
