@@ -143,11 +143,41 @@ class CsvBikeStockPredDailySourceTest {
         assertEquals(List.of(daily), loaded.origins());
     }
 
-    @Test
-    @DisplayName("309-S7: 날짜축 산출물이 하나도 없으면 폴더 경로를 밝히고 멈춘다")
-    void s7_빈_폴더(@TempDir Path dir) {
-        IOException e = assertThrows(IOException.class, () -> new CsvBikeStockPredDailySource(dir).read());
+    /*
+     * 날짜축 표는 비어 있어도 되는 표다 — 조회가 평균표로 떨어진다. AI 가 날짜축 산출물을 내기 전에도 CronJob 은
+     * 매일 돌고, 이때 실패로 멈추면 매일 가짜 실패 기록이 쌓여 앞 두 적재(bikepred·crowdpred)의 진짜 실패가 묻힌다.
+     * 그래서 "산출물이 아직 없음" 은 경고 + 빈 결과로 넘기고, 산출물이 있는데 깨진 것(S4·S5)만 멈춘다.
+     */
 
-        assertTrue(e.getMessage().contains(dir.toString()), e.getMessage());
+    @Test
+    @DisplayName("309-S7: 폴더에 날짜축 산출물이 없으면 빈 결과로 넘기고 폴더 경로를 경고한다 — 비어도 되는 표다")
+    void s7_빈_폴더(@TempDir Path dir) throws IOException {
+        BikeStockPredDailySource.Loaded loaded = new CsvBikeStockPredDailySource(dir).read();
+
+        assertTrue(loaded.rows().isEmpty());
+        assertTrue(loaded.origins().isEmpty());
+        assertEquals(1, loaded.warnings().size());
+        assertTrue(loaded.warnings().get(0).contains(dir.toString()), loaded.warnings().get(0));
+    }
+
+    @Test
+    @DisplayName("309-S8: 폴더 자체가 없어도 빈 결과로 넘긴다 — AI 가 아직 serving-daily 를 만들지 않은 상태다")
+    void s8_폴더_없음(@TempDir Path dir) throws IOException {
+        Path missing = dir.resolve("serving-daily");
+
+        BikeStockPredDailySource.Loaded loaded = new CsvBikeStockPredDailySource(missing).read();
+
+        assertTrue(loaded.rows().isEmpty());
+        assertEquals(1, loaded.warnings().size());
+    }
+
+    @Test
+    @DisplayName("309-S9: 파일을 직접 지정했는데 없으면 멈춘다 — 사람이 고른 경로가 틀린 것이다")
+    void s9_지정_파일_없음(@TempDir Path dir) {
+        Path missing = dir.resolve("bike_stock_pred_20260923-003000.csv");
+
+        IOException e = assertThrows(IOException.class, () -> new CsvBikeStockPredDailySource(missing).read());
+
+        assertTrue(e.getMessage().contains(missing.toString()), e.getMessage());
     }
 }
