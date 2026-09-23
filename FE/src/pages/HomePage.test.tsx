@@ -20,7 +20,6 @@ describe('홈 길찾기 패널', () => {
         origin={{ id: 'empty-origin', name: '', address: '', kind: '장소' }}
         destination={null}
         openSearch={vi.fn()}
-        openBrowse={vi.fn()}
         routePanelOpen
         toggleRoutePanel={vi.fn()}
         closeRoutePanel={vi.fn()}
@@ -32,8 +31,7 @@ describe('홈 길찾기 패널', () => {
     expect(screen.getByText('출발지를 검색하세요')).toBeTruthy()
   })
 
-  it('검색 버튼을 열고 길찾기 패널을 열고 닫는다', () => {
-    const openBrowse = vi.fn()
+  it('단독 장소 검색 없이 길찾기 패널을 열고 닫는다', () => {
     const toggleRoutePanel = vi.fn()
     const closeRoutePanel = vi.fn()
     const { rerender } = render(
@@ -41,7 +39,6 @@ describe('홈 길찾기 패널', () => {
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
-        openBrowse={openBrowse}
         routePanelOpen={false}
         toggleRoutePanel={toggleRoutePanel}
         closeRoutePanel={closeRoutePanel}
@@ -50,8 +47,7 @@ describe('홈 길찾기 패널', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '장소, 역, 주소 검색' }))
-    expect(openBrowse).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: '장소, 역, 주소 검색' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /길찾기/ }))
     expect(toggleRoutePanel).toHaveBeenCalledOnce()
@@ -62,7 +58,6 @@ describe('홈 길찾기 패널', () => {
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
-        openBrowse={openBrowse}
         routePanelOpen
         toggleRoutePanel={toggleRoutePanel}
         closeRoutePanel={closeRoutePanel}
@@ -81,7 +76,6 @@ describe('홈 길찾기 패널', () => {
         origin={origin}
         destination={null}
         openSearch={openSearch}
-        openBrowse={vi.fn()}
         routePanelOpen
         toggleRoutePanel={vi.fn()}
         closeRoutePanel={vi.fn()}
@@ -103,7 +97,6 @@ describe('홈 길찾기 패널', () => {
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
-        openBrowse={vi.fn()}
         routePanelOpen
         toggleRoutePanel={vi.fn()}
         closeRoutePanel={vi.fn()}

@@ -54,7 +54,10 @@ describe('경로와 안내 화면의 수명', () => {
     })
     const { result } = renderHook(() => useRoutePlanner(repository))
 
+    expect(result.current.routePanelOpen).toBe(true)
     expect(getCurrentPosition).not.toHaveBeenCalled()
+    act(() => result.current.closeRoutePanel())
+    expect(result.current.routePanelOpen).toBe(false)
     act(() => result.current.toggleRoutePanel())
     expect(result.current.routePanelOpen).toBe(true)
     expect(getCurrentPosition).toHaveBeenCalledOnce()
@@ -97,6 +100,7 @@ describe('경로와 안내 화면의 수명', () => {
     })
     const { result } = renderHook(() => useRoutePlanner(repository))
 
+    act(() => result.current.closeRoutePanel())
     act(() => result.current.toggleRoutePanel())
     act(() => result.current.trip.setOrigin(places[0]))
     act(() =>
@@ -116,6 +120,7 @@ describe('경로와 안내 화면의 수명', () => {
     })
     const { result } = renderHook(() => useRoutePlanner(repository))
 
+    act(() => result.current.closeRoutePanel())
     act(() => result.current.toggleRoutePanel())
     act(() => getCurrentPosition.mock.calls[0][1]({ code: 1 } as GeolocationPositionError))
 

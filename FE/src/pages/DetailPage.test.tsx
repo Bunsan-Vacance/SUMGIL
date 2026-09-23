@@ -50,7 +50,7 @@ function route(id: string, busId: string, busName: string): Route {
 }
 
 describe('경로 상세 버스 선택', () => {
-  it('혼잡도 퍼센트를 소숫점 첫째 자리까지 반올림해 표시한다', () => {
+  it('경로 상세의 혼잡도를 등급 글자와 색으로 표시한다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
     const current = route('current', 'BUS', '버스')
@@ -74,8 +74,10 @@ describe('경로 상세 버스 선택', () => {
       />,
     )
 
-    expect(screen.getByText('120.0%')).toBeTruthy()
-    expect(screen.getByText('120.0%').style.color).toBe('rgb(185, 28, 28)')
+    const congestion = document.querySelector('.stats strong[style]') as HTMLElement
+    expect(congestion.textContent).toBe('혼잡')
+    expect(congestion.style.color).toBe('rgb(185, 28, 28)')
+    expect(document.querySelector('.stats')?.textContent).not.toContain('%')
     expect(screen.getAllByText('혼잡도 예상')).toHaveLength(1)
     expect(screen.queryByText('요일 평균 기준')).toBeNull()
     expect(screen.queryByText('다른 경로')).toBeNull()

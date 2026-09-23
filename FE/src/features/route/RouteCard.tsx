@@ -1,10 +1,10 @@
 import { ArrowLeftRight, ChevronRight } from 'lucide-react'
 import {
   clockTime,
+  congestionGradeForPercent,
   congestionGradeText,
   congestionPredictionPresentation,
   congestionPredictionFor,
-  formatCongestionPercent,
   routeArrival,
   roundMinutes,
 } from './selectors'
@@ -35,13 +35,16 @@ export default function RouteCard({
   const finalLeg = displayLegs.at(-1)
   const destination = finalLeg?.to?.name || finalLeg?.title.split(' → ').at(-1)
   const prediction = congestionPredictionFor(route)
-  const congestionGrade = prediction ? congestionGradeText(prediction.congestionGrade) : undefined
-  const formattedPercent = prediction
-    ? formatCongestionPercent(prediction.congestionPercent)
+  const congestionGrade = prediction
+    ? congestionGradeText(
+        prediction.congestionGrade ??
+          congestionGradeForPercent(prediction.congestionPercent) ??
+          null,
+      )
     : undefined
   const predictionPresentation = congestionPredictionPresentation(prediction)
   const congestionLabel = prediction
-    ? `혼잡도 예상 ${formattedPercent}%${congestionGrade ? ` · ${congestionGrade}` : ''}`
+    ? `혼잡도 예상 ${congestionGrade ?? '정보 없음'}`
     : '예측 정보 없음'
   const recommendationLabels = recommendations.map((recommendation) =>
     recommendation === 'fast' ? '가장 빠른 경로' : '덜 붐비는 경로',
@@ -100,8 +103,9 @@ export default function RouteCard({
           {prediction ? (
             <>
               <small>혼잡도 예상</small>
-              <strong style={{ color: predictionPresentation?.color }}>{formattedPercent}%</strong>
-              {congestionGrade && <span>{congestionGrade}</span>}
+              <strong style={{ color: predictionPresentation?.color }}>
+                {congestionGrade ?? '정보 없음'}
+              </strong>
             </>
           ) : (
             <span>예측 정보 없음</span>
