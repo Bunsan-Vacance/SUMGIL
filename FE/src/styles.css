@@ -1314,6 +1314,10 @@ small {
 .route-card:hover {
   background: #fbfdfc;
 }
+.route-card-selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
 .route-card:focus-visible {
   outline-offset: -3px;
 }
