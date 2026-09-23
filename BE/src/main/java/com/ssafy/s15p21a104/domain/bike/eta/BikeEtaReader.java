@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
@@ -68,7 +69,8 @@ public class BikeEtaReader {
         if (fetcher == null) {
             return Optional.empty();
         }
-        OffsetDateTime now = OffsetDateTime.now(clock);
+        // FE 가 new Date() 로 읽는다 — JS 표준 ISO 는 소수 3자리까지라 밀리초로 자른다.
+        OffsetDateTime now = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MILLIS);
         long etaMinutes = Math.round(Duration.between(now, arrival).toSeconds() / 60.0);
         if (etaMinutes < 0 || etaMinutes > maxMinutes) {
             return Optional.empty();
