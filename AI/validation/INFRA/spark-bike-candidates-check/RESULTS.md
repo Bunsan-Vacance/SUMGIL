@@ -190,9 +190,53 @@ realtime_stock_profile/part.parquet`)도 정상 생성 확인.
 출력은 서빙에 연결하지 않았다 — 품질 리포트용이며, `refresh_avg.py`(avg 서빙 경로)는
 그대로 둔다.
 
+## 11. 운영 반영 Phase 1 — 실제 규모(45% 샘플, 11개월) `--engine spark` vs `pandas` 최종 검증
+
+9절 스모크(2개월, 5% 샘플)를 통과한 뒤, 실제 재학습에 가까운 규모로 마지막 게이트를 통과시켰다.
+같은 커맨드를 엔진만 바꿔 두 번 실행:
+
+```
+python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v-spark-check  --engine spark
+python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v-pandas-check --random-state 42
+```
+
+(`train_months/valid_months/test_months`, `sample_frac=0.45`, `station_categories=2583` 등
+`meta.json`에 남긴 조건 전부 동일 — 랜덤 샘플링 시드만 pandas 쪽에 명시했고 avg baseline
+자체는 시드에 의존하지 않는 결정적 집계라 결과에 영향 없음.)
+
+**결과 — 산출물 완전 일치:**
+
+| | pandas (`v-pandas-check`) | Spark (`v-spark-check`) |
+| --- | --- | --- |
+| avg 프로필 행 수 | 361,042 | 361,042 |
+| `stock_profile_avg.parquet` 값 | — | **완전 일치(모든 수치 컬럼 max_abs_err = 0.0)** |
+| LightGBM 학습 행 수 | 84,060,415 | 84,060,415 |
+| LightGBM eval (valid/test 4구간 MAE·RMSE·R²·방향정확도) | — | **소수점 16자리까지 동일** |
+
+avg baseline 산출물이 완전히 같으므로 그 뒤 LightGBM 학습·평가가 바이트 단위로 똑같이
+재현된 것은 당연한 결과다 — 즉 **`--engine spark`로 바꿔도 서빙에 나가는 예측값이 전혀
+달라지지 않는다**는 걸 실제 운영 규모에서 확인했다.
+
+**시간(`train_time_sec`, avg baseline+LightGBM 학습 합산)은 "비교"로 안 올린다** —
+`AI/CLAUDE.md`의 동등 조건 원칙 위반: 이 두 실행은 같은 머신에서 순차로 돌았지만 그 사이
+다른 백그라운드 작업(차트 자료 조사용 파일 읽기 등)이 같이 떠 있어 CPU를 나눠 썼다.
+pandas 254.1초 vs spark 569.5초로 기록됐는데, 이 방향(pandas가 더 빠름)은 8절의 통제된
+측정(pandas 24.8초 vs spark 18.3초, avg baseline만 격리 측정)과도 반대라 컨디션 차이로
+보는 게 맞다 — Spark 세션 기동(JVM warm-up) 오버헤드가 이런 반복 실행에서 매번 붙는다는
+점은 참고할 만하지만, 이 표만으로 "pandas가 더 빠르다"고 결론 내리지 않는다. 시간을 다시
+재려면 두 실행을 유휴 상태에서 단독으로 재실행해야 한다(우선순위 낮음 — 정확도 게이트는
+이미 통과했고, 8절 통제 측정이 이미 남아 있음).
+
+**결론 — Phase 1 게이트 통과.** 다음 실제 BIKE 모델 재학습부터 `--engine spark`를 정식으로
+써도 된다(기본값은 여전히 pandas로 둔다 — 필요할 때 옵트인). Phase 2(README에 Java/pyspark
+요구사항 문서화)·Phase 3(기본 엔진 정책 유지 재확인)·Phase 4(다음 실 재학습에서 실제
+`--engine spark` 사용)는 후속 커밋에서 진행한다.
+
 ## 원본
 
 `results.jsonl`(같은 폴더) — 3~7절(대여이력·재고 raw) 실행 조건·수치 원본.
 8절(`fit_streaming` 재현) 실행 결과는 `DATA_ENGINE/spark/jobs/bike_avg_baseline.py` 실행 시
 `--out`으로 저장(1회성 산출물이라 리포에는 안 남김) — 위 표가 그 값이다.
-이 문서와 어긋나면 이 문서가 맞다(8절은 재현 명령이 있으므로 재실행해서 확인 가능).
+11절 실행 결과는 `models/BIKE/v-spark-check_20260923-1701/meta.json`·
+`v-pandas-check_20260923-1716/meta.json`(둘 다 `.gitignore` 대상, 로컬 산출물)에 남아 있다.
+이 문서와 어긋나면 이 문서가 맞다(8·11절은 재현 명령이 있으므로 재실행해서 확인 가능).
