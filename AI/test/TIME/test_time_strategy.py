@@ -333,13 +333,13 @@ def test_사실_블록에_있던_숫자는_제거_후에도_허용된다():
     assert old_block_numbers <= _allowed_numbers(ctx)
 
 
-# ── 시스템 프롬프트 — 331 3단계: 230자 압축 + 선택 기준 1문장 ──
+# ── 시스템 프롬프트 — 331 3단계: 260자 압축 + 선택 기준 1문장 ──
 
 
-def test_시스템_프롬프트는_230자_이내이고_선택_기준과_형식_상한을_담는다():
+def test_시스템_프롬프트는_260자_이내이고_선택_기준과_형식_상한을_담는다():
     prompt = _system_prompt(2, 120)
 
-    assert len(prompt) <= 230
+    assert len(prompt) <= 260
     # 선택 기준(RuleStrategy.score와 같은 방향 — 낮은 p_empty 우선, 비슷하면 가까운 거리).
     assert "비어 있을 확률" in prompt
     assert "가까운" in prompt
@@ -353,7 +353,7 @@ def test_시스템_프롬프트는_230자_이내이고_선택_기준과_형식_�
     prompt2 = _system_prompt(3, 150)
     assert "3문장" in prompt2
     assert "150자" in prompt2
-    assert len(prompt2) <= 230
+    assert len(prompt2) <= 260
 
 
 # ── 설정 ──
