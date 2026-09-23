@@ -6,7 +6,7 @@
 
 **게이트웨이(GMS) 형식은 OpenAI 호환으로 확인됐다**(2026-09-23 실호출 1회, `TOOL_CONTRACT.md`
 6절 5번). `POST {base_url}/chat/completions`, `Authorization: Bearer <GMS_API_KEY>`, `messages`,
-`response_format.json_schema(strict)`가 그대로 통하고, 출력 상한은 `max_tokens`(정수, 값이
+`response_format.json_schema(strict)`가 그대로 통하고, 출력 상한은 `max_completion_tokens`(정수 — `max_tokens`는 gpt-5 계열이 400으로 거부한다, 2026-09-23 확인. 값이
 있을 때만 body에 실린다 — `Settings.time_llm_max_output_tokens` 참고)로 건다. 응답도
 `choices[0].message.content`·`usage.prompt_tokens/completion_tokens`·`model`(예:
 `gpt-5.4-mini-2026-03-17`) 구조다. base_url은 `https://gms.ssafy.io/gmsapi/api.openai.com/v1`,
@@ -16,7 +16,7 @@
 함수만 고치면 되도록 요청 조립과 응답 파싱을 여기 격리해뒀다. 그 밖의 코드(`complete()`
 호출부·`AgentStrategy`)는 `LlmResult`/`LlmError`만 보고 게이트웨이가 어떤 모양인지 모른다.
 
-`max_tokens`에 잘려 응답이 중간에 끊기면 `LlmResult.text`는 깨진 JSON 문자열을 그대로 담고,
+`max_completion_tokens`에 잘려 응답이 중간에 끊기면 `LlmResult.text`는 깨진 JSON 문자열을 그대로 담고,
 이 클라이언트는 그것도 성공(`LlmResult`)으로 돌려준다 — 잘림 자체는 HTTP 오류가 아니기
 때문이다. 이후 `strategy._parse_decision`이 `json.loads` 실패로 `None`을 돌려주고
 `AgentStrategy.decide`가 `RejectReason.BAD_JSON`으로 규칙 폴백에 넘어간다 — 별도 처리 없이
@@ -224,7 +224,7 @@ def _build_request(
     else:
         body["response_format"] = {"type": "json_object"}
     if max_output_tokens is not None:
-        body["max_tokens"] = max_output_tokens
+        body["max_completion_tokens"] = max_output_tokens
 
     return {
         "method": "POST",
