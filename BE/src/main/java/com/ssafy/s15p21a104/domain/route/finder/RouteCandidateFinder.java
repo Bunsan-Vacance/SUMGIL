@@ -1,6 +1,7 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
+import com.ssafy.s15p21a104.domain.route.bike.BikeUsePolicy;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
@@ -200,7 +201,7 @@ public final class RouteCandidateFinder {
                     allowedModes, costModel, rule);
         }
         // 대여 1회(연속 BIKE) 상한 초과 후보 제거(5부 T3) — 엔진·접근 closure 밖(레거시 폴백 포함)에서도 방어.
-        paths = paths.stream().filter(path -> !hasOverlongBikeRun(path)).toList();
+        paths = paths.stream().filter(path -> BikeUsePolicy.allowedPath(path.edges())).toList();
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {
@@ -348,22 +349,6 @@ public final class RouteCandidateFinder {
             }
         }
         return collected;
-    }
-
-    /** 경로에 대여 1회 상한(1km)을 넘는 연속 BIKE 구간이 있는가(5부 T3). */
-    private static boolean hasOverlongBikeRun(FoundPath path) {
-        long run = 0;
-        for (Edge edge : path.edges()) {
-            if (edge.mode() == TravelMode.BIKE) {
-                run += edge.travelSec();
-                if (run > com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder.MAX_ACT_SEC) {
-                    return true;
-                }
-            } else {
-                run = 0;
-            }
-        }
-        return false;
     }
 
     /** journey에 탑승(BUS·SUBWAY) leg가 있는가 — 비탑승(전부 연결) 판정용. */

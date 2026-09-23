@@ -1,7 +1,9 @@
 package com.ssafy.s15p21a104.domain.route.finder;
 
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bike;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bus;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.walk;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,7 +25,7 @@ class BikeActCapTest {
 
     private static RouteCandidateFinder finder() {
         Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
-        for (String id : List.of("A", "B", "C")) {
+        for (String id : List.of("A", "B", "C", "D")) {
             infos.put(id, new RouteMapper.StationInfo(id, id, 37.5, 127.0));
         }
         return new RouteCandidateFinder(new TransferRule(0), Map.of(), Set.of(), infos, Map::of,
@@ -61,5 +63,38 @@ class BikeActCapTest {
                 finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
 
         assertFalse(candidates.isEmpty(), "1.5km 자전거 경로가 사라졌다");
+    }
+
+    @Test
+    @DisplayName("C4: 무탑승 BIKE→WALK→BIKE(2런) 경로는 제외된다 (2026-09-23)")
+    void c4_무탑승_체인_제외() {
+        var graph = graphOf(bike("A", "B", 120), walk("B", "C", 60), bike("C", "D", 120));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "D", 3, null, null);
+
+        assertTrue(candidates.isEmpty(), "무탑승 자전거 체인이 남았다");
+    }
+
+    @Test
+    @DisplayName("C5: 접근 1런 + 이탈 1런(탑승 포함)은 유지된다 (2026-09-23)")
+    void c5_양끝_유지() {
+        var graph = graphOf(bike("A", "B", 120), bus("B", "C", "B1", 100), bike("C", "D", 120));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "D", 3, null, null);
+
+        assertFalse(candidates.isEmpty(), "접근·이탈 각 1런 경로가 사라졌다");
+    }
+
+    @Test
+    @DisplayName("C6: 탑승 사이 BIKE 런은 제외된다 (2026-09-23)")
+    void c6_중간_제외() {
+        var graph = graphOf(bus("A", "B", "B1", 100), bike("B", "C", 120), bus("C", "D", "B2", 100));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "D", 3, null, null);
+
+        assertTrue(candidates.isEmpty(), "중간 자전거 런이 남았다");
     }
 }

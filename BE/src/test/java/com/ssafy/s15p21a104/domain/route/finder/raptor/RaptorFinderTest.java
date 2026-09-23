@@ -186,10 +186,10 @@ class RaptorFinderTest {
         List<RaptorFinder.Connection> over = List.of(
                 new RaptorFinder.Connection("R1", "S", 200, TravelMode.BIKE)); // 300 + 200 = 500 > 480
         Map<String, RaptorFinder.Access> origin = Map.of(
-                "PLACE-ORIGIN", new RaptorFinder.Access(0, null, 0, TravelMode.WALK, 0),
-                "R1", new RaptorFinder.Access(300, "PLACE-ORIGIN", 300, TravelMode.BIKE, 300));
+                "PLACE-ORIGIN", new RaptorFinder.Access(0, null, 0, TravelMode.WALK, 0, 0),
+                "R1", new RaptorFinder.Access(300, "PLACE-ORIGIN", 300, TravelMode.BIKE, 300, 1));
         Map<String, RaptorFinder.Egress> dest = Map.of(
-                "D", new RaptorFinder.Egress(0, null, 0, TravelMode.WALK, 0));
+                "D", new RaptorFinder.Egress(0, null, 0, TravelMode.WALK, 0, 0));
 
         RaptorFinder blocked = new RaptorFinder(
                 List.of(route("B1", 0, "S", "100", "D")), over);
@@ -203,6 +203,20 @@ class RaptorFinderTest {
         assertTrue(!allowed.find("PLACE-ORIGIN", "PLACE-DEST",
                 new RaptorFinder.AccessTables(origin, dest), 3, false).isEmpty(),
                 "상한 이내 자전거 확장이 막혔다");
+    }
+
+    @Test
+    @DisplayName("R12: 탑승 사이(라운드≥1) BIKE 연결은 사용하지 않는다 (2026-09-23)")
+    void r12_중간자전거금지() {
+        RaptorFinder finder = new RaptorFinder(List.of(
+                route("B1", 0, "A", "100", "M"),
+                route("B2", 0, "X", "100", "D")),
+                List.of(new RaptorFinder.Connection("M", "X", 120, TravelMode.BIKE)));
+
+        List<RaptorFinder.Journey> journeys =
+                finder.find("A", "D", access("A", 0), access("D", 0), 3, false);
+
+        assertTrue(journeys.isEmpty(), "중간 BIKE 연결이 사용됐다");
     }
 
     // 연결망 다중 홉(대여소 체인)은 엔진이 아니라 경계가 접근·이탈 테이블로 공급한다(5부 R-A1).
