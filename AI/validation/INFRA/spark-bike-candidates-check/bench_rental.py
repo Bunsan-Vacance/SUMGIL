@@ -43,10 +43,24 @@ def compare_accuracy(pdf: pd.DataFrame, sdf_pandas: pd.DataFrame) -> dict:
     right = sdf_pandas.set_index(["station_id", "dow", "slot_5m"]).sort_index()
     common_idx = left.index.intersection(right.index)
     row_match = len(left) == len(right) == len(common_idx)
-    max_abs_err = float(
-        np.max(np.abs(left.loc[common_idx, "net_flow"].to_numpy() - right.loc[common_idx, "net_flow"].to_numpy()))
-    ) if len(common_idx) else float("nan")
-    return {"rows_pandas": len(left), "rows_spark": len(right), "rows_match": row_match, "max_abs_err": max_abs_err}
+    max_abs_err = (
+        float(
+            np.max(
+                np.abs(
+                    left.loc[common_idx, "net_flow"].to_numpy()
+                    - right.loc[common_idx, "net_flow"].to_numpy()
+                )
+            )
+        )
+        if len(common_idx)
+        else float("nan")
+    )
+    return {
+        "rows_pandas": len(left),
+        "rows_spark": len(right),
+        "rows_match": row_match,
+        "max_abs_err": max_abs_err,
+    }
 
 
 def run_scale(month_count: int, all_months: list[str]) -> dict:
@@ -70,7 +84,9 @@ def run_scale(month_count: int, all_months: list[str]) -> dict:
     # ── spark ──
     spark = make_spark(f"rental-bench-{month_count}m")
     try:
-        sdf_raw, convert_sec = read_rental_spark(spark, files)  # UTF-8 변환은 시간 밖(1회성 준비 비용)
+        sdf_raw, convert_sec = read_rental_spark(
+            spark, files
+        )  # UTF-8 변환은 시간 밖(1회성 준비 비용)
         sampler = MemSampler().start()
         t0 = time.perf_counter()
         sdf_result = op_spark(sdf_raw)

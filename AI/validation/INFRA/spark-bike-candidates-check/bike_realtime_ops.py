@@ -121,9 +121,13 @@ def op_spark(spark, files: list[Path]):
 
     df = df.withColumn(
         "stock_ratio",
-        F.when(F.col("rack_total_count") > 0, F.col("current_bike_count") / F.col("rack_total_count")),
+        F.when(
+            F.col("rack_total_count") > 0, F.col("current_bike_count") / F.col("rack_total_count")
+        ),
     )
-    df = df.withColumn("slot_5m", F.date_trunc("minute", F.col("collected_at")))  # 근사(분 단위 truncate 후 5분 버킷은 아래)
+    df = df.withColumn(
+        "slot_5m", F.date_trunc("minute", F.col("collected_at"))
+    )  # 근사(분 단위 truncate 후 5분 버킷은 아래)
     df = df.withColumn(
         "slot_5m",
         F.from_unixtime(F.floor(F.unix_timestamp(F.col("collected_at")) / 300) * 300),
@@ -131,25 +135,18 @@ def op_spark(spark, files: list[Path]):
 
     # 같은 (station, slot_5m) 안에서 가장 최근 값만 남긴다 (pandas의 drop_duplicates(keep="last")와 동일).
     window = Window.partitionBy("station_id", "slot_5m").orderBy(F.col("collected_at").desc())
-    deduped = (
-        df.withColumn("rn", F.row_number().over(window))
-        .where(F.col("rn") == 1)
-        .drop("rn")
-    )
+    deduped = df.withColumn("rn", F.row_number().over(window)).where(F.col("rn") == 1).drop("rn")
 
     # Spark dayofweek: 일=1..토=7. pandas dt.dayofweek: 월=0..일=6로 통일한다((spark+5)%7).
     spark_dow = F.dayofweek(F.col("collected_at"))
-    agg = (
-        deduped.groupBy(
-            "station_id",
-            ((spark_dow + 5) % 7).alias("dow"),
-            F.hour(F.col("collected_at")).alias("collected_hour"),
-        )
-        .agg(
-            F.mean("current_bike_count").alias("avg_bike_count"),
-            F.stddev("current_bike_count").alias("std_bike_count"),
-            F.mean("stock_ratio").alias("avg_stock_ratio"),
-            F.count("current_bike_count").alias("n_obs"),
-        )
+    agg = deduped.groupBy(
+        "station_id",
+        ((spark_dow + 5) % 7).alias("dow"),
+        F.hour(F.col("collected_at")).alias("collected_hour"),
+    ).agg(
+        F.mean("current_bike_count").alias("avg_bike_count"),
+        F.stddev("current_bike_count").alias("std_bike_count"),
+        F.mean("stock_ratio").alias("avg_stock_ratio"),
+        F.count("current_bike_count").alias("n_obs"),
     )
     return agg.orderBy("station_id", "dow", "collected_hour")
