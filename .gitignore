@@ -72,6 +72,12 @@ AI/models/*
 *.pkl
 *.parquet
 
+# 273 벤치 — 서버에서 받은 실제 재고 스냅샷 + UTF-8 변환 캐시(8.7GB). *.parquet 외에 CSV/.bak도
+# 섞여 있어 별도로 막는다. 로그도 재현 가능한 콘솔 출력이라 커밋 대상 아님(RESULTS.md·results.jsonl가 정본).
+AI/validation/INFRA/spark-bike-candidates-check/data_sample/
+AI/validation/INFRA/spark-bike-candidates-check/*.log
+AI/validation/INFRA/spark-bike-candidates-check/__pycache__/
+
 # DATA_ENGINE 리포트는 데이터로부터 재생성되는 산출물 — download_guide.md 등 직접 쓴 문서만 추적.
 AI/DATA_ENGINE/reports/bike_weather_eda.md
 AI/DATA_ENGINE/reports/crowd_eda.md
