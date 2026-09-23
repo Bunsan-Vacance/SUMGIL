@@ -28,7 +28,7 @@ import tools.jackson.databind.json.JsonMapper;
 @EnableConfigurationProperties(BusCongestionProperties.class)
 public class BusCongestionConfig {
 
-    @Bean
+    @Bean(destroyMethod = "shutdown")
     public BusCongestionReader busCongestionReader(BusCongestionProperties props,
                                                    RedisTemplate<String, Object> redisTemplate,
                                                    JsonMapper jsonMapper,

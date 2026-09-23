@@ -14,7 +14,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import tools.jackson.databind.json.JsonMapper;
@@ -32,11 +35,21 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p><b>어떤 실패도 밖으로 던지지 않는다.</b> 타임아웃·API 오류·예산 소진·캐시 손상 모두 빈 맵이
  * 되고 화면은 "정보 없음" 이 된다. 경로 검색이 이 값 때문에 깨지면 안 된다.
+ *
+ * <p><b>정류소별 조회는 개수 제한이 있는 전용 스레드 풀에서 돈다(2026-09-22 부하테스트
+ * 트러블슈팅, {@code troubleshooting-2026-09-22-notion.md}).</b> {@code
+ * CompletableFuture.runAsync(Runnable)}을 Executor 없이 쓰면 JVM 공통 풀
+ * (ForkJoinPool.commonPool)의 병렬성이 2 미만인 환경(예: 배포 서버처럼 CPU가 적은 경우)에서는
+ * 매번 새 스레드를 만들어버린다 — 정류소가 몰리면 스레드가 무제한으로 늘어나 서버 전체가
+ * 마비된다. 그래서 크기를 고정한 풀을 명시적으로 넘긴다.
  */
 @Slf4j
 public class BusCongestionReader {
 
     static final String BASE_URL = "http://ws.bus.go.kr/api/rest/arrive/getLowArrInfoByStId";
+
+    /** 동시에 뜰 수 있는 정류소 조회 스레드 수 상한. */
+    private static final int MAX_CONCURRENT_FETCHES = 16;
 
     private final HttpFetcher fetcher;
     private final RedisTemplate<String, Object> redisTemplate;
@@ -46,6 +59,7 @@ public class BusCongestionReader {
     private final String serviceKey;
     private final Duration cacheTtl;
     private final Duration batchTimeout;
+    private final ExecutorService fetchExecutor;
 
     public BusCongestionReader(HttpFetcher fetcher, RedisTemplate<String, Object> redisTemplate, JsonMapper mapper,
                                CallBudget budget, Clock clock, String serviceKey,
@@ -58,6 +72,24 @@ public class BusCongestionReader {
         this.serviceKey = serviceKey;
         this.cacheTtl = cacheTtl;
         this.batchTimeout = batchTimeout;
+        // disabled()는 prefetch를 아예 재정의해 executor를 쓰지 않는다 — fetcher가 null이면 안 만든다.
+        this.fetchExecutor = fetcher != null ? newFetchExecutor() : null;
+    }
+
+    private static ExecutorService newFetchExecutor() {
+        AtomicInteger threadCount = new AtomicInteger();
+        return Executors.newFixedThreadPool(MAX_CONCURRENT_FETCHES, runnable -> {
+            Thread thread = new Thread(runnable, "bus-congestion-fetch-" + threadCount.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    /** 애플리케이션 종료 시 스레드 풀을 정리한다({@code BusCongestionConfig}의 destroyMethod). */
+    public void shutdown() {
+        if (fetchExecutor != null) {
+            fetchExecutor.shutdown();
+        }
     }
 
     /**
@@ -87,7 +119,7 @@ public class BusCongestionReader {
                 continue;
             }
             budget.recordCall();
-            futures.add(CompletableFuture.runAsync(() -> fetchInto(stopId)));
+            futures.add(CompletableFuture.runAsync(() -> fetchInto(stopId), fetchExecutor));
         }
         try {
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
