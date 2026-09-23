@@ -253,4 +253,40 @@ class BusCongestionReaderTest {
 
         assertTrue(reader.forStop("121000012").isEmpty());
     }
+
+    @Test
+    @DisplayName("297-R11(2026-09-22 부하테스트 트러블슈팅): 정류소가 많아도 동시 조회 스레드 수가 상한을 넘지 않는다")
+    void r11_동시_조회_스레드_상한() throws Exception {
+        FakeRedis redis = new FakeRedis();
+        int stopCount = 40; // 스레드 풀 상한(16)보다 훨씬 많게
+        AtomicInteger concurrent = new AtomicInteger();
+        AtomicInteger peakConcurrent = new AtomicInteger();
+        Set<String> seenThreadNames = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        HttpFetcher fetcher = uri -> {
+            seenThreadNames.add(Thread.currentThread().getName());
+            int now = concurrent.incrementAndGet();
+            peakConcurrent.updateAndGet(prev -> Math.max(prev, now));
+            try {
+                Thread.sleep(50); // 겹치는 구간을 강제로 만든다
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                concurrent.decrementAndGet();
+            }
+            return body("X", 3, 10);
+        };
+        Set<String> stopIds = new java.util.HashSet<>();
+        for (int i = 0; i < stopCount; i++) {
+            stopIds.add("STOP-" + i);
+        }
+        BusCongestionReader reader = new BusCongestionReader(fetcher, redis.template, MAPPER, budget(1000),
+                FIXED, "TEST-KEY", Duration.ofSeconds(30), Duration.ofSeconds(5));
+
+        reader.prefetch(stopIds);
+
+        assertTrue(peakConcurrent.get() <= 16,
+                "동시 조회 스레드 수는 풀 상한(16)을 넘으면 안 된다 — 실측 " + peakConcurrent.get());
+        assertTrue(seenThreadNames.stream().allMatch(name -> name.startsWith("bus-congestion-fetch-")),
+                "전용 스레드 풀 이름 규칙을 따라야 한다: " + seenThreadNames);
+    }
 }
