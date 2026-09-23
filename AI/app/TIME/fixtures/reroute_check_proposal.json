@@ -1,0 +1,92 @@
+{
+  "request": {
+    "sessionId": "FIXTURE-PROPOSAL",
+    "step": 0,
+    "rentalId": "ST-TARGET",
+    "etaToRentalMinutes": 10,
+    "destStationId": "DEST-1",
+    "boundary": {
+      "legIndex": 1,
+      "nodeId": "ND-221",
+      "lat": 37.5665,
+      "lng": 126.978
+    }
+  },
+  "response": {
+    "status": "proposal",
+    "recommendationId": "00000000-0000-0000-0000-000000000000",
+    "validUntil": "2026-09-23T09:10:00+09:00",
+    "recommendedBy": "AGENT",
+    "reason": "교대 대여소는 거리가 가깝고 자전거도 넉넉합니다.",
+    "target": {
+      "rentalId": "ST-TARGET",
+      "name": "역삼",
+      "currentBikes": 0,
+      "predictedStock": 0.3,
+      "pEmpty": 0.9,
+      "horizonMin": 10
+    },
+    "alternative": {
+      "rentalId": "ST-ALT-A",
+      "name": "교대",
+      "lat": 37.5666,
+      "lng": 126.978,
+      "distanceMeters": 11,
+      "currentBikes": 4,
+      "predictedStock": 4.0,
+      "pEmpty": 0.1
+    },
+    "boundary": {
+      "legIndex": 1,
+      "nodeId": "ND-221",
+      "lat": 37.5665,
+      "lng": 126.978
+    },
+    "walkLeg": {
+      "mode": "WALK",
+      "fromNodeId": "ND-221",
+      "fromNodeName": null,
+      "fromLat": 37.5665,
+      "fromLng": 126.978,
+      "toNodeId": "ST-ALT-A",
+      "toNodeName": "교대",
+      "toLat": 37.5666,
+      "toLng": 126.978,
+      "routeId": null,
+      "routeName": null,
+      "minutes": 0.2,
+      "distanceMeters": 14,
+      "geometry": {
+        "type": "MultiLineString",
+        "coordinates": [
+          [
+            [
+              126.978,
+              37.5665
+            ],
+            [
+              126.978,
+              37.5666
+            ]
+          ]
+        ]
+      },
+      "geometryStatus": "estimated",
+      "estimated": true
+    },
+    "route": {
+      "routeType": "BIKE_SUBWAY",
+      "totalMinutes": 20.0,
+      "source": "ALGORITHM",
+      "totalDistanceMeters": 6000.0,
+      "transferCount": 0,
+      "legs": [
+        {
+          "mode": "BIKE",
+          "minutes": 20.0,
+          "routeId": null
+        }
+      ]
+    }
+  }
+}

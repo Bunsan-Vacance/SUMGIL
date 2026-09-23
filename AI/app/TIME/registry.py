@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-TOOL_SCHEMA_VERSION = "1.2.0"
+TOOL_SCHEMA_VERSION = "1.3.0"
 """도구 스키마 판. 필드 추가는 minor, 삭제·의미 변경은 major. 이력은 TOOL_CONTRACT.md."""
 
 # ── 도구 이름 상수 ──
@@ -356,9 +356,8 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "기준 좌표 주변의 따릉이 대여소를 가까운 순으로 조회한다. 지하철 대신 따릉이로 "
             "갈아탈 수 있는 대여소 후보를 고를 때 쓴다. "
-            "availableBikes는 **지금** 재고(Redis)이고 도착 시점 예측이 아니다 — 예측은 각 "
-            "rentalId로 get_eta_stock을 부를 것. 캐시가 없거나 만료됐으면 null이고, 이는 "
-            "에러가 아니다."
+            "이 목록에는 재고 필드가 없다 — 재고·도착 시점 예측이 필요하면 각 rentalId로 "
+            "get_eta_stock을 부를 것(또는 로컬 색인을 쓸 것)."
         ),
         "input_schema": _obj(
             {
@@ -391,15 +390,6 @@ TOOLS: list[dict[str, Any]] = [
                     "lng": {"type": "number"},
                     "dockCount": {"type": "integer"},
                     "distanceMeters": {"type": "number"},
-                    "availableBikes": {
-                        "type": ["integer", "null"],
-                        "description": (
-                            "지금 재고(Redis). 도착 시점 예측이 아니다. 캐시가 없거나 만료됐으면 "
-                            "null이고 에러가 아니다 — 신선/오래됨 구분은 이 목록 API에는 없다 "
-                            "(단건 /{rentalId}/stock에만 status가 있다)."
-                        ),
-                    },
-                    "stockUpdatedAt": {"type": ["string", "null"], "format": "date-time"},
                 },
             },
         },

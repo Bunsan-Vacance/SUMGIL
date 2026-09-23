@@ -10,16 +10,19 @@ FE→BE→AI인지가 아직 결정 대기라(`FROM_BE-time-reroute-contract-01`
 하나 때문에 요청이 500이 되는 일은 없어야 한다는 원칙(`service.py` 모듈 docstring)을 여기서
 한 번 더 지킨다. **항상 HTTP 200이다.**
 
-팩토리 함수(`_station_index`·`_session_store`·`_adapter`·`_strategy`·`_now`)는 전부 인자
-없는 모듈 레벨 함수다 — 테스트가 `app.BIKE.router` 테스트의 `service._store` monkeypatch와
-같은 패턴으로 갈아끼운다. `_station_index`·`_session_store`만 **프로세스 싱글턴**이고
-(파일 조회·세션 상태는 요청 사이에 남아야 한다), `_adapter`·`_strategy`는 매 요청 새로 만든다.
+팩토리 함수(`_station_index`·`_session_store`·`_adapter`·`_strategy`·`_now`)는 테스트가
+`app.BIKE.router` 테스트의 `service._store` monkeypatch와 같은 패턴으로 갈아끼운다.
+`_station_index`·`_session_store`만 **프로세스 싱글턴**이고(파일 조회·세션 상태는 요청 사이에
+남아야 한다), `_adapter`·`_strategy`는 매 요청 새로 만든다. **`_strategy`만 인자
+(`session_id`)를 받는다** — 324-3부터 LLM 세션 예산(`llm_budget.LlmBudget`)을 세션 보관소에
+붙였고, `_strategy`가 그 세션의 예산을 꺼내 `AgentStrategy`에 물려야 해서다.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -27,7 +30,13 @@ from fastapi import APIRouter
 
 from app.core.config import get_settings
 from app.TIME.adapters import CompositeAdapter, HttpAdapter, LocalAdapter, ToolAdapter
-from app.TIME.api_schemas import RerouteCheckRequest, RerouteCheckResponse, from_outcome
+from app.TIME.api_schemas import (
+    RerouteCheckRequest,
+    RerouteCheckResponse,
+    SessionBudgetOut,
+    TimeMetaResponse,
+    from_outcome,
+)
 from app.TIME.guard import ToolGuard
 from app.TIME.llm import settings_client
 from app.TIME.llm_budget import LlmBudget
@@ -70,19 +79,28 @@ def _station_index() -> StationIndex:
 def _session_store() -> SessionStore:
     """세션 쿨다운 보관소 — 프로세스 싱글턴(`session.py` 모듈 docstring 참고. 여러 세션이
     한 인스턴스를 공유해야 쿨다운이 폴링 사이에 유지된다). TTL은 쿨다운 노브를 그대로 쓴다 —
-    쿨다운이 끝난 세션의 발화 기록은 더 볼 일이 없다.
+    쿨다운이 끝난 세션의 발화 기록은 더 볼 일이 없다. 324-3부터 같은 TTL로 세션별 LLM 예산도
+    같이 보관한다(`session.py` 모듈 docstring 324-3 문단).
 
     `clock=_now`를 넘긴다 — 안 넘기면 `InMemorySessionStore`가 자기 시계(`session.py`의
     `_now_kst`, 실제 벽시계)를 쓰게 되는데, 그러면 `_now()`를 고정해 테스트하는 라우터의
     다른 계산(`seconds_since_last_fire`·`validUntil`)과 저장소의 만료 판정이 서로 다른
     시각을 기준으로 움직인다 — 실제 운영에서는 둘 다 실시각이라 안 드러나지만, `_now`를
     고정하는 테스트에서는 만료 판정만 실시각을 써서 쿨다운이 조용히 안 걸리는 어긋남이 난다.
+
+    `budget_factory`는 `Settings`의 세션 예산 노브를 닫아넣은 클로저다 — 싱글턴 생성 시점의
+    설정값을 그대로 굳힌다(다른 노브들도 이미 이 함수에서 그렇게 굳는다).
     """
     global _session_store_singleton
     if _session_store_singleton is None:
         settings = get_settings()
         _session_store_singleton = InMemorySessionStore(
-            ttl_sec=settings.time_trigger_cooldown_sec, clock=_now
+            ttl_sec=settings.time_trigger_cooldown_sec,
+            clock=_now,
+            budget_factory=lambda: LlmBudget(
+                max_calls=settings.time_llm_max_calls_per_session,
+                max_total_tokens=settings.time_llm_max_tokens_per_session,
+            ),
         )
     return _session_store_singleton
 
@@ -98,14 +116,15 @@ def _adapter() -> ToolAdapter:
     )
 
 
-def _strategy() -> RerouteStrategy:
+def _strategy(session_id: str) -> RerouteStrategy:
     """규칙 폴백을 기본으로 두고, LLM 게이트웨이 설정(주소·모델명·키) 셋이 전부 있을 때만
     `AgentStrategy`로 갈아 끼운다 — 하나라도 없으면 규칙 전략이 그대로 나간다(운영 폴백,
     `strategy.py` 모듈 docstring).
 
-    **세션 단위 예산(`LlmBudget`)이 원칙이지만 지금은 요청 단위로 만든다.** 폴링 여러 번에
-    걸친 누적 예산은 세션 보관소에 예산 상태까지 얹어야 하는데, 그건 302 범위 밖이라 요청마다
-    새 예산으로 시작하는 단순한 형태로 남겨둔다(다음 작업에서 세션 단위로 옮긴다).
+    **324-3: 세션 단위 예산.** `_session_store().budget_for(session_id)`로 이 세션의
+    `LlmBudget`을 꺼내 물린다 — 요청마다 새로 만들지 않으므로 세션당 3회/8000토큰 한도가
+    폴링 여러 번에 걸쳐 실제로 누적된다(`session.py` 모듈 docstring 324-3 문단, 이전에는
+    요청 단위로 매번 새로 만들었다).
     """
     settings = get_settings()
     rule = RuleStrategy(ScoreWeights.from_settings(settings))
@@ -113,10 +132,7 @@ def _strategy() -> RerouteStrategy:
         return AgentStrategy(
             settings_client(settings),
             fallback=rule,
-            budget=LlmBudget(
-                max_calls=settings.time_llm_max_calls_per_session,
-                max_total_tokens=settings.time_llm_max_tokens_per_session,
-            ),
+            budget=_session_store().budget_for(session_id),
             max_sentences=settings.time_agent_reason_max_sentences,
             max_chars=settings.time_agent_reason_max_chars,
         )
@@ -155,7 +171,7 @@ def _check_reroute(req: RerouteCheckRequest) -> RerouteCheckResponse:
         boundary=boundary,
         adapter=_adapter(),
         guard=ToolGuard(),  # 세션(요청 하나) 단위 — guard.py 첫 문단
-        strategy=_strategy(),
+        strategy=_strategy(req.session_id),
         station_index=_station_index(),
         seconds_since_last_fire=seconds_since_last_fire,
         thresholds=Thresholds.from_settings(settings),
@@ -181,6 +197,62 @@ def _check_reroute(req: RerouteCheckRequest) -> RerouteCheckResponse:
     )
 
     return from_outcome(outcome, recommendation_id=recommendation_id, valid_until=valid_until)
+
+
+@router.get("/meta", response_model=TimeMetaResponse)
+def get_meta() -> TimeMetaResponse:
+    """`GET /time/meta`(S15P21A104-324-2) — FE 디버그·시연용 노브 조회. **운영 판정에 쓰지
+    않는다**(응답을 캐시해 판정에 재사용하면 설정 변경이 반영 안 된다). `check_reroute`와 같은
+    이유로 절대 500을 내지 않는다 — 색인·스냅샷이 없으면 그 필드만 `null`이다."""
+    settings = get_settings()
+    llm_configured = bool(
+        settings.time_llm_base_url and settings.time_llm_model and settings.time_llm_api_key
+    )
+    return TimeMetaResponse(
+        trigger_p_empty=settings.time_trigger_p_empty,
+        trigger_min_stock=settings.time_trigger_min_stock,
+        trigger_max_eta_min=settings.time_trigger_max_eta_min,
+        trigger_cooldown_sec=settings.time_trigger_cooldown_sec,
+        debug_force_trigger_enabled=settings.time_debug_force_trigger_enabled,
+        nearby_radius_m=settings.time_nearby_radius_m,
+        nearby_limit=settings.time_nearby_limit,
+        score_empty_penalty_min=settings.time_score_empty_penalty_min,
+        strategy_kind="AGENT" if llm_configured else "ALGORITHM",
+        llm_model=settings.time_llm_model,
+        llm_configured=llm_configured,
+        station_index_size=_safe_station_index_size(),
+        snapshot_age_sec=_safe_snapshot_age_sec(settings),
+        session_budget=SessionBudgetOut(
+            max_calls=settings.time_llm_max_calls_per_session,
+            max_total_tokens=settings.time_llm_max_tokens_per_session,
+        ),
+    )
+
+
+def _safe_station_index_size() -> int | None:
+    """색인 조회가 무엇으로든 실패해도(파일 손상 등) `null`로 답한다 — 디버그 엔드포인트
+    하나 때문에 500을 내지 않는다(`check_reroute`와 같은 원칙)."""
+    try:
+        return _station_index().size()
+    except Exception:  # noqa: BLE001 - 디버그 엔드포인트의 마지막 그물
+        _log.exception("station index size 조회 중 예상 못 한 오류")
+        return None
+
+
+def _safe_snapshot_age_sec(settings: object) -> float | None:
+    """`latest_stock.parquet`의 mtime 기준 나이(초). 파일이 없으면(로컬 개발 등) `null`이다 —
+    없는 것을 오류로 보지 않는다(`station_index.py`의 값 안 지어내기 원칙과 같은 결)."""
+    raw_path = getattr(settings, "bike_live_stock_path", None)
+    if raw_path is None:
+        return None
+    path = Path(raw_path)
+    try:
+        if not path.exists():
+            return None
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=KST)
+        return (_now() - mtime).total_seconds()
+    except OSError:
+        return None
 
 
 __all__ = ["router"]

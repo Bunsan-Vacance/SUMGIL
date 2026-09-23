@@ -4,12 +4,16 @@
 (`strategy.AgentStrategy`) 안에서 예외가 올라오면 규칙 폴백으로 넘어갈 기회조차 없이 그 자리에서
 루프가 죽는다 — `schemas.py` 첫 문단·`adapters.py` 첫 문단과 같은 이유다.
 
-**게이트웨이(GMS)의 실제 요청·응답 형식은 미확정이다**(`TOOL_CONTRACT.md` 6절 5번). 잠정적으로
-OpenAI 호환 `POST {base_url}/chat/completions`(Authorization: Bearer, `messages`,
-`response_format`)로 가정하고 짠다. 나중에 실제 형식이 확인되면 `_build_request()`·
-`_parse_response()` 두 함수만 고치면 끝나도록 요청 조립과 응답 파싱을 여기 격리해뒀다 —
-그 밖의 코드(`complete()` 호출부·`AgentStrategy`)는 `LlmResult`/`LlmError`만 보고 게이트웨이가
-어떤 모양인지 모른다.
+**게이트웨이(GMS) 형식은 OpenAI 호환으로 확인됐다**(2026-09-23 실호출 1회, `TOOL_CONTRACT.md`
+6절 5번). `POST {base_url}/chat/completions`, `Authorization: Bearer <GMS_API_KEY>`, `messages`,
+`response_format.json_schema(strict)`가 그대로 통하고 응답도 `choices[0].message.content`·
+`usage.prompt_tokens/completion_tokens`·`model`(예: `gpt-5.4-mini-2026-03-17`) 구조다.
+base_url은 `https://gms.ssafy.io/gmsapi/api.openai.com/v1`, 모델은 `gpt-5.4-mini`(`.env`).
+같은 게이트웨이의 Gemini 경로(`generativelanguage.googleapis.com/v1beta/...:generateContent`,
+`x-goog-api-key`)는 형식이 달라 이 클라이언트로는 못 쓴다 — 바꿀 일이 생기면
+`_build_request()`·`_parse_response()` 두 함수만 고치면 되도록 요청 조립과 응답 파싱을 여기
+격리해뒀다. 그 밖의 코드(`complete()` 호출부·`AgentStrategy`)는 `LlmResult`/`LlmError`만 보고
+게이트웨이가 어떤 모양인지 모른다.
 """
 
 from __future__ import annotations

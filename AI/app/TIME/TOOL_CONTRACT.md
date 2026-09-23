@@ -1,6 +1,6 @@
 # TIME 에이전트 도구 계층 — 계약 (S15P21A104-202)
 
-작성 2026-09-20 · 브랜치 `feat/TIME-agent-tool-layer` · 스키마 판 **1.2.0**
+작성 2026-09-20 · 브랜치 `feat/TIME-agent-tool-layer` · 스키마 판 **1.3.0**
 
 > **이 문서는 도구 계층의 계약이다. 아래가 바뀌면 같은 커밋에서 이 문서를 고친다.**
 > `registry.TOOL_SCHEMA_VERSION` · `registry.TOOLS`의 도구 이름·입출력 스키마 ·
@@ -53,21 +53,23 @@ LLM 에이전트(203)가 호출할 도구를 **한 벌**로 정의하고, 실제
 `registry.tool_names()`는 정의 순서를 유지한다. LLM 요청의 `tools` 배열 순서가 프롬프트 캐시
 프리픽스에 들어가므로, 순서가 매번 달라지면 캐시가 통째로 무효화된다.
 
-### 1.2 `bike_stations_nearby` 출력 스키마 정정 — 2026-09-22 (203/302)
+### 1.2 `bike_stations_nearby` 출력 스키마 정정 완료 — 2026-09-23 (324)
 
-`registry.TOOLS`의 `bike_stations_nearby` 출력 스키마는 `availableBikes`·`stockUpdatedAt`을
-갖고 있다고 적고 있지만(1.1.0에서 넣음), **실제 BE DTO를 확인한 결과 `rentalId, name, lat, lng,
-dockCount, distanceMeters`뿐**이다 — 재고·갱신 시각 필드가 없다. 1.1.0 시점의 설명이 틀렸다.
+`registry.TOOLS`의 `bike_stations_nearby` 출력 스키마는 1.1.0에서 `availableBikes`·
+`stockUpdatedAt`을 갖고 있다고 적었지만, **실제 BE DTO를 확인한 결과 `rentalId, name, lat, lng,
+dockCount, distanceMeters`뿐**이었다 — 재고·갱신 시각 필드가 없다. 1.1.0 시점의 설명이 틀렸다.
+1.2.0에서는 실사용이 없는 도구 하나 때문에 develop-AI에 이미 머지된 판과 어긋나게 만들 이유가
+없어 정정을 다음 판올림으로 미뤄뒀는데(구 1.2절 내용), 이번 324 티켓이 그 판올림이다.
 
-그 사이 대안 후보 탐색은 이 도구가 아니라 AI 로컬 색인(`station_index.py` +
-`latest_stock.parquet`)으로 옮겨갔다(`AGENT_DESIGN.md` 2.3절 — 판정·후보 생성을 한 원천으로
-통일하려는 목적도 있었다). 그래서 이 도구는 지금 에이전트 경로에서 **쓰이지 않는다** — 나중에
+`registry.TOOLS`에서 `availableBikes`·`stockUpdatedAt`을 제거했고(item은 `rentalId, name, lat,
+lng, dockCount, distanceMeters`만 남는다), `description`도 "availableBikes는 지금 재고…"라는
+틀린 문장을 지우고 재고 필드가 없다는 사실과 재고·도착 시점 예측이 필요하면 `get_eta_stock`
+(또는 로컬 색인)을 쓰라는 안내로 바꿨다.
+
+대안 후보 탐색은 이 도구가 아니라 AI 로컬 색인(`station_index.py` + `latest_stock.parquet`)으로
+이미 옮겨가 있다(`AGENT_DESIGN.md` 2.3절 — 판정·후보 생성을 한 원천으로 통일하려는 목적도
+있었다). 그래서 스키마를 정정한 뒤에도 이 도구는 지금 에이전트 경로에서 **쓰이지 않는다** —
 로컬 색인이 죽었을 때의 폴백 자리로 남겨둔다.
-
-스키마 자체는 **고치지 않는다.** 지금 고치면 이 문서 머리말의 "스키마 판" 규약상 minor/major
-판올림이 필요한데, 실사용이 없는 도구 하나 때문에 develop-AI에 이미 머지된 판과 어긋나게
-만들 이유가 없다. 정정은 다음에 실제로 스키마를 바꿀 일이 생길 때(예: 이 도구를 다시 쓰게 될 때)
-같이 반영한다.
 
 ---
 
@@ -262,8 +264,8 @@ retryable=False)를 돌려준다. 소비는 `record(result)`가 하고, 토큰 �
 | 1 | `replan_route` 입력 `exclude_route_ids` | **보류**(1번) — BE 216(혼잡 가중 탐색) 이후 하드 제외/가중 페널티 중 방식을 정한다 | 스키마 미개방. 그전까지는 응답에서 현재 `routeId`를 쓰는 대안을 걸러내는 사후 필터링을 쓴다(`planner._replan_caller`). K=3이라 대안이 0개로 걸러질 수 있다는 한계는 BE도 인지하고 있다 |
 | 2 | `replan_route` 출력 `source: "AGENT"` | **거절**(2번) — `source`는 "누가 탐색했나"라 경로는 항상 `ALGORITHM`이 맞다. "누가 골랐나"는 축이 다르다 | 스키마 미개방. 에이전트가 고른 이유는 라우터 응답의 별도 필드(`recommendedBy`)에 싣는다 — FE(최진우) 판단이 먼저 필요하다 |
 | 3 | `replan_route` 출력 `reason` 생성 주체 | **확정**(3번) — BE 응답 필드에는 LLM 문장을 싣지 않는다. BE 고정 문구는 그대로 유지 | 스키마 미개방. 에이전트 문장은 에이전트(라우터) 응답에 별도로 담는다 |
-| 4 | BE `base_url` | **확인**(5번) — `prod` 네임스페이스 Service `be`, 포트 8080. `/api/**` 전부 인증 없음 | 값은 확인됐지만 호출 방향(6번 — AI가 언제 BE를 직접 부르는지, (b)/(c) 중 선택)이 216 이후 결정 대기라 `Settings` 필드·`.env.example` 반영은 그 결정 이후로 미룬다. 생성자 인자로만 받는 지금 방식은 유지 |
-| 5 | LLM 게이트웨이 · 사용 가능 모델 | 사용자 확인 | 클라이언트 구현(`llm.HttpLlmClient`). **게이트웨이 형식은 OpenAI 호환으로 가정, 실제 GMS 형식 확인 필요** — 확정되면 `_build_request`/`_parse_response`만 고치면 되도록 그 둘에 격리해뒀다. `time_llm_base_url`/`time_llm_model` 기본값 없음 |
+| 4 | BE `base_url` | **확인**(5번) — `prod` 네임스페이스 Service `be`, 포트 8080. `/api/**` 전부 인증 없음 | 값은 확인됐지만 호출 방향(6번 — AI가 언제 BE를 직접 부르는지, (b)/(c) 중 선택)이 216 이후 결정 대기라 `Settings` 필드·`.env.example` 반영은 그 결정 이후로 미룬다. 생성자 인자로만 받는 지금 방식은 유지. **dev 실호출 확인(2026-09-23)** — `TIME_BE_BASE_URL=https://j15a104.p.ssafy.io`로 `HttpAdapter`가 `POST /api/routes/replan`(step 0, boundaryId `ST-1290`, destStationId `0222`) 1회 → HTTP 200·빈 배열(대안 없음)·0.75초. 요청·응답 형식은 어댑터와 맞고, 빈 배열이 ID 미존재 때문인지 경로 부재 때문인지는 BE 응답만으로 구분되지 않는다 |
+| 5 | LLM 게이트웨이 · 사용 가능 모델 | 사용자 확인 | 클라이언트 구현(`llm.HttpLlmClient`). **GMS 형식 확인 완료(2026-09-23 실호출 1회)** — OpenAI 호환 `POST https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions`, `Authorization: Bearer GMS_API_KEY`, `response_format.json_schema(strict)` 통과. 모델 `gpt-5.4-mini`(응답 `model`=`gpt-5.4-mini-2026-03-17`), 69 입력·19 출력 토큰에 지연 1.2초. 값은 `.env`의 `TIME_LLM_BASE_URL`/`TIME_LLM_MODEL`, 기본값은 여전히 없음 |
 
 1~3은 `registry.py`의 `REPLAN_ROUTE` 항목 `x_resolved`에도 같은 근거로 남아 있다. 스키마를 실제로
 여는 것은 BE 216 완료·FE 방침 확정 이후다.
@@ -299,3 +301,4 @@ monkeypatch하며, 가드는 시계를 주입받아 `sleep` 없이 검증한다.
 | 1.1.0 | 2026-09-21 | bike_stations_nearby 도구·순차 호출·replan 예산 3·BE 회신 반영 |
 | 1.2.0 | 2026-09-22 | LLM 게이트웨이 클라이언트·세션 비용 가드·AgentStrategy |
 | — | 2026-09-22 | 문서만: nearby DTO 정정 메모·트리거 필드 사용 메모·replan 1회 패턴 (스키마 불변) |
+| 1.3.0 | 2026-09-23 | bike_stations_nearby 출력 스키마를 실제 BE DTO로 정정(availableBikes·stockUpdatedAt 제거) |
