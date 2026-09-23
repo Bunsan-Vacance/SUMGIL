@@ -296,6 +296,7 @@ def run(
     feature_set: str = "v3",
     out_root: Path = MODELS_DIR,
     train_empty_full: bool = False,
+    avg_engine: str = "pandas",
 ) -> Path:
     if feature_set not in FEATURE_SETS:
         raise ValueError(f"알 수 없는 feature_set: {feature_set} (가능: {list(FEATURE_SETS)})")
@@ -312,8 +313,16 @@ def run(
     holidays = load_holidays()
 
     # ── avg 소스: StockProfileBaseline(재고·확률) — train만으로 fit ──
-    print(f"[avg] train {len(train_paths)}개 파일 스트리밍 집계...")
-    avg_baseline = StockProfileBaseline().fit_streaming(train_paths, holidays)
+    if avg_engine not in ("pandas", "spark"):
+        raise ValueError(f"알 수 없는 avg_engine: {avg_engine} (가능: pandas, spark)")
+    print(f"[avg] train {len(train_paths)}개 파일 {avg_engine} 집계...")
+    if avg_engine == "spark":
+        # 274 B안 — DATA_ENGINE/spark/jobs/bike_avg_baseline.py에서 11개월 250.7M행으로
+        # pandas와 값 일치를 확인한 로직(app/BIKE/pipeline/lookup.py에 재구현). 기본값이
+        # 아니라 옵트인이다 — avg는 "정직한 baseline"이라 검증 없이 기본 경로를 바꾸지 않는다.
+        avg_baseline = StockProfileBaseline().fit_streaming_spark(train_paths, holidays)
+    else:
+        avg_baseline = StockProfileBaseline().fit_streaming(train_paths, holidays)
     print(f"[avg] station×dow_type×time_slot {len(avg_baseline.table_):,}행")
 
     # ── v4 전용 재료(KBO 일정, jamsil 인근역, D-1/D-7 lag lookup, 날씨, 역 거리, 유동인구) — v3면 전부 None ──
@@ -511,6 +520,14 @@ def main(argv: list[str] | None = None) -> None:
         help="빈 재고(is_empty)/만차(is_full) 확률 분류기도 같이 학습·저장한다 "
         "(v4_weather 전용, S15P21A104-160 Phase 6)",
     )
+    ap.add_argument(
+        "--engine",
+        dest="avg_engine",
+        default="pandas",
+        choices=["pandas", "spark"],
+        help="avg baseline(StockProfileBaseline) 집계 엔진. spark는 274 B안 — "
+        "pandas와 값 일치 검증됨(RESULTS.md), 로컬에 Java·pyspark 필요",
+    )
     args = ap.parse_args(argv)
     run(
         args.train_months,
@@ -521,6 +538,7 @@ def main(argv: list[str] | None = None) -> None:
         args.tag,
         args.feature_set,
         train_empty_full=args.train_empty_full,
+        avg_engine=args.avg_engine,
     )
 
 

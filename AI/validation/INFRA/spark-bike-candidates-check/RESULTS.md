@@ -137,6 +137,33 @@ Spark를 직접 고르게 하려면(B안) 별도 설계가 필요하다 — 아�
 합성 데이터 단위 테스트 3건 추가(`test/test_data_engine_spark_bike_avg_baseline.py`) —
 horizon 필터·NaN 제외·dow_type(토/일/평일) 분기를 실제 로직과 대조했다.
 
+## 9. B안 — `train.py`가 실제로 Spark를 고르게 통합
+
+8절은 대조용(A안)이었다. 이번엔 `app/BIKE/pipeline/lookup.py`의 `StockProfileBaseline`에
+`fit_streaming_spark()`를 추가하고, `train.py --engine {pandas,spark}`로 실제 선택 가능하게
+만들었다(기본값은 여전히 `pandas` — avg는 "정직한 baseline"이라 검증 없이 기본 경로를
+안 바꾼다는 원칙).
+
+계층 규칙(`AI/CLAUDE.md`: `app/`은 `DATA_ENGINE/`을 import하지 않는다) 때문에
+`DATA_ENGINE.spark`를 가져다 쓰지 않고 8절 로직을 `app/BIKE/pipeline/lookup.py` 안에 직접
+재구현했다 — 두 구현(`DATA_ENGINE/spark/jobs/bike_avg_baseline.py`, `lookup.py`)이 갈라지지
+않도록 로직을 바꿀 땐 둘 다 같이 바꿔야 한다.
+
+**스모크 검증**: `python -m app.BIKE.pipeline.train --train-months 202401 202402
+--valid-months 202412 --test-months 202507 --tag smoke-spark-engine --engine spark
+--sample-frac 0.05`을 실제로 끝까지 돌렸다.
+
+- `[avg] train 2개 파일 spark 집계...` → 312,111행(같은 2개월 pandas 결과와 행수 일치)
+- LightGBM 학습까지 정상 진행(early stopping, 38 iteration), 아티팩트 정상 저장
+- `stock_profile_avg.parquet` 스키마·값 확인 완료(`od_station_id, dow_type, time_slot,
+  exp_bikes, p_empty, p_full`)
+- 합성 데이터 단위 테스트 추가(`test/BIKE/test_bike_lookup_spark.py`) — `fit_streaming()`과
+  `fit_streaming_spark()` 값 일치 확인, BIKE 도메인 전체 회귀(49건) 통과
+
+**즉 "만들어두기만 하는" 상태를 벗어났다** — `--engine spark`를 켜면 실제로 다음 모델
+재학습이 이 경로를 타고, 그 결과가 지금과 동일한 서빙 체인(`refresh_avg.py` →
+`bike-avg-batch` → BE)에 그대로 들어간다.
+
 ## 원본
 
 `results.jsonl`(같은 폴더) — 3~7절(대여이력·재고 raw) 실행 조건·수치 원본.
