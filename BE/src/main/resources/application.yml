@@ -42,6 +42,13 @@ bus-congestion:
   batch-timeout: 1500ms  # 경로 검색 응답이 이만큼보다 더 늦어지지 않는다
   now-window: 10m        # 이 밖의 출발 시각을 지정한 검색에는 붙이지 않는다
 
+# 따릉이 도착 예측의 AI 실시간 모델(eta-stock, S15P21A104-309). 주소가 없으면 꺼지고 평균표로 나간다.
+bike-eta:
+  enabled: ${BIKE_ETA_ENABLED:true}
+  base-url: ${AI_API_BASE_URL:}    # prod: be-config 의 워커 Tailscale 주소
+  read-timeout: 1s                 # 2026-09-23 BE 파드 실측 0.34~0.39초
+  max-minutes: 30                  # 모델 학습 horizon 상한. 이보다 먼 도착은 평균표
+
 management:
   endpoints:
     web:

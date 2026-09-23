@@ -8,6 +8,8 @@ import com.ssafy.s15p21a104.domain.bike.dto.response.BikePredictionStatus;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStation;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStockPred;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStockPredId;
+import com.ssafy.s15p21a104.domain.bike.eta.BikeEtaReader;
+import com.ssafy.s15p21a104.domain.bike.eta.BikeEtaStock;
 import com.ssafy.s15p21a104.domain.bike.repository.BikeStationRepository;
 import com.ssafy.s15p21a104.domain.bike.repository.BikeStockPredRepository;
 import com.ssafy.s15p21a104.domain.bike.stock.BikeStock;
@@ -42,6 +44,7 @@ public class BikeStationSearchService {
     private final BikeStationRepository bikeStationRepository;
     private final BikeStockReader bikeStockReader;
     private final BikeStockPredRepository bikeStockPredRepository;
+    private final BikeEtaReader bikeEtaReader;
 
     public List<BikeStationResponse> nearby(Double lat, Double lng, Integer radiusMeters, Integer limit) {
         validateCoordinate(lat, lng);
@@ -73,7 +76,9 @@ public class BikeStationSearchService {
 
     /**
      * 도착 시각 기준 예상 재고(S15P21A104-237, FE-BE 통합 계약 §6).
-     * 정적 예측표({@code bike_stock_pred})만 읽는다 — 실시간 수집값을 건드리지 않는다.
+     * 도착까지 30분 이내면 AI 실시간 모델({@code eta-stock}, v4-weather-final LightGBM)을 먼저 쓰고 — 이때 {@code source}
+     * 는 MODEL, {@code predictedAt} 은 부른 시각이다 — 못 쓰면 정적 예측표({@code bike_stock_pred})로 떨어진다
+     * (S15P21A104-309, 판정은 {@link BikeEtaReader}). 실시간 수집값(Redis)은 여기서 직접 읽지 않는다.
      *
      * @param rentalId 대여소 ID
      * @param arrivalTime 도착 예상 시각(offset ISO). 없거나 깨지면 400
@@ -83,6 +88,14 @@ public class BikeStationSearchService {
         BikeStation station = bikeStationRepository.findById(rentalId)
                 .orElseThrow(() -> new DomainException(ErrorType.BIKE_STATION_NOT_FOUND));
         OffsetDateTime arrival = parseArrival(arrivalTime);
+        // AI 실시간 모델(eta-stock)을 먼저 본다(309). 못 쓰면(30분 초과·호출 실패 등) 빈 값이고 아래 평균표 조회가 그대로 돈다.
+        Optional<BikeEtaStock> model = bikeEtaReader.find(station.getRentalId(), arrival);
+        if (model.isPresent()) {
+            BikeEtaStock eta = model.get();
+            return new BikePredictionResponse(BikePredictionStatus.AVAILABLE, eta.predictedBikes(),
+                    eta.availabilityProbability(), eta.predictedAt(), arrival, station.getRentalId(),
+                    BikePredictionSource.MODEL);
+        }
         // 슬롯 규칙은 탐색과 같은 정의(DepartureSlot)를 쓴다 — pred 테이블 키와 일치해야 한다.
         LocalDateTime seoul = arrival.atZoneSameInstant(ZoneId.of("Asia/Seoul")).toLocalDateTime();
         DepartureSlot slot = DepartureSlot.of(seoul);

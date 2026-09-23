@@ -14,6 +14,7 @@ import com.ssafy.s15p21a104.domain.bike.dto.response.BikePredictionStatus;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStation;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStockPred;
 import com.ssafy.s15p21a104.domain.bike.entity.BikeStockPredId;
+import com.ssafy.s15p21a104.domain.bike.eta.BikeEtaReader;
 import com.ssafy.s15p21a104.domain.bike.repository.BikeStationRepository;
 import com.ssafy.s15p21a104.domain.bike.repository.BikeStockPredRepository;
 import com.ssafy.s15p21a104.domain.bike.stock.BikeStockReader;
@@ -46,6 +47,13 @@ class BikePrediction237Test {
 
     @Mock
     private BikeStockPredRepository bikeStockPredRepository;
+
+    /**
+     * 309 AI 실시간 모델 조회. 여기서는 늘 빈 값이다(Mockito 기본값 Optional.empty) — 모델 값을 못 쓰면 응답이
+     * 237 그대로라는 것을 이 테스트 전체가 보장한다. 없으면 @InjectMocks 가 null 을 넣어 prediction() 이 NPE 로 죽는다.
+     */
+    @Mock
+    private BikeEtaReader bikeEtaReader;
 
     @InjectMocks
     private BikeStationSearchService bikeStationSearchService;
