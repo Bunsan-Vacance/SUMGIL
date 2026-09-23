@@ -51,7 +51,8 @@ public final class LegContract {
                     leg.congestionGrade(),
                     type,
                     rentals.contains(leg.fromNodeId()) ? leg.fromNodeId() : null,
-                    rentals.contains(leg.toNodeId()) ? leg.toNodeId() : null));
+                    rentals.contains(leg.toNodeId()) ? leg.toNodeId() : null,
+                    leg.congestionLevel()));
             if (isTransit(leg.mode())) {
                 transitBefore = true;
             }

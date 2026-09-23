@@ -436,8 +436,13 @@ public class RouteSearchService {
             List<Edge> edges = edgesBySignature.getOrDefault(
                     RouteCandidateFinder.exactSignature(response), List.of());
             AtomicBoolean truncated = new AtomicBoolean(false);
+            LinkCongestionScorer.LinkLevelLookup levelLookup = congestionPredLookup(truncated);
             Optional<LinkCongestionScorer.Result> linkResult = edges.isEmpty() ? Optional.empty()
-                    : LinkCongestionScorer.score(edges, departureTime, congestionPredLookup(truncated));
+                    : LinkCongestionScorer.score(edges, departureTime, levelLookup);
+            // 265 후속(TO_BE-crowd-grade-scheme-02): leg별 최댓값을 SUBWAY leg 등장 순서에 맞춰 붙인다.
+            List<Double> perSubwayLegLevels = edges.isEmpty() ? List.of()
+                    : LinkCongestionScorer.scorePerSubwayLeg(edges, departureTime, levelLookup);
+            legs = attachSubwayCongestionLevels(legs, perSubwayLegLevels);
             Optional<CongestionPredictionResolver.Worst> worst = WorstCongestionPicker.pick(
                     linkResult,
                     id -> {
@@ -453,6 +458,26 @@ public class RouteSearchService {
                     response.transferCount(), prediction));
         }
         return out;
+    }
+
+    /**
+     * SUBWAY leg마다 {@link LinkCongestionScorer#scorePerSubwayLeg}가 낸 값을 등장 순서대로
+     * 하나씩 물린다(265 후속). 개수가 안 맞으면(있을 수 없지만 방어적으로) 남는 leg는
+     * 원래 값(null)을 유지한다 — 억지로 짝짓지 않는다.
+     */
+    private static List<RouteLegResponse> attachSubwayCongestionLevels(
+            List<RouteLegResponse> legs, List<Double> perSubwayLegLevels) {
+        List<RouteLegResponse> out = new ArrayList<>(legs.size());
+        int i = 0;
+        for (RouteLegResponse leg : legs) {
+            if (leg.mode() == TravelMode.SUBWAY && i < perSubwayLegLevels.size()) {
+                out.add(leg.withCongestionLevel(perSubwayLegLevels.get(i)));
+                i++;
+            } else {
+                out.add(leg);
+            }
+        }
+        return List.copyOf(out);
     }
 
     /** BUS leg 중 가장 혼잡한 leg(공통 축 수치). 아는 값이 없으면 빈 값. */
