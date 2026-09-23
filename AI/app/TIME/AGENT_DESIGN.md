@@ -273,11 +273,13 @@ geometryStatus`)에 `estimated: true`를 더한 모양이다 — FE가 같은 �
 **한계.** BE `BikeStockGate`(`domain/route/bike/BikeStockGate.java`)는 예측 맵이 비어 있으면
 "원천 없음"으로 보고 기본 허용한다 — AI가 이 `replan_route` 호출에 예측 재고를 함께 넘기지
 않으므로 게이트가 사실상 꺼져 있는 것과 같고, 하차역에서 BE가 재탐색하면 고갈이 확인된 원래
-대여소를 다시 고를 수 있다. 그래서 `boundary_id`를 대안 대여소로 명시적으로 바꿔 부른다. 하지만
-그 첫 leg가 실제로 대안 대여소에서 시작한다는 보장은 BE가 `boundaryId`를 대여소 노드로 어떻게
-처리하는지에 달려 있고, 이는 dev BE 수동 확인 대기 중이다(계획 3.2절) — 그 확인이 끝나기 전까지
-하차역→대안 도보는 **추정치**다. `viaNodeId` 경유 강제로 실경로화하는 것은 우석 회신 이후로
-미뤘다(계획 0절 범위 밖).
+대여소를 다시 고를 수 있다. 그래서 `boundary_id`를 대안 대여소로 명시적으로 바꿔 부른다.
+
+**첫 leg 검증(324).** BE 회신(`FROM_BE-bike-reroute-route-02.md` 1번, dev BE 수동 확인 대기가
+이걸로 끝났다) — `boundaryId`=대여소여도 첫 leg BIKE는 보장이 아니다. 경계 대여소에서 도보가
+더 싸면 WALK가 먼저 나오고, 옆 역이면 **WALK 단독**(prod 실측 `ST-1882→1024`)이다. 그래서
+`service._pick_route_from_alternative`가 `replan_result` 전체에서 첫 leg가 BIKE·대안 출발인
+첫 경로를 골라 쓰고, 없으면 재호출 없이 `unavailable`(`route_not_from_alternative`)이다.
 
 ### 3.5 API — `POST /time/reroute/check`
 
@@ -308,7 +310,11 @@ geometryStatus`)에 `estimated: true`를 더한 모양이다 — FE가 같은 �
   (`llm_budget.LlmBudget`), 저장소 자체가 파드 1개 전제라 파드 간 공유는 여전히 없다
 - 좌표 목적지(`destLat/Lng`) — 지금은 역 목적지만(BE `replan` 계약 제약)
 - `modes` 전면 재탐색(② 수단 변경) — 지금은 ① 대여소 교체만
-- 실제 보행 라우팅(`viaNodeId` 경유 강제) — 지금은 직선×1.3 추정(3.4절)
+- 실제 보행 라우팅(`viaNodeId` 경유 강제) — 지금은 직선×1.3 추정(3.4절). BE 회신
+  (`FROM_BE-bike-reroute-route-02.md` 6번): **가능·공수 소~중(1~2일, 테스트 포함)**, 방식은
+  2단 탐색(경계→via 1개 + via→목적지 K=3) 후 엣지 열 병합. **이번 스프린트 아님.** 리스크로
+  게이트 ON 시 강제 경유 대여소가 재고 0으로 탈락하는 상호작용을 꼽았다 — "강제 경유 대여소는
+  재고 게이트를 면제할지" 정책 질문이 대기 중이다.
 - 204 기준선 비교(`RuleStrategy` vs `AgentStrategy` 정식 비교) — 구조는 갖췄으나 수치를 재지
   않았다(1절)
 - Ingress·CORS·인증 — FE 실연결 전까지 mock
