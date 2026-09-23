@@ -55,6 +55,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -66,8 +67,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * 경로 검색. 그래프 미적재 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
@@ -82,6 +86,21 @@ public class RouteSearchService {
 
     /** 응답에 담을 후보 수 상한(S15P21A104-185). */
     private static final int MAX_CANDIDATES = 10;
+
+    /**
+     * 동시에 돌 수 있는 경로 탐색(그래프 탐색+geometry 후처리) 개수 상한(2026-09-23 CPU 포화
+     * 트러블슈팅, {@code troubleshooting-2026-09-22-notion.md} 13절). 스레드 풀 상한(291)을
+     * 걸어도 30 VU 부하테스트에서 파드 CPU 2코어가 그대로 꽉 차 헬스체크 응답까지 늦어지며
+     * 재시작됐다 — 이번엔 스레드가 아니라 CPU 자체가 부족했던 것. 요청을 무조건 받아 CPU를
+     * 계속 나눠주면 전부 느려지다 다 죽으므로, 초과분은 짧게 대기시키고 그래도 못 들어가면
+     * 503으로 빨리 돌려보낸다.
+     */
+    private static final int MAX_CONCURRENT_SEARCHES = 4;
+
+    /** 위 상한에 걸렸을 때 대기하는 최대 시간 — 이보다 오래 걸리면 어차피 클라이언트가 포기한다. */
+    private static final Duration SEARCH_ACQUIRE_TIMEOUT = Duration.ofSeconds(3);
+
+    private final Semaphore searchSemaphore = new Semaphore(MAX_CONCURRENT_SEARCHES);
 
     private final StationRepository stationRepository;
     private final RouteGraphRegistry graphRegistry;
@@ -159,16 +178,18 @@ public class RouteSearchService {
         }
         // 214·216: 속도 3(시간 탐색) + 혼잡 3(혼잡 가중 탐색). modes 필터는 라벨 전에 건다.
         // 217: RAPTOR 입력이 있으면 노선 스캔으로, 없으면 레거시로(어댑터가 계약 보존).
-        SixResult assembled = sixRoutes(
-                candidateFinder(raptorInputFor(departureSlot.dowType(), departureSlot.timeSlot(), null)),
-                slotGraph, originStationId, destStationId, modes,
-                effectiveDepartureTime);
-        // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
-        // 출발시각을 넘겨 live window일 때만 BUS 실시간 등급을 prefetch한다(297).
-        List<RouteSearchResponse> named =
-                withRouteNames(withGeometryAll(assembled.six()), effectiveDepartureTime);
-        // 계약 필드(236)는 맨 마지막에 붙인다 — geometry·이름 단계는 필드를 그대로 둔다.
-        return withContractFields(named, assembled, effectiveDepartureTime);
+        return withSearchPermit(() -> {
+            SixResult assembled = sixRoutes(
+                    candidateFinder(raptorInputFor(departureSlot.dowType(), departureSlot.timeSlot(), null)),
+                    slotGraph, originStationId, destStationId, modes,
+                    effectiveDepartureTime);
+            // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
+            // 출발시각을 넘겨 live window일 때만 BUS 실시간 등급을 prefetch한다(297).
+            List<RouteSearchResponse> named =
+                    withRouteNames(withGeometryAll(assembled.six()), effectiveDepartureTime);
+            // 계약 필드(236)는 맨 마지막에 붙인다 — geometry·이름 단계는 필드를 그대로 둔다.
+            return withContractFields(named, assembled, effectiveDepartureTime);
+        });
     }
 
     /** 탐색 결과 묶음 — 최종 6건과 점수 계산에 쓴 원본 후보(주입 후보 포함). */
@@ -745,11 +766,13 @@ public class RouteSearchService {
                 raptorInputFor(coordSlot.dowType(), coordSlot.timeSlot(), accessEdges));
         // 214·216: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
         LocalDateTime coordDeparture = RequestedDeparture.resolve(request.departureTime(), clock);
-        SixResult coordAssembled = sixRoutes(coordFinder, augmentedGraph,
-                PLACE_ORIGIN_ID, PLACE_DEST_ID, request.modes(), coordDeparture);
-        List<RouteSearchResponse> coordNamed =
-                withRouteNames(withGeometryAll(coordAssembled.six()), coordDeparture);
-        return withContractFields(coordNamed, coordAssembled, coordDeparture);
+        return withSearchPermit(() -> {
+            SixResult coordAssembled = sixRoutes(coordFinder, augmentedGraph,
+                    PLACE_ORIGIN_ID, PLACE_DEST_ID, request.modes(), coordDeparture);
+            List<RouteSearchResponse> coordNamed =
+                    withRouteNames(withGeometryAll(coordAssembled.six()), coordDeparture);
+            return withContractFields(coordNamed, coordAssembled, coordDeparture);
+        });
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {
@@ -765,5 +788,28 @@ public class RouteSearchService {
     private Station findStation(String stationId) {
         return stationRepository.findById(stationId)
                 .orElseThrow(() -> new DomainException(ErrorType.STATION_NOT_FOUND));
+    }
+
+    /**
+     * CPU를 많이 쓰는 탐색 구간(그래프 탐색+geometry 후처리)을 상한 걸린 세마포어로 감싼다.
+     * 입력 검증·그래프 로드 확인은 이 밖에서 이미 끝난 뒤라, 여기서 대기하는 요청은 전부
+     * "처리는 가능하지만 지금은 자리가 없는" 요청이다.
+     */
+    private <T> T withSearchPermit(Supplier<T> work) {
+        boolean acquired;
+        try {
+            acquired = searchSemaphore.tryAcquire(SEARCH_ACQUIRE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new DomainException(ErrorType.ROUTE_SEARCH_BUSY);
+        }
+        if (!acquired) {
+            throw new DomainException(ErrorType.ROUTE_SEARCH_BUSY);
+        }
+        try {
+            return work.get();
+        } finally {
+            searchSemaphore.release();
+        }
     }
 }
