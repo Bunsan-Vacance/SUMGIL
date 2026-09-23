@@ -206,12 +206,15 @@ cd BE
 ### 켜는 순서
 
 1. 이 MR(표·로더·조회 폴백·CronJob 소스) — 표가 비어 있어 응답 변화 없음
-2. AI 가 `batch_predict.py --predictor lightgbm --target-date <날짜> --out-dir <…>/serving-daily` 를 매일 실행
+2. **AI 가 lightgbm 아티팩트를 워커 `models/BIKE/` 에 올린다.** 2026-09-23 기준 워커에는 없다 — 있는 5개
+   (`avg-refreshed`·`smoke_*`·`v3-holiday-tuned_*`·`v4-weather-final_*` 2개)는 `LightGBMPredictor` 가 읽는
+   `model_exp_bikes.txt`·`model_q*.txt`·`isotonic_*.pkl`·`lag_lookup.parquet` 구성이 아니다
+3. AI 가 `batch_predict.py --predictor lightgbm --target-date <날짜> --out-dir <…>/serving-daily` 를 매일 실행
    → 다음 10:00 KST CronJob 부터 모델 값이 나간다
-3. 되돌리기: AI 가 2를 멈추면 새 날짜부터 평균값. 즉시 되돌리려면 `TRUNCATE bike_stock_pred_daily`
+4. 되돌리기: AI 가 3을 멈추면 새 날짜부터 평균값. 즉시 되돌리려면 `TRUNCATE bike_stock_pred_daily`
 
 **남은 판단**: 운영 lag(D-1/D-7)가 실시간 수집과 연결되지 않아 `hist_mean` 으로 메워진다(`predictor.py` 주석).
-검증된 개선(exp_bikes −11.6%)은 lag 덕분이라, 2 전에 lightgbm vs avg 를 실측 재고로 한 번 대조한다.
+검증된 개선(exp_bikes −11.6%)은 lag 덕분이라, 3 전에 lightgbm vs avg 를 실측 재고로 한 번 대조한다.
 
 ## 테스트
 
