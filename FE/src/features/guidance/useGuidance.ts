@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useReducer } from 'react'
+import { useCallback, useEffect, useReducer, useState } from 'react'
 import type { Place, Route } from '../route/types'
 import type { GuidanceConditions, TrainArrival } from '../../api/guidance'
-import { guidanceReducer, initialGuidance, type GuidanceState } from './guidanceReducer'
+import {
+  guidanceReducer,
+  initialGuidance,
+  type GuidanceState,
+  type GuidanceLocationStatus,
+} from './guidanceReducer'
 
 export const GUIDANCE_STORAGE_KEY = 'sugil:guidance'
 
@@ -57,11 +62,80 @@ function restoreGuidance(): GuidanceState {
     removeStoredGuidance(currentStorage)
     return initialGuidance
   }
-  return { ...initialGuidance, ...(parsed as unknown as GuidanceState) }
+  return { ...initialGuidance, ...(parsed as unknown as GuidanceState), locationStatus: 'idle' }
 }
 
-export function useGuidance() {
+export function useGuidance(trackingEnabled = false) {
   const [state, dispatch] = useReducer(guidanceReducer, undefined, restoreGuidance)
+  const [trackingRetry, setTrackingRetry] = useState(0)
+  const retryLocation = useCallback(() => setTrackingRetry((retry) => retry + 1), [])
+  useEffect(() => {
+    if (!trackingEnabled || !state.route || state.completed) {
+      dispatch({ type: 'location-status', status: 'idle' })
+      return
+    }
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.geolocation ||
+      typeof navigator.geolocation.watchPosition !== 'function'
+    ) {
+      dispatch({ type: 'location-status', status: 'unsupported' })
+      return
+    }
+    const geolocation = navigator.geolocation
+    dispatch({ type: 'location-status', status: 'waiting' })
+    let watchId: number | null = null
+    let active = true
+    try {
+      watchId = geolocation.watchPosition(
+        (position) => {
+          if (!active) return
+          dispatch({ type: 'location-status', status: 'tracking' })
+          dispatch({
+            type: 'location',
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          })
+        },
+        (error) => {
+          if (!active) return
+          dispatch({
+            type: 'location-status',
+            status: error.code === 1 ? 'denied' : 'no-position',
+          })
+        },
+        { enableHighAccuracy: true, maximumAge: 5_000, timeout: 10_000 },
+      )
+    } catch {
+      dispatch({ type: 'location-status', status: 'unsupported' })
+    }
+    return () => {
+      active = false
+      if (watchId !== null) geolocation.clearWatch(watchId)
+    }
+  }, [state.completed, state.route, trackingEnabled, trackingRetry])
+  useEffect(() => {
+    if (!trackingEnabled || typeof navigator === 'undefined' || !navigator.permissions?.query)
+      return
+    let disposed = false
+    let permission: PermissionStatus | null = null
+    const onPermissionChange = () => {
+      if (!disposed && permission?.state === 'granted') retryLocation()
+    }
+    void navigator.permissions
+      .query({ name: 'geolocation' })
+      .then((result) => {
+        if (disposed) return
+        permission = result
+        result.addEventListener('change', onPermissionChange)
+      })
+      .catch(() => undefined)
+    return () => {
+      disposed = true
+      permission?.removeEventListener('change', onPermissionChange)
+    }
+  }, [retryLocation, trackingEnabled])
   useEffect(() => {
     const currentStorage = storage()
     if (!currentStorage) return
@@ -70,7 +144,8 @@ export function useGuidance() {
         removeStoredGuidance(currentStorage)
         return
       }
-      currentStorage.setItem(GUIDANCE_STORAGE_KEY, JSON.stringify(state))
+      const { locationStatus: _locationStatus, ...persistedState } = state
+      currentStorage.setItem(GUIDANCE_STORAGE_KEY, JSON.stringify(persistedState))
     } catch {
       // 저장소를 사용할 수 없어도 안내 화면은 계속 동작한다.
     }
@@ -88,6 +163,9 @@ export function useGuidance() {
     stop,
     previous: () => dispatch({ type: 'previous' }),
     next: () => dispatch({ type: 'next' }),
+    setStep: (step: number) => dispatch({ type: 'set-step', step }),
+    retryLocation,
+    locationStatus: (state.locationStatus || 'idle') as GuidanceLocationStatus,
     setTrain: (time: string, arrival?: TrainArrival | null) =>
       dispatch({ type: 'train', time, arrival }),
     replan: (route: Route) => dispatch({ type: 'replan', route }),
