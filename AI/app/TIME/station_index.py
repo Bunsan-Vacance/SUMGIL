@@ -94,6 +94,11 @@ class StationIndex(Protocol):
         """
         ...
 
+    def size(self) -> int:
+        """색인에 실린 대여소 수. `GET /time/meta`(324-2) 디버그 응답용 — 트리거·후보 판정
+        로직은 이 값을 쓰지 않는다."""
+        ...
+
 
 class InMemoryStationIndex:
     """고정된 대여소 목록으로 만든 색인.
@@ -106,6 +111,9 @@ class InMemoryStationIndex:
 
     def get(self, rental_id: str) -> RentalStation | None:
         return self._by_id.get(rental_id)
+
+    def size(self) -> int:
+        return len(self._by_id)
 
     def nearby(
         self, lat: float, lng: float, radius_m: float, limit: int
@@ -181,6 +189,9 @@ class ParquetStationIndex:
         now: datetime | None = None,
     ) -> list[tuple[RentalStation, float]]:
         return self._index(now=now).nearby(lat, lng, radius_m, limit)
+
+    def size(self, *, now: datetime | None = None) -> int:
+        return self._index(now=now).size()
 
 
 def _now_kst() -> datetime:

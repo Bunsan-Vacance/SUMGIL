@@ -292,6 +292,11 @@ geometryStatus`)에 `estimated: true`를 더한 모양이다 — FE가 같은 �
   currentBikes,predictedStock,pEmpty}`·`boundary`(요청 에코)·`walkLeg`(3.4절)·`route`(BE
   `replan_route` 응답 원소의 **안쪽 `route`만** — 바깥 `reason`·`source`는 버린다).
 
+**`GET /time/meta`(324-2)** — FE 디버그·시연용 노브 조회. 키를 뺀 트리거·후보 노브 현재값,
+`strategyKind`(`AGENT`|`ALGORITHM`)·`llmModel`·`llmConfigured`, `stationIndexSize`·
+`snapshotAgeSec`(색인·스냅샷 없으면 `null`), `sessionBudget{maxCalls,maxTotalTokens}`. 운영
+판정에는 쓰지 않는다 — 항상 `Settings`를 새로 읽고, 절대 500을 내지 않는다.
+
 ### 3.6 아직 없는 것
 
 - Redis 세션(3.2절 — 지금은 `InMemorySessionStore`, 파드 1개 전제)

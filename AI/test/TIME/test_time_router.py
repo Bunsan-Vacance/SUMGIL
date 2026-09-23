@@ -447,3 +447,53 @@ def test_세션_만료_후에는_예산이_초기화된다(monkeypatch: pytest.M
 
     assert fake_client.calls == 4  # 리셋된 예산이라 다시 불렸다
     assert proposal is not None
+
+
+# ── 324-2: GET /time/meta ──
+
+
+def test_meta는_노브와_세션_예산을_돌려준다():
+    r = client.get("/time/meta")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["triggerPEmpty"] == 0.7
+    assert body["triggerCooldownSec"] == 600.0
+    assert body["nearbyRadiusM"] == 500
+    assert body["nearbyLimit"] == 5
+    assert body["strategyKind"] == "ALGORITHM"  # 기본 설정엔 LLM 게이트웨이가 없다
+    assert body["llmModel"] is None
+    assert body["llmConfigured"] is False
+    assert body["sessionBudget"] == {"maxCalls": 3, "maxTotalTokens": 8000}
+    assert body["stationIndexSize"] == 2  # DEFAULT_INDEX = 대상 + 대안 1개
+    assert body["snapshotAgeSec"] is None  # _FakeSettings엔 bike_live_stock_path가 없다
+    assert "llmApiKey" not in body  # 키는 절대 노출하지 않는다
+
+
+def test_meta는_llm이_설정되면_strategyKind가_AGENT이고_키는_노출하지_않는다(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        router, "get_settings", lambda: _llm_settings(time_llm_api_key="super-secret")
+    )
+
+    r = client.get("/time/meta")
+
+    body = r.json()
+    assert body["strategyKind"] == "AGENT"
+    assert body["llmConfigured"] is True
+    assert body["llmModel"] == "test-model"
+    assert "super-secret" not in r.text  # 키 값 자체가 응답 어디에도 없다
+
+
+def test_meta는_색인_조회가_깨져도_500이_아니라_null이다(monkeypatch: pytest.MonkeyPatch):
+    class _BrokenIndex:
+        def size(self) -> int:
+            raise RuntimeError("색인 파일 손상")
+
+    monkeypatch.setattr(router, "_station_index", _BrokenIndex)
+
+    r = client.get("/time/meta")
+
+    assert r.status_code == 200
+    assert r.json()["stationIndexSize"] is None

@@ -124,6 +124,37 @@ class RerouteCheckResponse(BaseModel):
     route: dict[str, Any] | None = None
 
 
+class SessionBudgetOut(BaseModel):
+    """세션당 LLM 예산 노브(324-3, `llm_budget.LlmBudget`의 상한값)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    max_calls: int = Field(alias="maxCalls")
+    max_total_tokens: int = Field(alias="maxTotalTokens")
+
+
+class TimeMetaResponse(BaseModel):
+    """`GET /time/meta`(324-2) 응답 — FE 디버그·시연용. **키는 절대 담지 않는다**
+    (`llmModel`만 있고 `llmApiKey`는 없다)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    trigger_p_empty: float = Field(alias="triggerPEmpty")
+    trigger_min_stock: float = Field(alias="triggerMinStock")
+    trigger_max_eta_min: int = Field(alias="triggerMaxEtaMin")
+    trigger_cooldown_sec: float = Field(alias="triggerCooldownSec")
+    debug_force_trigger_enabled: bool = Field(alias="debugForceTriggerEnabled")
+    nearby_radius_m: int = Field(alias="nearbyRadiusM")
+    nearby_limit: int = Field(alias="nearbyLimit")
+    score_empty_penalty_min: float = Field(alias="scoreEmptyPenaltyMin")
+    strategy_kind: Literal["AGENT", "ALGORITHM"] = Field(alias="strategyKind")
+    llm_model: str | None = Field(default=None, alias="llmModel")
+    llm_configured: bool = Field(alias="llmConfigured")
+    station_index_size: int | None = Field(default=None, alias="stationIndexSize")
+    snapshot_age_sec: float | None = Field(default=None, alias="snapshotAgeSec")
+    session_budget: SessionBudgetOut = Field(alias="sessionBudget")
+
+
 def from_outcome(
     outcome: RerouteOutcome,
     *,
@@ -184,6 +215,8 @@ __all__ = [
     "BoundaryOut",
     "RerouteCheckRequest",
     "RerouteCheckResponse",
+    "SessionBudgetOut",
     "TargetOut",
+    "TimeMetaResponse",
     "from_outcome",
 ]

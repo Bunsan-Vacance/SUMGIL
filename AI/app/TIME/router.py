@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -32,6 +33,8 @@ from app.TIME.adapters import CompositeAdapter, HttpAdapter, LocalAdapter, ToolA
 from app.TIME.api_schemas import (
     RerouteCheckRequest,
     RerouteCheckResponse,
+    SessionBudgetOut,
+    TimeMetaResponse,
     from_outcome,
 )
 from app.TIME.guard import ToolGuard
@@ -194,3 +197,62 @@ def _check_reroute(req: RerouteCheckRequest) -> RerouteCheckResponse:
     )
 
     return from_outcome(outcome, recommendation_id=recommendation_id, valid_until=valid_until)
+
+
+@router.get("/meta", response_model=TimeMetaResponse)
+def get_meta() -> TimeMetaResponse:
+    """`GET /time/meta`(S15P21A104-324-2) — FE 디버그·시연용 노브 조회. **운영 판정에 쓰지
+    않는다**(응답을 캐시해 판정에 재사용하면 설정 변경이 반영 안 된다). `check_reroute`와 같은
+    이유로 절대 500을 내지 않는다 — 색인·스냅샷이 없으면 그 필드만 `null`이다."""
+    settings = get_settings()
+    llm_configured = bool(
+        settings.time_llm_base_url and settings.time_llm_model and settings.time_llm_api_key
+    )
+    return TimeMetaResponse(
+        trigger_p_empty=settings.time_trigger_p_empty,
+        trigger_min_stock=settings.time_trigger_min_stock,
+        trigger_max_eta_min=settings.time_trigger_max_eta_min,
+        trigger_cooldown_sec=settings.time_trigger_cooldown_sec,
+        debug_force_trigger_enabled=settings.time_debug_force_trigger_enabled,
+        nearby_radius_m=settings.time_nearby_radius_m,
+        nearby_limit=settings.time_nearby_limit,
+        score_empty_penalty_min=settings.time_score_empty_penalty_min,
+        strategy_kind="AGENT" if llm_configured else "ALGORITHM",
+        llm_model=settings.time_llm_model,
+        llm_configured=llm_configured,
+        station_index_size=_safe_station_index_size(),
+        snapshot_age_sec=_safe_snapshot_age_sec(settings),
+        session_budget=SessionBudgetOut(
+            max_calls=settings.time_llm_max_calls_per_session,
+            max_total_tokens=settings.time_llm_max_tokens_per_session,
+        ),
+    )
+
+
+def _safe_station_index_size() -> int | None:
+    """색인 조회가 무엇으로든 실패해도(파일 손상 등) `null`로 답한다 — 디버그 엔드포인트
+    하나 때문에 500을 내지 않는다(`check_reroute`와 같은 원칙)."""
+    try:
+        return _station_index().size()
+    except Exception:  # noqa: BLE001 - 디버그 엔드포인트의 마지막 그물
+        _log.exception("station index size 조회 중 예상 못 한 오류")
+        return None
+
+
+def _safe_snapshot_age_sec(settings: object) -> float | None:
+    """`latest_stock.parquet`의 mtime 기준 나이(초). 파일이 없으면(로컬 개발 등) `null`이다 —
+    없는 것을 오류로 보지 않는다(`station_index.py`의 값 안 지어내기 원칙과 같은 결)."""
+    raw_path = getattr(settings, "bike_live_stock_path", None)
+    if raw_path is None:
+        return None
+    path = Path(raw_path)
+    try:
+        if not path.exists():
+            return None
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=KST)
+        return (_now() - mtime).total_seconds()
+    except OSError:
+        return None
+
+
+__all__ = ["router"]
