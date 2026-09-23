@@ -143,6 +143,7 @@ function BikeStockSheet({
       key={station.id}
       initialSnap="collapsed"
       preferredSnap="collapsed"
+      draggable={false}
       className="map-bike-stock-sheet"
       ariaLabel="따릉이 실시간 재고"
     >
