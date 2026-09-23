@@ -1,6 +1,10 @@
 import type { Place, Route } from '../route/types'
 import type { GuidanceConditions, TrainArrival } from '../../api/guidance'
 import { isTransitLeg } from '../route/transitions'
+
+export type GuidanceLocationStatus =
+  'idle' | 'waiting' | 'tracking' | 'denied' | 'no-position' | 'unsupported'
+
 export interface GuidanceState {
   step: number
   train: string | null
@@ -10,6 +14,7 @@ export interface GuidanceState {
   conditions?: GuidanceConditions
   selectedArrival?: TrainArrival | null
   completed: boolean
+  locationStatus: GuidanceLocationStatus
 }
 export const initialGuidance: GuidanceState = {
   step: 0,
@@ -20,6 +25,7 @@ export const initialGuidance: GuidanceState = {
   conditions: { modes: [], priority: 'fast' },
   selectedArrival: null,
   completed: false,
+  locationStatus: 'idle',
 }
 export type GuidanceAction =
   | {
@@ -32,8 +38,63 @@ export type GuidanceAction =
   | { type: 'stop' }
   | { type: 'previous' }
   | { type: 'next' }
+  | { type: 'set-step'; step: number }
   | { type: 'train'; time: string; arrival?: TrainArrival | null }
   | { type: 'replan'; route: Route }
+  | { type: 'location-status'; status: GuidanceLocationStatus }
+  | { type: 'location'; latitude: number; longitude: number; accuracy: number }
+
+const MAX_GUIDANCE_ACCURACY_METERS = 15
+const EARTH_RADIUS_METERS = 6_371_000
+
+function distanceMeters(
+  first: { latitude: number; longitude: number },
+  second: { latitude: number; longitude: number },
+) {
+  const latitude = (second.latitude - first.latitude) * (Math.PI / 180)
+  const longitude = (second.longitude - first.longitude) * (Math.PI / 180)
+  const firstLatitude = first.latitude * (Math.PI / 180)
+  const secondLatitude = second.latitude * (Math.PI / 180)
+  const haversine =
+    Math.sin(latitude / 2) ** 2 +
+    Math.sin(longitude / 2) ** 2 * Math.cos(firstLatitude) * Math.cos(secondLatitude)
+  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(haversine))
+}
+
+function reachedWalkingEndpoint(
+  state: GuidanceState,
+  latitude: number,
+  longitude: number,
+  accuracy: number,
+) {
+  const leg = state.route?.legs[state.step]
+  const endpoint = leg?.to
+  if (
+    state.completed ||
+    !leg ||
+    state.step >= (state.route?.legs.length || 0) - 1 ||
+    (leg.mode !== 'walk' && leg.mode !== 'bike') ||
+    !endpoint ||
+    !Number.isFinite(endpoint.lat) ||
+    !Number.isFinite(endpoint.lng) ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    !Number.isFinite(accuracy) ||
+    accuracy < 0 ||
+    accuracy > MAX_GUIDANCE_ACCURACY_METERS
+  ) {
+    return false
+  }
+  return (
+    distanceMeters(
+      { latitude, longitude },
+      { latitude: endpoint.lat as number, longitude: endpoint.lng as number },
+    ) +
+      accuracy <=
+    MAX_GUIDANCE_ACCURACY_METERS
+  )
+}
+
 export function guidanceReducer(state: GuidanceState, action: GuidanceAction): GuidanceState {
   switch (action.type) {
     case 'start': {
@@ -66,9 +127,23 @@ export function guidanceReducer(state: GuidanceState, action: GuidanceAction): G
       return state.step >= state.route.legs.length - 1
         ? { ...state, completed: true }
         : { ...state, step: state.step + 1, train: null, selectedArrival: null }
+    case 'set-step':
+      return state.route && !state.completed && Number.isInteger(action.step)
+        ? action.step >= 0 && action.step < state.route.legs.length
+          ? { ...state, step: action.step, train: null, selectedArrival: null }
+          : state
+        : state
     case 'train':
       return state.route && !state.completed
         ? { ...state, train: action.time, selectedArrival: action.arrival || null }
+        : state
+    case 'location-status':
+      return state.locationStatus === action.status
+        ? state
+        : { ...state, locationStatus: action.status }
+    case 'location':
+      return reachedWalkingEndpoint(state, action.latitude, action.longitude, action.accuracy)
+        ? { ...state, step: state.step + 1, train: null, selectedArrival: null }
         : state
     case 'replan': {
       if (!state.route || state.completed || !action.route.legs.length) return state

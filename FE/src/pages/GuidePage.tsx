@@ -6,6 +6,7 @@ import type { Route } from '../features/route/types'
 import type { TrainArrival } from '../api/guidance'
 import type { Navigate } from '../app/useNavigation'
 import LegList from '../features/route/LegList'
+import type { GuidanceLocationStatus } from '../features/guidance/guidanceReducer'
 interface Props {
   selected: Route
   step: number
@@ -19,6 +20,9 @@ interface Props {
   onTrain: () => void
   onReplan: () => void
   replanDisabled: boolean
+  locationStatus: GuidanceLocationStatus
+  onRetryLocation: () => void
+  onStepChange: (step: number) => void
 }
 
 function formatArrival(value: string) {
@@ -42,6 +46,9 @@ export default function GuidePage({
   onTrain,
   onReplan,
   replanDisabled,
+  locationStatus,
+  onRetryLocation,
+  onStepChange,
 }: Props) {
   const currentLeg = selected.legs[Math.min(step, selected.legs.length - 1)]
   const CurrentIcon = modeIcons[currentLeg.mode]
@@ -71,7 +78,30 @@ export default function GuidePage({
             </p>
           </div>
         </div>
-        <p className="manual-guidance-note">필요한 단계에서 직접 다음 안내를 눌러 이동해요.</p>
+        <div
+          className={`guidance-location guidance-location-${locationStatus}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span>
+            {locationStatus === 'tracking'
+              ? '현재 위치를 확인하며 안내 중이에요.'
+              : locationStatus === 'waiting'
+                ? '현재 위치를 확인하고 있어요.'
+                : locationStatus === 'denied'
+                  ? '위치 권한이 꺼져 있어요. 권한을 허용한 뒤 다시 확인하거나 단계를 직접 선택해 주세요.'
+                  : locationStatus === 'no-position'
+                    ? '현재 위치를 확인하지 못했어요. 직접 다음 단계나 현재 단계를 선택해 주세요.'
+                    : locationStatus === 'unsupported'
+                      ? '이 브라우저에서는 위치 안내를 사용할 수 없어요. 단계를 직접 선택해 주세요.'
+                      : '위치 안내를 준비하고 있어요.'}
+          </span>
+          {(locationStatus === 'denied' || locationStatus === 'no-position') && (
+            <button className="text-button" onClick={onRetryLocation}>
+              위치 다시 확인
+            </button>
+          )}
+        </div>
       </div>
       <BottomSheet
         compact
@@ -109,6 +139,20 @@ export default function GuidePage({
             <small>남음</small>
           </div>
         </div>
+        <label className="guidance-step-select">
+          <span>현재 단계 직접 선택</span>
+          <select
+            aria-label="현재 안내 단계"
+            value={step}
+            onChange={(event) => onStepChange(Number(event.target.value))}
+          >
+            {selected.legs.map((leg, index) => (
+              <option value={index} key={`${index}-${leg.title}`}>
+                {index + 1}. {leg.title}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="guidance-secondary-actions">
           {currentLeg.mode === 'subway' && (
             <button className="secondary" onClick={onTrain}>

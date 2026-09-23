@@ -2052,6 +2052,45 @@ small {
   font-size: 12px;
   text-shadow: 0 1px 3px #152536aa;
 }
+.guidance-location {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 4px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #152536;
+  background: #ffffffec;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.guidance-location .text-button {
+  flex-shrink: 0;
+  min-height: 32px;
+  margin-top: 0;
+  color: var(--primary-dark);
+  font-size: 12px;
+}
+.guidance-step-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  color: #43515e;
+  font-size: 13px;
+}
+.guidance-step-select select {
+  min-width: 0;
+  max-width: 62%;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: white;
+  color: #152536;
+}
 .guidance-actions,
 .guidance-secondary-actions {
   display: flex;
