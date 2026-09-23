@@ -25,6 +25,11 @@ import java.util.stream.Stream;
  * <p>
  * 같은 이름의 {@code .meta.json} 이 있으면 {@code rows} 를 실제 행 수와 대조해 어긋날 때 경고한다 —
  * 전송이 끊겨 파일이 잘린 것을 적재 전에 잡는다. 대조는 있을 때만 하고, 실패해도 적재를 막지 않는다.
+ * <p>
+ * <b>사이드카가 {@code "source": "model"} 인 파일은 고르지 않는다</b> (S15P21A104-309). AI {@code batch_predict.py} 는
+ * lightgbm 으로 돌아도 같은 {@code bike_stock_pred_<시각>.csv} 이름을 쓰는데, 열은 {@code dow_type} 대신
+ * {@code pred_date} 다. 같은 폴더에 더 늦게 생기면 파일명 최신으로 그걸 집어 적재 전체가 멈춘다. 날짜축 산출물은
+ * {@code load.bikepreddaily} 가 따로 읽는다.
  */
 public final class CsvBikeStockPredSource implements BikeStockPredSource {
 
@@ -32,6 +37,8 @@ public final class CsvBikeStockPredSource implements BikeStockPredSource {
     static final String FILE_SUFFIX = ".csv";
     /** meta.json 에서 행 수만 읽는다. JSON 파서를 들이지 않으려고 숫자 하나만 뽑는다. */
     private static final Pattern META_ROWS = Pattern.compile("\"rows\"\\s*:\\s*(\\d+)");
+    /** 날짜축(lightgbm) 산출물 표시. 이 로더의 대상이 아니다. */
+    private static final Pattern META_MODEL = Pattern.compile("\"source\"\\s*:\\s*\"model\"");
 
     private final Path path;
 
@@ -56,12 +63,18 @@ public final class CsvBikeStockPredSource implements BikeStockPredSource {
     /** 폴더면 최신 산출물을 고르고, 파일이면 그대로 쓴다. 어느 쪽이든 없으면 찾은 경로를 밝힌다. */
     private Path resolveCsv() throws IOException {
         if (Files.isDirectory(path)) {
+            List<Path> newestFirst;
             try (Stream<Path> files = Files.list(path)) {
-                return files.filter(CsvBikeStockPredSource::isArtifact)
-                        .max(Comparator.comparing(p -> p.getFileName().toString()))
-                        .orElseThrow(() -> new IOException(
-                                "재고 예측 산출물이 없습니다: " + path + " 에 " + FILE_PREFIX + "*" + FILE_SUFFIX));
+                newestFirst = files.filter(CsvBikeStockPredSource::isArtifact)
+                        .sorted(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed())
+                        .toList();
             }
+            for (Path candidate : newestFirst) {
+                if (!isModelArtifact(candidate)) {
+                    return candidate;
+                }
+            }
+            throw new IOException("재고 예측 산출물이 없습니다: " + path + " 에 " + FILE_PREFIX + "*" + FILE_SUFFIX);
         }
         if (!Files.isRegularFile(path)) {
             throw new IOException("재고 예측 산출물이 없습니다: " + path);
@@ -75,13 +88,30 @@ public final class CsvBikeStockPredSource implements BikeStockPredSource {
         return name.startsWith(FILE_PREFIX) && name.endsWith(FILE_SUFFIX);
     }
 
+    /** 사이드카가 날짜축(lightgbm) 산출물이라고 말하면 true. 사이드카가 없거나 못 읽으면 요일축으로 본다. */
+    private static boolean isModelArtifact(Path csv) {
+        Path meta = metaOf(csv);
+        if (!Files.isRegularFile(meta)) {
+            return false;
+        }
+        try {
+            return META_MODEL.matcher(Files.readString(meta, StandardCharsets.UTF_8)).find();
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static Path metaOf(Path csv) {
+        String name = csv.getFileName().toString();
+        return csv.resolveSibling(name.substring(0, name.length() - FILE_SUFFIX.length()) + ".meta.json");
+    }
+
     /**
      * 옆의 meta.json 과 행 수를 대조한다. 파일이 없거나 형식이 달라 읽지 못하면 그것도 경고로만 남긴다 —
      * 대조는 보조 확인이라 적재를 막을 이유가 없다.
      */
     private static Optional<String> metaMismatch(Path csv, int actualRows) {
-        String name = csv.getFileName().toString();
-        Path meta = csv.resolveSibling(name.substring(0, name.length() - FILE_SUFFIX.length()) + ".meta.json");
+        Path meta = metaOf(csv);
         if (!Files.isRegularFile(meta)) {
             return Optional.empty();
         }

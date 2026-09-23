@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
+import com.ssafy.s15p21a104.load.bikepreddaily.BikeStockPredDailyRow;
 import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
@@ -125,6 +126,49 @@ public final class MasterValidator {
      *
      * @param knownRentalIds 적재된 대여소 ID. <b>비어 있으면 대조를 건너뛴다</b> — dry-run 은 DB 를 읽지 않아 빈 집합이 온다
      */
+    /**
+     * 따릉이 날짜축 예측 (S15P21A104-309). {@link #validateBikeStockPred} 와 같은 규칙에 키만 (대여소, 날짜, 슬롯) 이다.
+     * 마스터에 없는 대여소는 같은 이유로 경고다 — 예측 표가 마스터보다 최근이다.
+     */
+    public static ValidationReport validateBikeStockPredDaily(List<BikeStockPredDailyRow> rows,
+                                                              Set<String> knownRentalIds) {
+        List<String> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        Set<String> keys = new HashSet<>();
+        Set<String> unknownRentalIds = new LinkedHashSet<>();
+
+        for (BikeStockPredDailyRow r : rows) {
+            String label = r.rentalId() + " " + r.predDate() + "/" + r.timeSlot();
+            if (!keys.add(r.rentalId() + "|" + r.predDate() + "|" + r.timeSlot())) {
+                errors.add("같은 (대여소, 날짜, 슬롯) 이 두 번: " + label);
+                continue;
+            }
+            if (r.timeSlot() < 0 || r.timeSlot() > MAX_TIME_SLOT) {
+                errors.add("시간 슬롯이 0~" + MAX_TIME_SLOT + " 밖: " + label);
+            }
+            if (r.expBikes() == null || r.expBikes().signum() < 0) {
+                errors.add("예상 대수가 음수이거나 없음: " + label + " (" + r.expBikes() + ")");
+            }
+            checkProbability("0대 확률", label, r.pEmpty(), errors);
+            checkProbability("만차 확률", label, r.pFull(), errors);
+            checkName("source", label, r.source(), SOURCE_MAX, errors);
+            if (r.predictionSource() != null && r.predictionSource().length() > PREDICTION_SOURCE_MAX) {
+                errors.add("prediction_source " + PREDICTION_SOURCE_MAX + "자 초과: " + label
+                        + " (" + r.predictionSource().length() + "자)");
+            }
+            if (!knownRentalIds.isEmpty() && !knownRentalIds.contains(r.rentalId())) {
+                unknownRentalIds.add(r.rentalId());
+            }
+        }
+
+        if (!unknownRentalIds.isEmpty()) {
+            warnings.add("대여소 마스터에 없는 대여소 " + unknownRentalIds.size()
+                    + "곳의 날짜축 예측을 함께 적재한다 (예측 표가 더 최근이다 — 마스터 갱신 필요): "
+                    + head(unknownRentalIds.stream().toList()));
+        }
+        return new ValidationReport(errors, warnings);
+    }
+
     public static ValidationReport validateBikeStockPred(List<BikeStockPredRow> rows, Set<String> knownRentalIds) {
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();

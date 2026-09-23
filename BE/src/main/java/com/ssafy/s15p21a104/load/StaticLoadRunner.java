@@ -8,6 +8,7 @@ import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopParser;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.bikepred.BikeStockPredSource;
+import com.ssafy.s15p21a104.load.bikepreddaily.BikeStockPredDailySource;
 import com.ssafy.s15p21a104.load.crowd.CongestionParser;
 import com.ssafy.s15p21a104.load.crowd.CrowdStationCodes;
 import com.ssafy.s15p21a104.load.crowdpred.CongestionPredSource;
@@ -134,8 +135,9 @@ public class StaticLoadRunner implements ApplicationRunner {
                 case "congestion" -> loadCongestion();
                 case "bikepred" -> loadBikeStockPred();
                 case "crowdpred" -> loadCongestionPred();
+                case "bikepreddaily" -> loadBikeStockPredDaily();
                 case "busheadway" -> loadBusHeadway();
-                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred, crowdpred, busheadway)", source);
+                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred, crowdpred, bikepreddaily, busheadway)", source);
             }
         }
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
@@ -422,6 +424,34 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         timed("bike_stock_pred", () -> writer.upsertBikeStockPred(loaded.rows()));
         log.info("재고 예측 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 따릉이 날짜축 예측(lightgbm). AI 배치 산출물(대여소 × 날짜 × 슬롯 48)을 그대로 옮긴다 (S15P21A104-309).
+     * <p>
+     * 요일축 표({@code bike_stock_pred})와 <b>별도 표</b>다. 조회는 이 표를 먼저 보고 없으면 요일축으로 떨어지므로,
+     * 이 적재가 실패하거나 원천이 없어도 응답은 평균값으로 계속 나간다. 원천 폴더도 요일축과 분리한다 —
+     * 두 산출물의 파일명 규칙이 같다.
+     */
+    private void loadBikeStockPredDaily() throws IOException {
+        long started = System.nanoTime();
+
+        BikeStockPredDailySource.Loaded loaded = props.bikepreddaily().toSource().read();
+        logWarnings("날짜축 재고 예측 파싱", loaded.warnings());
+        var st = loaded.stats();
+        log.info("날짜축 재고 예측: 원천 {} 행 · 날짜 {} · 대여소 {} · 건너뜀 {} · 적재 대상 {} 행 · 출처 등급 {} ({})",
+                st.sourceRows(), st.predDates(), st.stations(), st.skipped(), loaded.rows().size(),
+                st.predictionSources(), loaded.origins());
+
+        Set<String> knownRentalIds = props.dryRun() ? Set.of() : writer.existingRentalIds();
+        ValidationReport report = MasterValidator.validateBikeStockPredDaily(loaded.rows(), knownRentalIds);
+        logWarnings("검증", report.warnings());
+        if (!abortIfErrors("날짜축 재고 예측", report) || dryRun("날짜축 재고 예측", started)) {
+            return;
+        }
+
+        timed("bike_stock_pred_daily", () -> writer.upsertBikeStockPredDaily(loaded.rows()));
+        log.info("날짜축 재고 예측 적재 완료 ({} ms)", elapsedMs(started));
     }
 
     /**
