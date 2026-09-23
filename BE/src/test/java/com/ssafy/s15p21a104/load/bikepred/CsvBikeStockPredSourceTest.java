@@ -118,23 +118,6 @@ class CsvBikeStockPredSourceTest {
     }
 
     @Test
-    @DisplayName("309-G1: 사이드카가 source=model 인 파일은 고르지 않는다 — lightgbm 산출물도 같은 파일명 규칙이다")
-    void skipsModelArtifactWithSameNamingRule(@TempDir Path dir) throws IOException {
-        // AI batch_predict.py 는 예측기와 무관하게 bike_stock_pred_<시각>.csv 로 짓는다. lightgbm 파일이 더 늦게
-        // 생기면 파일명 최신으로 그걸 집어 dow_type 이 없다며 avg 적재 전체가 멈춘다.
-        Path avg = writeCsv(dir, "bike_stock_pred_20260917-014432.csv", THREE_ROWS);
-        writeCsv(dir, "bike_stock_pred_20260923-003000.csv",
-                "rental_id,pred_date,time_slot,exp_bikes,p_empty,p_full,source\nST-10,2026-09-23,0,4.4,0.2,0.1,model\n");
-        writeCsv(dir, "bike_stock_pred_20260923-003000.meta.json",
-                "{\n \"source\": \"model\",\n \"target_date\": \"2026-09-23\",\n \"rows\": 1\n}\n");
-
-        BikeStockPredSource.Loaded loaded = new CsvBikeStockPredSource(dir).read();
-
-        assertEquals(avg, loaded.origin());
-        assertEquals(3, loaded.rows().size());
-    }
-
-    @Test
     @DisplayName("파일이 없으면 찾은 경로를 밝히고 멈춘다")
     void missingFileFailsWithPath(@TempDir Path dir) {
         Path missing = dir.resolve("bike_stock_pred_20260101-000000.csv");

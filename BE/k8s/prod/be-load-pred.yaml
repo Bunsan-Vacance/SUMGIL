@@ -39,16 +39,12 @@ spec:
               image: sumgil-be:latest
               imagePullPolicy: IfNotPresent
               args:
-                # bikepreddaily(309)는 마지막이다 — 날짜축 표는 비어 있어도 조회가 평균표로 떨어지는 선택 표라,
-                # 앞 두 적재가 먼저 끝나야 한다.
-                - "--load.sources=bikepred,crowdpred,bikepreddaily"
+                - "--load.sources=bikepred,crowdpred"
                 # 설정 이름은 load.<소스>.path 다. application-load.yml 의 csv-path 는
                 # 어디에도 안 붙는 죽은 키라 그 이름으로는 안 덮인다(2026-09-22 컨테이너 실측).
                 # 환경변수 대신 인자로 두어 실제 이름이 드러나게 한다.
                 - "--load.bikepred.path=/ai-data/BIKE/serving"
                 - "--load.crowdpred.path=/ai-data/CROWD/serving"
-                # 날짜축(lightgbm) 산출물은 폴더를 나눈다 — 파일명 규칙이 avg 와 같아 한 폴더면 서로를 집는다(309).
-                - "--load.bikepreddaily.path=/ai-data/BIKE/serving-daily"
               envFrom:
                 # DB_URL·DB_USERNAME 등 (낮 파드와 같은 값)
                 - configMapRef:

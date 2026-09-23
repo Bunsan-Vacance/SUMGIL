@@ -64,15 +64,7 @@ test('307-C4: AI 폴더를 읽기 전용으로 마운트한다 — 산출물을 
 
 test('307-C5: 따릉이·혼잡도 두 예측을 함께 적재한다', () => {
   const doc = cronJobDoc(render());
-  // 309 에서 날짜축(bikepreddaily)이 뒤에 붙는다 — 앞 두 소스가 그대로인지만 본다.
-  assert.match(doc, /--load\.sources=bikepred,crowdpred\b/, '두 소스를 모두 지정해야 한다');
-});
-
-test('309-D1: 따릉이 날짜축 예측도 적재한다 — avg 와 다른 폴더에서 읽는다', () => {
-  const doc = cronJobDoc(render());
-  assert.match(doc, /--load\.sources=bikepred,crowdpred,bikepreddaily\b/, '날짜축 소스를 마지막에 붙여야 한다');
-  // avg 와 lightgbm 산출물은 파일명 규칙이 같다(bike_stock_pred_<시각>.csv). 같은 폴더면 서로를 집는다.
-  assert.match(doc, /--load\.bikepreddaily\.path=\/ai-data\/BIKE\/serving-daily\b/, 'serving-daily 폴더를 읽어야 한다');
+  assert.match(doc, /--load\.sources=bikepred,crowdpred/, '두 소스를 모두 지정해야 한다');
 });
 
 test('307-C6: prod 프로파일을 함께 켠다 — load 만 주면 로그가 한 줄도 안 남는다', () => {

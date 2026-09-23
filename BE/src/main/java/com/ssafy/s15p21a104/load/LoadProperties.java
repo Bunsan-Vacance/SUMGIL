@@ -1,7 +1,6 @@
 package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bikepred.BikePredProperties;
-import com.ssafy.s15p21a104.load.bikepreddaily.BikePredDailyProperties;
 import com.ssafy.s15p21a104.load.crowdpred.CrowdPredProperties;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -18,13 +17,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param prune       지하철 적재 뒤 시각표가 덮는 노선에서 이번 실행에 없는 edge_time 행과 고아 역을 지운다 (기본 true)
  * @param bikepred    재고 예측 적재의 원천 선택. bikepred 소스를 쓸 때만 본다
  * @param crowdpred   혼잡도 예측 적재의 원천 선택. crowdpred 소스를 쓸 때만 본다 (S15P21A104-305)
- * @param bikepreddaily 따릉이 날짜축 예측 적재의 원천 선택. bikepreddaily 소스를 쓸 때만 본다 (S15P21A104-309)
  */
 @ConfigurationProperties("load")
 public record LoadProperties(List<String> sources, boolean dryRun, UpsertWriter.WriteMode writeMode,
                              List<String> region, double avgSpeedMps, Boolean prune,
-                             BikePredProperties bikepred, CrowdPredProperties crowdpred,
-                             BikePredDailyProperties bikepreddaily) {
+                             BikePredProperties bikepred, CrowdPredProperties crowdpred) {
 
     public LoadProperties {
         if (sources == null || sources.isEmpty()) {
@@ -35,9 +32,6 @@ public record LoadProperties(List<String> sources, boolean dryRun, UpsertWriter.
         }
         if (crowdpred == null) {
             crowdpred = new CrowdPredProperties(null, null);
-        }
-        if (bikepreddaily == null) {
-            bikepreddaily = new BikePredDailyProperties(null, null);
         }
         if (writeMode == null) {
             writeMode = UpsertWriter.WriteMode.BATCH;

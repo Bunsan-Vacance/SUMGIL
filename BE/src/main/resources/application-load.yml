@@ -32,11 +32,3 @@ load:
     source: csv          # 지금은 csv 뿐이다. AI 는 PG 에 직접 쓰지 않고 BE load job 이 넣는다(회신 04 L-2)
     path: ../AI/data/CROWD/serving      # 폴더면 그 안의 최신 predictions_<날짜>_<시각>.csv 를 쓴다
                                         # 사이드카 .meta.json 은 필수다 — generated_at 이 NOT NULL 열이고 행 수 대조에 쓴다
-
-  # 따릉이 날짜축 예측(bikepreddaily, lightgbm) 원천 (S15P21A104-309). 기본 sources 에 없다:
-  #   ./gradlew bootRun --args='--load.sources=bikepreddaily'
-  # 요일축(bikepred)과 폴더를 나눈다 — 두 산출물 파일명 규칙이 bike_stock_pred_<시각>.csv 로 같아서
-  # 한 폴더에 섞이면 서로를 집는다. 날짜축인지는 사이드카 target_date 로 가린다
-  bikepreddaily:
-    source: csv
-    path: ../AI/data/BIKE/serving-daily  # 폴더면 대상 날짜마다 generated_at 최신 회차 하나씩. 사이드카 필수

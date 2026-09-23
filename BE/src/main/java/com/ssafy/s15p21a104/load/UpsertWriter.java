@@ -2,7 +2,6 @@ package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
 import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
-import com.ssafy.s15p21a104.load.bikepreddaily.BikeStockPredDailyRow;
 import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
@@ -106,21 +105,6 @@ public class UpsertWriter {
                   source = EXCLUDED.source, prediction_source = EXCLUDED.prediction_source, updated_at = now()
             """;
 
-    /**
-     * 따릉이 날짜축 예측 (S15P21A104-309). {@code generated_at} 은 행마다 자기 산출물의 사이드카 값이다 —
-     * 대상 날짜마다 다른 회차에서 올 수 있어 인자 하나로 받지 않는다.
-     */
-    private static final String UPSERT_BIKE_STOCK_PRED_DAILY = """
-            INSERT INTO bike_stock_pred_daily
-              (rental_id, pred_date, time_slot, exp_bikes, p_empty, p_full, source, prediction_source,
-               generated_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-            ON CONFLICT (rental_id, pred_date, time_slot) DO UPDATE
-              SET exp_bikes = EXCLUDED.exp_bikes, p_empty = EXCLUDED.p_empty, p_full = EXCLUDED.p_full,
-                  source = EXCLUDED.source, prediction_source = EXCLUDED.prediction_source,
-                  generated_at = EXCLUDED.generated_at, updated_at = now()
-            """;
-
     private static final String UPDATE_BUS_HEADWAY = """
             UPDATE bus_route SET headway_min = ?, updated_at = now() WHERE route_id = ?
             """;
@@ -183,22 +167,6 @@ public class UpsertWriter {
      *
      * @param generatedAt 산출물 사이드카의 {@code generated_at}. 모든 행이 같은 값을 갖는다
      */
-    /** 따릉이 날짜축 예측 적재 (S15P21A104-309). upsert 라 멱등이다. */
-    public int upsertBikeStockPredDaily(List<BikeStockPredDailyRow> rows) {
-        jdbc.batchUpdate(UPSERT_BIKE_STOCK_PRED_DAILY, rows, BATCH_SIZE, (ps, r) -> {
-            ps.setString(1, r.rentalId());
-            ps.setObject(2, r.predDate());
-            ps.setInt(3, r.timeSlot());
-            ps.setBigDecimal(4, r.expBikes());
-            ps.setBigDecimal(5, r.pEmpty());
-            ps.setBigDecimal(6, r.pFull());
-            ps.setString(7, r.source());
-            ps.setObject(8, r.predictionSource(), Types.VARCHAR);
-            ps.setObject(9, r.generatedAt());
-        });
-        return rows.size();
-    }
-
     public int upsertCongestionPred(List<CongestionPredRow> rows, OffsetDateTime generatedAt) {
         jdbc.batchUpdate(UPSERT_CONGESTION_PRED, rows, BATCH_SIZE, (ps, r) -> {
             ps.setObject(1, r.predDate());
