@@ -6,13 +6,13 @@ import pytest
 
 pyspark = pytest.importorskip("pyspark")
 
-from DATA_ENGINE.spark.jobs.bike_avg_baseline import (
+from DATA_ENGINE.spark.jobs.bike_avg_baseline import (  # noqa: E402
     STOCK_NEEDED_COLS,
     fit_pandas,
     fit_spark,
 )
-from DATA_ENGINE.spark.metrics import compare_frames
-from DATA_ENGINE.spark.session import build_spark_session
+from DATA_ENGINE.spark.metrics import compare_frames  # noqa: E402
+from DATA_ENGINE.spark.session import build_spark_session  # noqa: E402
 
 
 @pytest.fixture(scope="module")

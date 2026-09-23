@@ -6,7 +6,7 @@ import pytest
 
 pyspark = pytest.importorskip("pyspark")
 
-from app.BIKE.pipeline.lookup import (
+from app.BIKE.pipeline.lookup import (  # noqa: E402
     STOCK_KEYS,
     STOCK_NEEDED_COLS,
     StockProfileBaseline,

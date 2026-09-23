@@ -38,11 +38,11 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 AI_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(AI_ROOT))
 
-from app.BIKE.pipeline.calendar import DEFAULT_HOLIDAY_PATH, load_holidays
-from app.BIKE.pipeline.dataset import monthly_paths
-from app.BIKE.pipeline.lookup import STOCK_KEYS, StockProfileBaseline
-from DATA_ENGINE.spark.metrics import compare_frames
-from DATA_ENGINE.spark.session import build_spark_session
+from app.BIKE.pipeline.calendar import DEFAULT_HOLIDAY_PATH, load_holidays  # noqa: E402
+from app.BIKE.pipeline.dataset import monthly_paths  # noqa: E402
+from app.BIKE.pipeline.lookup import STOCK_KEYS, StockProfileBaseline  # noqa: E402
+from DATA_ENGINE.spark.metrics import compare_frames  # noqa: E402
+from DATA_ENGINE.spark.session import build_spark_session  # noqa: E402
 
 STOCK_NEEDED_COLS = [
     "od_station_id",

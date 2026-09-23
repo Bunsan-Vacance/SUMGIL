@@ -7,8 +7,8 @@ import pytest
 
 pyspark = pytest.importorskip("pyspark")
 
-from DATA_ENGINE.spark.schema_reader import read_bike_stock_raw, split_by_schema
-from DATA_ENGINE.spark.session import build_spark_session
+from DATA_ENGINE.spark.schema_reader import read_bike_stock_raw, split_by_schema  # noqa: E402
+from DATA_ENGINE.spark.session import build_spark_session  # noqa: E402
 
 
 @pytest.fixture(scope="module")

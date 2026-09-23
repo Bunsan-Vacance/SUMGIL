@@ -41,13 +41,13 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 AI_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(AI_ROOT))
 
-from DATA_ENGINE.batch.build_bike_stock_5min import (
+from DATA_ENGINE.batch.build_bike_stock_5min import (  # noqa: E402
     normalize_bike_stock,
     read_raw_snapshots,
 )
-from DATA_ENGINE.spark.metrics import compare_frames
-from DATA_ENGINE.spark.schema_reader import read_bike_stock_raw
-from DATA_ENGINE.spark.session import build_spark_session
+from DATA_ENGINE.spark.metrics import compare_frames  # noqa: E402
+from DATA_ENGINE.spark.schema_reader import read_bike_stock_raw  # noqa: E402
+from DATA_ENGINE.spark.session import build_spark_session  # noqa: E402
 
 DEFAULT_INPUT_ROOT = AI_ROOT / "data" / "BIKE" / "raw" / "realtime"
 DEFAULT_OUTPUT_ROOT = AI_ROOT / "data" / "BIKE" / "processed" / "realtime_stock_profile"

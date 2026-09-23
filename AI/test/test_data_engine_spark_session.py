@@ -2,7 +2,7 @@ import pytest
 
 pyspark = pytest.importorskip("pyspark")
 
-from DATA_ENGINE.spark.session import build_spark_session
+from DATA_ENGINE.spark.session import build_spark_session  # noqa: E402
 
 
 def test_build_spark_session_applies_expected_config():
