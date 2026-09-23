@@ -128,4 +128,90 @@ class LinkCongestionScorerTest {
     private static Edge subwayEdge(String from, String to, int travelSec, int waitSec) {
         return new Edge(from, to, "L1", travelSec, waitSec, TravelMode.SUBWAY);
     }
+
+    private static Edge subwayEdge(String from, String to, String routeId, int travelSec, int waitSec) {
+        return new Edge(from, to, routeId, travelSec, waitSec, TravelMode.SUBWAY);
+    }
+
+    @Test
+    @DisplayName("scorePerSubwayLeg: 한 노선 연속 구간은 leg 하나 — 최댓값 하나만 낸다(265 후속)")
+    void leg별_단일노선_최댓값() {
+        Edge first = subwayEdge("A", "B", "L1", 600, 0); // 40
+        Edge second = subwayEdge("B", "C", "L1", 600, 0); // 90
+
+        List<Double> result = LinkCongestionScorer.scorePerSubwayLeg(
+                List.of(first, second), DEPARTURE,
+                (edge, passThroughTime) -> edge.fromNode().equals("A") ? 40.0 : 90.0);
+
+        assertEquals(List.of(90.0), result);
+    }
+
+    @Test
+    @DisplayName("scorePerSubwayLeg: 노선이 바뀌면 leg가 나뉜다 — 평균이 아니라 leg별 최댓값")
+    void leg별_노선전환시_구분() {
+        Edge line1 = subwayEdge("A", "B", "L1", 600, 0); // 20
+        Edge line2 = subwayEdge("B", "C", "L2", 600, 0); // 80
+
+        List<Double> result = LinkCongestionScorer.scorePerSubwayLeg(
+                List.of(line1, line2), DEPARTURE,
+                (edge, passThroughTime) -> edge.routeId().equals("L1") ? 20.0 : 80.0);
+
+        assertEquals(List.of(20.0, 80.0), result);
+    }
+
+    @Test
+    @DisplayName("scorePerSubwayLeg: WALK로 끊기면 같은 노선이어도 leg를 새로 센다")
+    void leg별_비지하철로_끊기면_새leg() {
+        Edge ride1 = subwayEdge("A", "B", "L1", 600, 0);
+        Edge walk = new Edge("B", "B2", "WALK", 120, 0, TravelMode.WALK);
+        Edge ride2 = subwayEdge("B2", "C", "L1", 600, 0);
+
+        List<Double> result = LinkCongestionScorer.scorePerSubwayLeg(
+                List.of(ride1, walk, ride2), DEPARTURE, (edge, passThroughTime) -> 50.0);
+
+        assertEquals(List.of(50.0, 50.0), result);
+    }
+
+    @Test
+    @DisplayName("scorePerSubwayLeg: 값을 아는 링크가 하나도 없는 leg는 null — 평균·인접값으로 채우지 않는다")
+    void leg별_결측은_null() {
+        Edge known = subwayEdge("A", "B", "L1", 600, 0);
+        Edge missingLine = subwayEdge("B", "C", "L2", 600, 0);
+
+        List<Double> result = LinkCongestionScorer.scorePerSubwayLeg(
+                List.of(known, missingLine), DEPARTURE,
+                (edge, passThroughTime) -> edge.routeId().equals("L1") ? 65.0 : null);
+
+        assertEquals(2, result.size());
+        assertEquals(65.0, result.get(0), 1e-9);
+        assertNull(result.get(1));
+    }
+
+    @Test
+    @DisplayName("scorePerSubwayLeg: 같은 leg 안에서는 평균이 아니라 최댓값을 낸다")
+    void leg별_평균아닌_최댓값() {
+        Edge low = subwayEdge("A", "B", "L1", 600, 0);
+        Edge high = subwayEdge("B", "C", "L1", 600, 0);
+        Edge mid = subwayEdge("C", "D", "L1", 600, 0);
+
+        List<Double> result = LinkCongestionScorer.scorePerSubwayLeg(
+                List.of(low, high, mid), DEPARTURE, (edge, passThroughTime) -> switch (edge.fromNode()) {
+                    case "A" -> 30.0;
+                    case "B" -> 120.0; // 100을 넘어도 자르지 않는다
+                    default -> 50.0;
+                });
+
+        assertEquals(List.of(120.0), result);
+    }
+
+    @Test
+    @DisplayName("scorePerSubwayLeg: SUBWAY 엣지가 없으면 빈 목록")
+    void leg별_지하철없음_빈목록() {
+        Edge walk = new Edge("A", "B", "WALK", 120, 0, TravelMode.WALK);
+
+        List<Double> result = LinkCongestionScorer.scorePerSubwayLeg(
+                List.of(walk), DEPARTURE, (edge, passThroughTime) -> 99.0);
+
+        assertTrue(result.isEmpty());
+    }
 }
