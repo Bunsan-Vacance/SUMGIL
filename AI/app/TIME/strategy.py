@@ -210,7 +210,12 @@ def describe_candidate(ctx: AgentContext, index: int) -> str:
 def _target_facts_lines(ctx: AgentContext) -> list[str]:
     """대상 대여소 사실을 줄 목록으로. `describe_candidate`와 같은 원칙 — 없는 값은 줄 자체를
     뺀다. `_build_user_prompt`와 `_allowed_numbers`가 같은 줄을 본다(둘이 어긋나면 프롬프트에
-    안 보여준 숫자가 허용되거나, 보여준 숫자가 막힌다)."""
+    안 보여준 숫자가 허용되거나, 보여준 숫자가 막힌다).
+
+    331 2단계 — `decision.facts`를 그대로 나열하던 `[사실]` 블록을 없애면서, 여기 없던
+    `p_full`·`source`를 흡수했다(값을 새로 계산하지 않고 그대로 옮기기만 한다). `facts`의
+    나머지 키(`eta_minutes`·`current_stock`·`predicted_stock`·`p_empty`·`model_horizon_min`)는
+    원래부터 이미 여기 있었다."""
     reading = ctx.target_reading
     lines = [f"- 대여소: {ctx.target.name or '이 대여소'}", f"- 도착까지: {ctx.eta_minutes}분"]
     if reading.current_stock is not None:
@@ -219,8 +224,12 @@ def _target_facts_lines(ctx: AgentContext) -> list[str]:
         lines.append(f"- 도착 시 예상 재고: {reading.predicted_stock:.1f}대")
     if reading.p_empty is not None:
         lines.append(f"- 비어 있을 확률: {reading.p_empty * 100:.0f}%")
+    if reading.p_full is not None:
+        lines.append(f"- 가득 찰 확률: {reading.p_full * 100:.0f}%")
     if reading.model_horizon_min is not None:
         lines.append(f"- 예측 horizon: {reading.model_horizon_min}분")
+    if reading.source is not None:
+        lines.append(f"- 예측 출처: {reading.source}")
     return lines
 
 
@@ -258,29 +267,42 @@ class RejectReason(StrEnum):
 def _system_prompt(max_sentences: int, max_chars: int) -> str:
     """역할·출력 규칙. 문장·글자 상한은 `AgentStrategy`가 실제로 검사하는 값과 어긋나지
     않도록 인자로 받아 그대로 박아 넣는다 — 프롬프트 문구와 검증 로직의 숫자가 따로 놀면
-    LLM은 지켰다고 생각한 규칙에 걸려 탈락한다."""
+    LLM은 지켰다고 생각한 규칙에 걸려 탈락한다.
+
+    331 2단계 — `[사실]` 블록을 없앤 뒤로 목록이 `[대상 대여소]`·`[후보]` 둘이다.
+
+    331 3단계 — 260자 이내로 압축하면서(조사를 빼는 전보식 압축은 LLM 오독 위험이 있어 문장은 온전히 둔다) **선택 기준 1문장**을 추가했다("비어 있을
+    확률 낮은 후보 우선, 비슷하면 가까운 후보"). 기준선 real 실행(`RESULTS.md` real 절
+    s00·s05)에서 LLM이 "확률이 비슷한 후보"·"단순히 더 가까운 후보"를 골라 규칙과
+    어긋난 원인이 이 기준의 부재였다 — `RuleStrategy.score`(`AGENT_DESIGN.md` 2.5절,
+    `도보소요 + p_empty × 고갈페널티`, 작을수록 좋다)와 같은 방향(둘 다 작을수록 유리)만
+    문장으로 옮겼고, 가중치·계산식은 LLM에 시키지 않는다. "다른 후보의 이름은 쓰지 않는다"는 real 재측정에서 나온 교훈이다 — 선택 기준을 주자 LLM이
+    올바른 후보를 고르고도 사유에 비교 상대 후보 이름을 써서 7건 중 6건이 `WRONG_CANDIDATE_NAME`으로
+    탈락했다(`validation/TIME/reroute-baseline-check/RESULTS.md`). 가드는 그대로 두고 프롬프트에서
+    막는다."""
     return (
-        "당신은 따릉이 재고 고갈 재안내 에이전트다. 아래 [사실]·[대상 대여소]·[후보] 목록만 "
-        "보고 후보 중 하나를 골라 정확히 이 JSON 형식으로만 답하라: "
-        '{"chosen_index": <정수>, "reason": <문자열>}. '
-        "chosen_index는 [후보] 목록의 번호 그대로여야 한다. "
-        "reason에는 대여소 이름·숫자를 새로 만들지 말고 [사실]·[대상 대여소]·[후보]에 실제로 "
-        f"나온 값만 인용해 한국어 {max_sentences}문장 이내, {max_chars}자 이내로 써라."
+        "당신은 따릉이 재고 고갈 재안내 에이전트다. [대상 대여소]·[후보]만 보고 후보 하나를 골라 "
+        '이 JSON으로만 답하라: {"chosen_index": <정수>, "reason": <문자열>}. '
+        "비어 있을 확률이 낮은 후보를 우선하고, 비슷하면 더 가까운 후보를 고른다. "
+        "chosen_index는 [후보] 번호 그대로. reason에는 고른 후보와 대상 대여소의 이름·숫자만 "
+        f"그대로 인용하고 다른 후보의 이름은 쓰지 않는다. 한국어 {max_sentences}문장·{max_chars}자 이내."
     )
 
 
 def _build_user_prompt(ctx: AgentContext) -> str:
-    """`decision.facts`·대상 사실·`describe_candidate()` 결과를 그대로 문장으로 옮긴다.
+    """대상 사실·`describe_candidate()` 결과를 그대로 문장으로 옮긴다.
 
     두 전략이 같은 입력을 보게 하는 `AgentContext`(`context.py` 모듈 docstring)를 그대로
     옮기는 자리라, 여기서 값을 가공하지 않는다 — 없는 값을 계산해 넣으면 `AgentStrategy`와
     `RuleStrategy`가 보는 "사실"이 달라진다.
+
+    331 2단계 — `decision.facts`를 `- key: value`로 그대로 나열하던 `[사실]` 블록을 없앴다.
+    `[대상 대여소]`(`_target_facts_lines`)가 이미 `facts`와 같은 값을 한국어 문장으로 보여주고
+    있었고(`source`·`p_full`만 흡수해 보강했다), 두 블록이 같은 숫자를 중복해 보여줬을 뿐이다
+    (`validation/TIME/reroute-baseline-check/RESULTS.md` real 절 토큰 분해). `[대상 대여소]`·
+    `[후보]` 둘만 남는다.
     """
-    lines = ["[사실]"]
-    for key, value in ctx.decision.facts.items():
-        lines.append(f"- {key}: {value}")
-    lines.append("")
-    lines.append("[대상 대여소]")
+    lines = ["[대상 대여소]"]
     lines.extend(_target_facts_lines(ctx))
     lines.append("")
     lines.append("[후보]")
@@ -301,26 +323,29 @@ def _numbers_in(text: str) -> set[float]:
 def _allowed_numbers(ctx: AgentContext) -> set[float]:
     """`reason`이 지어내지 않았는지 검사할 숫자 허용집합.
 
-    `decision.facts`의 수치 값 + 프롬프트에 실제로 보여준 대상 사실 줄(`_target_facts_lines`) +
-    후보 요약(`describe_candidate`)에 나온 숫자를 모은다 — 전부 LLM이 프롬프트에서 **실제로
-    본** 숫자라 안전한 허용집합이다. facts의 불린 값은 `isinstance(x, int)`가 True로 나와
-    숫자로 섞일 수 있어 따로 뺀다.
+    프롬프트에 실제로 보여준 대상 사실 줄(`_target_facts_lines`) + 후보 요약
+    (`describe_candidate`)에 나온 숫자를 모은다 — 전부 LLM이 프롬프트에서 **실제로 본** 숫자라
+    안전한 허용집합이다.
 
-    `p_empty`는 프롬프트에 **퍼센트로 보여준다**(예: "62%") — 하지만 LLM이 원값(0.62)을 그대로
-    인용할 수도 있어 텍스트에서 뽑은 숫자만으로는 부족하다. 그래서 대상·후보 각각의 원본
-    `p_empty` 값도 직접 허용집합에 더한다(퍼센트로 보여준 값과 원값을 **둘 다** 허용).
+    331 2단계 이전에는 `decision.facts`의 수치 값을 여기 더 더했다 — 그때는 `[사실]` 블록이
+    그 값을 그대로(반올림 없이) 보여줬기 때문이다. 그 블록을 없앤 지금은 `facts`를 직접 보지
+    않는다 — 프롬프트에 안 보여준 raw 정밀도 숫자까지 허용하면 "LLM이 실제로 본 숫자"라는
+    이 함수의 전제가 깨진다. `_target_facts_lines`가 `facts`의 모든 값을 이미 문장으로
+    옮기므로(같은 파일의 그 함수 docstring), 허용집합이 줄지는 않는다.
+
+    `p_empty`·`p_full`은 프롬프트에 **퍼센트로 보여준다**(예: "62%") — 하지만 LLM이 원값
+    (0.62)을 그대로 인용할 수도 있어 텍스트에서 뽑은 숫자만으로는 부족하다. 그래서 대상·후보
+    각각의 원본 값도 직접 허용집합에 더한다(퍼센트로 보여준 값과 원값을 **둘 다** 허용). 대상의
+    `p_full`은 `_target_facts_lines`에만 있고 후보 요약에는 없어 대상 것만 더한다.
     """
     numbers: set[float] = set()
-    for value in ctx.decision.facts.values():
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, (int, float)):
-            numbers.add(float(value))
 
     for line in _target_facts_lines(ctx):
         numbers |= _numbers_in(line)
     if ctx.target_reading.p_empty is not None:
         numbers.add(float(ctx.target_reading.p_empty))
+    if ctx.target_reading.p_full is not None:
+        numbers.add(float(ctx.target_reading.p_full))
 
     for i in range(len(ctx.usable_candidates)):
         numbers |= _numbers_in(describe_candidate(ctx, i))

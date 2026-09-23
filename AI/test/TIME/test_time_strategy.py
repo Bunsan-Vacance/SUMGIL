@@ -23,6 +23,10 @@ from app.TIME.strategy import (
     RECOMMENDED_BY_ALGORITHM,
     RuleStrategy,
     ScoreWeights,
+    _allowed_numbers,
+    _build_user_prompt,
+    _numbers_in,
+    _system_prompt,
     build_reason,
     describe_candidate,
 )
@@ -288,6 +292,68 @@ def test_describe_candidate는_없는_값의_자리를_통째로_뺀다():
     assert "현재" not in text
     assert "예상" not in text
     assert "확률" not in text
+
+
+# ── LLM 사용자 프롬프트 — 331 2단계: [사실] 블록 제거 ──
+#
+# `decision.facts`를 `- key: value`로 그대로 나열하던 [사실] 블록은 [대상 대여소] 블록
+# (`_target_facts_lines`)과 값이 중복이었다(RESULTS.md real 절 토큰 분해). 블록을 없애도
+# facts의 모든 항목이 [대상 대여소]에 남아 있는지, 환각 검사 허용 숫자가 줄지 않는지를 고정한다.
+
+
+def test_프롬프트에_사실_블록이_없고_대상_블록이_facts_항목을_전부_담는다():
+    c = candidate("교대", distance_m=150.0)
+    ctx = fired_ctx(c, target_reading_kwargs={"predicted_stock": 1.5, "p_empty": 0.62})
+
+    prompt = _build_user_prompt(ctx)
+
+    assert "[사실]" not in prompt
+    assert "[대상 대여소]" in prompt
+    assert "[후보]" in prompt
+
+    target_block = prompt.split("[후보]")[0]
+    assert "도착까지" in target_block  # facts["eta_minutes"]
+    assert "재고" in target_block  # facts["current_stock"]/["predicted_stock"]
+    assert "확률" in target_block  # facts["p_empty"]/["p_full"]
+    assert "horizon" in target_block  # facts["model_horizon_min"]
+    assert "출처" in target_block  # facts["source"]
+
+
+def test_사실_블록에_있던_숫자는_제거_후에도_허용된다():
+    """제거한 [사실] 블록이 보여줬을 숫자(`decision.facts`를 `key: value`로 그대로 적은 것)가
+    새 허용집합(`_allowed_numbers`)에서 빠지지 않는지 — 허용 숫자 집합이 줄지 않는다는 확인."""
+    c = candidate("교대", distance_m=150.0)
+    ctx = fired_ctx(c, target_reading_kwargs={"predicted_stock": 1.5, "p_empty": 0.62})
+
+    old_block_numbers: set[float] = set()
+    for key, value in ctx.decision.facts.items():
+        old_block_numbers |= _numbers_in(f"- {key}: {value}")
+
+    assert old_block_numbers  # 이 픽스처는 실제로 숫자를 낸다(공집합이면 검사가 무의미하다)
+    assert old_block_numbers <= _allowed_numbers(ctx)
+
+
+# ── 시스템 프롬프트 — 331 3단계: 260자 압축 + 선택 기준 1문장 ──
+
+
+def test_시스템_프롬프트는_260자_이내이고_선택_기준과_형식_상한을_담는다():
+    prompt = _system_prompt(2, 120)
+
+    assert len(prompt) <= 260
+    # 선택 기준(RuleStrategy.score와 같은 방향 — 낮은 p_empty 우선, 비슷하면 가까운 거리).
+    assert "비어 있을 확률" in prompt
+    assert "가까운" in prompt
+    # JSON 형식 · chosen_index 규칙.
+    assert '{"chosen_index": <정수>, "reason": <문자열>}' in prompt
+    assert "chosen_index" in prompt
+    assert "[후보]" in prompt
+    # 문장·글자 상한 인자가 하드코딩이 아니라 그대로 박힌다 — 값을 바꾸면 문구도 바뀐다.
+    assert "2문장" in prompt
+    assert "120자" in prompt
+    prompt2 = _system_prompt(3, 150)
+    assert "3문장" in prompt2
+    assert "150자" in prompt2
+    assert len(prompt2) <= 260
 
 
 # ── 설정 ──
