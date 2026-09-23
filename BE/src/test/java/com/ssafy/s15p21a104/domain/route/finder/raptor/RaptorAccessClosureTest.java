@@ -91,4 +91,35 @@ class RaptorAccessClosureTest {
         assertEquals(240, access.get("R2").bikeRunSec());
         assertFalse(access.containsKey("R3"), "상한 초과 자전거 사슬이 남았다");
     }
+
+    @Test
+    @DisplayName("A6: 접근에서 WALK로 리셋된 두 번째 BIKE 런은 잘린다 (2026-09-23)")
+    void a6_접근_두번째런_차단() {
+        List<RaptorFinder.Connection> connections = List.of(
+                new RaptorFinder.Connection("PLACE-ORIGIN", "R1", 60, TravelMode.WALK),
+                new RaptorFinder.Connection("R1", "R2", 120, TravelMode.BIKE),
+                new RaptorFinder.Connection("R2", "R3", 60, TravelMode.WALK),
+                new RaptorFinder.Connection("R3", "R4", 120, TravelMode.BIKE));
+
+        Map<String, RaptorFinder.Access> access = RaptorAccessClosure.from("PLACE-ORIGIN", connections);
+
+        assertEquals(1, access.get("R3").bikeRuns(), "R3까지 1런이어야 한다");
+        assertFalse(access.containsKey("R4"), "두 번째 자전거 런이 남았다");
+    }
+
+    @Test
+    @DisplayName("A7: 이탈에서도 WALK로 리셋된 두 번째 BIKE 런은 잘린다 (2026-09-23)")
+    void a7_이탈_두번째런_차단() {
+        List<RaptorFinder.Connection> connections = List.of(
+                new RaptorFinder.Connection("S", "R1", 120, TravelMode.BIKE),
+                new RaptorFinder.Connection("R1", "R2", 60, TravelMode.WALK),
+                new RaptorFinder.Connection("R2", "R3", 120, TravelMode.BIKE),
+                new RaptorFinder.Connection("R3", "PLACE-DEST", 60, TravelMode.WALK));
+
+        Map<String, RaptorFinder.Egress> egress = RaptorAccessClosure.to("PLACE-DEST", connections);
+
+        // R2에서 목적지까지는 1런(BIKE R2→R3 + WALK)이라 유지되고, S→…→목적지는 2런이라 잘린다.
+        assertEquals(1, egress.get("R2").bikeRuns(), "R2까지 1런이어야 한다");
+        assertFalse(egress.containsKey("S"), "두 번째 자전거 런이 남았다");
+    }
 }

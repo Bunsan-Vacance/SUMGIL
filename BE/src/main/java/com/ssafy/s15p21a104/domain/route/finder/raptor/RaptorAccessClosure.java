@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.finder.raptor;
 
+import com.ssafy.s15p21a104.domain.route.bike.BikeUsePolicy;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,6 +19,9 @@ import java.util.PriorityQueue;
  *
  * <p>비용만이 아니라 <b>추적용 사슬</b>(직전/다음 구간)을 함께 담는다. 엔진이 journey 복원 시
  * 실제 WALK/BIKE leg를 그대로 방출할 수 있어야 하기 때문이다(비용만 주면 합성 leg로 뭉개진다).
+ *
+ * <p>자전거 위치 규칙(2026-09-23): 상태를 {@code (정점, 자전거 런 수)}로 두고 측당 1런만
+ * 허용한다 — 접근/이탈 안에서 WALK로 리셋된 두 번째 런(대여소 체인)은 이완하지 않는다.
  *
  * <p>모드 필터는 호출부 책임이다(전달받은 연결 목록만 사용). 순수 로직이며 DB에 의존하지 않는다.
  */
@@ -64,81 +68,111 @@ public final class RaptorAccessClosure {
         return reverseClosure(destNodeId, byTarget);
     }
 
-    /** 연결망 다익스트라(정방향) — 각 정점의 최선 직전 구간을 남긴다. */
+    /** 연결망 다익스트라(정방향) — 상태 (정점, 자전거 런 수)별 최선 직전 구간을 남긴다. */
     private static Map<String, RaptorFinder.Access> forwardClosure(String originNodeId,
             Map<String, List<RaptorFinder.Connection>> bySource) {
-        record Entry(String node, int cost) {
+        record State(String node, int bikeRuns) {
         }
-        Map<String, Integer> best = new HashMap<>();
-        Map<String, Integer> bestBikeRun = new HashMap<>();
-        Map<String, RaptorFinder.Access> out = new HashMap<>();
+        record Entry(State state, int cost) {
+        }
+        Map<State, Integer> best = new HashMap<>();
+        Map<State, Integer> bestBikeRun = new HashMap<>();
+        Map<State, RaptorFinder.Access> out = new HashMap<>();
         PriorityQueue<Entry> queue = new PriorityQueue<>(Comparator.comparingInt(Entry::cost));
-        best.put(originNodeId, 0);
-        bestBikeRun.put(originNodeId, 0);
-        out.put(originNodeId, new RaptorFinder.Access(0, null, 0, TravelMode.WALK, 0));
-        queue.add(new Entry(originNodeId, 0));
+        State origin = new State(originNodeId, 0);
+        best.put(origin, 0);
+        bestBikeRun.put(origin, 0);
+        out.put(origin, new RaptorFinder.Access(0, null, 0, TravelMode.WALK, 0, 0));
+        queue.add(new Entry(origin, 0));
         while (!queue.isEmpty()) {
             Entry entry = queue.poll();
-            if (entry.cost() > best.getOrDefault(entry.node(), INF)) {
+            State state = entry.state();
+            if (entry.cost() > best.getOrDefault(state, INF)) {
                 continue; // 낡은 항목
             }
-            int run = bestBikeRun.getOrDefault(entry.node(), 0);
-            for (RaptorFinder.Connection connection : bySource.getOrDefault(entry.node(), List.of())) {
+            int run = bestBikeRun.getOrDefault(state, 0);
+            for (RaptorFinder.Connection connection : bySource.getOrDefault(state.node(), List.of())) {
                 boolean bike = connection.mode() == TravelMode.BIKE;
-                int nextRun = bike ? run + connection.sec() : 0;
-                if (bike && nextRun > com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder
-                        .MAX_ACT_SEC) {
-                    continue; // 대여 1회 상한 초과 — 가지치기(5부 T3)
+                if (bike && !BikeUsePolicy.allowsBikeConnection(
+                        0, run, state.bikeRuns(), connection.sec())) {
+                    continue; // 측당 1런·2km 상한 초과 — 가지치기
                 }
+                int nextRun = bike ? run + connection.sec() : 0;
+                int nextRuns = bike
+                        ? BikeUsePolicy.runsAfterBike(run, state.bikeRuns())
+                        : state.bikeRuns();
                 int nextCost = entry.cost() + connection.sec();
-                if (nextCost < best.getOrDefault(connection.to(), INF)) {
-                    best.put(connection.to(), nextCost);
-                    bestBikeRun.put(connection.to(), nextRun);
-                    out.put(connection.to(), new RaptorFinder.Access(
-                            nextCost, entry.node(), connection.sec(), connection.mode(), nextRun));
-                    queue.add(new Entry(connection.to(), nextCost));
+                State next = new State(connection.to(), nextRuns);
+                if (nextCost < best.getOrDefault(next, INF)) {
+                    best.put(next, nextCost);
+                    bestBikeRun.put(next, nextRun);
+                    out.put(next, new RaptorFinder.Access(
+                            nextCost, state.node(), connection.sec(), connection.mode(), nextRun, nextRuns));
+                    queue.add(new Entry(next, nextCost));
                 }
             }
         }
-        return out;
+        Map<String, RaptorFinder.Access> result = new HashMap<>();
+        for (Map.Entry<State, RaptorFinder.Access> entry : out.entrySet()) {
+            RaptorFinder.Access current = result.get(entry.getKey().node());
+            if (current == null || entry.getValue().costSec() < current.costSec()) {
+                result.put(entry.getKey().node(), entry.getValue());
+            }
+        }
+        return result;
     }
 
-    /** 연결망 다익스트라(역방향) — 각 정점의 최선 다음 구간을 남긴다. */
+    /** 연결망 다익스트라(역방향) — 상태 (정점, 자전거 런 수)별 최선 다음 구간을 남긴다. */
     private static Map<String, RaptorFinder.Egress> reverseClosure(String destNodeId,
             Map<String, List<RaptorFinder.Connection>> byTarget) {
-        record Entry(String node, int cost) {
+        record State(String node, int bikeRuns) {
         }
-        Map<String, Integer> best = new HashMap<>();
-        Map<String, Integer> bestBikeRun = new HashMap<>();
-        Map<String, RaptorFinder.Egress> out = new HashMap<>();
+        record Entry(State state, int cost) {
+        }
+        Map<State, Integer> best = new HashMap<>();
+        Map<State, Integer> bestBikeRun = new HashMap<>();
+        Map<State, RaptorFinder.Egress> out = new HashMap<>();
         PriorityQueue<Entry> queue = new PriorityQueue<>(Comparator.comparingInt(Entry::cost));
-        best.put(destNodeId, 0);
-        bestBikeRun.put(destNodeId, 0);
-        out.put(destNodeId, new RaptorFinder.Egress(0, null, 0, TravelMode.WALK, 0));
-        queue.add(new Entry(destNodeId, 0));
+        State dest = new State(destNodeId, 0);
+        best.put(dest, 0);
+        bestBikeRun.put(dest, 0);
+        out.put(dest, new RaptorFinder.Egress(0, null, 0, TravelMode.WALK, 0, 0));
+        queue.add(new Entry(dest, 0));
         while (!queue.isEmpty()) {
             Entry entry = queue.poll();
-            if (entry.cost() > best.getOrDefault(entry.node(), INF)) {
+            State state = entry.state();
+            if (entry.cost() > best.getOrDefault(state, INF)) {
                 continue; // 낡은 항목
             }
-            int run = bestBikeRun.getOrDefault(entry.node(), 0);
-            for (RaptorFinder.Connection connection : byTarget.getOrDefault(entry.node(), List.of())) {
+            int run = bestBikeRun.getOrDefault(state, 0);
+            for (RaptorFinder.Connection connection : byTarget.getOrDefault(state.node(), List.of())) {
                 boolean bike = connection.mode() == TravelMode.BIKE;
-                int nextRun = bike ? run + connection.sec() : 0;
-                if (bike && nextRun > com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder
-                        .MAX_ACT_SEC) {
-                    continue; // 대여 1회 상한 초과 — 가지치기(5부 T3)
+                if (bike && !BikeUsePolicy.allowsBikeConnection(
+                        0, run, state.bikeRuns(), connection.sec())) {
+                    continue; // 측당 1런·2km 상한 초과 — 가지치기
                 }
+                int nextRun = bike ? run + connection.sec() : 0;
+                int nextRuns = bike
+                        ? BikeUsePolicy.runsAfterBike(run, state.bikeRuns())
+                        : state.bikeRuns();
                 int nextCost = entry.cost() + connection.sec();
-                if (nextCost < best.getOrDefault(connection.from(), INF)) {
-                    best.put(connection.from(), nextCost);
-                    bestBikeRun.put(connection.from(), nextRun);
-                    out.put(connection.from(), new RaptorFinder.Egress(
-                            nextCost, entry.node(), connection.sec(), connection.mode(), nextRun));
-                    queue.add(new Entry(connection.from(), nextCost));
+                State next = new State(connection.from(), nextRuns);
+                if (nextCost < best.getOrDefault(next, INF)) {
+                    best.put(next, nextCost);
+                    bestBikeRun.put(next, nextRun);
+                    out.put(next, new RaptorFinder.Egress(
+                            nextCost, state.node(), connection.sec(), connection.mode(), nextRun, nextRuns));
+                    queue.add(new Entry(next, nextCost));
                 }
             }
         }
-        return out;
+        Map<String, RaptorFinder.Egress> result = new HashMap<>();
+        for (Map.Entry<State, RaptorFinder.Egress> entry : out.entrySet()) {
+            RaptorFinder.Egress current = result.get(entry.getKey().node());
+            if (current == null || entry.getValue().costSec() < current.costSec()) {
+                result.put(entry.getKey().node(), entry.getValue());
+            }
+        }
+        return result;
     }
 }
