@@ -1,0 +1,9 @@
+[Unit]
+Description=BIKE realtime stock raw cumulative reprocess (Spark, quality report)
+
+[Service]
+Type=oneshot
+WorkingDirectory=<REPO_ROOT>/AI
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/usr/bin/bash <REPO_ROOT>/AI/DATA_ENGINE/scripts/run_bike_realtime_reprocess.sh
+TimeoutStartSec=30min

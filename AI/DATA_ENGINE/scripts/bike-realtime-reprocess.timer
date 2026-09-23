@@ -1,0 +1,13 @@
+# 누적 재처리라 매일일 필요는 없다 — 야간창(팀 제안서 기준 3코어·4GB)에 주 1회.
+# 파일이 계속 쌓이므로(273 실측: 10일치도 이미 Spark가 4.4배 빠름) 실행 시간은 갈수록 늘어난다 —
+# TimeoutStartSec(service, 30min)을 넘기면 늘려야 한다.
+[Unit]
+Description=BIKE realtime stock reprocess weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00 Asia/Seoul
+Persistent=true
+Unit=bike-realtime-reprocess.service
+
+[Install]
+WantedBy=timers.target
