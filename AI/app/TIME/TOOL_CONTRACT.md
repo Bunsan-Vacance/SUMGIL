@@ -154,7 +154,9 @@ CROWD는 **하루 1회 배치** 산출물이다. `get_line_congestion` 설명에
 
 `replan_route` 설명은 "반환된 경로의 역 이름·소요시간·거리를 임의로 바꾸지 말 것"을 명시한다.
 LLM이 경로를 각색하는 것을 도구 계층이 막을 수 있는 유일한 지점이 `description`이다.
-빈 배열은 오류가 아니라 **"대안 없음"**이고, 그때는 기존 안내를 유지한다.
+빈 배열은 오류가 아니라 **"대안 없음"**이고, 그때는 기존 안내를 유지한다. 단, 첫 leg 검증
+(324, `service._pick_route_from_alternative`)으로 배열의 어느 원소를 쓸지 **선택만** 한다 —
+고른 원소의 경로 값 자체는 그대로 인용한다.
 
 ---
 
@@ -267,9 +269,11 @@ retryable=False)를 돌려준다. 소비는 `record(result)`가 하고, 토큰 �
 | 3 | `replan_route` 출력 `reason` 생성 주체 | **확정**(3번) — BE 응답 필드에는 LLM 문장을 싣지 않는다. BE 고정 문구는 그대로 유지 | 스키마 미개방. 에이전트 문장은 에이전트(라우터) 응답에 별도로 담는다 |
 | 4 | BE `base_url` | **확인**(5번) — `prod` 네임스페이스 Service `be`, 포트 8080. `/api/**` 전부 인증 없음 | 값은 확인됐지만 호출 방향(6번 — AI가 언제 BE를 직접 부르는지, (b)/(c) 중 선택)이 216 이후 결정 대기라 `Settings` 필드·`.env.example` 반영은 그 결정 이후로 미룬다. 생성자 인자로만 받는 지금 방식은 유지. **dev 실호출 확인(2026-09-23)** — `TIME_BE_BASE_URL=https://j15a104.p.ssafy.io`로 `HttpAdapter`가 `POST /api/routes/replan`(step 0, boundaryId `ST-1290`, destStationId `0222`) 1회 → HTTP 200·빈 배열(대안 없음)·0.75초. 요청·응답 형식은 어댑터와 맞고, 빈 배열이 ID 미존재 때문인지 경로 부재 때문인지는 BE 응답만으로 구분되지 않는다 |
 | 5 | LLM 게이트웨이 · 사용 가능 모델 | 사용자 확인 | 클라이언트 구현(`llm.HttpLlmClient`). **GMS 형식 확인 완료(2026-09-23 실호출 1회)** — OpenAI 호환 `POST https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions`, `Authorization: Bearer GMS_API_KEY`, `response_format.json_schema(strict)` 통과. 모델 `gpt-5.4-mini`(응답 `model`=`gpt-5.4-mini-2026-03-17`), 69 입력·19 출력 토큰에 지연 1.2초. 값은 `.env`의 `TIME_LLM_BASE_URL`/`TIME_LLM_MODEL`, 기본값은 여전히 없음 |
+| 7 | `replan_route` 입력 `modes`·`priority` | **확인**(`FROM_BE-bike-reroute-route-02.md` 덧 7번) — DTO(`RerouteRequest`)에는 있으나 `RerouteController.replan()`이 finder에 넘기지 않는다. 전면 재탐색은 5부 D1(replan RAPTOR 이관)과 묶어 다룬다고 회신 | **현재 무시됨.** 스키마 미개방. 어댑터(4.2절 "명시적 `null`은 body에서 뺀다")는 유지 — 넘겨도 안전하고, 전면 재탐색이 통일되면 그때 쓸 자리다 |
 
 1~3은 `registry.py`의 `REPLAN_ROUTE` 항목 `x_resolved`에도 같은 근거로 남아 있다. 스키마를 실제로
-여는 것은 BE 216 완료·FE 방침 확정 이후다.
+여는 것은 BE 216 완료·FE 방침 확정 이후다. 7번은 `FROM_BE-time-reroute-contract-01`이 아니라
+`FROM_BE-bike-reroute-route-02.md`(324) 덧 7번이 출처다 — 번호 체계가 그 문서를 따르지 않는다.
 
 ---
 
@@ -303,3 +307,4 @@ monkeypatch하며, 가드는 시계를 주입받아 `sleep` 없이 검증한다.
 | 1.2.0 | 2026-09-22 | LLM 게이트웨이 클라이언트·세션 비용 가드·AgentStrategy |
 | — | 2026-09-22 | 문서만: nearby DTO 정정 메모·트리거 필드 사용 메모·replan 1회 패턴 (스키마 불변) |
 | 1.3.0 | 2026-09-23 | bike_stations_nearby 출력 스키마를 실제 BE DTO로 정정(availableBikes·stockUpdatedAt 제거) |
+| — | 2026-09-23 | 문서만: BE 회신(route-02) 반영 — replan 첫 leg 검증 가드(`route_not_from_alternative`)·`modes`/`priority` 무시 확인(7번)·`viaNodeId` 공수 회신 (스키마 불변) |

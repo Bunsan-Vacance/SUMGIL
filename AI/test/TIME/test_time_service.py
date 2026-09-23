@@ -37,6 +37,7 @@ from app.TIME.service import (
     REASON_NO_NEARBY_STATION,
     REASON_NO_STRATEGY,
     REASON_ROUTE_MALFORMED,
+    REASON_ROUTE_NOT_FROM_ALTERNATIVE,
     REASON_ROUTE_UNAVAILABLE,
     REASON_STRATEGY_UNDECIDED,
     REASON_TARGET_UNKNOWN,
@@ -125,18 +126,39 @@ GOOD_ALT = _eta(current_stock=4, predicted_stock=4.0, p_empty=0.1)
 """대안 후보의 조회 결과 — 재고 여유, 비어 있을 확률 낮음."""
 
 
-def _route_element(**route_overrides: Any) -> dict[str, Any]:
-    """BE `replan_route` 응답 원소 하나. 기본 `route`는 데모 예시(FE-04 편지 2.3절)를 옮겼다."""
+def _route_element(*, from_node_id: str = ALT_A_ID, **route_overrides: Any) -> dict[str, Any]:
+    """BE `replan_route` 응답 원소 하나. 기본 `route`는 데모 예시(FE-04 편지 2.3절)를 옮겼다.
+
+    첫 leg는 기본으로 `from_node_id`(기본 `ALT_A_ID`)에서 출발하는 BIKE다 — 대부분의 테스트가
+    ALT_A를 선택된 대안으로 쓰기 때문이다(324 첫 leg 검증 가드를 통과해야 `proposal`이 난다).
+    """
     route: dict[str, Any] = {
         "routeType": "BIKE_SUBWAY",
         "totalMinutes": 20.0,
         "source": "ALGORITHM",
         "totalDistanceMeters": 6000.0,
         "transferCount": 0,
-        "legs": [{"mode": "BIKE", "minutes": 20.0, "routeId": None}],
+        "legs": [{"mode": "BIKE", "minutes": 20.0, "routeId": None, "fromNodeId": from_node_id}],
     }
     route.update(route_overrides)
     return {"reason": "BE 고정 문구", "source": "ALGORITHM", "route": route}
+
+
+def _walk_only_route_element(from_node_id: str = ALT_A_ID) -> dict[str, Any]:
+    """첫 leg가 WALK뿐인 원소 — 경계 대여소에서 도보가 더 싸면 BE가 이런 원소를 먼저 준다
+    (`FROM_BE-bike-reroute-route-02.md` 1번 prod 실측)."""
+    return {
+        "reason": "BE 고정 문구",
+        "source": "ALGORITHM",
+        "route": {
+            "routeType": "WALK_ONLY",
+            "totalMinutes": 5.0,
+            "source": "ALGORITHM",
+            "totalDistanceMeters": 300.0,
+            "transferCount": 0,
+            "legs": [{"mode": "WALK", "minutes": 5.0, "routeId": None, "fromNodeId": from_node_id}],
+        },
+    }
 
 
 # ── 가짜 어댑터 ──
@@ -362,6 +384,48 @@ def test_원소에_route가_없으면_route_malformed이다():
     assert outcome.reason == REASON_ROUTE_MALFORMED
 
 
+def test_legs가_비정형이면_route_malformed이다():
+    # route는 있지만 legs[0]에 mode가 없다 — 324 첫 leg 검증 이전 단계의 malformed다.
+    adapter = FakeAdapter(
+        eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT},
+        replan=[_route_element(legs=[{"minutes": 20.0, "routeId": None}])],
+    )
+
+    outcome = run(adapter)
+
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_ROUTE_MALFORMED
+
+
+def test_WALK_우선_경로만_있으면_route_not_from_alternative이다():
+    # 경계 대여소에서 도보가 더 싸면 BE는 WALK만 있는 원소를 준다(BE 회신 1번 prod 실측).
+    adapter = FakeAdapter(
+        eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT},
+        replan=[_walk_only_route_element()],
+    )
+
+    outcome = run(adapter)
+
+    assert outcome.status is RerouteStatus.UNAVAILABLE
+    assert outcome.reason == REASON_ROUTE_NOT_FROM_ALTERNATIVE
+    assert outcome.proposal is not None  # 대안 선택까지는 끝났다 — 경로만 못 이었다
+    assert adapter.count(REPLAN_ROUTE) == 1  # 다음 후보로 재시도하지 않는다(1회 유지)
+
+
+def test_첫_원소가_WALK고_둘째가_대안_출발_BIKE면_둘째를_채택한다():
+    adapter = FakeAdapter(
+        eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT},
+        replan=[_walk_only_route_element(), _route_element(totalMinutes=25.0)],
+    )
+
+    outcome = run(adapter)
+
+    assert outcome.status is RerouteStatus.PROPOSAL
+    assert outcome.route is not None
+    assert outcome.route["totalMinutes"] == 25.0  # 두 번째 원소를 골랐다
+    assert outcome.route["legs"][0]["fromNodeId"] == ALT_A_ID
+
+
 def test_성공하면_proposal이고_필요한_필드가_다_채워진다():
     inner_route = {
         "routeType": "BIKE_SUBWAY",
@@ -369,7 +433,7 @@ def test_성공하면_proposal이고_필요한_필드가_다_채워진다():
         "source": "ALGORITHM",
         "totalDistanceMeters": 6120.0,
         "transferCount": 1,
-        "legs": [{"mode": "BIKE", "minutes": 8.0, "routeId": None}],
+        "legs": [{"mode": "BIKE", "minutes": 8.0, "routeId": None, "fromNodeId": ALT_A_ID}],
     }
     adapter = FakeAdapter(
         eta_stock={TARGET_ID: FIRED_TARGET, ALT_A_ID: GOOD_ALT},

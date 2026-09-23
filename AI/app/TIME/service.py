@@ -35,7 +35,8 @@
 | ⑤ 선택 | `strategy.decide(ctx)`가 `None`("대안은 있는데 점수를 못 냈다" — 대안 없음의 근거가 아니다) | `UNAVAILABLE` | `strategy_undecided` |
 | ⑥ 경로 연결 | `boundary`가 `None` | `UNAVAILABLE` | `boundary_missing` |
 | ⑥ 경로 연결 | `REPLAN_ROUTE`가 `ToolError` 또는 빈 배열(`route: null` 제안은 FE 결정상 금지) | `UNAVAILABLE` | `route_unavailable` |
-| ⑥ 경로 연결 | 첫 원소에 안쪽 `route` dict가 없다 | `UNAVAILABLE` | `route_malformed` |
+| ⑥ 경로 연결 | 첫 원소에 안쪽 `route` dict가 없다, 또는 `route.legs[0]`이 없거나 `mode`가 없다 | `UNAVAILABLE` | `route_malformed` |
+| ⑥ 경로 연결 | `replan_result` 전 원소 중 `legs[0]`이 BIKE·대안 대여소 출발인 경로가 없다(BE 회신: `boundaryId`=대여소여도 첫 leg BIKE 보장 없음 — `FROM_BE-bike-reroute-route-02.md` 1번) | `UNAVAILABLE` | `route_not_from_alternative` |
 | ⑥ 성공 | 도보 합성까지 끝남 | `PROPOSAL` | `proposal.reason`(사용자 문장) |
 | 그 외 | 어디서든 예상 못 한 예외 | `UNAVAILABLE` | `internal_error` |
 
@@ -78,6 +79,7 @@ REASON_STRATEGY_UNDECIDED = "strategy_undecided"
 REASON_BOUNDARY_MISSING = "boundary_missing"
 REASON_ROUTE_UNAVAILABLE = "route_unavailable"
 REASON_ROUTE_MALFORMED = "route_malformed"
+REASON_ROUTE_NOT_FROM_ALTERNATIVE = "route_not_from_alternative"
 REASON_INTERNAL_ERROR = "internal_error"
 
 
@@ -360,12 +362,43 @@ def _propose(
             boundary=boundary,
         )
 
-    first = replan_result[0]  # BE가 소요시간순으로 정렬해 준다 — 첫 원소를 그대로 쓴다.
+    first = replan_result[0]  # BE가 소요시간순으로 정렬해 준다 — malformed 여부는 첫 원소로만 본다.
     route = first.get("route") if isinstance(first, Mapping) else None
     if not isinstance(route, Mapping):
         return RerouteOutcome(
             status=RerouteStatus.UNAVAILABLE,
             reason=REASON_ROUTE_MALFORMED,
+            trigger=trig,
+            target=target,
+            target_reading=target_reading,
+            proposal=proposal,
+            alternative=alt,
+            boundary=boundary,
+        )
+
+    legs = route.get("legs")
+    first_leg = legs[0] if isinstance(legs, list) and legs else None
+    if not isinstance(first_leg, Mapping) or "mode" not in first_leg:
+        return RerouteOutcome(
+            status=RerouteStatus.UNAVAILABLE,
+            reason=REASON_ROUTE_MALFORMED,
+            trigger=trig,
+            target=target,
+            target_reading=target_reading,
+            proposal=proposal,
+            alternative=alt,
+            boundary=boundary,
+        )
+
+    # BE 회신(`FROM_BE-bike-reroute-route-02.md` 1번): boundaryId=대여소여도 첫 leg BIKE는
+    # 보장이 아니다 — 경계 대여소에서 도보가 더 싸면 WALK가 먼저 나오고, 옆 역이면 WALK 단독이다.
+    # 첫 원소를 무조건 쓰지 않고 배열 전체에서 대안 출발 BIKE 경로를 찾는다(재탐색 없이 — 이미
+    # 받은 배열 안에서만 고른다. `REPLAN_ROUTE`는 위에서 이미 1회 불렀다).
+    picked_route = _pick_route_from_alternative(replan_result, alt.candidate.station.rental_id)
+    if picked_route is None:
+        return RerouteOutcome(
+            status=RerouteStatus.UNAVAILABLE,
+            reason=REASON_ROUTE_NOT_FROM_ALTERNATIVE,
             trigger=trig,
             target=target,
             target_reading=target_reading,
@@ -386,8 +419,38 @@ def _propose(
         alternative=alt,
         boundary=boundary,
         walk_leg=walk_leg,
-        route=dict(route),
+        route=dict(picked_route),
     )
+
+
+def _pick_route_from_alternative(
+    replan_result: list[Any], alt_rental_id: str
+) -> Mapping[str, Any] | None:
+    """`replan_result`(BE 소요시간순 배열)에서 첫 leg가 BIKE고 대안 대여소(`alt_rental_id`)에서
+    출발하는 첫 경로의 `route`만 뽑는다.
+
+    BE 회신(`FROM_BE-bike-reroute-route-02.md` 1번): `boundaryId`=대여소여도 첫 leg BIKE는
+    보장이 아니다 — 경계 대여소에서 도보가 더 싸면 WALK가 먼저 나오고, 옆 역이면 WALK 단독이다.
+    맞는 경로가 없으면 `None`을 돌려주고(`REASON_ROUTE_NOT_FROM_ALTERNATIVE`) `REPLAN_ROUTE`를
+    다시 부르지 않는다 — 다음 후보로 재시도하는 선택지는 문서에만 남겨둔다
+    (`AGENT_DESIGN.md` 3.4절).
+    """
+    for element in replan_result:
+        if not isinstance(element, Mapping):
+            continue
+        candidate_route = element.get("route")
+        if not isinstance(candidate_route, Mapping):
+            continue
+        legs = candidate_route.get("legs")
+        if not isinstance(legs, list) or not legs:
+            continue
+        first_leg = legs[0]
+        if not isinstance(first_leg, Mapping) or first_leg.get("mode") != "BIKE":
+            continue
+        from_id = first_leg.get("fromRentalId") or first_leg.get("fromNodeId")
+        if from_id == alt_rental_id:
+            return candidate_route
+    return None
 
 
 def build_walk_leg(boundary: Boundary, station: RentalStation) -> dict[str, Any]:
@@ -435,6 +498,7 @@ __all__ = [
     "REASON_NO_NEARBY_STATION",
     "REASON_NO_STRATEGY",
     "REASON_ROUTE_MALFORMED",
+    "REASON_ROUTE_NOT_FROM_ALTERNATIVE",
     "REASON_ROUTE_UNAVAILABLE",
     "REASON_STRATEGY_UNDECIDED",
     "REASON_TARGET_UNKNOWN",
