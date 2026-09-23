@@ -117,7 +117,8 @@ d1_only .2`(날짜 기준 185/113/68일).
 | `festival_selflag_d1d7_resid_20260911-1533` | 90 배포 세트 | 93까지 배치가 쓴 모델. 보존 |
 | `festival_selflag_d1sd_d7_resid_20260913-0340` | 이전 배포 세트 | 이전 배포(197까지). 보존 |
 | `festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113` | 이전 배포(145 후속, 2024 단독 마스킹 학습). 롤백용 보존 | `crowd_lgbm_artifact`로 고정. 세트·`model_kind`는 동일(`lightgbm`), `meta.json`에 `training.masking` 블록만 추가. `batch_predict --today` meta `predictor_version`으로 확인 |
-| **`festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025`** | **현재 배포**(200, 2024+2025 최종 fit) | `crowd_lgbm_artifact`로 고정. 마스킹 stack, 학습 2024-01-01~2025-12-31(7,974,000행). 보유 평가 연도 없음 — 2026 실측 누적 시 `compare.py`로 사후 검증(4b절) |
+| **`festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025`** | **현재 배포**(200, 2024+2025 최종 fit) | `crowd_lgbm_artifact`로 고정. 마스킹 stack, 학습 2024-01-01~2025-12-31(7,974,000행). 보유 평가 연도 없음 — 2026 실측 누적 시 `compare.py`로 사후 검증(4b절). **학습 입력 이벤트 표는 318 수정 전 판**(`crowd_station_events_2024_2025_PRE318.parquet`, 축제 중복으로 `festival_count` 합 +16%) — 318에서 중복 제거 표로 재학습해도 `full` −0.07/−0.12%로 이득이 없고 서빙(2026 표, 불변)에 영향이 없어 재승격하지 않았다(`validation/CROWD/events-dedup-check/RESULTS.md`). 다음 재적합부터는 수정된 표가 입력이다 |
+| `_experiments/events318/w2024c_masked-stack` | 318 — 중복 제거 이벤트 표로 2024 학습한 마스킹 stack | 영향 측정용. 승격 안 함 |
 | `dl_gru_s14_20260914-0949` | 144 GRU = 198 V0(시드 42) | `model_kind="dl"` — `auto`가 고르지 않는다 |
 | `dl_gru_s14_s43_…`, `dl_gru_s14_s44_…` | V0 시드 43·44 | 198 시드 분산 측정 |
 | `dl_gru_s14_noev_s42_20260914-1358` | 198 채택 구성(V3), 이전 DL 배포(2024 단독). 롤백용 보존 | 시드 43·44도 같이 있다(`_noev_s43`, `_noev_s44`) |
