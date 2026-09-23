@@ -91,6 +91,17 @@ class BikeEtaReaderTest {
     }
 
     @Test
+    @DisplayName("309-R9: predictedAt 은 밀리초까지만 — FE 가 new Date() 로 읽는데 JS 표준은 소수 3자리까지다(사파리 대비)")
+    void r9_밀리초() {
+        Clock subMillis = Clock.fixed(Instant.parse("2026-09-23T01:00:00.9573491Z"), ZoneOffset.UTC);
+        var reader = new BikeEtaReader(new FakeFetcher(body("lightgbm", "0.3")), MAPPER, subMillis, BASE, 30);
+
+        OffsetDateTime predictedAt = reader.find("ST-1577", inMinutes(15)).orElseThrow().predictedAt();
+
+        assertEquals(OffsetDateTime.parse("2026-09-23T01:00:00.957Z"), predictedAt);
+    }
+
+    @Test
     @DisplayName("309-R2: AI 가 404(실시간 재고 없음)·503(모델 장애)·타임아웃이면 빈 값 — 예외를 던지지 않는다")
     void r2_호출_실패() {
         for (SourceCallException e : List.of(
