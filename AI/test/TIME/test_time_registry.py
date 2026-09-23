@@ -172,9 +172,20 @@ def test_bike_stations_nearby는_HTTP_도구다():
     assert registry.BIKE_STATIONS_NEARBY not in registry.LOCAL_TOOLS
 
 
-def test_bike_stations_nearby_설명이_availableBikes_의미를_밝힌다():
-    # availableBikes를 도착 예측으로 오인하면 안 된다 — get_eta_stock으로 유도하는 문장이 있는지 본다.
+def test_bike_stations_nearby_출력_스키마에_재고_필드가_없다():
+    # 실제 BE DTO에는 재고 필드가 없다(324) — 스키마에 남아 있으면 에이전트가 지어낸 값을
+    # 신뢰하게 된다.
     tool = registry.get_tool(registry.BIKE_STATIONS_NEARBY)
     assert tool is not None
-    assert "availableBikes" in tool["description"]
+    item_properties = tool["output_schema"]["items"]["properties"]
+    assert "availableBikes" not in item_properties
+    assert "stockUpdatedAt" not in item_properties
+
+
+def test_bike_stations_nearby_설명이_재고_없음과_get_eta_stock을_밝힌다():
+    # 재고 필드가 없다는 사실과 대안(get_eta_stock)이 description에 있어야 LLM이 재고를
+    # 지어내지 않는다.
+    tool = registry.get_tool(registry.BIKE_STATIONS_NEARBY)
+    assert tool is not None
+    assert "재고" in tool["description"]
     assert "get_eta_stock" in tool["description"]

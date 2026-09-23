@@ -471,8 +471,6 @@ def test_bike_stations_nearby_unwraps_response(monkeypatch: pytest.MonkeyPatch) 
             "lng": 127.0,
             "dockCount": 10,
             "distanceMeters": 42.0,
-            "availableBikes": 3,
-            "stockUpdatedAt": "2026-09-21T08:00:00+09:00",
         }
     ]
     _patch_requests(monkeypatch, _respond(_FakeResponse(200, {"data": body})))
@@ -484,10 +482,11 @@ def test_bike_stations_nearby_unwraps_response(monkeypatch: pytest.MonkeyPatch) 
     assert result == body
 
 
-def test_bike_stations_nearby_availableBikes_null이_그대로_통과한다(
+def test_bike_stations_nearby_dto에_없는_필드가_와도_그대로_통과한다(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """캐시가 없거나 만료되면 availableBikes가 null이다 — 값을 지어내지 않고 그대로 통과해야 한다."""
+    """스키마(rentalId 등 6개)에 없는 필드가 BE 응답에 섞여 와도 어댑터가 지어내거나 걸러내지
+    않고 그대로 통과시킨다 — 어댑터는 스키마 검증기가 아니다."""
     body = [{"rentalId": "ST-1", "availableBikes": None, "stockUpdatedAt": None}]
     _patch_requests(monkeypatch, _respond(_FakeResponse(200, {"data": body})))
 
@@ -495,8 +494,7 @@ def test_bike_stations_nearby_availableBikes_null이_그대로_통과한다(
         BIKE_STATIONS_NEARBY, {"lat": 37.5, "lng": 127.0}
     )
 
-    assert result[0]["availableBikes"] is None
-    assert result[0]["stockUpdatedAt"] is None
+    assert result == body
 
 
 def test_bike_stations_nearby_status_code_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
