@@ -108,6 +108,38 @@ pandas는 순차로 하나씩 열고, Spark는 병렬로 읽는다. 즉 이 지�
 - `DATA_ENGINE/spark/` 공통 모듈(세션 빌더·혼합 스키마 리더·지표 모듈)은 아직 정식 코드로 승격 안 됨 —
   이 벤치의 `common.py`/`bike_realtime_ops.py`가 그 초안 역할을 할 수 있다.
 
+## 8. 후속(274-A) — 진짜 운영 계산으로 재검증
+
+3번(재고 raw 누적)·6번(권장)에서 다룬 것과 **실제 프로덕션 baseline 계산은 다른 코드였다.**
+`app/BIKE/pipeline/lookup.py`의 `StockProfileBaseline.fit_streaming()`(`train.py`가 모델
+재학습 시 호출)이 진짜 "누적 재집계"였고, 입력도 Kafka 실시간 원본이 아니라
+`validation/BYC/full-coverage-check/outputs/full-run/train_netflow_q3_mapped_full_202401~
+202411.parquet`(11개월, **250.7M행** — 이 문서 도입부에서 처음 지목했던 그 파일)이었다.
+
+이 로직을 그대로 Spark로 재현해서(`DATA_ENGINE/spark/jobs/bike_avg_baseline.py`) 실제 11개월
+전체로 재측정했다.
+
+| | pandas(`fit_streaming`, production) | Spark |
+| --- | --- | --- |
+| 시간 | 24.8초 | 18.3초 |
+| 비율 | — | 0.74(Spark 26% 빠름) |
+| 결과 | 361,042행 | 361,042행 — **완전 일치**(오차 0.0) |
+
+**여기서는 격차가 크지 않다(26%).** 3·6번의 대여이력·재고 raw 벤치(3.3배)와 다르다. 이유는
+`fit_streaming()` 자체가 **이미 파일 단위 부분합 스트리밍으로 최적화된 pandas 코드**라서다
+— "행 수가 많으면 Spark가 압승"이 아니라 "원래 pandas 구현이 얼마나 최적화됐는가"가 격차를
+갈랐다. 250M행이라는 숫자만 보고 서둘러 결론 내리면 안 된다는 걸 이번에 확인했다.
+
+**A안(대조용)으로 붙였다** — `train.py`는 그대로 두고, 같은 값이 나오는지만 확인했다.
+`app/`이 `DATA_ENGINE/`을 import하지 않는다는 계층 규칙(`AI/CLAUDE.md`) 때문에 `train.py`가
+Spark를 직접 고르게 하려면(B안) 별도 설계가 필요하다 — 아직 미착수.
+
+합성 데이터 단위 테스트 3건 추가(`test/test_data_engine_spark_bike_avg_baseline.py`) —
+horizon 필터·NaN 제외·dow_type(토/일/평일) 분기를 실제 로직과 대조했다.
+
 ## 원본
 
-`results.jsonl`(같은 폴더) — 실행 조건·수치 원본. 이 문서와 어긋나면 `results.jsonl`이 맞다.
+`results.jsonl`(같은 폴더) — 3~7절(대여이력·재고 raw) 실행 조건·수치 원본.
+8절(`fit_streaming` 재현) 실행 결과는 `DATA_ENGINE/spark/jobs/bike_avg_baseline.py` 실행 시
+`--out`으로 저장(1회성 산출물이라 리포에는 안 남김) — 위 표가 그 값이다.
+이 문서와 어긋나면 이 문서가 맞다(8절은 재현 명령이 있으므로 재실행해서 확인 가능).
