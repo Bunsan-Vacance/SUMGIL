@@ -118,7 +118,10 @@ BELOW_THRESHOLD_TARGET = _eta(current_stock=5, predicted_stock=5.0, p_empty=0.1)
 GOOD_ALT = _eta(current_stock=4, predicted_stock=4.0, p_empty=0.1)
 
 
-def _route_element() -> dict[str, Any]:
+def _route_element(from_node_id: str = ALT1_ID) -> dict[str, Any]:
+    """첫 leg는 BIKE·`from_node_id`(=요청의 boundary_id) 출발이어야 한다 — 324 첫 leg 검증 가드
+    (`service._pick_route_from_alternative`)를 통과하지 못하면 `unavailable`이 되어 proposal 경로
+    지연을 잴 수 없다."""
     return {
         "reason": "BE 고정 문구",
         "source": "ALGORITHM",
@@ -128,7 +131,9 @@ def _route_element() -> dict[str, Any]:
             "source": "ALGORITHM",
             "totalDistanceMeters": 6000.0,
             "transferCount": 0,
-            "legs": [{"mode": "BIKE", "minutes": 20.0, "routeId": None}],
+            "legs": [
+                {"mode": "BIKE", "fromNodeId": from_node_id, "minutes": 20.0, "routeId": None}
+            ],
         },
     }
 
@@ -139,7 +144,7 @@ class FakeAdapter:
 
     def __init__(self, *, eta_stock: dict[str, Any] | None = None, replan: Any = None) -> None:
         self.eta_stock = dict(eta_stock or {})
-        self.replan = [_route_element()] if replan is None else replan
+        self.replan = replan  # None이면 call()에서 boundary_id에 맞춰 만든다
 
     def call(self, name: str, args: dict[str, Any]) -> Any:
         if name == GET_ETA_STOCK:
@@ -148,6 +153,9 @@ class FakeAdapter:
                 return ToolError.not_found(f"{rental_id} 실시간 재고를 확인할 수 없다")
             return self.eta_stock[rental_id]
         if name == REPLAN_ROUTE:
+            if self.replan is None:
+                # 대안이 어느 쪽으로 뽑히든 첫 leg 출발을 요청의 boundary_id에 맞춘다.
+                return [_route_element(str(args["boundary_id"]))]
             return self.replan
         return ToolError.invalid_input(f"가짜 어댑터가 모르는 도구 '{name}'")
 
