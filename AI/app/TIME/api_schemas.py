@@ -117,6 +117,11 @@ class RerouteCheckResponse(BaseModel):
     valid_until: datetime | None = Field(default=None, alias="validUntil")
     recommended_by: str | None = Field(default=None, alias="recommendedBy")
     reason: str | None = None
+    """`status`가 `proposal`이 아니면 `service.py` 모듈 docstring 표의 사유 코드 문자열
+    (`target_unknown`·`stock_unknown`·`route_malformed`·`route_not_from_alternative` 등) —
+    `route_not_from_alternative`는 BE가 첫 leg BIKE를 보장하지 않아(`FROM_BE-bike-reroute-route-02.md`
+    1번) 대안 대여소에서 출발하는 경로를 하나도 못 찾았을 때 나온다(324). `proposal`이면 사용자에게
+    보여줄 문장이다."""
     target: TargetOut | None = None
     alternative: AlternativeOut | None = None
     boundary: BoundaryOut | None = None
