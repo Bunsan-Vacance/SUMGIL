@@ -32,7 +32,8 @@ describe('구간 이동 안내', () => {
     render(<LegList route={route} />)
 
     expect(screen.getByText('도보 · 거리 준비중입니다')).toBeTruthy()
-    const congestion = screen.getByText('여유')
+    const congestion = document.querySelector('.leg-list p span') as HTMLElement
+    expect(congestion.textContent).toContain('여유')
     expect(congestion.style.color).toBe('rgb(29, 78, 216)')
     expect(congestion.closest('p')?.textContent).toBe('2호선 · 1.2km · 구간 예상 혼잡도 여유')
   })
@@ -101,7 +102,9 @@ describe('구간 이동 안내', () => {
 
     render(<LegList route={route} />)
 
-    expect(screen.getByText('버스 · 거리 준비중입니다 · 구간 예상 혼잡도 포화')).toBeTruthy()
+    expect(document.querySelector('.leg-list p')?.textContent).toBe(
+      '버스 · 거리 준비중입니다 · 구간 예상 혼잡도 포화',
+    )
   })
 
   it('원본 구간 인덱스의 현재 단계에 aria-current와 텍스트를 표시한다', () => {
