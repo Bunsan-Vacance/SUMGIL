@@ -31,7 +31,7 @@ describe('구간 이동 안내', () => {
 
     render(<LegList route={route} />)
 
-    expect(screen.getByText('도보 · 거리 준비중입니다')).toBeTruthy()
+    expect(screen.getByText('도보 · 거리 정보 없음')).toBeTruthy()
     const congestion = document.querySelector('.leg-list p span') as HTMLElement
     expect(congestion.textContent).toContain('여유')
     expect(congestion.style.color).toBe('rgb(29, 78, 216)')
@@ -78,7 +78,7 @@ describe('구간 이동 안내', () => {
 
     render(<LegList route={route} />)
 
-    expect(screen.getByText('이용 가능한 버스 4개 노선 · 거리 준비중입니다')).toBeTruthy()
+    expect(screen.getByText('이용 가능한 버스 4개 노선 · 거리 정보 없음')).toBeTruthy()
     expect(screen.queryByText(route.legs[0].note)).toBeNull()
   })
 
@@ -103,7 +103,7 @@ describe('구간 이동 안내', () => {
     render(<LegList route={route} />)
 
     expect(document.querySelector('.leg-list p')?.textContent).toBe(
-      '버스 · 거리 준비중입니다 · 구간 예상 혼잡도 포화',
+      '버스 · 거리 정보 없음 · 구간 예상 혼잡도 포화',
     )
   })
 
