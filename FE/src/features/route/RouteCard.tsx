@@ -16,11 +16,13 @@ import { isTransitLeg, isTransferLeg, transitionLabel } from './transitions'
 export default function RouteCard({
   route,
   comparison,
+  selected = false,
   recommendations = [],
   onDetail,
 }: {
   route: Route
   comparison?: string
+  selected?: boolean
   recommendations?: Array<'fast' | 'calm'>
   onDetail: () => void
 }) {
@@ -48,7 +50,8 @@ export default function RouteCard({
   return (
     <button
       type="button"
-      className={`route-card ${featuredClass}`.trim()}
+      className={`route-card ${featuredClass} ${selected ? 'route-card-selected' : ''}`.trim()}
+      aria-current={selected ? 'true' : undefined}
       aria-label={[
         route.label,
         `${roundMinutes(route.minutes)}분`,
