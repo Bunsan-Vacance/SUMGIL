@@ -262,8 +262,8 @@ retryable=False)를 돌려준다. 소비는 `record(result)`가 하고, 토큰 �
 | 1 | `replan_route` 입력 `exclude_route_ids` | **보류**(1번) — BE 216(혼잡 가중 탐색) 이후 하드 제외/가중 페널티 중 방식을 정한다 | 스키마 미개방. 그전까지는 응답에서 현재 `routeId`를 쓰는 대안을 걸러내는 사후 필터링을 쓴다(`planner._replan_caller`). K=3이라 대안이 0개로 걸러질 수 있다는 한계는 BE도 인지하고 있다 |
 | 2 | `replan_route` 출력 `source: "AGENT"` | **거절**(2번) — `source`는 "누가 탐색했나"라 경로는 항상 `ALGORITHM`이 맞다. "누가 골랐나"는 축이 다르다 | 스키마 미개방. 에이전트가 고른 이유는 라우터 응답의 별도 필드(`recommendedBy`)에 싣는다 — FE(최진우) 판단이 먼저 필요하다 |
 | 3 | `replan_route` 출력 `reason` 생성 주체 | **확정**(3번) — BE 응답 필드에는 LLM 문장을 싣지 않는다. BE 고정 문구는 그대로 유지 | 스키마 미개방. 에이전트 문장은 에이전트(라우터) 응답에 별도로 담는다 |
-| 4 | BE `base_url` | **확인**(5번) — `prod` 네임스페이스 Service `be`, 포트 8080. `/api/**` 전부 인증 없음 | 값은 확인됐지만 호출 방향(6번 — AI가 언제 BE를 직접 부르는지, (b)/(c) 중 선택)이 216 이후 결정 대기라 `Settings` 필드·`.env.example` 반영은 그 결정 이후로 미룬다. 생성자 인자로만 받는 지금 방식은 유지 |
-| 5 | LLM 게이트웨이 · 사용 가능 모델 | 사용자 확인 | 클라이언트 구현(`llm.HttpLlmClient`). **게이트웨이 형식은 OpenAI 호환으로 가정, 실제 GMS 형식 확인 필요** — 확정되면 `_build_request`/`_parse_response`만 고치면 되도록 그 둘에 격리해뒀다. `time_llm_base_url`/`time_llm_model` 기본값 없음 |
+| 4 | BE `base_url` | **확인**(5번) — `prod` 네임스페이스 Service `be`, 포트 8080. `/api/**` 전부 인증 없음 | 값은 확인됐지만 호출 방향(6번 — AI가 언제 BE를 직접 부르는지, (b)/(c) 중 선택)이 216 이후 결정 대기라 `Settings` 필드·`.env.example` 반영은 그 결정 이후로 미룬다. 생성자 인자로만 받는 지금 방식은 유지. **dev 실호출 확인(2026-09-23)** — `TIME_BE_BASE_URL=https://j15a104.p.ssafy.io`로 `HttpAdapter`가 `POST /api/routes/replan`(step 0, boundaryId `ST-1290`, destStationId `0222`) 1회 → HTTP 200·빈 배열(대안 없음)·0.75초. 요청·응답 형식은 어댑터와 맞고, 빈 배열이 ID 미존재 때문인지 경로 부재 때문인지는 BE 응답만으로 구분되지 않는다 |
+| 5 | LLM 게이트웨이 · 사용 가능 모델 | 사용자 확인 | 클라이언트 구현(`llm.HttpLlmClient`). **GMS 형식 확인 완료(2026-09-23 실호출 1회)** — OpenAI 호환 `POST https://gms.ssafy.io/gmsapi/api.openai.com/v1/chat/completions`, `Authorization: Bearer GMS_API_KEY`, `response_format.json_schema(strict)` 통과. 모델 `gpt-5.4-mini`(응답 `model`=`gpt-5.4-mini-2026-03-17`), 69 입력·19 출력 토큰에 지연 1.2초. 값은 `.env`의 `TIME_LLM_BASE_URL`/`TIME_LLM_MODEL`, 기본값은 여전히 없음 |
 
 1~3은 `registry.py`의 `REPLAN_ROUTE` 항목 `x_resolved`에도 같은 근거로 남아 있다. 스키마를 실제로
 여는 것은 BE 216 완료·FE 방침 확정 이후다.
