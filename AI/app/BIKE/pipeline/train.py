@@ -44,6 +44,16 @@ v4_distance(역 거리 추가, S15P21A104-160) 스모크:
     python -m app.BIKE.pipeline.train --train-months 202401 ... 202411 --valid-months 202412 \
         --test-months 202507 202508 202509 --tag v4-weather-full --feature-set v4_weather \
         --train-empty-full
+
+avg 소스(StockProfileBaseline) 집계 엔진(`--engine {pandas,spark}`, 기본 pandas, S15P21A104-274):
+    작은 규모(스모크, `--train-months` 1~2개)에서는 pandas가 더 빠르다 — Spark는 세션 기동
+    비용(JVM warm-up) 때문에 그렇다. **11개월 전체 규모로 실제 재학습할 때만** `--engine spark`를
+    붙인다 — 그 규모에서 pandas 대비 약 26% 빠르고(24.8초→18.3초), 산출물은 완전히 동일함을
+    실측 확인했다(`validation/INFRA/spark-bike-candidates-check/RESULTS.md` §8·§11). 기본값을
+    spark로 바꾸지 않은 이유도 이 소규모 역전 때문 — 매 스모크 테스트마다 JVM 기동 비용을 물게
+    된다. Spark 실행에는 로컬에 Java(JDK)가 있어야 한다.
+
+    python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v3 --engine spark
 """
 
 from __future__ import annotations
@@ -526,7 +536,8 @@ def main(argv: list[str] | None = None) -> None:
         default="pandas",
         choices=["pandas", "spark"],
         help="avg baseline(StockProfileBaseline) 집계 엔진. spark는 274 B안 — "
-        "pandas와 값 일치 검증됨(RESULTS.md), 로컬에 Java·pyspark 필요",
+        "pandas와 값 일치 검증됨(RESULTS.md), 로컬에 Java·pyspark 필요. "
+        "11개월 전체 규모 재학습에서만 권장(소규모는 JVM 기동비용 때문에 pandas가 더 빠름)",
     )
     args = ap.parse_args(argv)
     run(
