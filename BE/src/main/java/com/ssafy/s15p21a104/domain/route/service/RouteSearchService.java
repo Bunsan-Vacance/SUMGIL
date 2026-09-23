@@ -13,6 +13,7 @@ import com.ssafy.s15p21a104.domain.congestion.scoring.CongestionScorer;
 import com.ssafy.s15p21a104.domain.congestion.scoring.LinkCongestionScorer;
 import com.ssafy.s15p21a104.domain.congestion.scoring.SubwayDirectionResolver;
 import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
+import com.ssafy.s15p21a104.domain.route.bus.geometry.BusGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
 import com.ssafy.s15p21a104.domain.route.dto.request.RequestedDeparture;
@@ -108,6 +109,7 @@ public class RouteSearchService {
     private final RailGeometryRegistry railGeometryRegistry;
     private final WalkGeometryRegistry walkGeometryRegistry;
     private final BikeGeometryRegistry bikeGeometryRegistry;
+    private final BusGeometryRegistry busGeometryRegistry;
     private final RouteLineRepository routeLineRepository;
     private final BusRouteRepository busRouteRepository;
     private final CongestionRepository congestionRepository;
@@ -132,7 +134,24 @@ public class RouteSearchService {
             CongestionRepository congestionRepository,
             CongestionPredRepository congestionPredRepository) {
         this(stationRepository, graphRegistry, transferRule, railGeometryRegistry, walkGeometryRegistry,
-                bikeGeometryRegistry, routeLineRepository, busRouteRepository, congestionRepository,
+                bikeGeometryRegistry, null, routeLineRepository, busRouteRepository, congestionRepository,
+                congestionPredRepository);
+    }
+
+    public RouteSearchService(
+            StationRepository stationRepository,
+            RouteGraphRegistry graphRegistry,
+            TransferRule transferRule,
+            RailGeometryRegistry railGeometryRegistry,
+            WalkGeometryRegistry walkGeometryRegistry,
+            BikeGeometryRegistry bikeGeometryRegistry,
+            BusGeometryRegistry busGeometryRegistry,
+            RouteLineRepository routeLineRepository,
+            BusRouteRepository busRouteRepository,
+            CongestionRepository congestionRepository,
+            CongestionPredRepository congestionPredRepository) {
+        this(stationRepository, graphRegistry, transferRule, railGeometryRegistry, walkGeometryRegistry,
+                bikeGeometryRegistry, busGeometryRegistry, routeLineRepository, busRouteRepository, congestionRepository,
                 congestionPredRepository,
                 BusCongestionReader.disabled(),
                 new BusCongestionProperties(false, null, 0, null, null, null, null),
@@ -186,7 +205,7 @@ public class RouteSearchService {
             // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
             // 출발시각을 넘겨 live window일 때만 BUS 실시간 등급을 prefetch한다(297).
             List<RouteSearchResponse> named =
-                    withRouteNames(withGeometryAll(assembled.six()), effectiveDepartureTime);
+                    withGeometryAll(withRouteNames(assembled.six(), effectiveDepartureTime));
             // 계약 필드(236)는 맨 마지막에 붙인다 — geometry·이름 단계는 필드를 그대로 둔다.
             return withContractFields(named, assembled, effectiveDepartureTime);
         });
@@ -666,7 +685,24 @@ public class RouteSearchService {
                 (fromId, toId, fromLat, fromLng, toLat, toLng) -> walkGeometryRegistry.geometryFor(
                         fromId, toId, fromLat, fromLng, toLat, toLng),
                 (fromId, toId, fromLat, fromLng, toLat, toLng) -> bikeGeometryRegistry.geometryFor(
-                        fromId, toId, fromLat, fromLng, toLat, toLng))
+                        fromId, toId, fromLat, fromLng, toLat, toLng),
+                leg -> {
+                    if (busGeometryRegistry == null) {
+                        return Optional.empty();
+                    }
+                    String routeName = leg.routeName();
+                    if (routeName == null && leg.routeOptions() != null) {
+                        // ponytail: 정규 버스 구간은 첫 노선의 경로만 표시한다. 노선별 지도 선택이 생기면 후보별 geometry 계약으로 확장한다.
+                        routeName = leg.routeOptions().stream()
+                                .map(option -> option.routeName())
+                                .filter(name -> name != null && !name.isBlank())
+                                .findFirst().orElse(null);
+                    }
+                    return busGeometryRegistry.geometryFor(
+                            leg.routeId(), leg.fromNodeId(), leg.toNodeId(), routeName,
+                            leg.fromNodeName(), leg.toNodeName(),
+                            leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+                })
                 .enhanceAll(candidates);
     }
 
@@ -795,7 +831,7 @@ public class RouteSearchService {
             SixResult coordAssembled = sixRoutes(coordFinder, augmentedGraph,
                     PLACE_ORIGIN_ID, PLACE_DEST_ID, request.modes(), coordDeparture);
             List<RouteSearchResponse> coordNamed =
-                    withRouteNames(withGeometryAll(coordAssembled.six()), coordDeparture);
+                    withGeometryAll(withRouteNames(coordAssembled.six(), coordDeparture));
             return withContractFields(coordNamed, coordAssembled, coordDeparture);
         });
     }
