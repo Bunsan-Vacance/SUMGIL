@@ -103,6 +103,7 @@ export default function ResultsPage({
   origin,
   destinationName,
   visible,
+  selectedId,
   setSelectedId,
   status,
   retry,
@@ -271,6 +272,7 @@ export default function ResultsPage({
                     <RouteCard
                       key={route.id}
                       route={route}
+                      selected={route.id === selectedId}
                       recommendations={recommendations}
                       onDetail={() => {
                         setSelectedId(route.id)
@@ -304,16 +306,21 @@ export default function ResultsPage({
                   </div>
                 </div>
                 <div className="route-list">
-                  {remainingGroups.map(({ representative: route }) => (
-                    <RouteCard
-                      key={route.id}
-                      route={route}
-                      onDetail={() => {
-                        setSelectedId(route.id)
-                        go('detail')
-                      }}
-                    />
-                  ))}
+                  {remainingGroups.map(({ representative, variants }) => {
+                    const route =
+                      variants.find((variant) => variant.id === selectedId) ?? representative
+                    return (
+                      <RouteCard
+                        key={route.id}
+                        route={route}
+                        selected={route.id === selectedId}
+                        onDetail={() => {
+                          setSelectedId(route.id)
+                          go('detail')
+                        }}
+                      />
+                    )
+                  })}
                 </div>
               </section>
             )}
