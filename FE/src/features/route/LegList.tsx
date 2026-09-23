@@ -6,7 +6,7 @@ import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './s
 import { isTransitLeg, transitionLabel } from './transitions'
 
 function formatDistance(distanceMeters?: number) {
-  if (distanceMeters === undefined) return '거리 준비중입니다'
+  if (distanceMeters === undefined) return '거리 정보 없음'
   if (distanceMeters < 1000) return `${Math.round(distanceMeters)}m`
   return `${(distanceMeters / 1000).toFixed(distanceMeters >= 10000 ? 0 : 1)}km`
 }
