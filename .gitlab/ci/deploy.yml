@@ -13,6 +13,10 @@
 #   (매니페스트는 IfNotPresent라 latest 재apply로는 새 코드가 뜨지 않는다).
 #   IMAGE_TAG 없으면(k8s만 변경) 라이브 Deployment의 태그를 유지하고, 그것도 없으면 latest.
 # 롤백: 이전 SHA로 같은 절차 (별도 정책은 백로그 2026-09-16-deploy-strategy).
+# --force-conflicts: 2026-09-23 배포 실패 트러블슈팅 — 누군가 kubectl scale로 replicas를
+#   직접 건드리면 그 필드 소유권이 scale 서브리소스 쪽에 별도로 남아, 이후 이 apply가 값이
+#   같아도 계속 충돌로 막힌다. 여기서 선언하는 필드는 전부 이 apply가 유일한 정답이어야
+#   하므로 항상 이긴다.
 
 .deploy_base:
   stage: deploy
@@ -45,7 +49,7 @@ deploy-infra:
     - !reference [.deploy_base, before_script]
     - render_secret Infra/k8s/prod/data-secret.env.example Infra/k8s/prod/data-secret.env
   script:
-    - kubectl apply -k Infra/k8s --server-side
+    - kubectl apply -k Infra/k8s --server-side --force-conflicts
     - kubectl rollout status deployment/cert-manager -n cert-manager --timeout=240s
     - kubectl wait --for=condition=Ready certificate/sumgil-tls -n prod --timeout=300s
   after_script:
@@ -71,7 +75,7 @@ deploy-be:
   script:
     - TAG="${IMAGE_TAG:-$(live_tag be)}"; TAG="${TAG:-latest}"; echo "sumgil-be 태그 ${TAG}"
     - (cd BE/k8s/prod && kustomize edit set image "sumgil-be=${REGISTRY_HOST}/sumgil-be:${TAG}")
-    - kubectl apply -k BE/k8s/prod --server-side
+    - kubectl apply -k BE/k8s/prod --server-side --force-conflicts
     - kubectl rollout status deployment/be -n prod --timeout=300s
     - kubectl rollout status deployment/be-collector -n prod --timeout=300s
     - kubectl rollout status deployment/be-collector-evening -n prod --timeout=300s
@@ -95,5 +99,5 @@ deploy-fe:
   script:
     - TAG="${IMAGE_TAG:-$(live_tag fe)}"; TAG="${TAG:-latest}"; echo "sumgil-fe 태그 ${TAG}"
     - (cd FE/k8s/prod && kustomize edit set image "sumgil-fe=${REGISTRY_HOST}/sumgil-fe:${TAG}")
-    - kubectl apply -k FE/k8s/prod --server-side
+    - kubectl apply -k FE/k8s/prod --server-side --force-conflicts
     - kubectl rollout status deployment/fe -n prod --timeout=300s
