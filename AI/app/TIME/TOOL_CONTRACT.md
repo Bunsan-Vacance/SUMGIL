@@ -244,6 +244,7 @@ CROWD 서비스는 `date` 컬럼을 `datetime.date` 객체로 돌려준다. 도�
 | --- | --- | --- |
 | 세션당 LLM 호출 | 3 | **잠정값, 근거 없음** — 실제 프롬프트 크기·게이트웨이 단가를 보지 못했다 |
 | 세션당 총 토큰(입+출) | 8000 | 〃 |
+| 요청당 LLM 출력 상한(`max_tokens`) | 160 | 331 real 실측 출력 65~76토큰 + 사유 120자 상한 기준 여유 2배. 절감 목적이 아니라 출력 폭주 방지용(`Settings.time_llm_max_output_tokens`) |
 
 `check()`는 상태를 바꾸지 않고 넘겼으면 `None`, 넘었으면 `BUDGET_EXCEEDED`(`llm.LlmError`,
 retryable=False)를 돌려준다. 소비는 `record(result)`가 하고, 토큰 수를 모르면(`usage` 없음)

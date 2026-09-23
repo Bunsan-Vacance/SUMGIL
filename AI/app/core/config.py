@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     time_llm_base_url: str | None = None
     time_llm_model: str | None = None
     time_llm_timeout_sec: float = 4.0
+    # 331 real 실측(GMS gpt-5.4-mini, 표본 7건) 출력 65~76토큰 — 사유 120자 상한
+    # (`time_agent_reason_max_chars`)이면 이 범위를 벗어나기 어렵다. 여유 2배인 160으로
+    # 상한을 걸어 출력 폭주(요금·지연)만 막는다 — 정상 응답을 자르지 않는 값이다
+    # (`validation/TIME/reroute-baseline-check/RESULTS.md` real 절 토큰 분해).
+    time_llm_max_output_tokens: int = 160
     # BE 재안내 API(POST /api/routes/replan 등) 주소. 회신값 http://be:8080, 무인증
     # (`.claude/handoff/TO_FE-bike-reroute-04.md`). env는 BE_BASE_URL에서도 읽는다 —
     # time_llm_api_key와 같은 패턴으로 별칭을 둔다.

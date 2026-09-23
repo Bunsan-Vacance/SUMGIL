@@ -6,14 +6,21 @@
 
 **게이트웨이(GMS) 형식은 OpenAI 호환으로 확인됐다**(2026-09-23 실호출 1회, `TOOL_CONTRACT.md`
 6절 5번). `POST {base_url}/chat/completions`, `Authorization: Bearer <GMS_API_KEY>`, `messages`,
-`response_format.json_schema(strict)`가 그대로 통하고 응답도 `choices[0].message.content`·
-`usage.prompt_tokens/completion_tokens`·`model`(예: `gpt-5.4-mini-2026-03-17`) 구조다.
-base_url은 `https://gms.ssafy.io/gmsapi/api.openai.com/v1`, 모델은 `gpt-5.4-mini`(`.env`).
-같은 게이트웨이의 Gemini 경로(`generativelanguage.googleapis.com/v1beta/...:generateContent`,
-`x-goog-api-key`)는 형식이 달라 이 클라이언트로는 못 쓴다 — 바꿀 일이 생기면
-`_build_request()`·`_parse_response()` 두 함수만 고치면 되도록 요청 조립과 응답 파싱을 여기
-격리해뒀다. 그 밖의 코드(`complete()` 호출부·`AgentStrategy`)는 `LlmResult`/`LlmError`만 보고
-게이트웨이가 어떤 모양인지 모른다.
+`response_format.json_schema(strict)`가 그대로 통하고, 출력 상한은 `max_tokens`(정수, 값이
+있을 때만 body에 실린다 — `Settings.time_llm_max_output_tokens` 참고)로 건다. 응답도
+`choices[0].message.content`·`usage.prompt_tokens/completion_tokens`·`model`(예:
+`gpt-5.4-mini-2026-03-17`) 구조다. base_url은 `https://gms.ssafy.io/gmsapi/api.openai.com/v1`,
+모델은 `gpt-5.4-mini`(`.env`). 같은 게이트웨이의 Gemini 경로
+(`generativelanguage.googleapis.com/v1beta/...:generateContent`, `x-goog-api-key`)는 형식이
+달라 이 클라이언트로는 못 쓴다 — 바꿀 일이 생기면 `_build_request()`·`_parse_response()` 두
+함수만 고치면 되도록 요청 조립과 응답 파싱을 여기 격리해뒀다. 그 밖의 코드(`complete()`
+호출부·`AgentStrategy`)는 `LlmResult`/`LlmError`만 보고 게이트웨이가 어떤 모양인지 모른다.
+
+`max_tokens`에 잘려 응답이 중간에 끊기면 `LlmResult.text`는 깨진 JSON 문자열을 그대로 담고,
+이 클라이언트는 그것도 성공(`LlmResult`)으로 돌려준다 — 잘림 자체는 HTTP 오류가 아니기
+때문이다. 이후 `strategy._parse_decision`이 `json.loads` 실패로 `None`을 돌려주고
+`AgentStrategy.decide`가 `RejectReason.BAD_JSON`으로 규칙 폴백에 넘어간다 — 별도 처리 없이
+기존 파싱 실패 경로가 그대로 잡아준다.
 """
 
 from __future__ import annotations
@@ -103,11 +110,13 @@ class HttpLlmClient:
         api_key: str | None,
         model: str | None,
         timeout_sec: float = DEFAULT_TIMEOUT_SEC,
+        max_output_tokens: int | None = None,
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout_sec = timeout_sec
+        self.max_output_tokens = max_output_tokens
 
     def complete(
         self, system: str, user: str, *, json_schema: dict[str, Any] | None = None
@@ -127,6 +136,7 @@ class HttpLlmClient:
             system,
             user,
             json_schema=json_schema,
+            max_output_tokens=self.max_output_tokens,
         )
 
         started = time.monotonic()
@@ -193,6 +203,7 @@ def _build_request(
     user: str,
     *,
     json_schema: dict[str, Any] | None,
+    max_output_tokens: int | None = None,
 ) -> dict[str, Any]:
     """`requests.request()` 인자를 만든다. **GMS의 실제 요청 형식이 확정되면 이 함수만
     고치면 된다** — 호출부(`HttpLlmClient.complete`)는 이 함수가 낸 매핑을 그대로
@@ -212,6 +223,8 @@ def _build_request(
         }
     else:
         body["response_format"] = {"type": "json_object"}
+    if max_output_tokens is not None:
+        body["max_tokens"] = max_output_tokens
 
     return {
         "method": "POST",
@@ -287,6 +300,7 @@ def settings_client(settings: object) -> HttpLlmClient:
         api_key=getattr(settings, "time_llm_api_key", None),
         model=getattr(settings, "time_llm_model", None),
         timeout_sec=getattr(settings, "time_llm_timeout_sec", DEFAULT_TIMEOUT_SEC),
+        max_output_tokens=getattr(settings, "time_llm_max_output_tokens", None),
     )
 
 

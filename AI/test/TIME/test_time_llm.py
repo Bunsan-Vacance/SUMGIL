@@ -245,6 +245,31 @@ def test_json_schema를_주면_response_format에_실린다(monkeypatch: pytest.
     assert request["json"]["response_format"]["json_schema"]["schema"] == schema
 
 
+# ── max_output_tokens(331 1단계) ──
+
+
+def test_max_output_tokens가_있으면_body에_max_tokens로_실린다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _patch_requests(monkeypatch, _respond(_FakeResponse(200, _chat_payload("{}"))))
+
+    _client(max_output_tokens=160).complete(system="s", user="u")
+
+    (request,) = captured
+    assert request["json"]["max_tokens"] == 160
+
+
+def test_max_output_tokens가_None이면_max_tokens_키_자체가_없다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _patch_requests(monkeypatch, _respond(_FakeResponse(200, _chat_payload("{}"))))
+
+    _client(max_output_tokens=None).complete(system="s", user="u")
+
+    (request,) = captured
+    assert "max_tokens" not in request["json"]
+
+
 # ── settings_client 팩토리 ──
 
 
@@ -254,6 +279,7 @@ def test_settings_client는_Settings_필드에서_읽는다() -> None:
         time_llm_api_key = API_KEY
         time_llm_model = MODEL
         time_llm_timeout_sec = 9.0
+        time_llm_max_output_tokens = 160
 
     client = settings_client(FakeSettings())
 
@@ -261,6 +287,7 @@ def test_settings_client는_Settings_필드에서_읽는다() -> None:
     assert client.api_key == API_KEY
     assert client.model == MODEL
     assert client.timeout_sec == 9.0
+    assert client.max_output_tokens == 160
 
 
 def test_settings_client는_값이_없어도_생성된다() -> None:
