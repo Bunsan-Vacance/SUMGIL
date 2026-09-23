@@ -57,7 +57,7 @@ export function useRoutePlanner(
   const navigation = useNavigation()
   const { go, replace } = navigation
   const trip = useTrip(previewTripFor(location.search), repository)
-  const guidance = useGuidance()
+  const guidance = useGuidance(navigation.screen === 'guide')
   const screen = resolveScreen(navigation.screen, trip, guidance)
   const { message, setMessage } = useToast()
   const [searchTarget, setSearchTarget] = useState<'origin' | 'destination'>('destination')
@@ -81,33 +81,30 @@ export function useRoutePlanner(
   })
   const originRef = useRef(trip.origin)
   originRef.current = trip.origin
-  const { locate } = useCurrentLocation(
-    (position) => {
-      const { latitude, longitude } = position.coords
-      if (
-        !Number.isFinite(latitude) ||
-        !Number.isFinite(longitude) ||
-        latitude < -90 ||
-        latitude > 90 ||
-        longitude < -180 ||
-        longitude > 180
-      ) {
-        setMessage('현재 위치를 확인하지 못했어요. 다시 시도해 주세요.')
-        return
-      }
-      if (originRef.current.name.trim()) return
-      trip.setOrigin({
-        id: `current-location:${latitude}:${longitude}`,
-        name: '현재 위치',
-        address: `위도 ${latitude.toFixed(6)}, 경도 ${longitude.toFixed(6)}`,
-        kind: '현재 위치',
-        lat: latitude,
-        lng: longitude,
-      })
-    },
-    setMessage,
-    screen,
-  )
+  const setOriginFromCurrentLocation = (position: GeolocationPosition) => {
+    const { latitude, longitude } = position.coords
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      setMessage('현재 위치를 확인하지 못했어요. 다시 시도해 주세요.')
+      return
+    }
+    if (originRef.current.name.trim()) return
+    trip.setOrigin({
+      id: `current-location:${latitude}:${longitude}`,
+      name: '현재 위치',
+      address: `위도 ${latitude.toFixed(6)}, 경도 ${longitude.toFixed(6)}`,
+      kind: '현재 위치',
+      lat: latitude,
+      lng: longitude,
+    })
+  }
+  const { locate } = useCurrentLocation(setOriginFromCurrentLocation, setMessage, screen)
   useEffect(() => {
     if (screen !== navigation.screen) replace(screen)
   }, [screen, navigation.screen, replace])
@@ -418,6 +415,7 @@ export function useRoutePlanner(
     findRoutes,
     choosePlace,
     setOriginFromBrowse,
+    setOriginFromCurrentLocation,
     swapPlaces,
     selectRoute,
     startGuide,

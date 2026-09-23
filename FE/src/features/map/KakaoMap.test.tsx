@@ -223,6 +223,7 @@ function renderMap(
     route?: Route | null
     onPlaceSelect?: (place: Place) => void
     autoLocate?: boolean
+    onCurrentLocation?: (position: GeolocationPosition) => void
   } = {},
 ) {
   const markerClickHandlers: Array<() => void> = []
@@ -238,6 +239,7 @@ function renderMap(
       route={options.route}
       onPlaceSelect={options.onPlaceSelect}
       autoLocate={options.autoLocate}
+      onCurrentLocation={options.onCurrentLocation}
       onMessage={vi.fn()}
     />,
   )
@@ -286,11 +288,12 @@ afterEach(() => {
 describe('일반 지도 장소 마커', () => {
   it('홈 지도는 준비되면 현재 위치로 자동 이동한다', async () => {
     const getCurrentPosition = vi.fn()
+    const onCurrentLocation = vi.fn()
     Object.defineProperty(navigator, 'geolocation', {
       configurable: true,
       value: { getCurrentPosition },
     })
-    const rendered = renderMap({ autoLocate: true })
+    const rendered = renderMap({ autoLocate: true, onCurrentLocation })
     vi.stubGlobal('kakao', { maps: rendered.maps })
 
     await waitFor(() => expect(getCurrentPosition).toHaveBeenCalledOnce())
@@ -300,6 +303,7 @@ describe('일반 지도 장소 마커', () => {
     expect(point).toBeInstanceOf(FakeLatLng)
     expect((point as FakeLatLng).getLat()).toBe(position.coords.latitude)
     expect((point as FakeLatLng).getLng()).toBe(position.coords.longitude)
+    expect(onCurrentLocation).toHaveBeenCalledWith(position)
     expect(getCurrentPosition).toHaveBeenCalledOnce()
   })
 

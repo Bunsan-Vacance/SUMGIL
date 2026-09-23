@@ -226,6 +226,7 @@ export default function KakaoMap({
   focusedPlace,
   route,
   autoLocate = false,
+  onCurrentLocation,
 }: {
   origin?: Place | null
   destination?: Place | null
@@ -236,6 +237,7 @@ export default function KakaoMap({
   focusedPlace?: Place | null
   route?: Route | null
   autoLocate?: boolean
+  onCurrentLocation?: (position: GeolocationPosition) => void
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [bikeStationsVisible, setBikeStationsVisible] = useState(true)
@@ -310,7 +312,11 @@ export default function KakaoMap({
     effectiveRoute,
     bikeStationsVisible,
   )
-  const { locating, locate } = useCurrentLocation(showPosition, onMessage, locationScope)
+  const showCurrentPosition = (position: GeolocationPosition) => {
+    showPosition(position)
+    onCurrentLocation?.(position)
+  }
+  const { locating, locate } = useCurrentLocation(showCurrentPosition, onMessage, locationScope)
   const autoLocateRequested = useRef(false)
   useEffect(() => {
     if (!autoLocate || status !== 'ready' || autoLocateRequested.current) return

@@ -64,6 +64,9 @@ export default function App() {
                   screen === 'guide' ? guidance.route : screen === 'detail' ? trip.selected : null
                 }
                 autoLocate={screen === 'home'}
+                onCurrentLocation={
+                  screen === 'home' ? planner.setOriginFromCurrentLocation : undefined
+                }
                 onMessage={planner.setMessage}
               />
             )}
@@ -147,6 +150,9 @@ export default function App() {
               onTrain={planner.openTrain}
               onReplan={planner.openReplan}
               replanDisabled={Boolean(guidance.train)}
+              locationStatus={guidance.locationStatus}
+              onRetryLocation={guidance.retryLocation}
+              onStepChange={guidance.setStep}
             />
           )}
           {screen === 'arrival' && (
