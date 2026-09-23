@@ -132,12 +132,17 @@ class _CountingClient:
 
     inner: LlmClient
     calls: int = field(default=0, init=False)
+    last_text: str | None = field(default=None, init=False)
+    """LLM이 실제로 낸 원문. 가드에 탈락하면 `agent_proposal.reason`은 규칙 폴백 문장이라
+    LLM이 뭘 썼는지 안 남는다 — 탈락 원인을 읽으려면 이 원문이 필요하다."""
 
     def complete(
         self, system: str, user: str, *, json_schema: dict[str, Any] | None = None
     ) -> LlmOutcome:
         self.calls += 1
-        return self.inner.complete(system, user, json_schema=json_schema)
+        outcome = self.inner.complete(system, user, json_schema=json_schema)
+        self.last_text = outcome.text if isinstance(outcome, LlmResult) else None
+        return outcome
 
 
 # ── 표본 하나 실행 ──
@@ -156,6 +161,8 @@ class SampleResult:
     reject_reason: str | None
     match: bool
     reason_text: str | None
+    llm_raw_text: str | None
+    """LLM 원문(`_CountingClient.last_text`). 탈락 시 `reason_text`는 규칙 폴백 문장이다."""
     reason_chars: int | None
     reason_sentences: int | None
     input_tokens: int | None
@@ -202,6 +209,7 @@ def run_sample(
             == (agent_proposal.candidate_index if agent_proposal is not None else None)
         ),
         reason_text=reason_text,
+        llm_raw_text=client.last_text,
         reason_chars=len(reason_text) if reason_text is not None else None,
         reason_sentences=_sentence_count(reason_text) if reason_text is not None else None,
         input_tokens=agent.last_usage.input_tokens if agent.last_usage is not None else None,
