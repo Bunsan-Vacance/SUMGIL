@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Function;
 
 /**
  * 후보별 geometry 후처리(S15P21A104-213 T3).
@@ -51,6 +52,7 @@ public final class RouteGeometryEnhancer {
     private final RailGeometryLookup railLookup;
     private final WalkGeometryLookup walkLookup;
     private final BikeGeometryLookup bikeLookup;
+    private final Function<RouteLegResponse, Optional<MultiLineStringResponse>> busLookup;
     private final ExecutorService executor;
 
     /**
@@ -60,9 +62,16 @@ public final class RouteGeometryEnhancer {
      */
     public RouteGeometryEnhancer(
             RailGeometryLookup railLookup, WalkGeometryLookup walkLookup, BikeGeometryLookup bikeLookup) {
+        this(railLookup, walkLookup, bikeLookup, leg -> Optional.empty());
+    }
+
+    public RouteGeometryEnhancer(
+            RailGeometryLookup railLookup, WalkGeometryLookup walkLookup, BikeGeometryLookup bikeLookup,
+            Function<RouteLegResponse, Optional<MultiLineStringResponse>> busLookup) {
         this.railLookup = railLookup;
         this.walkLookup = walkLookup;
         this.bikeLookup = bikeLookup;
+        this.busLookup = busLookup;
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
@@ -136,11 +145,13 @@ public final class RouteGeometryEnhancer {
             // 유효한 결과가 와도 0m 도보에 외부 경로를 덧붙이면 표시 거리·시간이 왜곡된다.
             return leg;
         }
-        Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
-                ? walkLookup.find(leg.fromNodeId(), leg.toNodeId(),
-                        leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
-                : railLookup.find(
-                        leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        Optional<MultiLineStringResponse> geometry = switch (leg.mode()) {
+            case WALK -> walkLookup.find(leg.fromNodeId(), leg.toNodeId(),
+                    leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+            case BUS -> busLookup.apply(leg);
+            default -> railLookup.find(
+                    leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+        };
         if (geometry.isEmpty()) {
             return leg;
         }
@@ -210,8 +221,9 @@ public final class RouteGeometryEnhancer {
                 leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
                 leg.routeId(), minutes, leg.waitMinutes(),
                 geometry, "available",
-                distance, leg.routeName(), null,
-                null, null, null, null
+                distance, leg.routeName(), leg.routeOptions(),
+                leg.congestionGrade(), leg.transitionType(), leg.fromRentalId(), leg.toRentalId(),
+                leg.congestionLevel()
         );
     }
 
