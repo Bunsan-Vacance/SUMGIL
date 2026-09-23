@@ -295,7 +295,8 @@ geometryStatus`)에 `estimated: true`를 더한 모양이다 — FE가 같은 �
 ### 3.6 아직 없는 것
 
 - Redis 세션(3.2절 — 지금은 `InMemorySessionStore`, 파드 1개 전제)
-- 세션 단위 LLM 예산의 파드 간 공유(`llm_budget.LlmBudget`도 같은 전제)
+- 세션 단위 LLM 예산의 파드 간 공유 — 324-3에서 세션(`InMemorySessionStore`)에는 붙였지만
+  (`llm_budget.LlmBudget`), 저장소 자체가 파드 1개 전제라 파드 간 공유는 여전히 없다
 - 좌표 목적지(`destLat/Lng`) — 지금은 역 목적지만(BE `replan` 계약 제약)
 - `modes` 전면 재탐색(② 수단 변경) — 지금은 ① 대여소 교체만
 - 실제 보행 라우팅(`viaNodeId` 경유 강제) — 지금은 직선×1.3 추정(3.4절)
