@@ -145,12 +145,73 @@ AI EC2 serving/ ─(bikepred-fetch.mjs)─▶ AI/data/BIKE/serving/*.csv ─▶ 
   재고 게이트를 보수적으로 걸 근거로 쓸 수 있다.
 - 대여소 **2,824곳**이 들어 있어 마스터(2,731곳)보다 많다. 마스터 기준으로 조인하면 96곳이 빠진다.
 - 날짜 축이 없다. 재학습 때만 표가 새로 만들어지므로 조회는 (대여소, 요일, 슬롯) 세 값이면 된다.
+  **2026-09-23 날짜축 표를 별도로 추가했다(309)** — 아래 "날짜축 예측" 절. 이 표는 그대로다.
 
 ## 스키마 변경
 
 `V5__bike_stock_pred_prediction_source.sql` — `prediction_source VARCHAR(32) NULL` 추가.
 폭 32 는 가장 긴 값 `station_global_fallback`(23자)에 여유를 둔 것이다. `source` 가 폭 부족으로 V2 에서 이미
 한 번 넓어진 전례를 반영했다.
+
+## 날짜축 예측 — `bike_stock_pred_daily` (S15P21A104-309, 2026-09-23)
+
+AI LightGBM 예측기(195)는 날짜마다 다른 값을 낸다(요일·공휴일·날씨·KBO). 산출물 키가
+`(rental_id, pred_date, time_slot)` 이라 위 요일축 표에 넣을 칸이 없어 서빙되지 않고 있었다
+(`AI/app/BIKE/pipeline/batch_predict.py` 주석 "BE 스키마 동의 전까지 보류", 09-14).
+
+**요일축 표를 바꾸지 않고 날짜축 표를 하나 더 둔다.** 조회는 날짜축을 먼저 본다.
+
+```
+GET /api/bike-stations/{id}/prediction?arrivalTime=…
+  (대여소, 도착 날짜 KST, 슬롯) 가 bike_stock_pred_daily 에 있으면 → 그 값 · source MODEL · predictedAt = generated_at
+  없으면 bike_stock_pred (대여소, 요일, 슬롯)                         → 지금과 같음 · source MOCK  · predictedAt = 적재 시각
+  둘 다 없으면                                                       → UNAVAILABLE
+```
+
+- **비어 있어도 되는 표다.** 비면 응답이 237 그대로다 — 배포 순서가 자유롭고, AI 가 날짜축 산출물을 멈추면
+  평균값으로 돌아간다. 배치가 만들지 않은 먼 날짜도 평균값이 나가 화면이 비지 않는다.
+- `generated_at` 은 사이드카의 산출 시각이다. 요일축 표의 `predictedAt` 은 적재 시각이라 "○○ 기준 예측" 으로
+  읽으면 틀리는데, 날짜축 행에서는 산출 시각이 나간다.
+- `BikePredictionSource`(MODEL|MOCK)는 FE 계약이라 그대로다.
+
+### 원천 — 폴더를 나눈다
+
+**AI `batch_predict.py` 는 예측기와 무관하게 파일명을 `bike_stock_pred_<생성시각>.csv` 로 짓는다.** 날짜축인지는
+헤더(`pred_date`)와 사이드카 `target_date` 로만 구분된다. 한 폴더에 섞이면 요일축 로더가 파일명 최신으로 lightgbm
+파일을 집고 `필수 열이 없습니다: dow_type` 으로 적재 전체가 멈춘다(309-G1 로 재현).
+
+- 날짜축 원천은 **`AI/data/BIKE/serving-daily/`** (CronJob `/ai-data/BIKE/serving-daily`)
+- 요일축 로더는 사이드카가 `"source": "model"` 인 파일을 건너뛴다 — 누가 잘못 놓아도 안 멈춘다
+- 날짜축 로더는 사이드카 `target_date` 가 없는 파일(avg)을 고르지 않는다
+
+### 값 규칙 (crowdpred 선례)
+
+- **사이드카 필수.** `generated_at` 이 NOT NULL 열이다. 없으면 멈춘다.
+- 대상 날짜는 **파일명이 아니라 사이드카 `target_date`** 에서 읽는다 — 파일명에 대상 날짜가 없다.
+- 같은 날짜가 여러 회차면 **`generated_at` 최신 하나**. 날짜가 여럿이면 날짜마다 하나씩 모두.
+- 사이드카 `rows` 합과 실제 행 수가 다르면 멈춘다(잘린 파일).
+- **산출물이 아직 없으면 멈추지 않는다.** 폴더가 없거나 비었으면 경고 + 0행. AI 가 날짜축 산출물을 내기 전에도
+  CronJob 은 매일 도는데, 그때마다 실패로 찍히면 앞 두 적재의 진짜 실패가 묻힌다. 경로가 `.csv` 로 끝나면
+  (사람이 파일을 지정) 없을 때 멈춘다.
+- lightgbm 산출물에는 `prediction_source` 가 없다 — 열은 NULL 로 들어간다.
+
+```bash
+cd BE
+./gradlew bootRun --args='--load.sources=bikepreddaily --load.dry-run=true'          # 기본 ../AI/data/BIKE/serving-daily
+./gradlew bootRun --args='--load.sources=bikepreddaily --load.bikepreddaily.path=<폴더 또는 파일>'
+```
+
+스키마: `V10__bike_stock_pred_daily.sql`. 엔티티 `BikeStockPredDaily`, 로더 `load/bikepreddaily/`.
+
+### 켜는 순서
+
+1. 이 MR(표·로더·조회 폴백·CronJob 소스) — 표가 비어 있어 응답 변화 없음
+2. AI 가 `batch_predict.py --predictor lightgbm --target-date <날짜> --out-dir <…>/serving-daily` 를 매일 실행
+   → 다음 10:00 KST CronJob 부터 모델 값이 나간다
+3. 되돌리기: AI 가 2를 멈추면 새 날짜부터 평균값. 즉시 되돌리려면 `TRUNCATE bike_stock_pred_daily`
+
+**남은 판단**: 운영 lag(D-1/D-7)가 실시간 수집과 연결되지 않아 `hist_mean` 으로 메워진다(`predictor.py` 주석).
+검증된 개선(exp_bikes −11.6%)은 lag 덕분이라, 2 전에 lightgbm vs avg 를 실측 재고로 한 번 대조한다.
 
 ## 테스트
 
