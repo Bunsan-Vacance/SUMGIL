@@ -54,6 +54,15 @@
     `{ status: AVAILABLE|UNAVAILABLE, predictedBikes: int>=0 | null, availabilityProbability: 0..1 | null, predictedAt | null, arrivalTime, rentalId, source: MODEL|MOCK }`.
     UNAVAILABLE는 예측값 전부 null (0으로 해석 금지).
 
+## 8. bike prediction — AI 실시간 모델 연결 (309)
+
+- 원인: `source`가 늘 `MOCK`이라 FE가 "샘플"로 표시. 값은 평균 실데이터였고, AI의 LightGBM 실시간 API(`eta-stock`, 160)를 BE가 부르지 않고 있었다.
+- 해결방안: 도착까지 30분 이내면 AI 실시간 모델을 먼저 쓰고, 못 쓰면 기존 평균표.
+- 결과(API 변경사항 — **필드·타입 변경 없음, 값의 의미만**):
+  - `source: MODEL` = AI LightGBM 실시간 예측(지금 재고 + 도착까지 순증감). 이때 `predictedAt`은 **예측을 만든 시각**(요청 시각)이다.
+  - `source: MOCK` = 평균 예측표(실데이터 평균, 가짜 아님). 도착이 30분보다 멀거나, AI 호출이 실패·지연(1초)·실시간 재고 없음일 때. 이때 `predictedAt`은 평균표 적재 시각이다.
+  - 같은 대여소라도 도착 시각에 따라 `MODEL`/`MOCK`이 바뀐다. "샘플" 배지는 `MOCK`에서도 오해를 부르므로 문구 조정 권장("평균 기준" 등).
+
 ## 참고 — 이미 반영済 (FE 문서가 구버전 기준이라 대조용)
 
 - `GET /api/transit/arrivals?stationId&routeId` 구현済 (192). 응답은 `{ status: LIVE|NO_INFO|OUTSIDE_WINDOW|STALE, trains: [{trainId, direction, arrivalTime, updatedAt, source}], updatedAt }` 객체형. FE 문서의 배열형과 다름 — 사용 전 대조 필요.
