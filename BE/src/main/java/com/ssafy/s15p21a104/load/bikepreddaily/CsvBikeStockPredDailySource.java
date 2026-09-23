@@ -29,6 +29,10 @@ import java.util.stream.Stream;
  *
  * <p><b>사이드카는 필수다</b> — {@code generated_at} 이 NOT NULL 열이고, {@code rows} 합이 어긋나면 잘린 파일이라
  * 그날 예측이 반쪽으로 들어간다. 둘 다 경고로 넘기지 않고 멈춘다.
+ *
+ * <p>반대로 <b>산출물이 아직 없는 것은 멈추지 않는다</b> — 폴더가 없거나 비었으면 경고와 빈 결과를 돌려준다.
+ * 날짜축 표는 비어도 되는 표이고(조회가 평균표로 떨어진다), 매일 도는 CronJob 이 AI 산출물 시작 전까지
+ * 실패로 찍히면 진짜 실패가 묻힌다.
  */
 public final class CsvBikeStockPredDailySource implements BikeStockPredDailySource {
 
@@ -45,6 +49,14 @@ public final class CsvBikeStockPredDailySource implements BikeStockPredDailySour
     @Override
     public Loaded read() throws IOException {
         List<Path> csvs = resolveCsvs();
+        if (csvs.isEmpty()) {
+            // 날짜축 표는 비어 있어도 된다(조회가 평균표로 떨어진다). AI 가 산출물을 내기 전에 매일 실패로 멈추면
+            // CronJob 실패 기록이 가짜로 쌓여 앞 적재의 진짜 실패가 묻힌다 — 경고만 남기고 0행으로 넘긴다.
+            var empty = new BikeStockPredDailyParser().finish();
+            return new Loaded(List.of(), empty.stats(), List.of(), List.of(
+                    "따릉이 날짜축 예측 산출물이 아직 없어 건너뜁니다 (조회는 평균표로 나간다): " + path
+                            + " 에 사이드카 target_date 가 있는 " + FILE_PREFIX + "*" + FILE_SUFFIX));
+        }
 
         var parser = new BikeStockPredDailyParser();
         int expectedRows = 0;
@@ -65,13 +77,19 @@ public final class CsvBikeStockPredDailySource implements BikeStockPredDailySour
         return new Loaded(parsed.rows(), parsed.stats(), csvs, parser.warnings());
     }
 
-    /** 폴더면 대상 날짜마다 최신 회차 하나씩(날짜 순), 파일이면 그것 하나. */
+    /**
+     * 폴더면 대상 날짜마다 최신 회차 하나씩(날짜 순), 파일이면 그것 하나. 폴더가 없거나 날짜축 산출물이 없으면 빈 목록이다.
+     * 경로가 {@code .csv} 로 끝나면 사람이 파일을 고른 것이라, 없으면 빈 목록이 아니라 멈춘다.
+     */
     private List<Path> resolveCsvs() throws IOException {
+        if (Files.isRegularFile(path)) {
+            return List.of(path);
+        }
         if (!Files.isDirectory(path)) {
-            if (!Files.isRegularFile(path)) {
+            if (path.getFileName() != null && path.getFileName().toString().endsWith(FILE_SUFFIX)) {
                 throw new IOException("따릉이 날짜축 예측 산출물이 없습니다: " + path);
             }
-            return List.of(path);
+            return List.of();
         }
         Map<LocalDate, Path> latestByDate = new TreeMap<>();
         Map<LocalDate, BikeStockPredDailyMeta> latestMeta = new TreeMap<>();
@@ -91,10 +109,6 @@ public final class CsvBikeStockPredDailySource implements BikeStockPredDailySour
                 latestMeta.put(meta.targetDate(), meta);
                 latestByDate.put(meta.targetDate(), csv);
             }
-        }
-        if (latestByDate.isEmpty()) {
-            throw new IOException("따릉이 날짜축 예측 산출물이 없습니다: " + path + " 에 사이드카 target_date 가 있는 "
-                    + FILE_PREFIX + "*" + FILE_SUFFIX);
         }
         return new ArrayList<>(latestByDate.values());
     }
