@@ -2,10 +2,10 @@ package com.ssafy.s15p21a104.domain.bike.stock;
 
 import java.time.OffsetDateTime;
 
-/** {@link BikeStockReader} 조회 결과. UNAVAILABLE이면 available·updatedAt은 null이다. */
-public record BikeStock(Integer available, OffsetDateTime updatedAt, BikeStockStatus status) {
+/** {@link BikeStockReader} 조회 결과. UNAVAILABLE이면 재고·거치대 수·updatedAt은 null이다. */
+public record BikeStock(Integer available, Integer rackCount, OffsetDateTime updatedAt, BikeStockStatus status) {
 
     static BikeStock unavailable() {
-        return new BikeStock(null, null, BikeStockStatus.UNAVAILABLE);
+        return new BikeStock(null, null, null, BikeStockStatus.UNAVAILABLE);
     }
 }

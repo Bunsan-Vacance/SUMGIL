@@ -67,6 +67,7 @@
   "data": {
     "rentalId": "ST-1577",
     "availableBikes": 7,
+    "rackCount": 15,
     "stockUpdatedAt": "2026-09-17T09:58:30+09:00",
     "status": "AVAILABLE"
   }
@@ -77,6 +78,7 @@
 | --- | --- | --- |
 | `rentalId` | string | 요청 ID와 일치 |
 | `availableBikes` | integer \| null | 대여 가능 자전거 수. `status`가 `UNAVAILABLE`이면 `null` |
+| `rackCount` | integer \| null | 총 거치대 수. Redis 캐시의 `racks`를 전달하며 값이 없거나 잘못되면 `null`이다. `status`가 `UNAVAILABLE`이면 `null` |
 | `stockUpdatedAt` | ISO 8601(+09:00) \| null | 재고 관측(수집) 시각. 서버가 응답을 만든 시각이 아니다 — 조회만 반복해도 값이 바뀌지 않는다 |
 | `status` | `AVAILABLE` \| `STALE` \| `UNAVAILABLE` | 아래 표 참고 |
 
@@ -84,13 +86,15 @@
 
 수집 주기는 120초, Redis TTL은 300초다.
 
-| 상황 | status | availableBikes/stockUpdatedAt |
+| 상황 | status | availableBikes/rackCount/stockUpdatedAt |
 | --- | --- | --- |
-| 수집 후 180초 이내 | `AVAILABLE` | 최신 값. 자전거가 0대여도 `AVAILABLE`이다 — "값이 유효함"의 의미이지 "1대 이상 있음"이 아니다 |
-| 180초는 넘었지만 캐시(TTL 300초)는 살아있음 | `STALE` | 마지막 값·시각을 그대로 반환. 현재 재고로 단정하지 않는다 |
-| 캐시 없음(한 번도 수집 안 됨, 또는 TTL 만료) | `UNAVAILABLE` | 둘 다 `null` |
+| 수집 후 180초 이내 | `AVAILABLE` | 최신 값. 자전거가 0대여도 `AVAILABLE`이다 — "값이 유효함"의 의미이지 "1대 이상 있음"이 아니다. `rackCount`가 없거나 잘못되면 해당 필드만 `null`이다 |
+| 180초는 넘었지만 캐시(TTL 300초)는 살아있음 | `STALE` | 마지막 값·거치대 수·시각을 그대로 반환. 현재 재고로 단정하지 않는다 |
+| 캐시 없음(한 번도 수집 안 됨, 또는 TTL 만료) | `UNAVAILABLE` | `availableBikes`/`rackCount`/`stockUpdatedAt` 모두 `null` |
 
 180초 = 수집 주기(120초)의 1.5배다. 한 회차를 놓쳐도 바로 STALE로 떨어뜨리지 않되, TTL(300초)보다는 짧게 잡아 STALE 구간이 존재하도록 했다.
+
+`rackCount`는 기존 Redis 캐시의 `racks` 값을 읽어 추가로 내려주는 총 거치대 수 정보다. 수집·DB·인프라 변경은 없으며, 기존 JSON 소비자는 새 필드를 사용하지 않아도 호환된다. `rackCount`는 반납 가능 여부를 판정하는 값이 아니므로 `availableDocks = rackCount - availableBikes`를 계산하지 않는다. 서울시 안내처럼 거치대가 가득 차도 반납할 수 있는 경우가 있으므로([서울시 공식 안내](https://mediahub.seoul.go.kr/archives/2006926)), 반납 가능 여부는 별도 정책과 실제 반납 흐름에서 판단한다.
 
 ### 실패
 

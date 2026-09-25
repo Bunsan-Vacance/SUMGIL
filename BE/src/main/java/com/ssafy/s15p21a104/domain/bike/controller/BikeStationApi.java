@@ -31,7 +31,8 @@ public interface BikeStationApi {
     @Operation(summary = "대여소 단건 실시간 재고 조회", description = "서울시 공공자전거 API를 다시 호출하지 않고 "
             + "수집기가 Redis에 적재해 둔 최신 재고를 읽는다(수집 주기 120초). status로 신뢰도를 구분한다 — "
             + "AVAILABLE(신선도 창 180초 이내), STALE(캐시는 있지만 180초를 넘김, 마지막 값·시각을 그대로 반환), "
-            + "UNAVAILABLE(캐시 없음·TTL 300초 만료, 값은 전부 null). 등록되지 않은 rentalId는 404다.")
+            + "UNAVAILABLE(캐시 없음·TTL 300초 만료, 값은 전부 null). rackCount는 총 거치대 수이며 반납 가능 여부를 계산하는 값이 아니다. "
+            + "등록되지 않은 rentalId는 404다.")
     @GetMapping("/{rentalId}/stock")
     ApiResult<BikeStockResponse> stock(@PathVariable String rentalId);
 

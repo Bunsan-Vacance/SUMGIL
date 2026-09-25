@@ -71,7 +71,8 @@ public class BikeStationSearchService {
         BikeStation station = bikeStationRepository.findById(rentalId)
                 .orElseThrow(() -> new DomainException(ErrorType.BIKE_STATION_NOT_FOUND));
         BikeStock stock = bikeStockReader.find(station.getRentalId());
-        return new BikeStockResponse(station.getRentalId(), stock.available(), stock.updatedAt(), stock.status());
+        return new BikeStockResponse(station.getRentalId(), stock.available(), stock.rackCount(), stock.updatedAt(),
+                stock.status());
     }
 
     /**
