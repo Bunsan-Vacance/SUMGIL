@@ -1,9 +1,33 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import DetailPage from './DetailPage'
+import RouteCard from '../features/route/RouteCard'
 import type { Route } from '../features/route/types'
+
+vi.mock('../api/repositories', () => ({
+  isBikePredictionMockEnabled: false,
+  isBikeStockMockEnabled: false,
+  bikePredictionRepository: {
+    prediction: async (rentalId: string, arrivalTime: string) => ({
+      rentalId,
+      arrivalTime,
+      status: 'AVAILABLE',
+      predictedBikes: 4,
+      source: 'MODEL',
+    }),
+  },
+  bikeStockRepository: {
+    stock: async (rentalId: string) => ({
+      rentalId,
+      status: 'AVAILABLE',
+      availableBikes: rentalId === 'ST-2' ? 21 : 6,
+      rackCount: 10,
+      stockUpdatedAt: '2026-09-25T15:00:00+09:00',
+    }),
+  },
+}))
 
 afterEach(() => {
   cleanup()
@@ -50,6 +74,85 @@ function route(id: string, busId: string, busName: string): Route {
 }
 
 describe('경로 상세 버스 선택', () => {
+  it('검색 결과와 상세에서 동일한 이동 시간 막대와 혼잡도 표시를 사용한다', () => {
+    const current = route('shared-strip', 'BUS', '버스')
+    current.legs[1].segmentCongestionGrade = 'CONGESTED'
+    const { container } = render(
+      <>
+        <RouteCard route={current} onDetail={vi.fn()} />
+        <DetailPage
+          selected={current}
+          alternatives={[current]}
+          setSelectedId={vi.fn()}
+          go={vi.fn()}
+          startGuide={vi.fn()}
+        />
+      </>,
+    )
+    const card = container.querySelector('.route-card')!
+    const detail = container.querySelector('.route-detail-summary')!
+    expect(detail.querySelector('.mode-strip')?.outerHTML).toBe(
+      card.querySelector('.mode-strip')?.outerHTML,
+    )
+    expect(detail.querySelector('.route-segment-labels')?.outerHTML).toBe(
+      card.querySelector('.route-segment-labels')?.outerHTML,
+    )
+  })
+
+  it('같은 시트에서 안내를 시작해도 따릉이 예측과 혼잡 안내를 유지한다', async () => {
+    const current: Route = {
+      ...route('bike', 'BUS', '버스'),
+      departedAt: new Date().toISOString(),
+      legs: [
+        {
+          mode: 'bike',
+          title: '따릉이 이동',
+          note: '',
+          minutes: 10,
+          from: { name: '대여소 A', rentalId: 'ST-1' },
+          to: { name: '대여소 B', rentalId: 'ST-2' },
+        },
+      ],
+    }
+    const props = {
+      selected: current,
+      alternatives: [current],
+      setSelectedId: vi.fn(),
+      go: vi.fn(),
+      startGuide: vi.fn(),
+    }
+    const { rerender } = render(<DetailPage {...props} />)
+    await waitFor(() => expect(screen.getByText('4대 예상')).toBeTruthy())
+    expect(screen.getByText('6대')).toBeTruthy()
+    expect(screen.getByText('반납 대여소 혼잡 · 현장 공간 확인 필요')).toBeTruthy()
+    const sheet = screen.getByRole('region', { name: '경로 안내 패널' })
+    fireEvent.click(screen.getByRole('button', { name: '바텀시트 펼치기' }))
+    rerender(
+      <DetailPage
+        {...props}
+        guidance={{
+          step: 0,
+          locationStatus: 'tracking',
+          onExit: vi.fn(),
+          onPrevious: vi.fn(),
+          onNext: vi.fn(),
+          onTrain: vi.fn(),
+          onReplan: vi.fn(),
+          replanDisabled: false,
+          onRetryLocation: vi.fn(),
+          onStepChange: vi.fn(),
+        }}
+      />,
+    )
+    expect(screen.getByRole('region', { name: '경로 안내 패널' })).toBe(sheet)
+    expect(sheet.getAttribute('data-snap')).toBe('expanded')
+    expect(screen.getByText('4대 예상')).toBeTruthy()
+    expect(screen.getByText('6대')).toBeTruthy()
+    expect(sheet.querySelector('[aria-current="step"]')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '안내 종료' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '다음 구간' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '안내 시작' })).toBeNull()
+  })
   it('경로 상세의 혼잡도를 등급 글자와 색으로 표시한다', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T00:00:00.000Z'))
@@ -64,8 +167,6 @@ describe('경로 상세 버스 선택', () => {
 
     render(
       <DetailPage
-        origin={{ id: 'origin', name: '출발', address: '', kind: '장소' }}
-        destinationName="도착"
         selected={current}
         alternatives={[current]}
         setSelectedId={vi.fn()}
@@ -93,8 +194,6 @@ describe('경로 상세 버스 선택', () => {
 
     render(
       <DetailPage
-        origin={{ id: 'origin', name: '출발', address: '', kind: '장소' }}
-        destinationName="도착"
         selected={current}
         alternatives={[current]}
         setSelectedId={setSelectedId}
@@ -104,7 +203,9 @@ describe('경로 상세 버스 선택', () => {
     )
 
     const region = screen.getByRole('region', { name: '이용 가능한 버스' })
-    expect(region.textContent).toContain('transfer → destination')
+    expect(region.textContent).not.toContain('transfer → destination')
+    expect(screen.getByRole('list', { name: '경로 상세' }).textContent).toContain('transfer')
+    expect(screen.getByRole('list', { name: '경로 상세' }).textContent).toContain('destination')
     const disclosure = region.querySelector('details')
     expect(disclosure?.open).toBe(false)
     expect(screen.getByText('이용 가능한 버스 2개 노선')).toBeTruthy()
@@ -113,7 +214,7 @@ describe('경로 상세 버스 선택', () => {
     expect(region.textContent).toContain('108번')
     expect(region.textContent).toContain('약 10분 간격')
     expect(region.textContent).toContain('143번')
-    expect(region.textContent).toContain('배차 정보 없음')
+    expect(region.textContent).not.toContain('배차 정보 없음')
     expect(region.querySelectorAll('button')).toHaveLength(0)
     expect(setSelectedId).not.toHaveBeenCalled()
   })
@@ -124,8 +225,6 @@ describe('경로 상세 버스 선택', () => {
 
     render(
       <DetailPage
-        origin={{ id: 'origin', name: '출발', address: '', kind: '장소' }}
-        destinationName="도착"
         selected={current}
         alternatives={[current]}
         setSelectedId={vi.fn()}
@@ -143,8 +242,6 @@ describe('경로 상세 버스 선택', () => {
     const setSelectedId = vi.fn()
     render(
       <DetailPage
-        origin={{ id: 'origin', name: '출발', address: '', kind: '장소' }}
-        destinationName="도착"
         selected={first}
         alternatives={[first, second]}
         setSelectedId={setSelectedId}

@@ -153,7 +153,6 @@ export function useRoutePlanner(
     setRoutePanelOpen(true)
     if (!trip.origin.name.trim()) locate()
   }
-  const closeRoutePanel = () => setRoutePanelOpen(false)
   const returnToRouteInput = () => {
     setRoutePanelOpen(true)
     go('home')
@@ -410,7 +409,6 @@ export function useRoutePlanner(
     openBrowse,
     routePanelOpen,
     toggleRoutePanel,
-    closeRoutePanel,
     returnToRouteInput,
     findRoutes,
     choosePlace,
