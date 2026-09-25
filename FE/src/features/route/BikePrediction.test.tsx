@@ -100,6 +100,7 @@ describe('BikePrediction', () => {
     )
     await waitFor(() => expect(screen.getByText('0대 예상')).toBeTruthy())
     expect(screen.getByText('0대')).toBeTruthy()
+    expect(screen.getByText('도착 시 대여할 자전거가 없어요.')).toBeTruthy()
   })
 
   it('오래된 재고는 현재가 아닌 마지막 확인 시각으로 표시한다', async () => {
@@ -121,22 +122,30 @@ describe('BikePrediction', () => {
     const repository: BikePredictionRepository = {
       prediction: vi.fn().mockResolvedValue(prediction),
     }
+    let sourceCalls = 0
     const stockRepository: Pick<BikeStationRepository, 'stock'> = {
-      stock: vi
-        .fn()
-        .mockResolvedValueOnce({
-          ...stock,
-          availableBikes: null,
-          stockUpdatedAt: null,
-          status: 'UNAVAILABLE',
-        })
-        .mockRejectedValueOnce(new Error('offline'))
-        .mockResolvedValueOnce(stock),
+      stock: vi.fn((rentalId) => {
+        if (rentalId === 'ST-2') {
+          return Promise.resolve({ ...stock, rentalId: 'ST-2', availableBikes: 6, rackCount: 6 })
+        }
+        sourceCalls += 1
+        if (sourceCalls === 1) {
+          return Promise.resolve({
+            ...stock,
+            availableBikes: null,
+            stockUpdatedAt: null,
+            status: 'UNAVAILABLE' as const,
+          })
+        }
+        if (sourceCalls === 2) return Promise.reject(new Error('offline'))
+        return Promise.resolve(stock)
+      }),
     }
     const { rerender } = render(
       <BikePrediction route={route} repository={repository} stockRepository={stockRepository} />,
     )
     await waitFor(() => expect(screen.getByText('재고 정보 없음')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/반납 대여소가 혼잡해요/)).toBeTruthy())
     rerender(
       <BikePrediction
         route={{ ...route, id: 'retry-stock' }}
@@ -150,7 +159,7 @@ describe('BikePrediction', () => {
     await waitFor(() => expect(screen.getByText('6대')).toBeTruthy())
   })
 
-  it('명시적인 rentalId가 없으면 API를 호출하지 않는다', () => {
+  it('명시적인 rentalId가 없으면 API를 호출하지 않는다', async () => {
     const repository: BikePredictionRepository = { prediction: vi.fn() }
     const routeWithoutId = {
       ...route,
@@ -159,7 +168,9 @@ describe('BikePrediction', () => {
       ),
     }
     render(<BikePrediction route={routeWithoutId} repository={repository} />)
-    expect(screen.getByText('이 대여소의 도착 시 예측 정보가 아직 없어요.')).toBeTruthy()
+    await waitFor(() =>
+      expect(screen.getByText('이 대여소의 도착 시 예측 정보가 아직 없어요.')).toBeTruthy(),
+    )
     expect(repository.prediction).not.toHaveBeenCalled()
   })
 
@@ -198,6 +209,7 @@ describe('BikePrediction', () => {
         .mockImplementationOnce(() => new Promise((yes) => (resolveSecond = yes))),
     }
     const { rerender } = render(<BikePrediction route={route} repository={repository} />)
+    await waitFor(() => expect(repository.prediction).toHaveBeenCalledTimes(1))
     const nextRoute = {
       ...route,
       id: 'next-route',
@@ -206,6 +218,7 @@ describe('BikePrediction', () => {
       ),
     }
     rerender(<BikePrediction route={nextRoute} repository={repository} />)
+    await waitFor(() => expect(repository.prediction).toHaveBeenCalledTimes(2))
     expect(vi.mocked(repository.prediction).mock.calls[0][2].aborted).toBe(true)
     await act(async () => resolveSecond(nextPrediction))
     await waitFor(() => expect(screen.getByText('4대 예상')).toBeTruthy())
@@ -217,13 +230,17 @@ describe('BikePrediction', () => {
     let resolveFirst!: (value: BikeStock) => void
     let resolveSecond!: (value: BikeStock) => void
     const stockRepository: Pick<BikeStationRepository, 'stock'> = {
-      stock: vi
-        .fn()
-        .mockImplementationOnce(() => new Promise((yes) => (resolveFirst = yes)))
-        .mockImplementationOnce(() => new Promise((yes) => (resolveSecond = yes))),
+      stock: vi.fn((rentalId: string, _signal: AbortSignal): Promise<BikeStock> => {
+        if (rentalId === 'ST-1') return new Promise((yes) => (resolveFirst = yes))
+        if (rentalId === 'ST-9') return new Promise((yes) => (resolveSecond = yes))
+        return Promise.resolve({ ...stock, rentalId, availableBikes: 6, rackCount: 6 })
+      }),
     }
     const { rerender } = render(
       <BikePrediction route={route} repository={null} stockRepository={stockRepository} />,
+    )
+    await waitFor(() =>
+      expect(stockRepository.stock).toHaveBeenCalledWith('ST-1', expect.any(AbortSignal)),
     )
     const nextRoute = {
       ...route,
@@ -234,6 +251,9 @@ describe('BikePrediction', () => {
     }
     rerender(
       <BikePrediction route={nextRoute} repository={null} stockRepository={stockRepository} />,
+    )
+    await waitFor(() =>
+      expect(stockRepository.stock).toHaveBeenCalledWith('ST-9', expect.any(AbortSignal)),
     )
     await act(async () => resolveSecond({ ...stock, rentalId: 'ST-9', availableBikes: 9 }))
     await waitFor(() => expect(screen.getByText('9대')).toBeTruthy())

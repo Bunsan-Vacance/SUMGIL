@@ -965,6 +965,105 @@ describe('백엔드 repository', () => {
     })
   })
 
+  it('총 거치대 수를 optional 필드로 보존하고 기존 응답도 허용한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            rackCount: 6,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ rackCount: 6 })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.not.toHaveProperty('rackCount')
+  })
+
+  it('총 거치대 수가 음수나 소수면 응답을 거부한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            rackCount: -1,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            rackCount: 6.5,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+  })
+
   it('대여소 단건 재고의 대여소 ID가 요청과 다르면 거부한다', async () => {
     vi.stubGlobal(
       'fetch',
