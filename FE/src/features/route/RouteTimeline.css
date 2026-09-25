@@ -73,6 +73,14 @@
   border-radius: 8px;
   outline: 6px solid #f1f9f6;
 }
+.route-timeline-leg.is-walk.is-active {
+  padding-top: 6px;
+  padding-bottom: 12px;
+}
+.route-timeline-leg.is-active > .route-timeline-ordinary {
+  padding: 8px 10px;
+  outline: none;
+}
 .route-timeline-transit {
   position: relative;
   padding: 0;
