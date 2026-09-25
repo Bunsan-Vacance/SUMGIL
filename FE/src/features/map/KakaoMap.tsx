@@ -11,7 +11,7 @@ import {
   segmentCongestionGradeForLeg,
   segmentCongestionPresentation,
 } from '../route/segmentCongestion'
-import { useKakaoMap } from './useKakaoMap'
+import { useKakaoMap, type LivePosition } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
 
 function bikeRentalId(place: Place) {
@@ -227,6 +227,7 @@ export default function KakaoMap({
   route,
   autoLocate = false,
   onCurrentLocation,
+  livePosition = null,
 }: {
   origin?: Place | null
   destination?: Place | null
@@ -238,6 +239,7 @@ export default function KakaoMap({
   route?: Route | null
   autoLocate?: boolean
   onCurrentLocation?: (position: GeolocationPosition) => void
+  livePosition?: LivePosition
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [bikeStationsVisible, setBikeStationsVisible] = useState(true)
@@ -301,7 +303,7 @@ export default function KakaoMap({
     setSelectedPlace(place)
     onPlaceSelect?.(place)
   }
-  const { container, status, retry, showPosition, locationScope } = useKakaoMap(
+  const { container, status, retry, showPosition, resumeLivePosition, locationScope } = useKakaoMap(
     origin ?? null,
     destination ?? null,
     onMessage,
@@ -311,6 +313,7 @@ export default function KakaoMap({
     places === undefined ? null : mapFocus,
     effectiveRoute,
     bikeStationsVisible,
+    livePosition,
   )
   const showCurrentPosition = (position: GeolocationPosition) => {
     showPosition(position)
@@ -390,7 +393,9 @@ export default function KakaoMap({
             className="icon-button kakao-locate"
             aria-label="현재 위치"
             disabled={locating}
-            onClick={locate}
+            onClick={() => {
+              if (!resumeLivePosition()) locate()
+            }}
           >
             {locating ? <span className="spinner" /> : <LocateFixed />}
           </button>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import type { Place, Route } from '../route/types'
 import type { GuidanceConditions, TrainArrival } from '../../api/guidance'
+import { LOCATION_MAX_AGE_MS } from './locationProgress'
 import {
   guidanceReducer,
   initialGuidance,
@@ -66,6 +67,7 @@ function restoreGuidance(): GuidanceState {
     ...initialGuidance,
     ...(parsed as unknown as GuidanceState),
     locationStatus: 'idle',
+    position: null,
     locationCandidateStep: undefined,
     locationCandidateCount: 0,
     transitAwayStep: undefined,
@@ -93,11 +95,27 @@ export function useGuidance(trackingEnabled = false) {
     dispatch({ type: 'location-status', status: 'waiting' })
     let watchId: number | null = null
     let active = true
+    let lastTimestamp = -Infinity
+    let staleTimer: ReturnType<typeof setTimeout> | undefined
     try {
       watchId = geolocation.watchPosition(
         (position) => {
           if (!active) return
-          dispatch({ type: 'location-status', status: 'tracking' })
+          const age = Date.now() - position.timestamp
+          if (!Number.isFinite(position.timestamp) || age > LOCATION_MAX_AGE_MS || age < -1_000) {
+            dispatch({ type: 'location-status', status: 'no-position' })
+            return
+          }
+          // Cached/replayed fixes must not satisfy the two-observation arrival check.
+          if (position.timestamp <= lastTimestamp) return
+          lastTimestamp = position.timestamp
+          clearTimeout(staleTimer)
+          staleTimer = setTimeout(
+            () => {
+              if (active) dispatch({ type: 'location-status', status: 'no-position' })
+            },
+            Math.max(0, LOCATION_MAX_AGE_MS - age),
+          )
           dispatch({
             type: 'location',
             latitude: position.coords.latitude,
@@ -107,6 +125,7 @@ export function useGuidance(trackingEnabled = false) {
         },
         (error) => {
           if (!active) return
+          clearTimeout(staleTimer)
           dispatch({
             type: 'location-status',
             status: error.code === 1 ? 'denied' : 'no-position',
@@ -119,6 +138,7 @@ export function useGuidance(trackingEnabled = false) {
     }
     return () => {
       active = false
+      clearTimeout(staleTimer)
       if (watchId !== null) geolocation.clearWatch(watchId)
     }
   }, [state.completed, state.route, trackingEnabled, trackingRetry])
@@ -153,6 +173,7 @@ export function useGuidance(trackingEnabled = false) {
       }
       const {
         locationStatus: _locationStatus,
+        position: _position,
         locationCandidateStep: _locationCandidateStep,
         locationCandidateCount: _locationCandidateCount,
         transitAwayStep: _transitAwayStep,
@@ -177,6 +198,7 @@ export function useGuidance(trackingEnabled = false) {
     previous: () => dispatch({ type: 'previous' }),
     next: () => dispatch({ type: 'next' }),
     setStep: (step: number) => dispatch({ type: 'set-step', step }),
+    confirmStep: () => dispatch({ type: 'confirm-step' }),
     retryLocation,
     locationStatus: (state.locationStatus || 'idle') as GuidanceLocationStatus,
     setTrain: (time: string, arrival?: TrainArrival | null) =>

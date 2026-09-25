@@ -133,7 +133,7 @@ describe('길안내 진행 상태', () => {
         type: 'location',
         latitude: endpoint.lat!,
         longitude: endpoint.lng!,
-        accuracy: 26,
+        accuracy: 31,
       }),
     ).toMatchObject({ step: 0, locationCandidateCount: 0 })
 
@@ -175,7 +175,7 @@ describe('길안내 진행 상태', () => {
     })
   })
 
-  it('대중교통은 목적지에서 멀어진 위치를 확인한 뒤에만 자동으로 하차 처리한다', () => {
+  it('지하철은 GPS가 도착역에 가까워져도 탑승·하차를 직접 확인한다', () => {
     const endpoint = { lat: 37.5, lng: 127.0 }
     const transitRoute = {
       ...routes[0],
@@ -197,7 +197,12 @@ describe('길안내 진행 상태', () => {
     })
     const nearOnce = guidanceReducer(away, atDestination)
     expect(nearOnce.completed).toBe(false)
-    expect(guidanceReducer(nearOnce, atDestination)).toMatchObject({ completed: true, step: 0 })
+    const nearTwice = guidanceReducer(nearOnce, atDestination)
+    expect(nearTwice).toMatchObject({ completed: false, step: 0 })
+    const boarded = guidanceReducer(nearTwice, { type: 'confirm-step' })
+    expect(boarded).toMatchObject({ completed: false, step: 0, train: 'confirmed' })
+    expect(guidanceReducer(boarded, atDestination).completed).toBe(false)
+    expect(guidanceReducer(boarded, { type: 'confirm-step' })).toMatchObject({ completed: true })
   })
 
   it('버스는 정류장 밖 이동을 확인한 뒤 도착점 근처에서 두 번 확인해야 진행한다', () => {
@@ -285,5 +290,81 @@ describe('길안내 진행 상태', () => {
       train: null,
     })
     expect(guidanceReducer(active, { type: 'set-step', step: 99 })).toBe(active)
+  })
+
+  it.each(['BOARDING', 'ALIGHTING', 'BIKE_RENTAL', 'BIKE_RETURN'] as const)(
+    '%s 행동은 같은 위치의 GPS만으로 완료하지 않는다',
+    (transitionType) => {
+      const leg = { ...routes[0].legs[0], transitionType }
+      const state = { ...initialGuidance, route: { ...routes[0], legs: [leg, routes[0].legs[1]] } }
+      const fix = {
+        type: 'location' as const,
+        latitude: leg.to!.lat!,
+        longitude: leg.to!.lng!,
+        accuracy: 5,
+      }
+      const atStation = guidanceReducer(guidanceReducer(state, fix), fix)
+      expect(atStation.step).toBe(0)
+      expect(guidanceReducer(atStation, { type: 'confirm-step' }).step).toBe(1)
+    },
+  )
+
+  it('도착 좌표가 없으면 현재 구간 geometry 끝점을 쓰되 좌표가 전혀 없으면 멈춘다', () => {
+    const leg = {
+      ...routes[0].legs[0],
+      to: undefined,
+      geometry: {
+        type: 'MultiLineString' as const,
+        coordinates: [
+          [
+            [127, 37.5],
+            [127.001, 37.501],
+          ] as [number, number][],
+        ],
+      },
+    }
+    const state = { ...initialGuidance, route: { ...routes[0], legs: [leg] } }
+    const fix = { type: 'location' as const, latitude: 37.501, longitude: 127.001, accuracy: 5 }
+    expect(guidanceReducer(guidanceReducer(state, fix), fix).completed).toBe(true)
+    const missing = { ...state, route: { ...state.route, legs: [{ ...leg, geometry: undefined }] } }
+    expect(guidanceReducer(guidanceReducer(missing, fix), fix).completed).toBe(false)
+  })
+
+  it('승차 행동 확인 후 지하철 탑승을 유지하고 하차 확인은 인접 하차 행동까지만 처리한다', () => {
+    const walk = routes[0].legs[0]
+    const subway = { ...routes[0].legs[1], mode: 'subway' as const }
+    const state = {
+      ...initialGuidance,
+      route: {
+        ...routes[0],
+        legs: [
+          { ...walk, transitionType: 'BOARDING' as const },
+          subway,
+          { ...walk, transitionType: 'ALIGHTING' as const },
+          walk,
+        ],
+      },
+    }
+    const boarded = guidanceReducer(state, { type: 'confirm-step' })
+    expect(boarded).toMatchObject({ step: 1, train: 'confirmed' })
+    expect(guidanceReducer(boarded, { type: 'confirm-step' })).toMatchObject({
+      step: 3,
+      train: null,
+      completed: false,
+    })
+  })
+
+  it('도착 지점 가까운 위치는 오차까지 반경 안에 두 번 들어와야 전환한다', () => {
+    const endpoint = routes[0].legs[0].to!
+    const state = { ...initialGuidance, route: routes[0] }
+    const fix = {
+      type: 'location' as const,
+      latitude: endpoint.lat! + 0.0002,
+      longitude: endpoint.lng!,
+      accuracy: 8,
+    }
+    expect(guidanceReducer(guidanceReducer(state, fix), fix).step).toBe(1)
+    const uncertain = { ...fix, accuracy: 25 }
+    expect(guidanceReducer(guidanceReducer(state, uncertain), uncertain).step).toBe(0)
   })
 })

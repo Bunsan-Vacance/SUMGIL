@@ -3,6 +3,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RouteRepository } from '../api/contracts'
+import type { Route } from '../features/route/types'
 import type { GuidanceRepository, ReplanProposal } from '../api/guidance'
 import { places, routes } from '../api/mock/fixtures'
 import { GUIDANCE_STORAGE_KEY } from '../features/guidance/useGuidance'
@@ -31,6 +32,91 @@ describe('경로와 안내 화면의 수명', () => {
     await waitFor(() => expect(rendered.result.current.trip.status).toBe('success'))
     return rendered
   }
+
+  it('실제 위치 콜백으로 도보 → 지하철 수동 확인 → 따릉이 → 최종 도착까지 이어진다', async () => {
+    const endpoint = (name: string, lat: number) => ({ name, lat, lng: 127 })
+    const journey: Route = {
+      ...routes[0],
+      id: 'gps-journey',
+      legs: [
+        {
+          mode: 'walk',
+          title: '역으로 이동',
+          note: '',
+          minutes: 3,
+          from: endpoint('출발', 37.49),
+          to: endpoint('승차역', 37.5),
+        },
+        {
+          mode: 'subway',
+          title: '지하철 이동',
+          note: '',
+          minutes: 5,
+          from: endpoint('승차역', 37.5),
+          to: endpoint('하차역', 37.51),
+        },
+        {
+          mode: 'bike',
+          title: '따릉이 이동',
+          note: '',
+          minutes: 4,
+          from: endpoint('대여소', 37.51),
+          to: endpoint('반납소', 37.52),
+        },
+        {
+          mode: 'walk',
+          title: '목적지로 이동',
+          note: '',
+          minutes: 2,
+          from: endpoint('반납소', 37.52),
+          to: endpoint('목적지', 37.53),
+        },
+      ],
+    }
+    let success!: (position: GeolocationPosition) => void
+    const clearWatch = vi.fn()
+    const watchPosition = vi.fn((onSuccess) => {
+      success = onSuccess
+      return 20
+    })
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { watchPosition, clearWatch },
+    })
+    const { result } = renderHook(() => useRoutePlanner({ search: async () => [journey] }))
+    act(() => result.current.trip.setOrigin(places[0]))
+    act(() => result.current.findRoutes(places[1]))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    act(() => result.current.startGuide())
+    await waitFor(() => expect(watchPosition).toHaveBeenCalledOnce())
+    let timestamp = Date.now() - 1_000
+    const at = (latitude: number) =>
+      act(() =>
+        success({
+          timestamp: (timestamp += 1),
+          coords: { latitude, longitude: 127, accuracy: 5 },
+        } as GeolocationPosition),
+      )
+    at(37.5001)
+    expect(result.current.guidance.step).toBe(0)
+    at(37.5001)
+    expect(result.current.guidance.step).toBe(1)
+    at(37.51)
+    at(37.51)
+    expect(result.current.guidance.step).toBe(1)
+    act(() => result.current.guidance.confirmStep())
+    expect(result.current.guidance.train).toBe('confirmed')
+    act(() => result.current.guidance.confirmStep())
+    expect(result.current.guidance.step).toBe(2)
+    at(37.52)
+    at(37.52)
+    expect(result.current.guidance.step).toBe(3)
+    at(37.53)
+    at(37.53)
+    await waitFor(() => expect(result.current.screen).toBe('arrival'))
+    expect(result.current.guidance.completed).toBe(true)
+    expect(clearWatch).toHaveBeenCalledWith(20)
+  })
 
   it('출발지가 비어 있으면 목적지를 보존하고 출발지 선택으로 안내한다', () => {
     const search = vi.fn(async () => routes)

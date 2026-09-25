@@ -240,3 +240,11 @@
 .route-timeline-leg.is-riding + .route-timeline-leg.is-riding {
   padding-top: 22px;
 }
+.route-timeline-confirm {
+  margin: 10px 0 4px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  color: #08715f;
+}
