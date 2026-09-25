@@ -94,60 +94,188 @@ describe('길안내 진행 상태', () => {
     expect(replanned.train).toBeNull()
   })
 
-  it('정확한 도보 도착점만 자동으로 진행하고 대중교통과 목적지는 자동 완료하지 않는다', () => {
+  it('도보와 자전거는 연속된 정확한 도착 위치 두 번으로 진행한다', () => {
     const active = { ...initialGuidance, route: routes[0], step: 0 }
     const endpoint = routes[0].legs[0].to!
-    const progressed = guidanceReducer(active, {
+    const candidate = guidanceReducer(active, {
       type: 'location',
       latitude: endpoint.lat!,
       longitude: endpoint.lng!,
       accuracy: 5,
     })
-
+    expect(candidate.step).toBe(0)
+    const progressed = guidanceReducer(candidate, {
+      type: 'location',
+      latitude: endpoint.lat!,
+      longitude: endpoint.lng!,
+      accuracy: 5,
+    })
     expect(progressed.step).toBe(1)
+    const nextEndpoint = routes[0].legs[1].to!
     expect(
       guidanceReducer(progressed, {
         type: 'location',
-        latitude: routes[0].legs[1].to!.lat!,
-        longitude: routes[0].legs[1].to!.lng!,
+        latitude: nextEndpoint.lat!,
+        longitude: nextEndpoint.lng!,
         accuracy: 5,
+      }).step,
+    ).toBe(1)
+    expect(
+      guidanceReducer(candidate, {
+        type: 'location',
+        latitude: endpoint.lat! + 0.0003,
+        longitude: endpoint.lng!,
+        accuracy: 10,
+      }).locationCandidateCount,
+    ).toBe(0)
+    expect(
+      guidanceReducer(active, {
+        type: 'location',
+        latitude: endpoint.lat!,
+        longitude: endpoint.lng!,
+        accuracy: 26,
       }),
-    ).toBe(progressed)
+    ).toMatchObject({ step: 0, locationCandidateCount: 0 })
 
     const finalRoute = { ...routes[0], legs: [routes[0].legs[0]] }
     const final = { ...initialGuidance, route: finalRoute }
+    const finalCandidate = guidanceReducer(final, {
+      type: 'location',
+      latitude: finalRoute.legs[0].to!.lat!,
+      longitude: finalRoute.legs[0].to!.lng!,
+      accuracy: 5,
+    })
     expect(
-      guidanceReducer(final, {
+      guidanceReducer(finalCandidate, {
         type: 'location',
         latitude: finalRoute.legs[0].to!.lat!,
         longitude: finalRoute.legs[0].to!.lng!,
         accuracy: 5,
       }),
-    ).toBe(final)
+    ).toMatchObject({ completed: true, step: 0 })
+  })
+
+  it('자전거 구간도 도착점 좌표를 두 번 확인하면 자동 진행한다', () => {
+    const endpoint = { lat: 37.5, lng: 127.0 }
+    const bikeRoute = {
+      ...bikeProposal,
+      legs: bikeProposal.legs.map((leg, index) => (index === 1 ? { ...leg, to: endpoint } : leg)),
+    }
+    const active = { ...initialGuidance, route: bikeRoute, step: 1 }
+    const atEndpoint = {
+      type: 'location' as const,
+      latitude: endpoint.lat,
+      longitude: endpoint.lng,
+      accuracy: 10,
+    }
+    expect(guidanceReducer(active, atEndpoint)).toMatchObject({ step: 1, completed: false })
+    expect(guidanceReducer(guidanceReducer(active, atEndpoint), atEndpoint)).toMatchObject({
+      step: 2,
+      completed: false,
+    })
+  })
+
+  it('대중교통은 목적지에서 멀어진 위치를 확인한 뒤에만 자동으로 하차 처리한다', () => {
+    const endpoint = { lat: 37.5, lng: 127.0 }
+    const transitRoute = {
+      ...routes[0],
+      legs: [{ ...routes[0].legs[0], mode: 'subway' as const, to: endpoint }],
+    }
+    const active = { ...initialGuidance, route: transitRoute }
+    const atDestination = {
+      type: 'location' as const,
+      latitude: endpoint.lat,
+      longitude: endpoint.lng,
+      accuracy: 5,
+    }
+    expect(guidanceReducer(active, atDestination)).toMatchObject({ step: 0, completed: false })
+    const away = guidanceReducer(active, {
+      type: 'location',
+      latitude: endpoint.lat + 0.002,
+      longitude: endpoint.lng,
+      accuracy: 5,
+    })
+    const nearOnce = guidanceReducer(away, atDestination)
+    expect(nearOnce.completed).toBe(false)
+    expect(guidanceReducer(nearOnce, atDestination)).toMatchObject({ completed: true, step: 0 })
+  })
+
+  it('버스는 정류장 밖 이동을 확인한 뒤 도착점 근처에서 두 번 확인해야 진행한다', () => {
+    const endpoint = { lat: 37.5, lng: 127.0 }
+    const busRoute = {
+      ...routes[3],
+      legs: routes[3].legs.map((leg, index) => (index === 1 ? { ...leg, to: endpoint } : leg)),
+    }
+    const active = { ...initialGuidance, route: busRoute, step: 1 }
+    const away = {
+      type: 'location' as const,
+      latitude: endpoint.lat + 0.002,
+      longitude: endpoint.lng,
+      accuracy: 5,
+    }
+    const near = {
+      type: 'location' as const,
+      latitude: endpoint.lat,
+      longitude: endpoint.lng,
+      accuracy: 5,
+    }
+    const armed = guidanceReducer(active, away)
+    expect(guidanceReducer(armed, near).step).toBe(1)
+    expect(guidanceReducer(guidanceReducer(armed, near), near).step).toBe(2)
+  })
+
+  it('수동 단계 변경 뒤에는 이전 위치 후보를 이어 쓰지 않는다', () => {
+    const endpoint = routes[0].legs[0].to!
+    const active = { ...initialGuidance, route: routes[0] }
+    const candidate = guidanceReducer(active, {
+      type: 'location',
+      latitude: endpoint.lat!,
+      longitude: endpoint.lng!,
+      accuracy: 5,
+    })
+    const manuallyChanged = guidanceReducer(candidate, { type: 'set-step', step: 0 })
+    expect(manuallyChanged.locationCandidateCount).toBe(0)
     expect(
-      guidanceReducer(active, {
+      guidanceReducer(manuallyChanged, {
         type: 'location',
         latitude: endpoint.lat!,
         longitude: endpoint.lng!,
-        accuracy: 31,
-      }),
-    ).toBe(active)
+        accuracy: 5,
+      }).step,
+    ).toBe(0)
+  })
+
+  it('무효 GPS를 거부하고 재탐색은 위치 확인 후보를 초기화한다', () => {
+    const endpoint = { lat: 37.5, lng: 127.0 }
+    const route = {
+      ...routes[0],
+      legs: routes[0].legs.map((leg, index) => (index === 0 ? { ...leg, to: endpoint } : leg)),
+    }
+    const active = { ...initialGuidance, route }
+    const candidate = guidanceReducer(active, {
+      type: 'location',
+      latitude: endpoint.lat,
+      longitude: endpoint.lng,
+      accuracy: 5,
+    })
     expect(
-      guidanceReducer(active, {
+      guidanceReducer(candidate, {
         type: 'location',
-        latitude: endpoint.lat! + 0.0001,
-        longitude: endpoint.lng!,
-        accuracy: 10,
+        latitude: 91,
+        longitude: endpoint.lng,
+        accuracy: 5,
       }),
-    ).toBe(active)
-    expect(
-      guidanceReducer(active, {
-        type: 'location',
-        latitude: endpoint.lat!,
-        longitude: endpoint.lng!,
-        accuracy: -1,
-      }),
-    ).toBe(active)
+    ).toMatchObject({ step: 0, locationCandidateCount: 0 })
+
+    const pending = guidanceReducer(candidate, { type: 'location-status', status: 'no-position' })
+    expect(pending.locationCandidateCount).toBe(0)
+    const replanned = guidanceReducer(candidate, { type: 'replan', route: routes[1] })
+    expect(replanned).toMatchObject({
+      step: 0,
+      locationCandidateCount: 0,
+      locationCandidateStep: null,
+      transitAwayStep: null,
+    })
   })
 
   it('위치 없이 현재 단계를 직접 수정한다', () => {

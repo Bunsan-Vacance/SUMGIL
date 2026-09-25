@@ -1,4 +1,6 @@
 import { bikeProposal, places, routes } from '../api/mock/fixtures'
+import { routeSearchMockResponse } from '../api/mock/routeResponses'
+import { mapRouteApiResponse } from '../api/routeMapper'
 import { modes } from '../features/route/constants'
 import type { TripState } from '../features/route/tripReducer'
 
@@ -27,6 +29,37 @@ export function isCongestionPreview(search: string, isDev = import.meta.env.DEV)
 }
 
 export function previewTripFor(search: string, isDev = import.meta.env.DEV): TripState {
+  const scenario = new URLSearchParams(search).get('preview')
+  if (isDev && (scenario === 'bike' || scenario === 'short')) {
+    const departedAt = new Date().toISOString()
+    const candidates = mapRouteApiResponse(routeSearchMockResponse, departedAt)
+    const selected =
+      scenario === 'bike'
+        ? candidates.find((route) => route.legs.some((leg) => leg.mode === 'bike'))!
+        : candidates[0]
+    const from = selected.legs[0].from!
+    const to = selected.legs.at(-1)!.to!
+    return {
+      ...previewTrip,
+      origin: {
+        ...from,
+        id: from.id || 'preview-origin',
+        name: from.name || '출발',
+        address: '',
+        kind: '장소',
+      },
+      destination: {
+        ...to,
+        id: to.id || 'preview-destination',
+        name: to.name || '도착',
+        address: '',
+        kind: '장소',
+      },
+      candidates,
+      selected,
+      status: 'success',
+    }
+  }
   if (!isCongestionPreview(search, isDev)) return previewTrip
   const departedAt = new Date().toISOString()
   const previewRoutes = routes.map((route) => ({ ...route, departedAt }))

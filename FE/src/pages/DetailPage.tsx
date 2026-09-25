@@ -1,50 +1,78 @@
-import { ArrowLeft, Navigation } from 'lucide-react'
+import { ArrowLeft, Navigation, Radio } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
-import LegList from '../features/route/LegList'
+import RouteTimeline from '../features/route/RouteTimeline'
 import BikePrediction from '../features/route/BikePrediction'
+import RouteModeStrip from '../features/route/RouteModeStrip'
 import {
+  clockTime,
   congestionPredictionFor,
   congestionPredictionPresentation,
   isCongestionPredictionDate,
+  remaining,
   routeArrival,
   roundMinutes,
 } from '../features/route/selectors'
-import type { Place, Route } from '../features/route/types'
+import type { Route } from '../features/route/types'
 import type { Navigate } from '../app/useNavigation'
+import type { GuidanceLocationStatus } from '../features/guidance/guidanceReducer'
 import {
   busLegOptions,
-  busOptionLabel,
   busRouteOptions,
   formatBusLabel,
   groupRoutes,
 } from '../features/route/routeGrouping'
+import './DetailPage.css'
+
+export interface RouteGuidanceControls {
+  step: number
+  locationStatus: GuidanceLocationStatus
+  onExit: () => void
+  onPrevious: () => void
+  onNext: () => void
+  onTrain: () => void
+  onReplan: () => void
+  replanDisabled: boolean
+  onRetryLocation: () => void
+  onStepChange: (step: number) => void
+}
 interface Props {
-  origin: Place
-  destinationName: string
   selected: Route
   alternatives: Route[]
   setSelectedId: (id: string) => void
   go: Navigate
   startGuide: () => void
+  originName?: string
+  destinationName?: string
+  guidance?: RouteGuidanceControls
+}
+const locationMessages: Record<GuidanceLocationStatus, string> = {
+  idle: '위치 안내를 준비하고 있어요.',
+  waiting: '현재 위치를 확인하고 있어요.',
+  tracking: '위치를 확인하며 구간을 자동으로 안내해요.',
+  denied: '위치 권한을 허용하면 자동으로 안내해요.',
+  'no-position': '위치가 잡히지 않으면 아래에서 현재 구간을 조정해 주세요.',
+  unsupported: '위치 안내를 사용할 수 없어요. 현재 구간을 직접 선택해 주세요.',
 }
 export default function DetailPage({
-  origin,
-  destinationName,
   selected,
   alternatives,
   setSelectedId,
   go,
   startGuide,
+  originName,
+  destinationName,
+  guidance,
 }: Props) {
   const selectedGroup = groupRoutes(alternatives).find((group) =>
     group.variants.some((route) => route.id === selected.id),
   )
-  const inlineBusSegments = busLegOptions(selected)
   const legacyBusOptions = selectedGroup ? busRouteOptions(selectedGroup.variants) : []
-  const predictionDate = isCongestionPredictionDate(selected.departedAt)
   const prediction = congestionPredictionFor(selected)
-  const predictionPresentation = congestionPredictionPresentation(prediction, selected.legs)
-  const congestionGrade = predictionPresentation?.label
+  const presentation = congestionPredictionPresentation(prediction, selected.legs)
+  const departure = clockTime(selected.departedAt)
+  const arrival = routeArrival(selected.minutes, selected.departedAt)
+  const currentLeg = guidance ? selected.legs[guidance.step] : undefined
+  const minutes = guidance ? remaining(selected, guidance.step) : selected.minutes
   return (
     <>
       <button
@@ -55,84 +83,118 @@ export default function DetailPage({
         <ArrowLeft />
       </button>
       <BottomSheet
-        key="detail"
+        className="route-detail-sheet"
         footer={
-          <button className="primary" onClick={startGuide}>
-            길안내 시작
-            <Navigation size={17} />
-          </button>
+          <div className="route-detail-footer">
+            <div className="route-detail-eta">
+              <strong>
+                {roundMinutes(minutes)}분{guidance ? ' 남음' : ''}
+              </strong>
+              <span>{arrival} 도착 예정</span>
+            </div>
+            {guidance ? (
+              <button className="secondary" onClick={guidance.onExit}>
+                안내 종료
+              </button>
+            ) : (
+              <button className="primary" onClick={startGuide}>
+                <Navigation size={17} />
+                안내 시작
+              </button>
+            )}
+          </div>
         }
       >
-        <p className="section-label">
-          {origin.name} → {destinationName}
-        </p>
-        <div className="detail-title">
-          <h2>
-            {roundMinutes(selected.minutes)}
-            <small>분</small>
-          </h2>
-          <span>{routeArrival(selected.minutes, selected.departedAt)} 도착 예상</span>
-        </div>
-        {selected.source === 'MOCK' && <small className="detail-source">샘플 경로</small>}
-        <div className="stats">
-          {selected.totalDistanceMeters !== undefined && (
-            <div>
-              <strong>{Math.round(selected.totalDistanceMeters).toLocaleString('ko-KR')}m</strong>
-              <small>전체 거리</small>
-            </div>
-          )}
-          <div>
-            <strong>{selected.transfers}회</strong>
-            <small>환승</small>
+        <header className="route-detail-summary">
+          <div className="route-detail-summary-top">
+            <h2>
+              {roundMinutes(selected.minutes)}
+              <small>분</small>
+            </h2>
+            {guidance && (
+              <span className="route-detail-live">
+                <Radio size={14} />
+                안내 중
+              </span>
+            )}
           </div>
-          {selected.walk !== undefined && (
-            <div>
-              <strong>{selected.walk}m</strong>
-              <small>도보</small>
-            </div>
-          )}
-          {predictionDate && (
-            <div>
-              <strong style={{ color: predictionPresentation?.color }}>
-                {congestionGrade ?? '정보 없음'}
-              </strong>
-              <small>혼잡도 예상</small>
-            </div>
-          )}
-        </div>
-        <BikePrediction route={selected} />
-        {inlineBusSegments.length > 0 && (
-          <section className="bus-options" aria-label="이용 가능한 버스">
-            <h3>이용 가능한 버스</h3>
-            {inlineBusSegments.map(({ leg, index, options }) => (
-              <div className="bus-options-segment" key={index}>
-                <h4>
-                  {leg.from?.name || '출발 정류장'} → {leg.to?.name || '도착 정류장'}
-                </h4>
-                {options.length ? (
-                  <details className="bus-options-details" open={options.length === 1}>
-                    <summary>이용 가능한 버스 {options.length}개 노선</summary>
-                    <div className="bus-options-list">
-                      {options.map((option) => (
-                        <div className="bus-option" key={option.routeId}>
-                          <strong>{busOptionLabel(option)}</strong>
-                          <span>
-                            {option.headwayMin
-                              ? `약 ${option.headwayMin}분 간격`
-                              : '배차 정보 없음'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                ) : (
-                  <p className="bus-options-empty">버스 노선 정보를 확인하지 못했어요.</p>
-                )}
+          <p className="route-detail-times">
+            {departure ? `${departure} – ${arrival}` : `${arrival} 도착 예상`}
+            <span>환승 {selected.transfers}회</span>
+          </p>
+          <RouteModeStrip legs={selected.legs} />
+          <div className="route-detail-meta stats">
+            {selected.walk !== undefined && <span>도보 {selected.walk}m</span>}
+            {isCongestionPredictionDate(selected.departedAt) && (
+              <span>
+                <span>혼잡도 예상</span>{' '}
+                <strong style={{ color: presentation?.color }}>
+                  {presentation?.label ?? '정보 없음'}
+                </strong>
+              </span>
+            )}
+            {selected.source === 'MOCK' && <small>샘플 경로</small>}
+          </div>
+        </header>
+        {guidance && (
+          <section className="route-detail-guidance" aria-label="현재 구간 안내">
+            <p role="status" aria-live="polite">
+              <strong>{currentLeg?.title}</strong>
+              <span>{locationMessages[guidance.locationStatus]}</span>
+            </p>
+            {['denied', 'no-position', 'unsupported'].includes(guidance.locationStatus) && (
+              <button className="text-button" onClick={guidance.onRetryLocation}>
+                위치 다시 확인
+              </button>
+            )}
+            <details className="route-detail-adjust">
+              <summary>안내 조정</summary>
+              <label>
+                현재 구간
+                <select
+                  aria-label="현재 안내 단계"
+                  value={guidance.step}
+                  onChange={(event) => guidance.onStepChange(Number(event.target.value))}
+                >
+                  {selected.legs.map((leg, index) => (
+                    <option key={index} value={index}>
+                      {index + 1}. {leg.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="route-detail-actions">
+                <button
+                  className="secondary"
+                  disabled={guidance.step === 0}
+                  onClick={guidance.onPrevious}
+                >
+                  이전 구간
+                </button>
+                <button className="secondary" onClick={guidance.onNext}>
+                  {guidance.step === selected.legs.length - 1 ? '도착 확인' : '다음 구간'}
+                </button>
               </div>
-            ))}
+              <div className="route-detail-actions">
+                {currentLeg?.mode === 'subway' && (
+                  <button className="secondary" onClick={guidance.onTrain}>
+                    탑승 확인
+                  </button>
+                )}
+                <button
+                  className="secondary"
+                  onClick={guidance.onReplan}
+                  disabled={guidance.replanDisabled}
+                >
+                  다른 경로 찾기
+                </button>
+              </div>
+              {guidance.replanDisabled && <p>하차 후 다음 구간에서 다시 찾을 수 있어요.</p>}
+            </details>
           </section>
         )}
-        {inlineBusSegments.length === 0 && legacyBusOptions.length > 1 && (
+        <BikePrediction route={selected} />
+        {!guidance && busLegOptions(selected).length === 0 && legacyBusOptions.length > 1 && (
           <section className="bus-options" aria-label="버스 선택">
             <h3>버스 선택</h3>
             <div className="bus-options-list">
@@ -140,7 +202,6 @@ export default function DetailPage({
                 <button
                   type="button"
                   key={route.id}
-                  className={route.id === selected.id ? 'is-selected' : undefined}
                   aria-pressed={route.id === selected.id}
                   onClick={() => setSelectedId(route.id)}
                 >
@@ -151,9 +212,14 @@ export default function DetailPage({
             </div>
           </section>
         )}
-        <section className="route-legs" aria-label="구간별 이동 안내">
-          <h3>구간별 이동 안내</h3>
-          <LegList route={selected} />
+        <section aria-label="구간별 이동 안내" className="route-detail-journey">
+          <h3 className="sr-only">구간별 이동 안내</h3>
+          <RouteTimeline
+            route={selected}
+            originName={originName}
+            destinationName={destinationName}
+            activeIndex={guidance?.step}
+          />
         </section>
       </BottomSheet>
     </>

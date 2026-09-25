@@ -3,7 +3,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { places, routes } from '../../api/mock/fixtures'
-import { useGuidance } from './useGuidance'
+import { GUIDANCE_STORAGE_KEY, useGuidance } from './useGuidance'
 
 const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation')
 const originalPermissions = Object.getOwnPropertyDescriptor(navigator, 'permissions')
@@ -18,6 +18,26 @@ afterEach(() => {
 
 describe('길안내 위치 추적', () => {
   beforeEach(() => sessionStorage.clear())
+
+  it('저장된 GPS 후보는 복원하지 않고 다시 저장할 때도 제외한다', async () => {
+    sessionStorage.setItem(
+      GUIDANCE_STORAGE_KEY,
+      JSON.stringify({
+        route: routes[0],
+        step: 0,
+        completed: false,
+        locationCandidateStep: 0,
+        locationCandidateCount: 1,
+        transitAwayStep: 0,
+      }),
+    )
+    const { result } = renderHook(() => useGuidance(false))
+    expect(result.current.step).toBe(0)
+    const stored = JSON.parse(sessionStorage.getItem(GUIDANCE_STORAGE_KEY)!)
+    expect(stored.locationCandidateStep).toBeUndefined()
+    expect(stored.locationCandidateCount).toBeUndefined()
+    expect(stored.transitAwayStep).toBeUndefined()
+  })
 
   it('안내가 끝나면 위치 추적을 정리한다', async () => {
     const clearWatch = vi.fn()
@@ -47,13 +67,15 @@ describe('길안내 위치 추적', () => {
         return 2
       })
       .mockImplementationOnce((success) => {
-        success({
+        const position = {
           coords: {
             latitude: routes[0].legs[0].to!.lat,
             longitude: routes[0].legs[0].to!.lng,
             accuracy: 5,
           },
-        } as GeolocationPosition)
+        } as GeolocationPosition
+        success(position)
+        success(position)
         return 3
       })
     Object.defineProperty(navigator, 'geolocation', {

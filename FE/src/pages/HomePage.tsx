@@ -1,4 +1,4 @@
-import { ArrowDownUp, ArrowLeft, ArrowRight, Pencil, Search } from 'lucide-react'
+import { ArrowDownUp, ArrowRight, Pencil, Search } from 'lucide-react'
 import type { Place } from '../features/route/types'
 interface Props {
   origin: Place
@@ -6,7 +6,6 @@ interface Props {
   openSearch: (target: 'origin' | 'destination') => void
   routePanelOpen: boolean
   toggleRoutePanel: () => void
-  closeRoutePanel: () => void
   findRoutes: () => void
   swapPlaces: () => void
 }
@@ -16,7 +15,6 @@ export default function HomePage({
   openSearch,
   routePanelOpen,
   toggleRoutePanel,
-  closeRoutePanel,
   findRoutes,
   swapPlaces,
 }: Props) {
@@ -41,14 +39,6 @@ export default function HomePage({
         hidden={!routePanelOpen}
       >
         <div className="home-panel-heading">
-          <button
-            type="button"
-            className="icon-button home-panel-back"
-            aria-label="홈으로 돌아가기"
-            onClick={closeRoutePanel}
-          >
-            <ArrowLeft size={19} />
-          </button>
           <h2>어디로 갈까요?</h2>
         </div>
         <div className="trip-fields">

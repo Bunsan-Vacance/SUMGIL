@@ -10,7 +10,6 @@ import BrowsePage from './pages/BrowsePage'
 import SearchPage from './pages/SearchPage'
 import ResultsPage from './pages/ResultsPage'
 import DetailPage from './pages/DetailPage'
-import GuidePage from './pages/GuidePage'
 import ArrivalPage from './pages/ArrivalPage'
 import ActiveGuidanceBar from './features/guidance/ActiveGuidanceBar'
 import Modal from './components/Modal'
@@ -24,6 +23,8 @@ export default function App() {
   const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
   const { screen, go, trip, guidance, destinationName, modal, setModal } = planner
+  const routeView = screen === 'detail' || screen === 'guide'
+  const displayedRoute = screen === 'guide' ? guidance.route : trip.selected
   const title = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (!showSplash && screen !== 'search' && screen !== 'browse') title.current?.focus()
@@ -45,7 +46,7 @@ export default function App() {
             screen !== 'browse' &&
             screen !== 'results' && (
               <KakaoMap
-                key={screen}
+                key={routeView ? 'route' : screen}
                 origin={
                   screen === 'home'
                     ? null
@@ -77,7 +78,6 @@ export default function App() {
               openSearch={planner.openSearch}
               routePanelOpen={planner.routePanelOpen}
               toggleRoutePanel={planner.toggleRoutePanel}
-              closeRoutePanel={planner.closeRoutePanel}
               findRoutes={planner.findRoutes}
               swapPlaces={planner.swapPlaces}
             />
@@ -125,34 +125,31 @@ export default function App() {
               onSearchWalk={trip.searchWalkOnly}
             />
           )}
-          {screen === 'detail' && trip.selected && (
+          {routeView && displayedRoute && (
             <DetailPage
-              origin={trip.origin}
-              destinationName={destinationName}
-              selected={trip.selected}
+              selected={displayedRoute}
               alternatives={trip.visible}
               setSelectedId={planner.selectRoute}
               go={go}
               startGuide={planner.startGuide}
-            />
-          )}
-          {screen === 'guide' && guidance.route && (
-            <GuidePage
-              selected={guidance.route}
-              step={guidance.step}
-              train={guidance.train}
-              selectedArrival={guidance.selectedArrival || null}
+              originName={screen === 'guide' ? guidance.origin?.name : trip.origin.name}
               destinationName={destinationName}
-              go={go}
-              onExit={() => setModal('exit')}
-              onPrevious={planner.previous}
-              onNext={planner.advance}
-              onTrain={planner.openTrain}
-              onReplan={planner.openReplan}
-              replanDisabled={Boolean(guidance.train)}
-              locationStatus={guidance.locationStatus}
-              onRetryLocation={guidance.retryLocation}
-              onStepChange={guidance.setStep}
+              guidance={
+                screen === 'guide'
+                  ? {
+                      step: guidance.step,
+                      onExit: () => setModal('exit'),
+                      onPrevious: planner.previous,
+                      onNext: planner.advance,
+                      onTrain: planner.openTrain,
+                      onReplan: planner.openReplan,
+                      replanDisabled: Boolean(guidance.train),
+                      locationStatus: guidance.locationStatus,
+                      onRetryLocation: guidance.retryLocation,
+                      onStepChange: guidance.setStep,
+                    }
+                  : undefined
+              }
             />
           )}
           {screen === 'arrival' && (
