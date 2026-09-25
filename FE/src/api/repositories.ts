@@ -1,5 +1,6 @@
 import { mockRouteRepository, routeSearchMockRepository } from './mock/repositories'
 import { bikePredictionMockRepository } from './mock/bikePrediction'
+import { bikeStockMockRepository } from './mock/bikeStock'
 import { RepositoryError } from './errors'
 import { mapBackendRoute } from './routeMapper'
 import { createBackendBikePredictionRepository } from './bikePrediction'
@@ -28,6 +29,8 @@ export const isRouteSearchMockEnabled =
   import.meta.env.VITE_ROUTE_SEARCH_MOCK?.trim().toLowerCase() === 'true'
 export const isBikePredictionMockEnabled =
   import.meta.env.VITE_BIKE_PREDICTION_MOCK?.trim().toLowerCase() === 'true'
+export const isBikeStockMockEnabled =
+  import.meta.env.VITE_BIKE_STOCK_MOCK?.trim().toLowerCase() === 'true'
 
 function validCoordinate(value: string | number, min: number, max: number) {
   if (typeof value === 'string' && !value.trim()) return null
@@ -414,6 +417,12 @@ function mapBikeStock(value: unknown): BikeStock {
     throw new RepositoryError('invalid-response', '따릉이 재고 상태 응답이 올바르지 않아요.')
   }
   const hasCount = Number.isInteger(value.availableBikes) && (value.availableBikes as number) >= 0
+  const hasRackCount =
+    value.rackCount === null ||
+    (Number.isInteger(value.rackCount) && (value.rackCount as number) >= 0)
+  if (value.rackCount !== undefined && !hasRackCount) {
+    throw new RepositoryError('invalid-response', '따릉이 거치대 수 응답이 올바르지 않아요.')
+  }
   const timestamp = text(value.stockUpdatedAt)
   const hasValidTimestamp =
     !!timestamp &&
@@ -424,7 +433,7 @@ function mapBikeStock(value: unknown): BikeStock {
   }
   if (
     value.status === 'UNAVAILABLE' &&
-    (value.availableBikes != null || value.stockUpdatedAt != null)
+    (value.availableBikes != null || value.stockUpdatedAt != null || value.rackCount != null)
   ) {
     throw new RepositoryError('invalid-response', '따릉이 재고 응답이 올바르지 않아요.')
   }
@@ -433,6 +442,7 @@ function mapBikeStock(value: unknown): BikeStock {
     availableBikes: hasCount ? (value.availableBikes as number) : null,
     stockUpdatedAt: hasValidTimestamp ? timestamp : null,
     status: value.status as BikeStockStatus,
+    ...(value.rackCount !== undefined ? { rackCount: value.rackCount as number | null } : {}),
   }
 }
 
@@ -486,9 +496,11 @@ export const routeRepository = isRouteSearchMockEnabled
   : apiBaseUrl
     ? createBackendRouteRepository(apiBaseUrl)
     : mockRouteRepository
-export const bikeStockRepository = apiBaseUrl
-  ? createBackendBikeStationRepository(apiBaseUrl)
-  : null
+export const bikeStockRepository = isBikeStockMockEnabled
+  ? bikeStockMockRepository
+  : apiBaseUrl
+    ? createBackendBikeStationRepository(apiBaseUrl)
+    : null
 export const bikeStationRepository = bikeStockRepository
 export const bikePredictionRepository = isBikePredictionMockEnabled
   ? bikePredictionMockRepository

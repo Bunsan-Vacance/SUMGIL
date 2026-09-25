@@ -58,4 +58,5 @@ export interface BikeStock {
   availableBikes: number | null
   stockUpdatedAt: string | null
   status: BikeStockStatus
+  rackCount?: number | null
 }
