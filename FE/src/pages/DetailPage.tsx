@@ -16,6 +16,12 @@ import type { Route } from '../features/route/types'
 import type { Navigate } from '../app/useNavigation'
 import type { GuidanceLocationStatus } from '../features/guidance/guidanceReducer'
 import {
+  confirmationLabel,
+  distanceToEndpoint,
+  guidanceEndpoint,
+  type GuidancePosition,
+} from '../features/guidance/locationProgress'
+import {
   busLegOptions,
   busRouteOptions,
   formatBusLabel,
@@ -25,6 +31,9 @@ import './DetailPage.css'
 
 export interface RouteGuidanceControls {
   step: number
+  boarded?: boolean
+  position?: GuidancePosition | null
+  onConfirm?: () => void
   locationStatus: GuidanceLocationStatus
   onExit: () => void
   onPrevious: () => void
@@ -52,6 +61,7 @@ const locationMessages: Record<GuidanceLocationStatus, string> = {
   denied: '위치 권한을 허용하면 자동으로 안내해요.',
   'no-position': '위치가 잡히지 않으면 아래에서 현재 구간을 조정해 주세요.',
   unsupported: '위치 안내를 사용할 수 없어요. 현재 구간을 직접 선택해 주세요.',
+  inaccurate: '위치 오차가 커요. 정확한 위치가 잡히면 자동 안내를 이어갈게요.',
 }
 export default function DetailPage({
   selected,
@@ -73,6 +83,27 @@ export default function DetailPage({
   const arrival = routeArrival(selected.minutes, selected.departedAt)
   const currentLeg = guidance ? selected.legs[guidance.step] : undefined
   const minutes = guidance ? remaining(selected, guidance.step) : selected.minutes
+  const confirmLabel = confirmationLabel(currentLeg, guidance?.boarded)
+  const distance = guidance?.position
+    ? distanceToEndpoint(guidance.position, currentLeg)
+    : undefined
+  const progressMessage = confirmLabel
+    ? currentLeg?.mode === 'subway' && guidance?.boarded
+      ? `${currentLeg.to?.name || '도착역'}에서 하차 후 확인해 주세요.`
+      : confirmLabel === '탑승했어요'
+        ? '승차 후 현재 구간에서 탑승을 확인해 주세요.'
+        : confirmLabel === '하차했어요'
+          ? '하차 후 현재 구간에서 확인해 주세요.'
+          : confirmLabel === '대여했어요'
+            ? '자전거를 대여한 뒤 확인해 주세요.'
+            : '자전거를 반납한 뒤 확인해 주세요.'
+    : currentLeg && !guidanceEndpoint(currentLeg)
+      ? '이 구간은 도착 위치 정보가 없어 직접 다음 구간으로 넘겨 주세요.'
+      : guidance?.locationStatus === 'tracking' && distance !== undefined
+        ? `${currentLeg?.to?.name || '다음 지점'}${distance <= 50 ? ' 근처예요.' : `까지 약 ${distance < 1000 ? `${Math.round(distance / 10) * 10}m` : `${(distance / 1000).toFixed(1)}km`}`}`
+        : guidance
+          ? locationMessages[guidance.locationStatus]
+          : ''
   return (
     <>
       <button
@@ -142,13 +173,14 @@ export default function DetailPage({
             </span>
             <p role="status" aria-live="polite">
               <strong>{currentLeg?.title}</strong>
-              <span>{locationMessages[guidance.locationStatus]}</span>
+              <span>{progressMessage}</span>
             </p>
-            {['denied', 'no-position', 'unsupported'].includes(guidance.locationStatus) && (
-              <button className="text-button" onClick={guidance.onRetryLocation}>
-                위치 다시 확인
-              </button>
-            )}
+            {!confirmLabel &&
+              ['denied', 'no-position', 'unsupported'].includes(guidance.locationStatus) && (
+                <button className="text-button" onClick={guidance.onRetryLocation}>
+                  위치 다시 확인
+                </button>
+              )}
             <details className="route-detail-adjust">
               <summary>안내 조정</summary>
               <label>
@@ -178,9 +210,9 @@ export default function DetailPage({
                 </button>
               </div>
               <div className="route-detail-actions">
-                {currentLeg?.mode === 'subway' && (
+                {currentLeg?.mode === 'subway' && !currentLeg.transitionType && (
                   <button className="secondary" onClick={guidance.onTrain}>
-                    탑승 확인
+                    탑승 열차 선택
                   </button>
                 )}
                 <button
@@ -221,6 +253,11 @@ export default function DetailPage({
             originName={originName}
             destinationName={destinationName}
             activeIndex={guidance?.step}
+            activeAction={
+              guidance?.onConfirm && confirmLabel
+                ? { label: confirmLabel, onConfirm: guidance.onConfirm }
+                : undefined
+            }
           />
         </section>
       </BottomSheet>

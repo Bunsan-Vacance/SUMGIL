@@ -113,6 +113,7 @@ export default function GuidanceDialogs({
               <button className="secondary" key={arrival.trainId} onClick={() => onTrain(arrival)}>
                 <strong>{formatArrival(arrival.arrivalTime)}</strong>
                 <span>{arrival.direction}</span>
+                <span>이 열차에 탔어요</span>
                 {arrival.source === 'MOCK' && <small>샘플</small>}
               </button>
             ))}
@@ -120,7 +121,7 @@ export default function GuidanceDialogs({
         )}
         {arrivalStatus !== 'unsupported' && arrivalStatus !== 'loading' && (
           <button className="text-button full" onClick={() => onTrain(null)}>
-            잘 모르겠어요
+            열차 정보 없이 탑승 확인
           </button>
         )}
       </Modal>

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Route } from './types'
 import RouteTimeline from './RouteTimeline'
 
@@ -19,6 +19,29 @@ function route(legs: Route['legs']): Route {
 }
 
 describe('경로 상세 타임라인', () => {
+  it('안내 시작 시 스크롤을 보존하고 다음 구간 전환 때 시트 내부만 이동한다', () => {
+    const value = route([
+      { mode: 'walk', title: '역으로', note: '', minutes: 2 },
+      { mode: 'subway', title: '지하철', note: '', minutes: 3 },
+    ])
+    const view = (activeIndex?: number) => (
+      <div className="sheet-body">
+        <RouteTimeline route={value} activeIndex={activeIndex} />
+      </div>
+    )
+    const { container, rerender } = render(view())
+    const body = container.querySelector<HTMLElement>('.sheet-body')!
+    const scrollTo = vi.fn()
+    body.scrollTo = scrollTo
+    rerender(view(0))
+    expect(scrollTo).not.toHaveBeenCalled()
+    rerender(view(1))
+    expect(scrollTo).toHaveBeenCalledOnce()
+    expect(body.querySelector('[aria-current="step"]')?.textContent).toContain('지하철')
+    rerender(view(1))
+    expect(scrollTo).toHaveBeenCalledOnce()
+  })
+
   it('도보 구간은 별도 승하차 노드가 없으므로 실제 이동 지점을 보존한다', () => {
     const value = route([
       { mode: 'walk', title: '강남 → 출입구', note: '이동 구간', minutes: 2, distanceMeters: 120 },

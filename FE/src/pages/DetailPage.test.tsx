@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import DetailPage from './DetailPage'
+import DetailPage, { type RouteGuidanceControls } from './DetailPage'
 import RouteCard from '../features/route/RouteCard'
 import type { Route } from '../features/route/types'
 
@@ -74,6 +74,77 @@ function route(id: string, busId: string, busName: string): Route {
 }
 
 describe('경로 상세 버스 선택', () => {
+  it('지하철 탑승·하차 버튼을 접힌 안내 조정 밖의 현재 구간에 표시한다', () => {
+    const current = route('subway-confirm', 'BUS', '버스')
+    const onConfirm = vi.fn()
+    const guidance: RouteGuidanceControls = {
+      step: 1,
+      boarded: false,
+      locationStatus: 'no-position',
+      onConfirm,
+      onExit: vi.fn(),
+      onPrevious: vi.fn(),
+      onNext: vi.fn(),
+      onTrain: vi.fn(),
+      onReplan: vi.fn(),
+      replanDisabled: false,
+      onRetryLocation: vi.fn(),
+      onStepChange: vi.fn(),
+    }
+    const props = {
+      selected: current,
+      alternatives: [current],
+      setSelectedId: vi.fn(),
+      go: vi.fn(),
+      startGuide: vi.fn(),
+    }
+    const { rerender } = render(<DetailPage {...props} guidance={guidance} />)
+    const board = screen.getByRole('button', { name: '탑승했어요' })
+    expect(board.closest('[aria-current="step"]')).toBeTruthy()
+    expect(board.closest('details')).toBeNull()
+    fireEvent.click(board)
+    expect(onConfirm).toHaveBeenCalledOnce()
+    rerender(<DetailPage {...props} guidance={{ ...guidance, boarded: true }} />)
+    expect(screen.getByRole('button', { name: '하차했어요' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '탑승했어요' })).toBeNull()
+    expect(screen.getByText('transfer에서 하차 후 확인해 주세요.')).toBeTruthy()
+  })
+
+  it('정확한 위치일 때 다음 지점 근처임을 알리고 위치 오차 시에는 경고한다', () => {
+    const current = route('nearby', 'BUS', '버스')
+    current.legs[0].to = { ...current.legs[0].to, lat: 37.5, lng: 127 }
+    const guidance: RouteGuidanceControls = {
+      step: 0,
+      locationStatus: 'tracking',
+      position: { latitude: 37.5001, longitude: 127, accuracy: 5 },
+      onExit: vi.fn(),
+      onPrevious: vi.fn(),
+      onNext: vi.fn(),
+      onTrain: vi.fn(),
+      onReplan: vi.fn(),
+      replanDisabled: false,
+      onRetryLocation: vi.fn(),
+      onStepChange: vi.fn(),
+    }
+    const props = {
+      selected: current,
+      alternatives: [current],
+      setSelectedId: vi.fn(),
+      go: vi.fn(),
+      startGuide: vi.fn(),
+    }
+    const { rerender } = render(<DetailPage {...props} guidance={guidance} />)
+    expect(screen.getByText('station 근처예요.')).toBeTruthy()
+    rerender(
+      <DetailPage
+        {...props}
+        guidance={{ ...guidance, position: null, locationStatus: 'inaccurate' }}
+      />,
+    )
+    expect(screen.getByText(/위치 오차가 커요/)).toBeTruthy()
+    expect(screen.queryByText('station 근처예요.')).toBeNull()
+  })
+
   it('검색 결과와 상세에서 동일한 이동 시간 막대와 혼잡도 표시를 사용한다', () => {
     const current = route('shared-strip', 'BUS', '버스')
     current.legs[1].segmentCongestionGrade = 'CONGESTED'

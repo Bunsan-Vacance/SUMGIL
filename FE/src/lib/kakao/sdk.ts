@@ -65,6 +65,7 @@ export interface KakaoAbstractOverlay extends MapOverlay {
   getProjection(): MapProjection
 }
 export interface KakaoMarker extends MapOverlay {
+  setPosition(point: MapPoint): void
   setImage(image: MapMarkerImage): void
   setZIndex(zIndex: number): void
 }

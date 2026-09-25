@@ -10,6 +10,7 @@ const originalPermissions = Object.getOwnPropertyDescriptor(navigator, 'permissi
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   if (originalGeolocation) Object.defineProperty(navigator, 'geolocation', originalGeolocation)
   else Reflect.deleteProperty(navigator, 'geolocation')
   if (originalPermissions) Object.defineProperty(navigator, 'permissions', originalPermissions)
@@ -29,6 +30,7 @@ describe('길안내 위치 추적', () => {
         locationCandidateStep: 0,
         locationCandidateCount: 1,
         transitAwayStep: 0,
+        position: { latitude: 37.5, longitude: 127, accuracy: 5 },
       }),
     )
     const { result } = renderHook(() => useGuidance(false))
@@ -37,6 +39,8 @@ describe('길안내 위치 추적', () => {
     expect(stored.locationCandidateStep).toBeUndefined()
     expect(stored.locationCandidateCount).toBeUndefined()
     expect(stored.transitAwayStep).toBeUndefined()
+    expect(stored.position).toBeUndefined()
+    expect(result.current.position).toBeNull()
   })
 
   it('안내가 끝나면 위치 추적을 정리한다', async () => {
@@ -68,6 +72,7 @@ describe('길안내 위치 추적', () => {
       })
       .mockImplementationOnce((success) => {
         const position = {
+          timestamp: Date.now() - 100,
           coords: {
             latitude: routes[0].legs[0].to!.lat,
             longitude: routes[0].legs[0].to!.lng,
@@ -75,7 +80,7 @@ describe('길안내 위치 추적', () => {
           },
         } as GeolocationPosition
         success(position)
-        success(position)
+        success({ ...position, timestamp: Date.now() })
         return 3
       })
     Object.defineProperty(navigator, 'geolocation', {
@@ -154,6 +159,7 @@ describe('길안내 위치 추적', () => {
 
     act(() =>
       success({
+        timestamp: Date.now(),
         coords: {
           latitude: routes[0].legs[0].to!.lat,
           longitude: routes[0].legs[0].to!.lng,
@@ -162,5 +168,57 @@ describe('길안내 위치 추적', () => {
       } as GeolocationPosition),
     )
     expect(rendered.result.current.step).toBe(0)
+  })
+
+  it('위치 하나를 지도와 안내에 공유하고 캐시 중복·오래된 위치·낮은 정확도로 넘기지 않는다', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-25T10:00:00Z'))
+    let success!: (position: GeolocationPosition) => void
+    let failure!: (error: GeolocationPositionError) => void
+    const clearWatch = vi.fn()
+    const watchPosition = vi.fn((onSuccess, onError) => {
+      success = onSuccess
+      failure = onError
+      return 10
+    })
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: { watchPosition, clearWatch },
+    })
+    const { result, rerender } = renderHook(({ enabled }) => useGuidance(enabled), {
+      initialProps: { enabled: true },
+    })
+    act(() => result.current.start(routes[0], places[0], places[1]))
+    const endpoint = routes[0].legs[0].to!
+    const fix = (accuracy = 5, timestamp = Date.now()) =>
+      ({
+        timestamp,
+        coords: { latitude: endpoint.lat!, longitude: endpoint.lng!, accuracy },
+      }) as GeolocationPosition
+    act(() => success(fix()))
+    expect(result.current.position).toEqual(fix().coords)
+    act(() => success(fix()))
+    expect(result.current.step).toBe(0)
+    act(() => vi.advanceTimersByTime(1_000))
+    act(() => success(fix(80)))
+    expect(result.current).toMatchObject({ position: null, locationStatus: 'inaccurate', step: 0 })
+    act(() => vi.advanceTimersByTime(1_000))
+    act(() => success(fix()))
+    expect(result.current.step).toBe(0)
+    act(() => vi.advanceTimersByTime(15_001))
+    expect(result.current).toMatchObject({ position: null, locationStatus: 'no-position' })
+    act(() => success(fix(5, Date.now() - 60_000)))
+    expect(result.current.step).toBe(0)
+    act(() => success(fix()))
+    expect(result.current.step).toBe(0)
+    act(() => vi.advanceTimersByTime(1_000))
+    act(() => success(fix()))
+    expect(result.current.step).toBe(1)
+    expect(watchPosition).toHaveBeenCalledOnce()
+    expect(JSON.parse(sessionStorage.getItem(GUIDANCE_STORAGE_KEY)!).position).toBeUndefined()
+    act(() => failure({ code: 1 } as GeolocationPositionError))
+    expect(result.current).toMatchObject({ position: null, locationStatus: 'denied' })
+    rerender({ enabled: false })
+    expect(clearWatch).toHaveBeenCalledWith(10)
   })
 })

@@ -1,5 +1,6 @@
 import './RouteTimeline.css'
 import type { CSSProperties } from 'react'
+import { useEffect, useRef } from 'react'
 import { Footprints } from 'lucide-react'
 import type { Leg, Route } from './types'
 import { roundMinutes } from './selectors'
@@ -130,13 +131,28 @@ export default function RouteTimeline({
   originName,
   destinationName,
   activeIndex,
+  activeAction,
 }: {
   route: Route
   originName?: string
   destinationName?: string
   /** Index in the original route.legs array. */
   activeIndex?: number
+  activeAction?: { label: string; onConfirm: () => void }
 }) {
+  const timeline = useRef<HTMLOListElement>(null)
+  const previousIndex = useRef(activeIndex)
+  useEffect(() => {
+    const changed = previousIndex.current !== undefined && previousIndex.current !== activeIndex
+    previousIndex.current = activeIndex
+    if (!changed || activeIndex === undefined) return
+    const active = timeline.current?.querySelector<HTMLElement>('[aria-current="step"]')
+    const body = timeline.current?.closest<HTMLElement>('.sheet-body')
+    if (!active || !body) return
+    const top =
+      active.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 12
+    body.scrollTo?.({ top: Math.max(0, top), behavior: 'auto' })
+  }, [activeIndex])
   const firstLeg = route.legs[0]
   const lastLeg = route.legs.at(-1)
   const origin = originName || (firstLeg && stationName(firstLeg, 'from')) || '출발'
@@ -150,7 +166,7 @@ export default function RouteTimeline({
     (isTransitLeg(lastLeg) || lastLeg.mode === 'bike') &&
     destination === stationName(lastLeg, 'to')
   return (
-    <ol className="route-timeline" aria-label="경로 상세">
+    <ol ref={timeline} className="route-timeline" aria-label="경로 상세">
       {!startsAtStop && (
         <li className="route-timeline-endpoint route-timeline-origin">
           <span className="route-timeline-endpoint-marker">출발</span>
@@ -185,6 +201,14 @@ export default function RouteTimeline({
                   endpoint={index === 0 && startsAtStop ? '출발' : undefined}
                 />
                 <div className="route-timeline-service">
+                  {active && activeAction?.label === '탑승했어요' && (
+                    <button
+                      className="secondary route-timeline-confirm"
+                      onClick={activeAction.onConfirm}
+                    >
+                      {activeAction.label}
+                    </button>
+                  )}
                   <div className="route-timeline-service-row">
                     <span className="route-timeline-service-label">{copy.label}</span>
                     {congestion && (
@@ -207,6 +231,14 @@ export default function RouteTimeline({
                   side="to"
                   endpoint={index === route.legs.length - 1 && endsAtStop ? '도착' : undefined}
                 />
+                {active && activeAction && activeAction.label !== '탑승했어요' && (
+                  <button
+                    className="secondary route-timeline-confirm"
+                    onClick={activeAction.onConfirm}
+                  >
+                    {activeAction.label}
+                  </button>
+                )}
               </div>
             ) : (
               <div className="route-timeline-ordinary">
@@ -220,6 +252,14 @@ export default function RouteTimeline({
                     <p className="route-timeline-direction">{leg.note}</p>
                   )}
                 <SegmentMeta leg={leg} />
+                {active && activeAction && (
+                  <button
+                    className="secondary route-timeline-confirm"
+                    onClick={activeAction.onConfirm}
+                  >
+                    {activeAction.label}
+                  </button>
+                )}
               </div>
             )}
           </li>
