@@ -12,18 +12,41 @@ import { modeIcons } from './ModeIcon'
 import { lineColor, lineTextColor } from './lineColor'
 import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
 import { isTransitLeg, isTransferLeg, transitionLabel } from './transitions'
+import { bikeRouteAvailabilityMessage, type BikeRouteAvailability } from './bikeAvailability'
+import { isBikeStockMockEnabled } from '../../api/repositories'
+
+function isBikeRoute(route: Route) {
+  return route.legs.some((leg) => leg.mode === 'bike')
+}
+
+function availabilityLabel(availability: BikeRouteAvailability) {
+  const message = bikeRouteAvailabilityMessage(availability.status)
+  if (!message || availability.status === 'checking') return message
+  if (availability.status !== 'unknown') return message
+  if (!availability.stockUpdatedAt) return `${message} · 기준 시각 확인 불가`
+  const time = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(availability.stockUpdatedAt))
+  const basis = availability.stockBasis === 'return' ? '반납 재고' : '대여 재고'
+  return `${message} · ${basis} 마지막 확인 ${time}`
+}
 
 export default function RouteCard({
   route,
   comparison,
   selected = false,
   recommendations = [],
+  bikeAvailability,
   onDetail,
 }: {
   route: Route
   comparison?: string
   selected?: boolean
   recommendations?: Array<'fast' | 'calm'>
+  bikeAvailability?: BikeRouteAvailability
   onDetail: () => void
 }) {
   const displayLegs = compactLegs(route.legs)
@@ -46,6 +69,20 @@ export default function RouteCard({
   const featuredClass = recommendations.length
     ? `route-card-featured route-card-featured-${recommendations.length > 1 ? 'both' : recommendations[0]}`
     : ''
+  const availabilityStatus = isBikeRoute(route)
+    ? (bikeAvailability?.status ?? 'checking')
+    : undefined
+  const baseAvailabilityNotice =
+    availabilityStatus && bikeAvailability
+      ? availabilityLabel({ ...bikeAvailability, status: availabilityStatus })
+      : availabilityStatus
+        ? bikeRouteAvailabilityMessage(availabilityStatus)
+        : null
+  const availabilityNotice = baseAvailabilityNotice
+    ? `${baseAvailabilityNotice}${
+        isBikeStockMockEnabled && isBikeRoute(route) && route.source !== 'MOCK' ? ' · 샘플' : ''
+      }`
+    : null
 
   return (
     <button
@@ -56,6 +93,7 @@ export default function RouteCard({
         route.label,
         `${roundMinutes(route.minutes)}분`,
         congestionLabel,
+        availabilityNotice,
         ...recommendationLabels,
         comparison,
         '상세 경로',
@@ -85,6 +123,20 @@ export default function RouteCard({
           <ChevronRight className="route-card-chevron" size={20} aria-hidden="true" />
         </span>
       </span>
+      {availabilityNotice && (
+        <span
+          className={`route-bike-availability route-bike-availability-${availabilityStatus}`}
+          role={
+            availabilityStatus === 'rental-unavailable' ||
+            availabilityStatus === 'rental-unavailable-current' ||
+            availabilityStatus === 'return-crowded'
+              ? 'status'
+              : undefined
+          }
+        >
+          {availabilityNotice}
+        </span>
+      )}
       <span className="route-card-main">
         <span className="route-card-details">
           <span className="route-time">

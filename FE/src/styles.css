@@ -1387,6 +1387,24 @@ small {
   color: #6b7c88;
   font-size: 11px;
 }
+.route-bike-availability {
+  display: block;
+  margin: -2px 0 8px;
+  color: #6b7c88;
+  font-size: 12px;
+  font-weight: 700;
+}
+.route-bike-availability-rental-unavailable,
+.route-bike-availability-return-crowded {
+  color: #b42318;
+}
+.route-bike-availability-rental-unavailable-current {
+  color: #8a5a00;
+}
+.route-bike-availability-unknown,
+.route-bike-availability-checking {
+  color: #8a5a00;
+}
 .route-badge {
   color: var(--primary-dark);
   font-size: 13px;
@@ -1855,8 +1873,35 @@ small {
   font-size: 12px;
   line-height: 1.35;
 }
+.bike-prediction-stock-note {
+  color: #8a5a00;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.bike-prediction-unavailable-note {
+  color: #b42318;
+  font-size: 11px;
+  line-height: 1.35;
+}
 .bike-prediction-state .secondary {
   margin-top: 10px;
+}
+.bike-prediction-return {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.bike-prediction-return strong {
+  font-size: 14px;
+}
+.bike-prediction-return-crowded {
+  color: #b42318;
+}
+.bike-prediction-return small {
+  color: var(--muted);
+  font-size: 11px;
 }
 .bike-prediction-value strong {
   display: block;

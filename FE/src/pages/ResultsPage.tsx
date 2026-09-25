@@ -9,6 +9,10 @@ import { clockTime, congestionPredictionFor } from '../features/route/selectors'
 import { groupRoutes } from '../features/route/routeGrouping'
 import type { RepositoryErrorCode } from '../api/errors'
 import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
+import {
+  useBikeRouteAvailability,
+  type BikeRouteAvailability,
+} from '../features/route/bikeAvailability'
 
 interface Props {
   origin: Place
@@ -67,17 +71,29 @@ function sortRoutes(routes: Route[], priority: Priority) {
     .map(({ route }) => route)
 }
 
-function featuredRoutes(routes: Route[]): FeaturedRoute[] {
-  if (!routes.length) return []
-  const fastest = routes.reduce(
+function isBikeRoute(route: Route) {
+  return route.legs.some((leg) => leg.mode === 'bike')
+}
+
+function canRecommend(route: Route, availability: Record<string, BikeRouteAvailability>) {
+  return !isBikeRoute(route) || availability[route.id]?.status === 'available'
+}
+
+function featuredRoutes(
+  routes: Route[],
+  availability: Record<string, BikeRouteAvailability>,
+): FeaturedRoute[] {
+  const recommendable = routes.filter((route) => canRecommend(route, availability))
+  if (!recommendable.length) return []
+  const fastest = recommendable.reduce(
     (best, route, index) =>
       !best || compareByTime(route, best.route, index, best.index) < 0 ? { route, index } : best,
     undefined as { route: Route; index: number } | undefined,
   )
-  const taggedCalm = routes.filter((route) => route.routeType === 'LOW_CONGESTION')
+  const taggedCalm = recommendable.filter((route) => route.routeType === 'LOW_CONGESTION')
   const calmCandidates = taggedCalm.length
     ? taggedCalm
-    : routes.filter((route) => congestionPredictionFor(route) !== undefined)
+    : recommendable.filter((route) => congestionPredictionFor(route) !== undefined)
   const calm = calmCandidates.reduce<Route | undefined>((best, route) => {
     if (!best) return route
     if (taggedCalm.length) return compareByTime(route, best, 0, 0) < 0 ? route : best
@@ -127,7 +143,8 @@ export default function ResultsPage({
   const [choosingTime, setChoosingTime] = useState(false)
   const [localPriority, setLocalPriority] = useState<Priority>(() => priority)
   const liveApi = isLiveApi ?? false
-  const featured = featuredRoutes(visible)
+  const bikeAvailability = useBikeRouteAvailability(visible)
+  const featured = featuredRoutes(visible, bikeAvailability)
   const featuredIds = new Set(featured.map(({ route }) => route.id))
   const remaining = visible.filter((route) => !featuredIds.has(route.id))
   const remainingPredictions = remaining.filter((route) => congestionPredictionFor(route))
@@ -272,6 +289,7 @@ export default function ResultsPage({
                     <RouteCard
                       key={route.id}
                       route={route}
+                      bikeAvailability={bikeAvailability[route.id]}
                       selected={route.id === selectedId}
                       recommendations={recommendations}
                       onDetail={() => {
@@ -313,6 +331,7 @@ export default function ResultsPage({
                       <RouteCard
                         key={route.id}
                         route={route}
+                        bikeAvailability={bikeAvailability[route.id]}
                         selected={route.id === selectedId}
                         onDetail={() => {
                           setSelectedId(route.id)
