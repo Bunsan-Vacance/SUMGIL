@@ -44,22 +44,24 @@ class BikeStockReaderTest {
     @Test
     @DisplayName("신선도 창(180초) 이내면 AVAILABLE")
     void 신선하면_AVAILABLE() {
-        given(rawValue(7, NOW.minusSeconds(60)));
+        given(rawValue(7, 0, NOW.minusSeconds(60)));
 
         BikeStock stock = reader.find("ST-1");
 
         assertEquals(7, stock.available());
+        assertEquals(0, stock.rackCount());
         assertEquals(BikeStockStatus.AVAILABLE, stock.status());
     }
 
     @Test
     @DisplayName("신선도 창을 넘겼지만 캐시는 있으면 STALE — 마지막 값을 그대로 준다")
     void 오래됐으면_STALE() {
-        given(rawValue(3, NOW.minusSeconds(200)));
+        given(rawValue(3, 15, NOW.minusSeconds(200)));
 
         BikeStock stock = reader.find("ST-1");
 
         assertEquals(3, stock.available());
+        assertEquals(15, stock.rackCount());
         assertEquals(BikeStockStatus.STALE, stock.status());
     }
 
@@ -71,6 +73,54 @@ class BikeStockReaderTest {
         BikeStock stock = reader.find("ST-1");
 
         assertNull(stock.available());
+        assertNull(stock.rackCount());
+        assertNull(stock.updatedAt());
+        assertEquals(BikeStockStatus.UNAVAILABLE, stock.status());
+    }
+
+    @Test
+    @DisplayName("거치대 수가 없으면 재고 상태는 유지하고 rackCount만 null")
+    void 거치대_수가_없으면_null() {
+        given(rawValueWithoutRacks(7, NOW.minusSeconds(60)));
+
+        BikeStock stock = reader.find("ST-1");
+
+        assertEquals(7, stock.available());
+        assertNull(stock.rackCount());
+        assertEquals(BikeStockStatus.AVAILABLE, stock.status());
+    }
+
+    @Test
+    @DisplayName("거치대 수가 잘못되거나 음수면 rackCount만 null")
+    void 거치대_수가_잘못되면_null() {
+        Map<String, Object> broken = rawValue(7, 15, NOW.minusSeconds(60));
+        broken.put("racks", "not-a-number");
+        given(broken);
+
+        BikeStock stock = reader.find("ST-1");
+
+        assertEquals(7, stock.available());
+        assertNull(stock.rackCount());
+        assertEquals(BikeStockStatus.AVAILABLE, stock.status());
+
+        broken.put("racks", -1);
+        given(broken);
+
+        stock = reader.find("ST-1");
+
+        assertNull(stock.rackCount());
+        assertEquals(BikeStockStatus.AVAILABLE, stock.status());
+    }
+
+    @Test
+    @DisplayName("대여 가능 자전거 수가 음수면 UNAVAILABLE")
+    void 대여_가능_자전거_수가_음수면_UNAVAILABLE() {
+        given(rawValue(-1, 15, NOW.minusSeconds(60)));
+
+        BikeStock stock = reader.find("ST-1");
+
+        assertNull(stock.available());
+        assertNull(stock.rackCount());
         assertNull(stock.updatedAt());
         assertEquals(BikeStockStatus.UNAVAILABLE, stock.status());
     }
@@ -88,7 +138,15 @@ class BikeStockReaderTest {
         assertEquals(BikeStockStatus.UNAVAILABLE, stock.status());
     }
 
-    private static Map<String, Object> rawValue(int available, Instant ingestedAt) {
+    private static Map<String, Object> rawValue(int available, int racks, Instant ingestedAt) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("available", available);
+        value.put("racks", racks);
+        value.put("ingested_at", ingestedAt.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+        return value;
+    }
+
+    private static Map<String, Object> rawValueWithoutRacks(int available, Instant ingestedAt) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("available", available);
         value.put("ingested_at", ingestedAt.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));

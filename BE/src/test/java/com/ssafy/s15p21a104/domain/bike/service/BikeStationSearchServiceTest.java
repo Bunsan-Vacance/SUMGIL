@@ -17,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 
@@ -73,7 +74,7 @@ class BikeStationSearchServiceTest {
         BikeStation withinBoundingBoxButOutsideRadius = mockStation("ST-2", "박스 안 반경 밖", BASE_LAT + 0.003, BASE_LNG, 5);
         lenient().when(bikeStationRepository.findByLatBetweenAndLngBetween(any(), any(), any(), any()))
                 .thenReturn(List.of(withinBoundingBoxButOutsideRadius, near));
-        lenient().when(bikeStockReader.find(any())).thenReturn(new BikeStock(null, null, BikeStockStatus.UNAVAILABLE));
+        lenient().when(bikeStockReader.find(any())).thenReturn(new BikeStock(null, null, null, BikeStockStatus.UNAVAILABLE));
 
         List<BikeStationResponse> result = bikeStationSearchService.nearby(BASE_LAT, BASE_LNG, 200, null);
 
@@ -88,7 +89,7 @@ class BikeStationSearchServiceTest {
         lenient().when(bikeStationRepository.findByLatBetweenAndLngBetween(any(), any(), any(), any()))
                 .thenReturn(List.of(near));
         OffsetDateTime updatedAt = OffsetDateTime.parse("2026-09-17T10:00:00+09:00");
-        lenient().when(bikeStockReader.find("ST-1")).thenReturn(new BikeStock(7, updatedAt, BikeStockStatus.AVAILABLE));
+        lenient().when(bikeStockReader.find("ST-1")).thenReturn(new BikeStock(7, 10, updatedAt, BikeStockStatus.AVAILABLE));
 
         List<BikeStationResponse> result = bikeStationSearchService.nearby(BASE_LAT, BASE_LNG, 200, null);
 
@@ -103,7 +104,7 @@ class BikeStationSearchServiceTest {
         BikeStation near = mockStation("ST-1", "가까운 대여소", BASE_LAT + 0.0005, BASE_LNG, 10);
         lenient().when(bikeStationRepository.findByLatBetweenAndLngBetween(any(), any(), any(), any()))
                 .thenReturn(List.of(near));
-        lenient().when(bikeStockReader.find("ST-1")).thenReturn(new BikeStock(null, null, BikeStockStatus.UNAVAILABLE));
+        lenient().when(bikeStockReader.find("ST-1")).thenReturn(new BikeStock(null, null, null, BikeStockStatus.UNAVAILABLE));
 
         List<BikeStationResponse> result = bikeStationSearchService.nearby(BASE_LAT, BASE_LNG, 200, null);
 
@@ -124,18 +125,21 @@ class BikeStationSearchServiceTest {
 
     @Test
     @DisplayName("등록된 대여소는 재고 상태(AVAILABLE/STALE/UNAVAILABLE)를 그대로 전달한다")
-    void 단건조회_상태_전달() {
+    void 단건조회_상태_전달() throws Exception {
         BikeStation station = mockStation("ST-1", "가까운 대여소", BASE_LAT, BASE_LNG, 10);
         lenient().when(bikeStationRepository.findById("ST-1")).thenReturn(Optional.of(station));
         OffsetDateTime updatedAt = OffsetDateTime.parse("2026-09-17T09:50:00+09:00");
-        lenient().when(bikeStockReader.find("ST-1")).thenReturn(new BikeStock(3, updatedAt, BikeStockStatus.STALE));
+        lenient().when(bikeStockReader.find("ST-1")).thenReturn(new BikeStock(3, 15, updatedAt, BikeStockStatus.STALE));
 
         BikeStockResponse response = bikeStationSearchService.stock("ST-1");
 
         assertEquals("ST-1", response.rentalId());
         assertEquals(3, response.availableBikes());
+        assertEquals(15, response.rackCount());
         assertEquals(updatedAt, response.stockUpdatedAt());
         assertEquals(BikeStockStatus.STALE, response.status());
+        String json = JsonMapper.builder().build().writeValueAsString(response);
+        assertEquals(true, json.contains("\"rackCount\":15"));
     }
 
     private BikeStation mockStation(String rentalId, String name, double lat, double lng, int dockCount) {
