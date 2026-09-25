@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 public record BikeStockResponse(
         String rentalId,
         Integer availableBikes,
+        Integer rackCount,
         OffsetDateTime stockUpdatedAt,
         BikeStockStatus status
 ) {

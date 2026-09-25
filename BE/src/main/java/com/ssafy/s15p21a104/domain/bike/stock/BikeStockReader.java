@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * {@code bike:stock:{rentalId}} 캐시를 읽어 신선도를 판정한다(BIKE-001 156). 값 모양은 반영기
- * ({@code consume.BikeStockApplier})가 쓰는 것과 같다 — {@code available}·{@code ingested_at}.
+ * ({@code consume.BikeStockApplier})가 쓰는 것과 같다 — {@code available}·{@code racks}·{@code ingested_at}.
  *
  * <p>서버는 이 캐시를 읽기만 한다. 값이 없거나 형식이 깨졌으면 예외를 던지지 않고 UNAVAILABLE로 다룬다 —
  * 재고를 모르는 상태는 에러가 아니다(원칙: 값을 지어내지 않는다).
@@ -36,13 +36,18 @@ public class BikeStockReader {
             return BikeStock.unavailable();
         }
         Integer available = asInt(map.get("available"));
+        if (available == null || available < 0) {
+            return BikeStock.unavailable();
+        }
+        Integer rackCount = asNonNegativeInt(map.get("racks"));
         OffsetDateTime updatedAt = asTime(map.get("ingested_at"));
-        if (available == null || updatedAt == null) {
+        if (updatedAt == null) {
             return BikeStock.unavailable();
         }
         boolean fresh = Duration.between(updatedAt, OffsetDateTime.now(clock))
                 .compareTo(CacheKeys.BIKE_STOCK_FRESH_WINDOW) <= 0;
-        return new BikeStock(available, updatedAt, fresh ? BikeStockStatus.AVAILABLE : BikeStockStatus.STALE);
+        return new BikeStock(available, rackCount, updatedAt,
+                fresh ? BikeStockStatus.AVAILABLE : BikeStockStatus.STALE);
     }
 
     private static Integer asInt(Object value) {
@@ -54,6 +59,11 @@ public class BikeStockReader {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private static Integer asNonNegativeInt(Object value) {
+        Integer parsed = asInt(value);
+        return parsed == null || parsed < 0 ? null : parsed;
     }
 
     private static OffsetDateTime asTime(Object value) {
