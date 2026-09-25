@@ -175,10 +175,13 @@ describe('경로 상세 버스 선택', () => {
       />,
     )
 
-    const congestion = document.querySelector('.stats strong[style]') as HTMLElement
+    const congestion = document.querySelector(
+      '.route-detail-congestion strong[style]',
+    ) as HTMLElement
     expect(congestion.textContent).toBe('혼잡')
     expect(congestion.style.color).toBe('rgb(185, 28, 28)')
-    expect(document.querySelector('.stats')?.textContent).not.toContain('%')
+    expect(congestion.closest('.route-detail-summary-top')?.querySelector('h2')).toBeTruthy()
+    expect(document.querySelector('.route-detail-congestion')?.textContent).not.toContain('%')
     expect(screen.getAllByText('혼잡도 예상')).toHaveLength(1)
     expect(screen.queryByText('요일 평균 기준')).toBeNull()
     expect(screen.queryByText('다른 경로')).toBeNull()

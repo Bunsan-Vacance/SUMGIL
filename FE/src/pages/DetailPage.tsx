@@ -107,37 +107,39 @@ export default function DetailPage({
       >
         <header className="route-detail-summary">
           <div className="route-detail-summary-top">
-            <h2>
-              {roundMinutes(selected.minutes)}
-              <small>분</small>
-            </h2>
-            {guidance && (
-              <span className="route-detail-live">
-                <Radio size={14} />
-                안내 중
-              </span>
-            )}
-          </div>
-          <p className="route-detail-times">
-            {departure ? `${departure} – ${arrival}` : `${arrival} 도착 예상`}
-            <span>환승 {selected.transfers}회</span>
-          </p>
-          <RouteModeStrip legs={selected.legs} />
-          <div className="route-detail-meta stats">
-            {selected.walk !== undefined && <span>도보 {selected.walk}m</span>}
+            <div className="route-detail-time-group">
+              <h2>{roundMinutes(selected.minutes)}분</h2>
+              <p className="route-detail-times">
+                {departure ? `${departure} – ${arrival}` : `${arrival} 도착 예상`}
+                <span>환승 {selected.transfers}회</span>
+              </p>
+            </div>
             {isCongestionPredictionDate(selected.departedAt) && (
-              <span>
-                <span>혼잡도 예상</span>{' '}
+              <div
+                className={`route-detail-congestion${presentation ? '' : ' is-unavailable'}`}
+                aria-label={`전체 경로 혼잡도 예상 ${presentation?.label ?? '정보 없음'}`}
+              >
                 <strong style={{ color: presentation?.color }}>
                   {presentation?.label ?? '정보 없음'}
                 </strong>
-              </span>
+                <span>혼잡도 예상</span>
+              </div>
             )}
-            {selected.source === 'MOCK' && <small>샘플 경로</small>}
           </div>
+          <RouteModeStrip legs={selected.legs} />
+          {(selected.walk !== undefined || selected.source === 'MOCK') && (
+            <div className="route-detail-meta stats">
+              {selected.walk !== undefined && <span>도보 {selected.walk}m</span>}
+              {selected.source === 'MOCK' && <small>샘플 경로</small>}
+            </div>
+          )}
         </header>
         {guidance && (
           <section className="route-detail-guidance" aria-label="현재 구간 안내">
+            <span className="route-detail-live">
+              <Radio size={14} />
+              안내 중
+            </span>
             <p role="status" aria-live="polite">
               <strong>{currentLeg?.title}</strong>
               <span>{locationMessages[guidance.locationStatus]}</span>
