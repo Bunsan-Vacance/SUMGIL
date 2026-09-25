@@ -65,6 +65,7 @@ export default function App() {
                   screen === 'guide' ? guidance.route : screen === 'detail' ? trip.selected : null
                 }
                 autoLocate={screen === 'home'}
+                livePosition={screen === 'guide' ? guidance.position : undefined}
                 onCurrentLocation={
                   screen === 'home' ? planner.setOriginFromCurrentLocation : undefined
                 }
@@ -138,6 +139,9 @@ export default function App() {
                 screen === 'guide'
                   ? {
                       step: guidance.step,
+                      boarded: Boolean(guidance.train),
+                      position: guidance.position,
+                      onConfirm: guidance.confirmStep,
                       onExit: () => setModal('exit'),
                       onPrevious: planner.previous,
                       onNext: planner.advance,

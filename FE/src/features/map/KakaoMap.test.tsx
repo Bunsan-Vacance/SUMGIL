@@ -100,6 +100,7 @@ class FakeMap {
   panTo = vi.fn()
   relayout = vi.fn()
   getBounds = vi.fn(() => new FakeBounds())
+  dragStart: (() => void) | null = null
 }
 
 class FakeBounds {
@@ -113,6 +114,7 @@ class FakeMarker {
   setMap = vi.fn()
   setImage = vi.fn()
   setZIndex = vi.fn()
+  setPosition = vi.fn()
 
   constructor(readonly options: { title?: string }) {}
 }
@@ -208,6 +210,8 @@ function fakeMaps(
         ) => {
           if (target instanceof FakeMarker && type === 'click')
             markerClickHandlers.push(handler as unknown as () => void)
+          if (target instanceof FakeMap && type === 'dragstart')
+            target.dragStart = handler as unknown as () => void
         },
       ) as unknown as KakaoMaps['event']['addListener'],
       removeListener: removeListener as unknown as KakaoMaps['event']['removeListener'],
@@ -224,6 +228,7 @@ function renderMap(
     onPlaceSelect?: (place: Place) => void
     autoLocate?: boolean
     onCurrentLocation?: (position: GeolocationPosition) => void
+    livePosition?: { latitude: number; longitude: number; accuracy: number } | null
   } = {},
 ) {
   const markerClickHandlers: Array<() => void> = []
@@ -240,6 +245,7 @@ function renderMap(
       onPlaceSelect={options.onPlaceSelect}
       autoLocate={options.autoLocate}
       onCurrentLocation={options.onCurrentLocation}
+      livePosition={options.livePosition}
       onMessage={vi.fn()}
     />,
   )
@@ -286,6 +292,63 @@ afterEach(() => {
 })
 
 describe('일반 지도 장소 마커', () => {
+  it('livePosition은 단일 위치 마커를 갱신하고 드래그 후 현재 위치 버튼으로 추적을 재개한다', async () => {
+    const first = { latitude: 37.5, longitude: 127.03, accuracy: 8 }
+    const rendered = renderMap({ livePosition: first })
+    await waitFor(() => expect(rendered.markers).toHaveLength(2))
+    const liveMarker = rendered.markers[1]
+    const map = FakeMap.instances[0]
+    expect(map.panTo).toHaveBeenCalledTimes(1)
+
+    rendered.rerender(
+      <KakaoMap
+        origin={origin}
+        destination={null}
+        livePosition={{ ...first, latitude: 37.51 }}
+        onMessage={vi.fn()}
+      />,
+    )
+    expect(liveMarker.setPosition).toHaveBeenCalledOnce()
+    expect(map.panTo).toHaveBeenCalledTimes(2)
+
+    act(() => map.dragStart?.())
+    rendered.rerender(
+      <KakaoMap
+        origin={origin}
+        destination={null}
+        livePosition={{ ...first, latitude: 37.52 }}
+        onMessage={vi.fn()}
+      />,
+    )
+    expect(liveMarker.setPosition).toHaveBeenCalledTimes(2)
+    expect(map.panTo).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByRole('button', { name: '현재 위치' }))
+    expect(map.panTo).toHaveBeenCalledTimes(3)
+    expect(rendered.markers).toHaveLength(2)
+  })
+
+  it('안내 종료 시 live 마커를 제거하고 유효하지 않은 좌표는 표시하지 않는다', async () => {
+    const rendered = renderMap({
+      livePosition: { latitude: 37.5, longitude: 127.03, accuracy: 8 },
+    })
+    await waitFor(() => expect(rendered.markers).toHaveLength(2))
+    const liveMarker = rendered.markers[1]
+    rendered.rerender(
+      <KakaoMap origin={origin} destination={null} livePosition={null} onMessage={vi.fn()} />,
+    )
+    expect(liveMarker.setMap).toHaveBeenCalledWith(null)
+    rendered.rerender(
+      <KakaoMap
+        origin={origin}
+        destination={null}
+        livePosition={{ latitude: 91, longitude: 127.03, accuracy: 8 }}
+        onMessage={vi.fn()}
+      />,
+    )
+    expect(rendered.markers).toHaveLength(2)
+  })
+
   it('홈 지도는 준비되면 현재 위치로 자동 이동한다', async () => {
     const getCurrentPosition = vi.fn()
     const onCurrentLocation = vi.fn()
@@ -462,7 +525,7 @@ describe('일반 지도 장소 마커', () => {
 
     expect(markers).toHaveLength(2)
     unmount()
-    expect(removeListener).toHaveBeenCalledTimes(3)
+    expect(removeListener).toHaveBeenCalledTimes(4)
     markers.forEach((marker) => expect(marker.setMap).toHaveBeenCalledWith(null))
   })
 
@@ -906,6 +969,48 @@ describe('일반 지도 장소 마커', () => {
 
     expect(map.setBounds.mock.calls.length).toBeGreaterThan(setBoundsCalls)
     expect(map.setCenter).toHaveBeenCalledTimes(1)
+  })
+
+  it('SDK 준비 후 경로 bounds보다 live 위치 추적이 우선하고 resize 시 사용자 드래그를 유지한다', async () => {
+    const route: Route = {
+      id: 'route-live-camera',
+      label: '길안내 경로',
+      minutes: 8,
+      transfers: 0,
+      modes: ['walk'],
+      legs: [],
+      geometry: {
+        type: 'MultiLineString',
+        coordinates: [
+          [
+            [127.01, 37.49],
+            [127.04, 37.52],
+          ],
+        ],
+      },
+    }
+    const rendered = renderMap({
+      route,
+      livePosition: { latitude: 37.5, longitude: 127.03, accuracy: 7 },
+    })
+    await waitFor(() => expect(document.querySelector('.route-svg-overlay')).not.toBeNull())
+    const map = FakeMap.instances[0]
+    expect(map.setBounds).toHaveBeenCalledOnce()
+    expect(map.panTo).toHaveBeenCalledOnce()
+
+    const boundsCalls = map.setBounds.mock.calls.length
+    const panCalls = map.panTo.mock.calls.length
+    act(() => FakeResizeObserver.trigger())
+    expect(map.setBounds).toHaveBeenCalledTimes(boundsCalls)
+    expect(map.panTo).toHaveBeenCalledTimes(panCalls + 1)
+
+    act(() => map.dragStart?.())
+    const preservedCenter = map.getCenter()
+    const pausedPanCalls = map.panTo.mock.calls.length
+    act(() => FakeResizeObserver.trigger())
+    expect(map.setCenter).toHaveBeenLastCalledWith(preservedCenter)
+    expect(map.panTo).toHaveBeenCalledTimes(pausedPanCalls)
+    rendered.unmount()
   })
 })
 

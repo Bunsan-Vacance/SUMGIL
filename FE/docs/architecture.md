@@ -42,6 +42,7 @@ src/
 - `selectors`와 reducer는 React·DOM·네트워크 없이 동작하는 함수다.
 - `components`는 특정 경로 데이터나 화면 이름을 알지 않는다.
 - 카카오 SDK 사용은 `features/map`과 `lib/kakao` 안으로 제한한다. 일반 지도와 장소 탐색 지도는 `useKakaoMap`, 지도 위치 선택은 `MapPlacePicker`, 현재 위치 조회는 `useCurrentLocation`이 맡는다. `KakaoMap`은 경로 장소 또는 탐색 결과 배열을 받아 마커를 관리한다.
+- 길안내의 지속 위치 추적은 `useGuidance`가 소유하며 `locationProgress`에서 도착 지점과 거리·직접 확인 행동을 판정한다. `App`은 유효한 위치를 지도에 전달할 뿐 별도 위치 watch를 만들지 않는다. 지도는 기존 현재 위치 마커를 갱신하고 드래그 시 추종을 중단한다. 위치 갱신 때문에 지도나 경로 오버레이를 재생성하지 않는다.
 - 따릉이 정적 데이터 변환과 선택용 `Place` 변환은 `features/map/bikeStations`, viewport 내 자전거 아이콘 오버레이는 `features/map/bikeStationMarkers`가 맡는다. 선택 결과는 기존 장소 선택 흐름으로 전달한다.
 - 미리보기 시나리오용 제안 경로는 `app/preview`에서 주입한다. 초기 후보·선택 경로를 기능 훅 내부에 숨겨 넣지 않는다.
 
