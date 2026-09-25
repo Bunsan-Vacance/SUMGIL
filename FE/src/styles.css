@@ -1886,22 +1886,12 @@ small {
 .bike-prediction-state .secondary {
   margin-top: 10px;
 }
-.bike-prediction-return {
-  display: grid;
-  gap: 3px;
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-.bike-prediction-return strong {
-  font-size: 14px;
-}
 .bike-prediction-return-crowded {
+  margin-top: 6px;
   color: #b42318;
-}
-.bike-prediction-return small {
-  color: var(--muted);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .bike-prediction-value strong {
   display: block;
