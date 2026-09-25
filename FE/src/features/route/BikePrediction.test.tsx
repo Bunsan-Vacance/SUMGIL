@@ -145,7 +145,9 @@ describe('BikePrediction', () => {
       <BikePrediction route={route} repository={repository} stockRepository={stockRepository} />,
     )
     await waitFor(() => expect(screen.getByText('재고 정보 없음')).toBeTruthy())
-    await waitFor(() => expect(screen.getByText(/반납 대여소가 혼잡해요/)).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText('반납 대여소 혼잡 · 현장 공간 확인 필요')).toBeTruthy(),
+    )
     rerender(
       <BikePrediction
         route={{ ...route, id: 'retry-stock' }}
