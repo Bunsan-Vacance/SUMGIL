@@ -1,0 +1,203 @@
+.bottom-sheet.route-detail-sheet[data-snap='default'] {
+  height: auto;
+  max-height: 76%;
+}
+.route-detail-sheet .sheet-grip {
+  height: 26px;
+  flex-basis: 26px;
+}
+.route-detail-sheet .sheet-grip span {
+  width: 30px;
+  height: 3px;
+  background: #c4cdd4;
+}
+.route-detail-sheet .sheet-body {
+  padding: 0 20px 24px;
+}
+.route-detail-summary {
+  padding: 0 0 16px;
+  border-bottom: 1px solid #e9edf0;
+}
+.route-detail-summary-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.route-detail-summary h2 {
+  color: #18252e;
+  font-size: 26px;
+  line-height: 1.3;
+  letter-spacing: -0.7px;
+  font-weight: 650;
+}
+.route-detail-summary h2 small {
+  font-size: 13px;
+  font-weight: 500;
+  margin-left: 2px;
+}
+.route-detail-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 5px;
+  color: #5c6871;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.route-detail-times > span {
+  color: #7b858e;
+}
+.route-detail-meta.stats {
+  display: flex;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: #68747d;
+  font-size: 12px;
+}
+.route-detail-meta.stats strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.route-detail-meta.stats small {
+  font-size: 12px;
+  color: #68747d;
+  margin-left: auto;
+}
+.route-detail-footer {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.route-detail-footer > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 112px;
+  min-height: 42px;
+  border-radius: 22px;
+  padding: 9px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.route-detail-eta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.route-detail-eta strong {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--primary-dark);
+}
+.route-detail-eta span {
+  font-size: 12px;
+  color: #5c6871;
+}
+.route-detail-live {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--primary-dark);
+  background: #eef9f5;
+  padding: 6px 9px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+.route-detail-guidance {
+  padding: 14px 0;
+  border-bottom: 1px solid #e9edf0;
+}
+.route-detail-guidance > p {
+  display: grid;
+  gap: 5px;
+}
+.route-detail-guidance > p strong {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #08715f;
+}
+.route-detail-guidance > p span {
+  font-size: 12px;
+  color: #64717a;
+  line-height: 1.6;
+}
+.route-detail-adjust {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #5b6973;
+}
+.route-detail-adjust summary {
+  padding: 8px 0;
+  cursor: pointer;
+}
+.route-detail-adjust label {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+.route-detail-adjust select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  background: white;
+  color: #24333e;
+  border: 1px solid #dce2e7;
+  border-radius: 8px;
+}
+.route-detail-adjust > p {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.route-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.route-detail-actions > button {
+  flex: 1;
+  font-size: 13px;
+}
+.route-detail-journey {
+  padding-top: 22px;
+}
+.route-detail-sheet .bike-prediction-card h3 {
+  font-size: 12px;
+  font-weight: 600;
+}
+.route-detail-sheet .bike-prediction-value {
+  background: #f8fafb;
+  border-color: #edf0f2;
+}
+.route-detail-sheet .bike-prediction-value strong {
+  font-size: 17px;
+  font-weight: 600;
+}
+.route-detail-sheet .bike-prediction-return-crowded {
+  font-size: 12px;
+}
+.route-detail-sheet .bike-prediction-return-crowded strong {
+  font-weight: 500;
+}
+@media (max-width: 360px) {
+  .route-detail-sheet .sheet-body {
+    padding-inline: 16px;
+  }
+  .route-detail-footer {
+    gap: 8px;
+  }
+  .route-detail-footer > button {
+    min-width: 104px;
+    padding-inline: 12px;
+  }
+}

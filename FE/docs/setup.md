@@ -34,6 +34,8 @@ npm run dev
 
 ## 확인할 흐름
 
+개발 서버에서 `/?preview=congestion#detail`로 환승 경로를, `/?preview=short#detail`로 단일 지하철 구간을, `/?preview=bike#detail`로 따릉이 경로를 확인할 수 있다. 초기화 옵션은 개발 모드에서만 동작하며 짧은 경로·따릉이는 실제 API 계약 fixture를 사용한다. 재고와 예측도 샘플로 확인하려면 각각 `VITE_BIKE_STOCK_MOCK=true`, `VITE_BIKE_PREDICTION_MOCK=true`를 개발 서버에 설정한다.
+
 1. 홈에서 도착지를 검색하고 도곡역을 선택한다.
 2. 대표 경로와 이어지는 다른 경로를 스크롤하며 선택한다. 우선순위를 변경하거나 이동수단을 필터링한다.
 3. 바텀시트 손잡이는 클릭, 위아래 드래그, 키보드 위아래 화살표로 조작한다. Escape는 기본 높이로 돌린다.

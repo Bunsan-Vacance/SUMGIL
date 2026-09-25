@@ -62,7 +62,14 @@ function restoreGuidance(): GuidanceState {
     removeStoredGuidance(currentStorage)
     return initialGuidance
   }
-  return { ...initialGuidance, ...(parsed as unknown as GuidanceState), locationStatus: 'idle' }
+  return {
+    ...initialGuidance,
+    ...(parsed as unknown as GuidanceState),
+    locationStatus: 'idle',
+    locationCandidateStep: undefined,
+    locationCandidateCount: 0,
+    transitAwayStep: undefined,
+  }
 }
 
 export function useGuidance(trackingEnabled = false) {
@@ -144,7 +151,13 @@ export function useGuidance(trackingEnabled = false) {
         removeStoredGuidance(currentStorage)
         return
       }
-      const { locationStatus: _locationStatus, ...persistedState } = state
+      const {
+        locationStatus: _locationStatus,
+        locationCandidateStep: _locationCandidateStep,
+        locationCandidateCount: _locationCandidateCount,
+        transitAwayStep: _transitAwayStep,
+        ...persistedState
+      } = state
       currentStorage.setItem(GUIDANCE_STORAGE_KEY, JSON.stringify(persistedState))
     } catch {
       // 저장소를 사용할 수 없어도 안내 화면은 계속 동작한다.
