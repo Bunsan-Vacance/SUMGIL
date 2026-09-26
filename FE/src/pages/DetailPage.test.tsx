@@ -145,7 +145,7 @@ describe('경로 상세 버스 선택', () => {
     expect(screen.queryByText('station 근처예요.')).toBeNull()
   })
 
-  it('검색 결과와 상세에서 동일한 이동 시간 막대와 혼잡도 표시를 사용한다', () => {
+  it('이동 시간 막대는 공유하고 검색 결과의 혼잡도만 노선 옆으로 옮긴다', () => {
     const current = route('shared-strip', 'BUS', '버스')
     current.legs[1].segmentCongestionGrade = 'CONGESTED'
     const { container } = render(
@@ -165,9 +165,9 @@ describe('경로 상세 버스 선택', () => {
     expect(detail.querySelector('.mode-strip')?.outerHTML).toBe(
       card.querySelector('.mode-strip')?.outerHTML,
     )
-    expect(detail.querySelector('.route-segment-labels')?.outerHTML).toBe(
-      card.querySelector('.route-segment-labels')?.outerHTML,
-    )
+    expect(detail.querySelector('.route-segment-labels')?.textContent).toContain('혼잡')
+    expect(card.querySelector('.route-segment-labels')).toBeNull()
+    expect(card.querySelector('.route-stop-congestion')?.textContent).toBe('혼잡')
   })
 
   it('같은 시트에서 안내를 시작해도 따릉이 예측과 혼잡 안내를 유지한다', async () => {
