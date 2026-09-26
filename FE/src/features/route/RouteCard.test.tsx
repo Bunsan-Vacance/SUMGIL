@@ -147,7 +147,7 @@ describe('경로 카드 구간 혼잡도', () => {
     )
   })
 
-  it('모든 표시 구간을 같은 폭으로 정렬하고 등급 없는 구간은 비워 둔다', () => {
+  it('막대 위 대신 각 승차역의 노선명 왼쪽에 구간 등급을 표시한다', () => {
     const route: Route = {
       id: 'route',
       label: '빠른 경로',
@@ -185,14 +185,15 @@ describe('경로 카드 구간 혼잡도', () => {
 
     render(<RouteCard route={route} onDetail={vi.fn()} />)
 
-    const labels = screen.getByLabelText('구간별 혼잡도')
-    expect(labels.children).toHaveLength(3)
-    expect(Array.from(labels.children, (cell) => cell.textContent)).toEqual(['혼잡', '', '포화'])
-    expect(Array.from(labels.children, (cell) => (cell as HTMLElement).style.flexGrow)).toEqual([
-      '5',
-      '1',
-      '4',
-    ])
+    expect(screen.queryByLabelText('구간별 혼잡도')).toBeNull()
+    const congested = screen.getByLabelText('역삼역 → 선릉역 구간 혼잡도 혼잡')
+    const saturated = screen.getByLabelText('선릉역 → 도곡역 구간 혼잡도 포화')
+    expect(congested.nextElementSibling?.textContent).toBe('2호선')
+    expect(saturated.nextElementSibling?.textContent).toBe('수인분당선')
+    expect(congested.style.color).toBe('rgb(185, 28, 28)')
+    expect(saturated.style.color).toBe('rgb(126, 34, 206)')
+    expect(document.querySelectorAll('.route-stop-congestion')).toHaveLength(2)
+    expect(document.querySelector('.route-stop-arrival .route-stop-congestion')).toBeNull()
     expect(screen.queryByText('역삼역 → 선릉역')).toBeNull()
     expect(screen.queryByText('선릉역 → 도곡역')).toBeNull()
     expect(screen.getByRole('button').getAttribute('aria-label')).toContain('상세 경로')
@@ -217,9 +218,7 @@ describe('경로 카드 구간 혼잡도', () => {
       />,
     )
 
-    expect(
-      Array.from(screen.getByLabelText('구간별 혼잡도').children, (cell) => cell.textContent),
-    ).toEqual(['보통'])
+    expect(screen.getByLabelText('정류장 A → 정류장 B 구간 혼잡도 보통').textContent).toBe('보통')
   })
 
   it('구간 혼잡도 값이 없으면 구간별 혼잡도 UI를 만들지 않는다', () => {
@@ -235,5 +234,6 @@ describe('경로 카드 구간 혼잡도', () => {
     render(<RouteCard route={route} onDetail={vi.fn()} />)
 
     expect(screen.queryByLabelText('구간별 혼잡도')).toBeNull()
+    expect(document.querySelector('.route-stop-congestion')).toBeNull()
   })
 })

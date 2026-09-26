@@ -1568,7 +1568,9 @@ small {
   background: #087e62;
 }
 .route-stops {
-  display: block;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) max-content fit-content(110px);
+  column-gap: 9px;
   position: relative;
   margin-top: 14px;
   padding-top: 8px;
@@ -1576,7 +1578,8 @@ small {
 }
 .route-stop {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
   gap: 9px;
   position: relative;
@@ -1606,9 +1609,35 @@ small {
 }
 .route-stop-line {
   font-size: 12px;
+  line-height: 18px;
   color: #596b75;
   max-width: 110px;
   overflow-wrap: anywhere;
+}
+.route-stop-meta {
+  display: grid;
+  grid-column: 3 / span 2;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.route-stop-congestion {
+  grid-column: 1;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 750;
+  text-align: center;
+  white-space: nowrap;
+}
+.route-stop-meta .route-stop-line {
+  grid-column: 2;
+  min-width: 0;
+  text-align: right;
+}
+.route-stop-arrival .route-stop-line {
+  grid-column: 4;
+  text-align: right;
 }
 .route-line-dot {
   display: inline-block;
