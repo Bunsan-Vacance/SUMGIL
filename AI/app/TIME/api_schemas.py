@@ -149,6 +149,9 @@ class TimeMetaResponse(BaseModel):
     trigger_max_eta_min: int = Field(alias="triggerMaxEtaMin")
     trigger_cooldown_sec: float = Field(alias="triggerCooldownSec")
     debug_force_trigger_enabled: bool = Field(alias="debugForceTriggerEnabled")
+    debug_empty_rental_ids: list[str] = Field(alias="debugEmptyRentalIds")
+    """301-B 시연용 override 대상 대여소 목록. `debugForceTriggerEnabled`가 false면 항상 빈
+    목록이다 — 게이트가 꺼져 실제로 효력이 없는 값을 노출하지 않는다(`router.get_meta` 참고)."""
     nearby_radius_m: int = Field(alias="nearbyRadiusM")
     nearby_limit: int = Field(alias="nearbyLimit")
     score_empty_penalty_min: float = Field(alias="scoreEmptyPenaltyMin")

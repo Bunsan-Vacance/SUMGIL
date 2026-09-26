@@ -29,7 +29,13 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter
 
 from app.core.config import get_settings
-from app.TIME.adapters import CompositeAdapter, HttpAdapter, LocalAdapter, ToolAdapter
+from app.TIME.adapters import (
+    CompositeAdapter,
+    DebugEmptyStockAdapter,
+    HttpAdapter,
+    LocalAdapter,
+    ToolAdapter,
+)
 from app.TIME.api_schemas import (
     RerouteCheckRequest,
     RerouteCheckResponse,
@@ -108,12 +114,23 @@ def _session_store() -> SessionStore:
 def _adapter() -> ToolAdapter:
     """요청마다 새로 만든다 — `CompositeAdapter`·`LocalAdapter`·`HttpAdapter`는 상태를 갖지
     않는 얇은 래퍼라 재사용할 이유가 없다(`guard.py`의 세션 단위 인스턴스 원칙과 달리, 이쪽은
-    애초에 세션 상태가 없다)."""
+    애초에 세션 상태가 없다).
+
+    301-B: 게이트(`time_debug_force_trigger_enabled` AND `debug_empty_rental_ids` 비어있지
+    않음)를 통과할 때만 `DebugEmptyStockAdapter`로 감싼다 — 게이트가 이중이라 운영 환경(둘 다
+    기본값 False/빈 문자열)에서는 이 분기를 절대 타지 않는다.
+    """
     settings = get_settings()
-    return CompositeAdapter(
+    base = CompositeAdapter(
         local=LocalAdapter(),
         http=HttpAdapter(settings.time_be_base_url, settings.time_be_timeout_sec),
     )
+    debug_rental_ids = settings.debug_empty_rental_ids
+    if settings.time_debug_force_trigger_enabled and debug_rental_ids:
+        return DebugEmptyStockAdapter(
+            base, debug_rental_ids, horizon_fill_min=settings.time_trigger_max_eta_min
+        )
+    return base
 
 
 def _strategy(session_id: str) -> RerouteStrategy:
@@ -208,12 +225,18 @@ def get_meta() -> TimeMetaResponse:
     llm_configured = bool(
         settings.time_llm_base_url and settings.time_llm_model and settings.time_llm_api_key
     )
+    # 301-B: 실제로 효력이 있는 값만 노출한다 — 게이트가 꺼져 있으면 목록이 채워져 있어도
+    # 빈 목록으로 보여준다(`_adapter()`가 그럴 때 override를 적용하지 않는 것과 같은 판단).
+    debug_empty_rental_ids = (
+        settings.debug_empty_rental_ids if settings.time_debug_force_trigger_enabled else []
+    )
     return TimeMetaResponse(
         trigger_p_empty=settings.time_trigger_p_empty,
         trigger_min_stock=settings.time_trigger_min_stock,
         trigger_max_eta_min=settings.time_trigger_max_eta_min,
         trigger_cooldown_sec=settings.time_trigger_cooldown_sec,
         debug_force_trigger_enabled=settings.time_debug_force_trigger_enabled,
+        debug_empty_rental_ids=debug_empty_rental_ids,
         nearby_radius_m=settings.time_nearby_radius_m,
         nearby_limit=settings.time_nearby_limit,
         score_empty_penalty_min=settings.time_score_empty_penalty_min,
