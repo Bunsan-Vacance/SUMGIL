@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import date as date_type
 from datetime import datetime
 from typing import Any, Protocol
@@ -30,7 +30,7 @@ from app.TIME.registry import (
     LOCAL_TOOLS,
     REPLAN_ROUTE,
 )
-from app.TIME.schemas import ToolError
+from app.TIME.schemas import ToolError, is_error
 
 # `app.BIKE.pipeline.calendar.KST`와 같은 값이지만 그 모듈은 pandas를 끌어온다 —
 # 어댑터는 서빙 경로라 상수 하나 때문에 무거운 의존성을 물리지 않는다(AI/CLAUDE.md 디렉터리 규약).
@@ -363,9 +363,61 @@ class CompositeAdapter:
         return _unknown_tool(name)
 
 
+class DebugEmptyStockAdapter:
+    """시연용 예측 override 래퍼(S15P21A104-301-B).
+
+    `get_eta_stock` 응답 중 지정한 대여소(`rental_ids`)만 도착 시점 재고를 고갈로 덮어써
+    (`predicted_stock=0.0`, `p_empty=1.0`, `source="debug_override"`) 시연 시나리오를 재현
+    가능하게 만든다. 게이트(`Settings.time_debug_force_trigger_enabled` AND
+    `Settings.debug_empty_rental_ids` 비어있지 않음)는 이 클래스가 아니라 호출자
+    (`router._adapter`)가 판단한다 — 이 클래스는 감싸졌다는 것 자체가 이미 "켜졌다"는 뜻이다.
+
+    **`trigger.evaluate`의 규칙 1~4(오류·horizon·저신뢰·쿨다운)를 덮지 않는다** — `trigger.py`의
+    `forced`(5번)와 같은 원칙이다. `ToolError`·오류 dict·`get_eta_stock` 외 도구 이름은 손대지
+    않고 그대로 통과시킨다: 이 래퍼가 하는 일은 "정상 조회 결과의 숫자를 바꿔치기"뿐이고, 오류였을
+    자리를 성공으로 둔갑시키면 값 안 지어내기 원칙이 깨진다. `current_stock`·`p_full`은 실값을
+    유지한다 — 시연이 재현하려는 것은 "곧 빌 것"이지 "지금도 비어 있다"가 아니다.
+
+    대상 대여소도 후보 대여소도 같은 어댑터(`CompositeAdapter`)를 타므로, 목록에 넣은 대여소는
+    트리거 대상으로도 재안내 후보로도 재고 0으로 보인다 — 트리거·전략 코드는 이 응답이 실제
+    조회인지 override인지 구분하지 않는다(`AGENT_DESIGN.md` "시연용 예측 override" 절).
+    """
+
+    def __init__(
+        self,
+        inner: ToolAdapter,
+        rental_ids: Iterable[str],
+        *,
+        horizon_fill_min: int,
+    ) -> None:
+        self.inner = inner
+        self._rental_ids = frozenset(str(rental_id) for rental_id in rental_ids)
+        self._horizon_fill_min = horizon_fill_min
+
+    def call(self, name: str, args: Mapping[str, Any]) -> ToolResult:
+        result = self.inner.call(name, args)
+        if name != GET_ETA_STOCK:
+            return result
+        if not isinstance(result, Mapping) or is_error(result):
+            return result
+        if str(args.get("rental_id")) not in self._rental_ids:
+            return result
+
+        overridden = dict(result)  # 원본 dict는 바뀌지 않는다 — 새 dict에만 반영한다.
+        overridden["predicted_stock"] = 0.0
+        overridden["p_empty"] = 1.0
+        overridden["source"] = "debug_override"
+        if overridden.get("model_horizon_min") is None:
+            # 모델이 horizon을 못 냈을 때만 채운다 — 실제로 낸 horizon이 있으면 그 값이 더
+            # 정확한 근거다(트리거 규칙 2 `horizon_out_of_range`가 이 값을 그대로 본다).
+            overridden["model_horizon_min"] = self._horizon_fill_min
+        return overridden
+
+
 __all__ = [
     "DEFAULT_HTTP_TIMEOUT_SECONDS",
     "CompositeAdapter",
+    "DebugEmptyStockAdapter",
     "HttpAdapter",
     "LocalAdapter",
     "ToolAdapter",
