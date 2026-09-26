@@ -183,6 +183,20 @@ Kafka `bike.stock` 수집 창은 **07:00~24:00**뿐이다(`FROM_BE-bike-stock-da
 구간은 사람은 이미 움직이는데 데이터가 없다. 이 구간 확장 여부는 원빈에게 물어 둔 상태다
 (계획 3.2절).
 
+### 2.7 시연용 예측 override (S15P21A104-301-B)
+
+`adapters.DebugEmptyStockAdapter`가 지정한 대여소의 `get_eta_stock` 응답을 재고 0(`predicted_stock=0.0`,
+`p_empty=1.0`, `source="debug_override"`)으로 덮어써 시연 시나리오를 재현 가능하게 만든다. 게이트는
+이중이다 — `time_debug_force_trigger_enabled` AND `debug_empty_rental_ids` 비어있지 않음(`router._adapter`가
+판단). 운영 환경에서는 둘 다 기본값(False/빈 문자열)이라 이 경로를 타지 않는다.
+
+이 층(어댑터)에 둔 이유는 **대상 대여소와 후보 대여소가 같은 규칙을 타야 하기 때문**이다 — 트리거·전략
+코드가 이 응답을 실제 조회와 구분하지 않으므로, 목록에 넣은 대여소는 트리거 대상으로도 재안내 후보로도
+재고 0으로 보인다. 트리거·서비스·전략 코드는 손대지 않는다.
+
+덮지 않는 규칙: `ToolError`·오류 dict·`get_eta_stock` 외 도구는 그대로 통과한다 — `trigger.evaluate`의
+규칙 1~4(오류·horizon·저신뢰·쿨다운)는 `forced`(5번)와 같은 원칙으로 이 override도 우회하지 않는다.
+
 ## 3. 진입점 — `service.py` (S15P21A104-302)
 
 `propose_reroute()` 하나가 ①~⑥을 잇는다(②재고 조회·⑥경로 연결·도보 합성이 302에서 추가됐다).
