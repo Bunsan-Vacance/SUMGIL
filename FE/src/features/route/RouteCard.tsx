@@ -11,7 +11,8 @@ import { compactLegs } from './LegList'
 import { modeIcons } from './ModeIcon'
 import { lineColor } from './lineColor'
 import RouteModeStrip from './RouteModeStrip'
-import { transitionLabel } from './transitions'
+import { isTransitLeg, transitionLabel } from './transitions'
+import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
 import { bikeRouteAvailabilityMessage, type BikeRouteAvailability } from './bikeAvailability'
 import { isBikeStockMockEnabled } from '../../api/repositories'
 
@@ -157,28 +158,43 @@ export default function RouteCard({
         </span>
       </span>
       {comparison && <span className="route-comparison">{comparison}</span>}
-      <RouteModeStrip legs={route.legs} />
+      <RouteModeStrip legs={route.legs} showCongestionLabels={false} />
       <span className="route-stops">
         {displayLegs
           .filter((leg) => !leg.transfer && leg.mode !== 'walk')
           .map((leg, index) => {
             const Icon = modeIcons[leg.mode]
             const station = leg.from?.name || leg.title.split(' → ')[0]
+            const congestion = isTransitLeg(leg)
+              ? segmentCongestionPresentation(segmentCongestionGradeForLeg(leg))
+              : undefined
+            const arrivalStation = leg.to?.name || leg.title.split(' → ').at(-1)
             return (
               <span className="route-stop" key={index}>
                 <span className={`leg-icon ${leg.mode}`} style={{ color: lineColor(leg) }}>
                   <Icon size={17} aria-hidden="true" />
                 </span>
                 <strong>{station}</strong>
-                <span className={`route-stop-line ${leg.mode}`}>
-                  <i
-                    className="route-line-dot"
-                    style={{ backgroundColor: lineColor(leg) }}
-                    hidden={!lineColor(leg)}
-                  />
-                  {leg.note}
-                  {transitionLabel(leg.transitionType) &&
-                    ` · ${transitionLabel(leg.transitionType)}`}
+                <span className="route-stop-meta">
+                  {congestion && (
+                    <span
+                      className="route-stop-congestion"
+                      style={{ color: congestion.color }}
+                      aria-label={`${station} → ${arrivalStation} 구간 혼잡도 ${congestion.label}`}
+                    >
+                      {congestion.label}
+                    </span>
+                  )}
+                  <span className={`route-stop-line ${leg.mode}`}>
+                    <i
+                      className="route-line-dot"
+                      style={{ backgroundColor: lineColor(leg) }}
+                      hidden={!lineColor(leg)}
+                    />
+                    {leg.note}
+                    {transitionLabel(leg.transitionType) &&
+                      ` · ${transitionLabel(leg.transitionType)}`}
+                  </span>
                 </span>
               </span>
             )

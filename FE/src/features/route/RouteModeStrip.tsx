@@ -7,14 +7,20 @@ import { roundMinutes } from './selectors'
 import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
 import { isTransitLeg, isTransferLeg, transitionLabel } from './transitions'
 
-export default function RouteModeStrip({ legs }: { legs: Leg[] }) {
+export default function RouteModeStrip({
+  legs,
+  showCongestionLabels = true,
+}: {
+  legs: Leg[]
+  showCongestionLabels?: boolean
+}) {
   const displayLegs = compactLegs(legs)
   const hasCongestion = displayLegs.some(
     (leg) => isTransitLeg(leg) && segmentCongestionGradeForLeg(leg) !== undefined,
   )
   return (
     <>
-      {hasCongestion && (
+      {showCongestionLabels && hasCongestion && (
         <span className="route-segment-labels" aria-label="구간별 혼잡도">
           {displayLegs.map((leg, index) => {
             const congestion = isTransitLeg(leg)
