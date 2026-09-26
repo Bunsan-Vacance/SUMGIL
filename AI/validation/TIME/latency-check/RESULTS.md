@@ -47,6 +47,33 @@
 세션 수를 올렸을 때(50·100) 이 오버헤드가 그대로 유지되는지가 본 측정의 핵심 관전 포인트다
 (스레드풀 경합이 있으면 오버헤드가 세션 수에 비례해 늘어난다).
 
+## 로컬 실색인·실BE — E2E·본 측정 (2026-09-26, S15P21A104-301)
+
+배포 서버(`/ai/**`)가 아직 없어, **실제 스냅샷·실제 모델·실제 dev BE**를 붙인 로컬 uvicorn을 배포 서버 대신 쟀다.
+가짜였던 것은 없다 — LLM만 규칙 전략(`ALGORITHM`, `TIME_LLM_MODEL` 비움)이라 호출되지 않는다.
+
+- 색인: J15A104A `latest_stock.parquet`(7컬럼, 컨슈머 반영 후) 2,744행 → 좌표 있는 2,345곳. 신선도 300초라 측정 직전 scp.
+- 예측: `models/BIKE/v4-weather-final_20260917-2037` + `station_master.parquet` + `latest_weather.parquet`(서버에서 복사). `lag_lookup_live.parquet`은 서버에도 없어 모델은 lag 없이 돌았다(`source=lightgbm`).
+- BE: `TIME_BE_BASE_URL=https://j15a104.p.ssafy.io` 실 `replan`. 대여소 노드(`ST-*`)→역 `239`(홍대입구)가 그래프에 있어 첫 leg `BIKE` 경로가 온다.
+- 시연 override: `TIME_DEBUG_FORCE_TRIGGER_ENABLED=1 TIME_DEBUG_EMPTY_RENTAL_IDS=ST-145`.
+
+### E2E 3상태 (curl 1회씩)
+
+| 요청 rentalId | 상태 | reason | 비고 |
+| --- | --- | --- | --- |
+| `ST-1947`(재고 37) | `no_trigger` | `below_threshold` | 실예측 p_empty 0.04 |
+| `ST-145`(override) | `proposal` | 규칙 문장 | target predictedStock 0.0·pEmpty 1.0(override), 대안 `ST-144` 탑골공원 앞 214m(실예측 7.9대), route = dev BE 실경로, 1.6초 |
+| `ST-NOPE` | `unavailable` | `target_unknown` | 색인에 없음 |
+
+### 본 측정 (`run_dev.py --base-url http://localhost:8000 --count 20 --concurrency 1`)
+
+| 경로 | p50 | p95 | max | body.status |
+| --- | --- | --- | --- | --- |
+| `no_trigger` (`ST-1947`) | 232ms | 401ms | 2,285ms(첫 호출 워밍업) | no_trigger 20/20 |
+| `proposal` (`--with-proposal`, `ST-1947` 강제) | 1,883ms | 2,182ms | 4,118ms(첫 호출) | proposal 20/20 |
+
+판정: 둘 다 6초 계약 안. `proposal` 1.9초의 구성은 대상 예측 1회(≈0.23초) + 후보 최대 5곳 예측(각 ≈0.23초, 순차) + BE replan(≈0.75초)로 설명된다 — LightGBM 예측이 대여소마다 따로 도는 것이 가장 큰 몫이라, 줄이려면 후보 예측을 한 번에 배치로 묶는 것이 다음 최적화 후보다(이번 범위 밖). 결과 파일 `out/dev_no_trigger_n20_c1.*`·`out/dev_proposal_n20_c1.*`, 시나리오 표 `out/scenario_20260926.md`(실고갈 160곳·강제용 2,016곳, 조회 약 4분 — 색인을 대여소마다 다시 만드는 구조라 느리다).
+
 ## 배포 서버 — 미측정 (2026-09-23 확인: `/ai/**`가 FE index.html로 떨어짐 — INFRA AI Ingress 미배포. Ingress 머지·AI 이미지(211) 후 `run_dev.py --base-url https://j15a104.p.ssafy.io/ai` 1회)
 
 `run_dev.py`는 이 세션에서 작성만 하고 실행하지 않았다(`README.md` "실행" 절 참고 — 배포 서버에

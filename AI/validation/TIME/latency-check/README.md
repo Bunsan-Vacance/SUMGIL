@@ -16,6 +16,10 @@ FE는 이동 중 이 엔드포인트를 120초마다 폴링한다. 폴링 대부
 - `src/run_local.py` — **가짜 BE·가짜 LLM(고정 지연)·가짜 색인**을 붙인 로컬 측정. 실제 GMS·BE를
   전혀 부르지 않는다. `no_trigger`·`proposal` 두 경로를 세션 N개가 동시에 두드리는 상황을
   스레드풀로 흉내낸다. **실행 가능** — 반복 실행해도 외부 자원을 쓰지 않는다.
+- `src/find_scenario.py` — `run_dev.py`에 넣을 **실제 대여소**를 `latest_stock.parquet`에서 고른다. 서비스와
+  같은 `ParquetStationIndex`로 재고 0 + 반경 내 재고 있는 이웃 ≥2인 대여소(A, 자연 트리거)와 이웃 조건만
+  맞는 대여소(B, `debugForceTrigger`용)를 표로 낸다. 조회만 하며 외부 호출이 없다. 로컬에 parquet이
+  없으면 J15A104A의 파일을 받아 `--stock-path`로 지정한다.
 - `src/run_dev.py` — 실제 배포된 AI 서버에 HTTP로 요청을 보낸다. `no_trigger` 경로만 기본으로
   돌고, LLM(`proposal`) 경로는 `--with-proposal`을 명시해야 켜진다. **이 세션에서는 작성만 하고
   실행하지 않았다** — 배포 서버에 반복 호출을 보내는 스크립트라 실행 범위(호출 수·시각)를 먼저

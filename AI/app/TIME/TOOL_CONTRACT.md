@@ -206,6 +206,12 @@ CROWD 서비스는 `date` 컬럼을 `datetime.date` 객체로 돌려준다. 도�
 나가므로 `_jsonable`이 `date`·`datetime`을 ISO 문자열로 맞춘다. **값을 바꾸는 게 아니라 선언한
 스키마(`{"format": "date"}`)의 표현으로 맞추는 것**이고, 숫자·문자열은 손대지 않는다.
 
+### 4.4 시연용 예측 override 노브 (301-B)
+
+| 노브 | 기본값 | 효력 조건 |
+| --- | --- | --- |
+| `time_debug_empty_rental_ids` | `""`(빈 문자열, 콤마 구분 대여소 ID 목록) | `time_debug_force_trigger_enabled`가 `True`일 때만 — 이 목록에 든 대여소의 `get_eta_stock` 응답을 `adapters.DebugEmptyStockAdapter`가 재고 0으로 덮어쓴다(`AGENT_DESIGN.md` 2.7절) |
+
 ---
 
 ## 5. 가드
@@ -308,3 +314,4 @@ monkeypatch하며, 가드는 시계를 주입받아 `sleep` 없이 검증한다.
 | — | 2026-09-22 | 문서만: nearby DTO 정정 메모·트리거 필드 사용 메모·replan 1회 패턴 (스키마 불변) |
 | 1.3.0 | 2026-09-23 | bike_stations_nearby 출력 스키마를 실제 BE DTO로 정정(availableBikes·stockUpdatedAt 제거) |
 | — | 2026-09-23 | 문서만: BE 회신(route-02) 반영 — replan 첫 leg 검증 가드(`route_not_from_alternative`)·`modes`/`priority` 무시 확인(7번)·`viaNodeId` 공수 회신 (스키마 불변) |
+| — | 2026-09-26 | 문서만: 시연용 예측 override 어댑터(`adapters.DebugEmptyStockAdapter`)·노브(`time_debug_empty_rental_ids`) 추가(301-B). 도구 스키마·오류 코드는 안 바뀐다 (스키마 불변) |

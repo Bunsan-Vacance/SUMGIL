@@ -169,6 +169,13 @@ class Settings(BaseSettings):
     # 이 플래그 자체가 트리거 규칙 1~4(오류·horizon·신뢰도·쿨다운)를 우회시키진 않지만, 6·7번
     # 판정을 건너뛰고 강제로 띄우는 경로라 데모·QA 외에는 열어두지 않는다.
     time_debug_force_trigger_enabled: bool = False
+    # 301-B: 시연용 강제 재고 고갈 override 대상 대여소(쉼표 구분 ID 목록). 이 목록에 든 대여소는
+    # `get_eta_stock` 응답이 `adapters.DebugEmptyStockAdapter`를 거치며 재고 0으로 덮어써진다.
+    # **`time_debug_force_trigger_enabled`가 True일 때만 효력이 있다**(게이트 AND) — 운영에서는
+    # 둘 다 False라 이 목록이 채워져 있어도 아무 일도 일어나지 않는다. 대상 대여소로도 재안내
+    # 후보로도 같은 어댑터를 타므로 목록에 넣으면 양쪽 다 재고 0으로 보인다(의도 — 시연 구간을
+    # 자유롭게 설계하기 위함).
+    time_debug_empty_rental_ids: str = ""
 
     # ── TIME 주변 대여소 탐색(203/302) ──
     # StationIndex.nearby()에 쓰는 반경(m)·상한. **잠정값** — 실제 대여소 밀도 분포를 보지
@@ -195,6 +202,14 @@ class Settings(BaseSettings):
         return [
             crowd_processed / x.strip() for x in self.crowd_events_files.split(",") if x.strip()
         ]
+
+    @property
+    def debug_empty_rental_ids(self) -> list[str]:
+        """`time_debug_empty_rental_ids`를 콤마 목록으로 파싱한다(`grade_thresholds`와 같은
+        패턴 — 공백 제거·빈 항목 제외). 게이트(`time_debug_force_trigger_enabled`) 판단은
+        여기서 하지 않는다 — 이 프로퍼티는 항상 파싱만 하고, 효력 여부는 호출자(어댑터 생성·
+        `GET /time/meta` 노출)가 게이트와 함께 판단한다."""
+        return [x.strip() for x in self.time_debug_empty_rental_ids.split(",") if x.strip()]
 
 
 @lru_cache

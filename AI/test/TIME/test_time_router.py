@@ -70,6 +70,7 @@ class _FakeSettings:
             "time_trigger_cooldown_sec": 600.0,
             "time_recommendation_ttl_sec": 600.0,
             "time_debug_force_trigger_enabled": False,
+            "debug_empty_rental_ids": [],
             "time_nearby_radius_m": 500,
             "time_nearby_limit": 5,
             "time_trigger_p_empty": 0.7,
