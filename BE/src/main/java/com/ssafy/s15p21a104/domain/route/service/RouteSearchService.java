@@ -684,6 +684,18 @@ public class RouteSearchService {
         return RouteCandidateFinder.reorderSpeedByTotalMinutes(enhanceGeometry(candidates));
     }
 
+    /**
+     * 검색 밖(재안내 replan)에서 만든 후보에 검색 응답과 같은 표시 단계(노선 이름 → geometry)를 붙인다.
+     * 순서는 그대로 둔다 — 속도 그룹 재정렬(268)은 검색 6경로 전용이다.
+     *
+     * @param routes 후보(순서 유지)
+     * @param departureTime 출발 시각(버스 실시간 등급 prefetch 판정, null이면 지금)
+     * @return 이름·geometry가 붙은 후보
+     */
+    public List<RouteSearchResponse> withDisplayFields(List<RouteSearchResponse> routes, LocalDateTime departureTime) {
+        return enhanceGeometry(withRouteNames(routes, departureTime));
+    }
+
     private List<RouteSearchResponse> enhanceGeometry(List<RouteSearchResponse> candidates) {
         return new RouteGeometryEnhancer(
                 (routeId, fromLat, fromLng, toLat, toLng) -> railGeometryRegistry.geometryForLeg(

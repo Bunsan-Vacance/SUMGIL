@@ -22,6 +22,7 @@ public class RerouteController implements RerouteApi {
 
     private final RouteGraphRegistry graphRegistry;
     private final TransferRule transferRule;
+    private final com.ssafy.s15p21a104.domain.route.service.RouteSearchService routeSearchService;
 
     @Override
     public ApiResult<List<RerouteResponse>> replan(RerouteRequest request) {
@@ -35,9 +36,10 @@ public class RerouteController implements RerouteApi {
         if (request.step() < 0) {
             throw new DomainException(ErrorType.INVALID_COORDINATE);
         }
-        DepartureSlot slot = DepartureSlot.of(request.requestedAt() != null
+        LocalDateTime requested = request.requestedAt() != null
                 ? LocalDateTime.ofInstant(request.requestedAt().toInstant(), ZoneId.of("Asia/Seoul"))
-                : LocalDateTime.now());
+                : null;
+        DepartureSlot slot = DepartureSlot.of(requested != null ? requested : LocalDateTime.now());
         RouteCandidateFinder finder = new RouteCandidateFinder(
                 transferRule,
                 graphRegistry.transferTimes(),
@@ -50,7 +52,9 @@ public class RerouteController implements RerouteApi {
                         graphRegistry.raptorRouteSetFor(slot.dowType(), slot.timeSlot()), null));
         RerouteService service = new RerouteService(
                 finder,
-                () -> graphRegistry.graphFor(slot.dowType(), slot.timeSlot()));
+                () -> graphRegistry.graphFor(slot.dowType(), slot.timeSlot()))
+                // 검색 응답과 같은 노선 이름·geometry 단계(TO_BE-bike-reroute-route-03 §1).
+                .withDisplay(routes -> routeSearchService.withDisplayFields(routes, requested));
         return ApiResult.ok(RerouteResponse.listOf(
                 service.replan(request.boundaryId(), destId, slot.dowType(), slot.timeSlot())));
     }
