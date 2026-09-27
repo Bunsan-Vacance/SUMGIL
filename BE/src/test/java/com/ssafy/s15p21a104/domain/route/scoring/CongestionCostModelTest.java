@@ -90,4 +90,23 @@ class CongestionCostModelTest {
         assertFalse(CongestionCostModel.hasWeightEffect(91.9));
         assertTrue(CongestionCostModel.hasWeightEffect(100.1));
     }
+
+    @Test
+    @DisplayName("269-T1: 같은 노선 혼잡도는 모델당 한 번만 조회한다 — 모르는 값(null)도 다시 묻지 않는다")
+    void t269_조회_메모() {
+        java.util.Map<String, Integer> calls = new java.util.HashMap<>();
+        KShortestPathFinder.EdgeCostModel memo = CongestionCostModel.of(0.5, (type, id) -> {
+            calls.merge(type + ":" + id, 1, Integer::sum);
+            return "L2".equals(id) ? 150.0 : null;
+        }, null);
+        Edge hot = new Edge("A", "B", "L2", 100, 0, TravelMode.SUBWAY);
+        Edge unknown = new Edge("B", "C", "L9", 100, 0, TravelMode.SUBWAY);
+
+        for (int i = 0; i < 1000; i++) {
+            assertEquals(125, memo.travelCost(hot));
+            assertEquals(100, memo.travelCost(unknown));
+        }
+
+        assertEquals(Map.of("LINE:L2", 1, "LINE:L9", 1), calls);
+    }
 }
