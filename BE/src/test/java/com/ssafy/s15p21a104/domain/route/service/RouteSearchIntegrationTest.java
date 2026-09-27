@@ -191,7 +191,9 @@ class RouteSearchIntegrationTest {
                 subway("A", "C", "L1", 900),
                 bike("A", "R1", 120),
                 bike("R1", "C", 120)));
-        lenient().when(graphRegistry.bikeStock()).thenReturn(Map.of("R1", 0));
+        // 재고 게이트는 대여 시점 슬롯 예측을 본다(재고 게이트 연결) — 슬롯 무관하게 R1 소진.
+        lenient().when(graphRegistry.bikeStock(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt())).thenReturn(Map.of("R1", 0));
 
         List<RouteSearchResponse> result = routeSearchService.search("A", "C", null, null, null);
 

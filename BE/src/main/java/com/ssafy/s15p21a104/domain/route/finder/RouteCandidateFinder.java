@@ -45,6 +45,8 @@ public final class RouteCandidateFinder {
     private final Supplier<Map<String, Integer>> bikeStock;
     private final BusRouteIndex busRouteIndex;
     private final RaptorInput raptorInput;
+    /** 출발 후 경과 초 → 대여소별 예상 재고(SPEC 0.8 도착 시점 기준). 기본은 시간 무관 {@link #bikeStock}. */
+    private final java.util.function.LongFunction<Map<String, Integer>> bikeStockAt;
 
     /** RAPTOR 탐색 입력(S15P21A104-217 ③). null이면 레거시 엔진만 쓴다. */
     public record RaptorInput(com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet routeSet,
@@ -81,6 +83,29 @@ public final class RouteCandidateFinder {
         this.bikeStock = bikeStock;
         this.busRouteIndex = busRouteIndex;
         this.raptorInput = raptorInput;
+        this.bikeStockAt = bikeStock == null ? elapsed -> Map.of() : elapsed -> bikeStock.get();
+    }
+
+    private RouteCandidateFinder(RouteCandidateFinder base,
+                                 java.util.function.LongFunction<Map<String, Integer>> bikeStockAt) {
+        this.transferRule = base.transferRule;
+        this.transferTimes = base.transferTimes;
+        this.rentalIds = base.rentalIds;
+        this.stationInfos = base.stationInfos;
+        this.bikeStock = base.bikeStock;
+        this.busRouteIndex = base.busRouteIndex;
+        this.raptorInput = base.raptorInput;
+        this.bikeStockAt = bikeStockAt;
+    }
+
+    /**
+     * 대여 시점 기준 재고 조회를 쓰는 사본(재고 게이트). 요청마다 출발 시각에 묶어 만든다.
+     *
+     * @param bikeStockAt 출발 후 경과 초 → 대여소별 예상 재고
+     * @return 재고 조회만 바뀐 새 탐색기
+     */
+    public RouteCandidateFinder withBikeStockAt(java.util.function.LongFunction<Map<String, Integer>> bikeStockAt) {
+        return new RouteCandidateFinder(this, java.util.Objects.requireNonNull(bikeStockAt, "bikeStockAt"));
     }
 
     /**
@@ -426,10 +451,7 @@ public final class RouteCandidateFinder {
                 new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
                 stationInfos, RouteType.SHORTEST, RouteSource.ALGORITHM,
                 transferSecs, busRouteIndex);
-        return response.filter(r -> BikeStockGate.passesEdges(
-                found.edges().stream().map(Edge::fromNode).toList(),
-                found.edges().stream().map(Edge::mode).toList(),
-                bikeStock.get()));
+        return response.filter(r -> BikeStockGate.passesAt(found.edges(), bikeStockAt));
     }
 
     /**

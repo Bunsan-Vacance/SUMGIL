@@ -70,4 +70,29 @@ public final class BikeStockGate {
         }
         return true;
     }
+
+    /**
+     * 대여 시점 기준 게이트(SPEC 0.8 — 재고는 현재가 아니라 도착 예상 시각 기준). BIKE 엣지 출발
+     * 대여소마다 그 엣지 전까지의 누적 이동·대기 초로 재고를 조회한다. 예측이 없는 대여소는 통과.
+     *
+     * @param edges 탐색 결과 엣지(순서대로)
+     * @param stockAt 출발 후 경과 초 → 대여소별 예상 재고
+     * @return 대여 시점에 소진(0대 이하) 예상인 대여소가 있으면 false
+     */
+    public static boolean passesAt(List<com.ssafy.s15p21a104.domain.route.graph.Edge> edges,
+                                   java.util.function.LongFunction<Map<String, Integer>> stockAt) {
+        Objects.requireNonNull(edges, "edges");
+        Objects.requireNonNull(stockAt, "stockAt");
+        long elapsed = 0;
+        for (com.ssafy.s15p21a104.domain.route.graph.Edge edge : edges) {
+            if (edge.mode() == TravelMode.BIKE) {
+                Integer bikes = stockAt.apply(elapsed).get(edge.fromNode());
+                if (bikes != null && bikes <= 0) {
+                    return false;
+                }
+            }
+            elapsed += edge.travelSec() + edge.waitSec();
+        }
+        return true;
+    }
 }
