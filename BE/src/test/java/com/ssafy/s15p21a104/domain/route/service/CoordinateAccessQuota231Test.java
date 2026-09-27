@@ -1,5 +1,6 @@
 package com.ssafy.s15p21a104.domain.route.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.domain.route.RouteTestFixtures;
@@ -48,5 +49,24 @@ class CoordinateAccessQuota231Test {
 
         assertTrue(edges.stream().anyMatch(e -> e.toNode().equals("221")),
                 "최근접 역(221)이 접근 후보에 있어야 한다");
+    }
+
+    @Test
+    @DisplayName("270-T1: 좌표 접근 도보도 우회율(1.3)을 적용한다 — WalkEdgeBuilder 도보 엣지와 같은 산식")
+    void t270_좌표접근_우회율() {
+        Map<String, RouteMapper.StationInfo> infos = Map.of(
+                "221", new RouteMapper.StationInfo("221", "역삼역", 37.500658, 127.03643));
+        RouteGraph graph = RouteTestFixtures.graphOf(
+                RouteTestFixtures.subway("221", "222", "L1", 100));
+
+        List<Edge> edges = CoordinateAccessEdges.accessEdges(
+                "PLACE-ORIGIN", 37.4980, 127.0320, infos, graph, true, Set.of("221", "222"));
+
+        double distanceM = com.ssafy.s15p21a104.global.geo.GeoDistance.haversineMeters(
+                37.4980, 127.0320, 37.500658, 127.03643);
+        long expected = Math.round(distanceM
+                * com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder.CIRCUITY
+                / com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder.METERS_PER_SEC);
+        assertEquals(expected, edges.get(0).travelSec());
     }
 }

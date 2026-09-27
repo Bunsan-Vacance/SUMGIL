@@ -104,4 +104,19 @@ class RouteScoreRankerBusTest {
         assertEquals(RouteType.LOW_CONGESTION, ranked.get(0).routeType());
         assertEquals(40.0, ranked.get(0).totalMinutes(), 0.01); // 최대 70인 버스가 1등
     }
+
+    @Test
+    @DisplayName("271-T1: 혼잡 점수 동점이면 소요시간이 짧은 순 — 실행마다 순서가 바뀌지 않는다")
+    void t271_동점_결정적() {
+        List<ScoredCandidate> sameScore = new java.util.ArrayList<>();
+        for (int minutes : new int[] {41, 33, 47, 30, 38, 44, 35, 49}) {
+            sameScore.add(candidate("L" + minutes, TravelMode.SUBWAY, minutes * 60));
+        }
+
+        List<RouteSearchResponse> ranked = ranker.topCalmByLink(
+                sameScore, DEPART, SUBWAY_140, 3, BUS_70);
+
+        assertEquals(List.of(30.0, 33.0, 35.0),
+                ranked.stream().map(RouteSearchResponse::totalMinutes).toList());
+    }
 }
