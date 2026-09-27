@@ -39,7 +39,7 @@ function props(overrides: Partial<ComponentProps<typeof ResultsPage>> = {}) {
 }
 
 describe('경로 결과 상태', () => {
-  it('구간 막대에서 환승을 도보와 다른 아이콘과 문구로 표시한다', async () => {
+  it('구간 막대에서 도보·환승은 아이콘 없이 시간만 표시하고 환승 설명은 유지한다', async () => {
     const route = {
       ...routes[0],
       legs: [
@@ -53,8 +53,12 @@ describe('경로 결과 상태', () => {
     render(<ResultsPage {...props({ visible: [route] })} />)
     const strip = await waitFor(() => screen.getByLabelText('구간별 이동 시간'))
     expect(strip.querySelectorAll('.transfer')).toHaveLength(2)
-    expect(strip.querySelectorAll('.transfer .lucide-arrow-left-right')).toHaveLength(2)
-    expect(strip.querySelectorAll('.walk .lucide-footprints')).toHaveLength(2)
+    expect(strip.querySelectorAll('.transfer svg, .walk svg')).toHaveLength(0)
+    expect(strip.querySelectorAll('.bike svg')).toHaveLength(1)
+    expect(
+      Array.from(strip.querySelectorAll('.transfer'), (segment) => segment.textContent),
+    ).toEqual(['3분', '3분'])
+    expect(screen.getAllByLabelText('환승 3분')).toHaveLength(2)
     expect(screen.getAllByTitle('환승 3분')).toHaveLength(2)
   })
   it('경로의 구간을 눌러도 해당 경로를 선택하고 상세로 이동한다', () => {
