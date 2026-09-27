@@ -83,6 +83,10 @@ public final class RaptorRouteSetBuilder {
                     log.debug("지하철 미해결 링크 버림: {} {}->{}", lineId, row.fromNode(), row.toNode());
                 }
             }
+            // 환승역이 다른 노선의 작은 역사코드를 물려받은 노선(수인분당·8호선 가락시장/남위례 등)은
+            // 역번호가 오르내려 같은 물리 방향이 여러 그룹으로 흩어지고 체인이 조각난다. 조각마다
+            // 재승차 대기가 붙으므로 이어지는 조각이 하나뿐이면 잇는다(267).
+            stitch(ordered);
             for (List<Segment> segments : ordered) {
                 materialize(lineId, TravelMode.SUBWAY, segments, routes);
             }
@@ -351,6 +355,60 @@ public final class RaptorRouteSetBuilder {
             current = next.to();
         }
         return segments;
+    }
+
+    /**
+     * 조각 체인을 잇는다 — 더 이을 게 없을 때까지 반복. 이미 온전한 체인(종점 도달·분기 모호)은
+     * 후보가 없거나 여럿이라 그대로 남는다.
+     */
+    private static void stitch(List<List<Segment>> chains) {
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (List<Segment> chain : chains) {
+                List<Segment> next = uniqueContinuation(chain, chains);
+                if (next != null) {
+                    chain.addAll(next);
+                    chains.removeIf(candidate -> candidate == next);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 체인 끝 정점에서 시작하는 다른 체인 중, 직전 정점으로 되돌아가지 않고 끝 정점 외에 겹치는
+     * 정점이 없는 것이 정확히 하나면 그 체인. 없거나 여럿(분기)이면 null.
+     */
+    private static List<Segment> uniqueContinuation(List<Segment> chain, List<List<Segment>> chains) {
+        if (chain.isEmpty()) {
+            return null;
+        }
+        Segment last = chain.get(chain.size() - 1);
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        for (Segment segment : chain) {
+            visited.add(segment.from());
+            visited.add(segment.to());
+        }
+        List<Segment> found = null;
+        for (List<Segment> candidate : chains) {
+            if (candidate == chain || candidate.isEmpty()) {
+                continue;
+            }
+            Segment first = candidate.get(0);
+            if (!first.from().equals(last.to()) || first.to().equals(last.from())) {
+                continue;
+            }
+            if (candidate.stream().anyMatch(segment -> visited.contains(segment.to()))) {
+                continue;
+            }
+            if (found != null) {
+                return null;
+            }
+            found = candidate;
+        }
+        return found;
     }
 
     /** 보류 링크를 기존 체인 끝/시작에 붙인다. 붙지 않으면 false. */
