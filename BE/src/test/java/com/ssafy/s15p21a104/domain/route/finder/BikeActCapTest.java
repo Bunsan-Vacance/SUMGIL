@@ -18,8 +18,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 대여 1회(연속 BIKE) 상한 테스트(5부 T3) — 상한(240초 = 1km/15km·h⁻¹)을 넘는 연속 자전거
- * 구간은 후보에서 제외된다. 레거시 폴백 경로에서도 방어한다.
+ * 대여 1회(연속 BIKE) 600초 상한 테스트(5부 T3). 12km/h 기준 약 2km이며,
+ * 레거시 폴백 경로에서도 같은 시간 상한을 적용한다.
  */
 class BikeActCapTest {
 
@@ -33,9 +33,9 @@ class BikeActCapTest {
     }
 
     @Test
-    @DisplayName("C1: 연속 자전거 520초(>480, 2km 초과) 경로는 후보에서 제외된다")
+    @DisplayName("C1: 연속 자전거 620초(>600초) 경로는 후보에서 제외된다")
     void c1_상한초과_제외() {
-        var graph = graphOf(bike("A", "B", 260), bike("B", "C", 260));
+        var graph = graphOf(bike("A", "B", 310), bike("B", "C", 310));
 
         List<ScoredCandidate> candidates =
                 finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
@@ -44,9 +44,9 @@ class BikeActCapTest {
     }
 
     @Test
-    @DisplayName("C2: 연속 자전거 480초(≤480, 2km 경계) 경로는 유지된다")
+    @DisplayName("C2: 연속 자전거 600초 경계 경로는 유지된다")
     void c2_상한이내_유지() {
-        var graph = graphOf(bike("A", "B", 240), bike("B", "C", 240));
+        var graph = graphOf(bike("A", "B", 300), bike("B", "C", 300));
 
         List<ScoredCandidate> candidates =
                 finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
@@ -55,9 +55,9 @@ class BikeActCapTest {
     }
 
     @Test
-    @DisplayName("C3: 역삼→한티급 1.5km(360초) 경로는 유지된다 (2026-09-22 상향 근거)")
+    @DisplayName("C3: 역삼→한티급 1.5km(450초) 경로는 유지된다 (2026-09-22 상향 근거)")
     void c3_역삼한티급_유지() {
-        var graph = graphOf(bike("A", "B", 180), bike("B", "C", 180));
+        var graph = graphOf(bike("A", "B", 225), bike("B", "C", 225));
 
         List<ScoredCandidate> candidates =
                 finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
