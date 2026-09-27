@@ -55,7 +55,7 @@ class BikeRentalEdgeBuilderTest {
 
         double dist = BikeEdgeBuilder.distanceM(
                 new Stop("R1", 37.5000, 127.0000), new Stop("R2", 37.5000, 127.0045));
-        int expected = (int) Math.round(dist / BikeEdgeBuilder.METERS_PER_SEC);
+        int expected = (int) Math.round(dist / (12_000.0 / 3600.0));
         assertTrue(expected > 0);
         assertTrue(edges.stream().allMatch(e -> e.travelSec() == expected));
         assertTrue(edges.stream().allMatch(e -> e.waitSec() == 0));

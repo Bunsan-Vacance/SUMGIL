@@ -77,10 +77,10 @@ class BikeUsePolicyTest {
     }
 
     @Test
-    @DisplayName("P9: 2km(480초) 초과 런은 금지")
+    @DisplayName("P9: 2km(600초) 초과 런은 금지")
     void p9_상한초과() {
         assertFalse(BikeUsePolicy.allowedPath(List.of(
-                bike("O", "R1", 250), bike("R1", "D", 250))));
+                bike("O", "R1", 310), bike("R1", "D", 310))));
     }
 
     @Test
