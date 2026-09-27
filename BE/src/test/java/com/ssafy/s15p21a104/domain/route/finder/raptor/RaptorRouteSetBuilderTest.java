@@ -117,6 +117,47 @@ class RaptorRouteSetBuilderTest {
                 "지선 체인이 빠졌다: " + branchFirstRoutes);
     }
 
+    @Test
+    @DisplayName("S7: 역번호가 오르내리는 노선(수인분당 형태)도 한 방향이 노선 하나로 조립된다 (267)")
+    void s7_역번호역전_수인분당() {
+        // 선릉 220 · 한티 1024 · 도곡 334 · 구룡 1026 · 개포동 1027 · 대모산입구 1028 · 수서 339 · 복정 2821
+        List<String> order = List.of("220", "1024", "334", "1026", "1027", "1028", "339", "2821");
+
+        List<String> routes = routeStops(RaptorRouteSetBuilder.subwayRoutes(bidirectional(order, "1075")));
+
+        assertTrue(routes.contains("1075:" + String.join(">", order)), "하행 체인이 조각났다: " + routes);
+        assertTrue(routes.contains("1075:" + String.join(">", order.reversed())), "상행 체인이 조각났다: " + routes);
+    }
+
+    @Test
+    @DisplayName("S8: 중간 역번호 역전(8호선 가락시장·남위례 형태)도 노선 하나로 조립된다 (267)")
+    void s8_역번호역전_8호선() {
+        // 송파 2817 · 가락시장 340 · 문정 2819 · 장지 2820 · 복정 2821 · 남위례 2828 · 산성 2822 · 남한산성입구 2823
+        List<String> order = List.of("2817", "340", "2819", "2820", "2821", "2828", "2822", "2823");
+
+        List<RaptorFinder.Route> built = RaptorRouteSetBuilder.subwayRoutes(bidirectional(order, "1008"));
+        List<String> routes = routeStops(built);
+
+        assertTrue(routes.contains("1008:" + String.join(">", order)), "하행 체인이 조각났다: " + routes);
+        assertTrue(routes.contains("1008:" + String.join(">", order.reversed())), "상행 체인이 조각났다: " + routes);
+        RaptorFinder.Route down = built.stream()
+                .filter(route -> route.stops().equals(order)).findFirst().orElseThrow();
+        for (int i = 0; i < order.size() - 1; i++) {
+            assertEquals(60 + i, down.travelSec()[i], "구간 소요가 어긋났다: " + i);
+            assertEquals(10 + i, down.boardWaitSec()[i], "승차 대기가 어긋났다: " + i);
+        }
+    }
+
+    /** 정차 순서대로 양방향 구간 행 — 하행 i번 구간 소요 60+i초·대기 10+i초, 상행은 90초·20초. */
+    private static List<RouteEdgeRow> bidirectional(List<String> order, String line) {
+        List<RouteEdgeRow> rows = new java.util.ArrayList<>();
+        for (int i = 0; i + 1 < order.size(); i++) {
+            rows.add(row(order.get(i), order.get(i + 1), line, 60 + i, 10 + i));
+            rows.add(row(order.get(i + 1), order.get(i), line, 90, 20));
+        }
+        return rows;
+    }
+
     /** 노선 집합을 순서 무관 비교용 문자열로 — routeId + 정차 순서. */
     private static List<String> routeStops(List<RaptorFinder.Route> routes) {
         return routes.stream()
