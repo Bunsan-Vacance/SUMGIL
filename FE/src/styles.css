@@ -1454,9 +1454,9 @@ small {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-basis: 44px;
+  flex-basis: 0;
   min-width: 0;
-  padding: 0 2px;
+  padding: 0;
   overflow: hidden;
   font-weight: 750;
   text-align: center;
@@ -1489,7 +1489,7 @@ small {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-basis: 44px;
+  flex-basis: 0;
   min-width: 0;
   container-type: inline-size;
   container-name: route-segment;
