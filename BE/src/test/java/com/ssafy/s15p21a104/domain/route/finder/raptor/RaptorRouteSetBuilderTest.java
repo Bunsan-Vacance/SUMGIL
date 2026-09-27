@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteStopsReader;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.loader.RouteEdgeRow;
@@ -146,6 +147,28 @@ class RaptorRouteSetBuilderTest {
             assertEquals(60 + i, down.travelSec()[i], "구간 소요가 어긋났다: " + i);
             assertEquals(10 + i, down.boardWaitSec()[i], "승차 대기가 어긋났다: " + i);
         }
+    }
+
+    @Test
+    @DisplayName("S9: 버스 승차 대기 = 배차간격/2, 배차간격 없으면 기본 12분(360초), 상한 15분 (218)")
+    void s9_버스승차대기() {
+        List<BusEdgeBuilder.RouteStop> stops = List.of(
+                new BusEdgeBuilder.RouteStop("S1", "정류장1", 1, 37.500, 127.000),
+                new BusEdgeBuilder.RouteStop("S2", "정류장2", 2, 37.505, 127.000),
+                new BusEdgeBuilder.RouteStop("S3", "정류장3", 3, 37.510, 127.000));
+        Map<String, List<BusEdgeBuilder.RouteStop>> routes = new java.util.LinkedHashMap<>();
+        routes.put("B8", stops);    // 배차 8분 → 240초
+        routes.put("B40", stops);   // 배차 40분 → 1200초지만 상한 900초
+        routes.put("BNULL", stops); // 배차 미상 → 기본 12분 → 360초
+
+        Map<String, RaptorFinder.Route> byId = RaptorRouteSetBuilder
+                .busRoutes(routes, Map.of("B8", 8, "B40", 40)).stream()
+                .collect(java.util.stream.Collectors.toMap(RaptorFinder.Route::routeId, r -> r));
+
+        assertEquals(240, byId.get("B8").boardWaitSec()[0]);
+        assertEquals(240, byId.get("B8").boardWaitSec()[1]);
+        assertEquals(900, byId.get("B40").boardWaitSec()[0]);
+        assertEquals(360, byId.get("BNULL").boardWaitSec()[0]);
     }
 
     /** 정차 순서대로 양방향 구간 행 — 하행 i번 구간 소요 60+i초·대기 10+i초, 상행은 90초·20초. */

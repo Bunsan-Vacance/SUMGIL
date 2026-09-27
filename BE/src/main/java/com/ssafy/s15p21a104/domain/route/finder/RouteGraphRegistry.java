@@ -77,6 +77,33 @@ public class RouteGraphRegistry {
         this.bikeStationRepository = bikeStationRepository;
     }
 
+    /** 버스 배차간격(RAPTOR 승차 대기, 218). 선택 주입 — 없으면 전 노선 기본 배차로 조립. */
+    private com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository busRouteRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setBusRouteRepository(com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository busRouteRepository) {
+        this.busRouteRepository = busRouteRepository;
+    }
+
+    /** 노선 ID → 배차간격(분). 조회 실패·미적재는 빈 맵(기본 배차) — 그래프 적재를 막지 않는다. */
+    private Map<String, Integer> busHeadways() {
+        if (busRouteRepository == null) {
+            return Map.of();
+        }
+        try {
+            Map<String, Integer> headways = new HashMap<>();
+            for (com.ssafy.s15p21a104.domain.bus.entity.BusRoute route : busRouteRepository.findAll()) {
+                if (route.getHeadwayMin() != null) {
+                    headways.put(route.getRouteId(), route.getHeadwayMin());
+                }
+            }
+            return headways;
+        } catch (RuntimeException e) {
+            log.warn("버스 배차간격 조회 실패 — 기본 배차로 조립: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
     @PostConstruct
     void load() {
         try {
@@ -126,7 +153,7 @@ public class RouteGraphRegistry {
             List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals, busStops);
             // RAPTOR 노선·연결(217) — 슬롯 무관분을 여기서 한 번 만들어 캐시한다.
             this.raptorBusRoutes = com.ssafy.s15p21a104.domain.route.finder.raptor
-                    .RaptorRouteSetBuilder.busRoutes(busRoutes);
+                    .RaptorRouteSetBuilder.busRoutes(busRoutes, busHeadways());
             this.raptorConnections = com.ssafy.s15p21a104.domain.route.finder.raptor
                     .RaptorRouteSetBuilder.connections(stops, rentals, busStops);
             List<Edge> extraEdges = new java.util.ArrayList<>(walkEdges);
