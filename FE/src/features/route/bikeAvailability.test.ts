@@ -1,8 +1,16 @@
-import { describe, expect, it, vi } from 'vitest'
+// @vitest-environment jsdom
+
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BikeStock } from '../../api/contracts'
 import type { BikePrediction } from '../../api/bikePrediction'
 import type { Route } from './types'
-import { bikeRouteAvailabilityMessage, loadBikeRouteAvailability } from './bikeAvailability'
+import {
+  bikeRouteAvailabilityMessage,
+  loadBikeRouteAvailability,
+  useBikeRouteAvailability,
+  type BikeAvailabilityRepositories,
+} from './bikeAvailability'
 
 const route: Route = {
   id: 'bike-route',
@@ -41,6 +49,39 @@ const stock = (overrides: Partial<BikeStock> = {}): BikeStock => ({
   stockUpdatedAt: '2026-09-24T08:31:00+09:00',
   status: 'AVAILABLE',
   ...overrides,
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((yes) => {
+    resolve = yes
+  })
+  return { promise, resolve }
+}
+
+function predictionFor(rentalId: string): BikePrediction {
+  return { ...prediction, rentalId }
+}
+
+function routeWithIds(id: string, rentalId: string, returnRentalId: string): Route {
+  return {
+    ...route,
+    id,
+    legs: route.legs.map((leg) =>
+      leg.mode === 'bike'
+        ? {
+            ...leg,
+            from: { ...leg.from, rentalId },
+            to: { ...leg.to, rentalId: returnRentalId },
+          }
+        : leg,
+    ),
+  }
+}
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
 })
 
 function repositories(
@@ -161,5 +202,106 @@ describe('BIKE 경로 이용 가능 여부', () => {
     })
     expect(result.status).toBe('unknown')
     expect(bikeRouteAvailabilityMessage(result.status)).toContain('확인할 수 없어요')
+  })
+
+  it('자전거 경로 batch가 모두 끝날 때까지 checking을 유지하고 한 번에 결과를 노출한다', async () => {
+    const predictionDeferred = deferred<BikePrediction>()
+    const repository: BikeAvailabilityRepositories = {
+      prediction: { prediction: vi.fn(() => predictionDeferred.promise) },
+      stock: {
+        stock: vi.fn((rentalId: string) => Promise.resolve(stock({ rentalId, availableBikes: 1 }))),
+      },
+    }
+    const routes = [route]
+    const { result } = renderHook(() => useBikeRouteAvailability(routes, repository))
+
+    expect(result.current[route.id]?.status).toBe('checking')
+    await act(async () => {
+      predictionDeferred.resolve(prediction)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current[route.id]?.status).toBe('available'))
+  })
+
+  it('10초 timeout은 완료된 경로를 보존하고 미완료 경로를 unknown으로 확정한다', async () => {
+    vi.useFakeTimers()
+    const first = routeWithIds('bike-route-first', 'ST-1', 'ST-2')
+    const second = routeWithIds('bike-route-second', 'ST-3', 'ST-4')
+    const routes = [first, second]
+    const firstPrediction = deferred<BikePrediction>()
+    const secondPrediction = deferred<BikePrediction>()
+    const signals: AbortSignal[] = []
+    const repository: BikeAvailabilityRepositories = {
+      prediction: {
+        prediction: vi.fn((rentalId: string, _arrivalTime: string, signal: AbortSignal) => {
+          signals.push(signal)
+          return rentalId === 'ST-1' ? firstPrediction.promise : secondPrediction.promise
+        }),
+      },
+      stock: {
+        stock: vi.fn((rentalId: string) => Promise.resolve(stock({ rentalId, availableBikes: 1 }))),
+      },
+    }
+    const { result } = renderHook(() => useBikeRouteAvailability(routes, repository))
+
+    await act(async () => {
+      firstPrediction.resolve(predictionFor('ST-1'))
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    act(() => vi.advanceTimersByTime(10_000))
+    expect(result.current[first.id]?.status).toBe('available')
+    expect(result.current[second.id]?.status).toBe('unknown')
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
+
+    await act(async () => {
+      secondPrediction.resolve(predictionFor('ST-3'))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current[second.id]?.status).toBe('unknown')
+  })
+
+  it('같은 route id의 새 batch에는 이전 availability를 노출하지 않는다', async () => {
+    const oldPrediction = deferred<BikePrediction>()
+    const newPrediction = deferred<BikePrediction>()
+    const oldRepository: BikeAvailabilityRepositories = {
+      prediction: { prediction: vi.fn(() => oldPrediction.promise) },
+      stock: {
+        stock: vi.fn((rentalId: string) => Promise.resolve(stock({ rentalId, availableBikes: 1 }))),
+      },
+    }
+    const newRepository: BikeAvailabilityRepositories = {
+      prediction: { prediction: vi.fn(() => newPrediction.promise) },
+      stock: {
+        stock: vi.fn((rentalId: string) => Promise.resolve(stock({ rentalId, availableBikes: 1 }))),
+      },
+    }
+    const { result, rerender } = renderHook(
+      ({ routes, repositories }) => useBikeRouteAvailability(routes, repositories),
+      { initialProps: { routes: [route], repositories: oldRepository } },
+    )
+
+    await act(async () => {
+      oldPrediction.resolve(prediction)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current[route.id]?.status).toBe('available'))
+
+    rerender({
+      routes: [{ ...route, departedAt: '2026-09-25T08:30:00+09:00' }],
+      repositories: newRepository,
+    })
+    expect(result.current[route.id]?.status).toBe('checking')
+    await act(async () => {
+      newPrediction.resolve(prediction)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current[route.id]?.status).toBe('available'))
   })
 })

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { places, routes } from '../api/mock/fixtures'
 import type { ComponentProps } from 'react'
@@ -39,7 +39,7 @@ function props(overrides: Partial<ComponentProps<typeof ResultsPage>> = {}) {
 }
 
 describe('경로 결과 상태', () => {
-  it('구간 막대에서 환승을 도보와 다른 아이콘과 문구로 표시한다', () => {
+  it('구간 막대에서 환승을 도보와 다른 아이콘과 문구로 표시한다', async () => {
     const route = {
       ...routes[0],
       legs: [
@@ -51,7 +51,7 @@ describe('경로 결과 상태', () => {
       ],
     }
     render(<ResultsPage {...props({ visible: [route] })} />)
-    const strip = screen.getByLabelText('구간별 이동 시간')
+    const strip = await waitFor(() => screen.getByLabelText('구간별 이동 시간'))
     expect(strip.querySelectorAll('.transfer')).toHaveLength(2)
     expect(strip.querySelectorAll('.transfer .lucide-arrow-left-right')).toHaveLength(2)
     expect(strip.querySelectorAll('.walk .lucide-footprints')).toHaveLength(2)

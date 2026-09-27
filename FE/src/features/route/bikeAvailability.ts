@@ -44,6 +44,8 @@ export interface BikeAvailabilityRepositories {
   stock?: Pick<BikeStationRepository, 'stock'> | null
 }
 
+const BIKE_AVAILABILITY_TIMEOUT_MS = 10_000
+
 function predictionTarget(route: Route): PredictionTarget | null {
   if (!route.departedAt || !Number.isFinite(new Date(route.departedAt).getTime())) return null
   let elapsedMinutes = 0
@@ -204,30 +206,69 @@ export function useBikeRouteAvailability(
     () => routes.filter((route) => route.legs.some((leg) => leg.mode === 'bike')),
     [routes],
   )
-  const [availability, setAvailability] = useState<Record<string, BikeRouteAvailability>>({})
-  useEffect(() => {
-    const controller = new AbortController()
-    const initial = Object.fromEntries(
-      bikeRoutes.map((route) => [
-        route.id,
-        { status: 'checking' as const, stockUpdatedAt: null, stockBasis: null },
-      ]),
-    )
-    setAvailability(initial)
-    Promise.all(
-      bikeRoutes.map(
-        async (route) =>
-          [
-            route.id,
-            await loadBikeRouteAvailability(route, controller.signal, repositories),
-          ] as const,
+  const batch = useMemo(() => ({ bikeRoutes, repositories }), [bikeRoutes, repositories])
+  const initialAvailability = useMemo(
+    () =>
+      Object.fromEntries(
+        bikeRoutes.map((route) => [
+          route.id,
+          { status: 'checking' as const, stockUpdatedAt: null, stockBasis: null },
+        ]),
       ),
-    )
-      .then((entries) => {
-        if (!controller.signal.aborted) setAvailability(Object.fromEntries(entries))
-      })
-      .catch(() => undefined)
-    return () => controller.abort()
-  }, [bikeRoutes, repositories])
-  return availability
+    [bikeRoutes],
+  )
+  const [completedBatch, setCompletedBatch] = useState<{
+    batch: typeof batch
+    availability: Record<string, BikeRouteAvailability>
+  } | null>(null)
+  useEffect(() => {
+    if (!batch.bikeRoutes.length) return
+    const controller = new AbortController()
+    let active = true
+    const settled = new Map<string, BikeRouteAvailability>()
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+    const publish = () => {
+      if (!active) return
+      setCompletedBatch({ batch, availability: Object.fromEntries(settled) })
+    }
+    const settle = (routeId: string, value: BikeRouteAvailability) => {
+      if (!active || settled.has(routeId)) return
+      settled.set(routeId, value)
+      if (settled.size === batch.bikeRoutes.length) {
+        publish()
+        active = false
+        if (timeoutId !== undefined) clearTimeout(timeoutId)
+      }
+    }
+
+    timeoutId = setTimeout(() => {
+      if (!active) return
+      controller.abort()
+      for (const route of batch.bikeRoutes) {
+        if (!settled.has(route.id))
+          settled.set(route.id, {
+            status: 'unknown',
+            stockUpdatedAt: null,
+            stockBasis: null,
+          })
+      }
+      publish()
+      active = false
+    }, BIKE_AVAILABILITY_TIMEOUT_MS)
+
+    batch.bikeRoutes.forEach((route) => {
+      loadBikeRouteAvailability(route, controller.signal, batch.repositories)
+        .then((value) => settle(route.id, value))
+        .catch(() =>
+          settle(route.id, { status: 'unknown', stockUpdatedAt: null, stockBasis: null }),
+        )
+    })
+    return () => {
+      active = false
+      controller.abort()
+      if (timeoutId !== undefined) clearTimeout(timeoutId)
+    }
+  }, [batch])
+  return completedBatch?.batch === batch ? completedBatch.availability : initialAvailability
 }
