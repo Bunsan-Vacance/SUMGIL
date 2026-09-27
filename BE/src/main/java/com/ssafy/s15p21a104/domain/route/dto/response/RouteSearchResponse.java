@@ -15,8 +15,9 @@ public record RouteSearchResponse(
         Double totalDistanceMeters,
         /**
          * 환승 횟수(S15P21A104-150/FE-175 항목8, S15P21A104-213 T1·214).
-         * TRANSFER leg 수와 같다. 접근 경계(WALK ↔ 주행)는 환승이 아니라
-         * TRANSFER leg를 만들지 않으므로 카운트에서 제외한다.
+         * 실제 탑승 수단(BIKE·BUS·SUBWAY) 전환 횟수다. WALK와 TRANSFER leg 자체는
+         * 세지 않으며, 명시 TRANSFER는 다음 실제 탑승 경계에서 한 번 보조한다. 따라서
+         * TRANSFER leg 수와 다를 수 있다.
          */
         Integer transferCount,
         /**

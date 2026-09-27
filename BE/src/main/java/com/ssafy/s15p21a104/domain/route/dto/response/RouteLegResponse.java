@@ -34,7 +34,7 @@ public record RouteLegResponse(
         String routeName,
         /**
          * BUS leg 운행 노선 후보(S15P21A104-234). 정규 구간이라 노선 선택을 미루고 목록으로 싣는다.
-         * 비BUS leg는 null. FE 표시용이며 탐색·집계에 쓰지 않는다.
+         * 비BUS leg는 null. 탐색 비용에는 쓰지 않으며 응답용 환승 집계에서는 공통 노선 판정에 사용한다.
          */
         List<RouteOptionResponse> routeOptions,
         /**
