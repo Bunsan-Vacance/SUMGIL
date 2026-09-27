@@ -2,6 +2,7 @@ package com.ssafy.s15p21a104.domain.route.finder.raptor;
 
 import com.ssafy.s15p21a104.domain.route.bike.BikeUsePolicy;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
+import com.ssafy.s15p21a104.domain.route.walk.WalkUsePolicy;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -77,6 +78,7 @@ public final class RaptorAccessClosure {
         }
         Map<State, Integer> best = new HashMap<>();
         Map<State, Integer> bestBikeRun = new HashMap<>();
+        Map<State, Integer> bestWalkRun = new HashMap<>();
         Map<State, RaptorFinder.Access> out = new HashMap<>();
         PriorityQueue<Entry> queue = new PriorityQueue<>(Comparator.comparingInt(Entry::cost));
         State origin = new State(originNodeId, 0);
@@ -91,12 +93,17 @@ public final class RaptorAccessClosure {
                 continue; // 낡은 항목
             }
             int run = bestBikeRun.getOrDefault(state, 0);
+            int walkRun = bestWalkRun.getOrDefault(state, 0);
             for (RaptorFinder.Connection connection : bySource.getOrDefault(state.node(), List.of())) {
                 boolean bike = connection.mode() == TravelMode.BIKE;
                 if (bike && !BikeUsePolicy.allowsBikeConnection(
                         0, run, state.bikeRuns(), connection.sec())) {
                     continue; // 측당 1런·2km 상한 초과 — 가지치기
                 }
+                if (!bike && !WalkUsePolicy.allowsWalk(walkRun, connection.sec())) {
+                    continue; // 연속 도보 15분 초과 — 가지치기
+                }
+                int nextWalkRun = bike ? 0 : walkRun + connection.sec();
                 int nextRun = bike ? run + connection.sec() : 0;
                 int nextRuns = bike
                         ? BikeUsePolicy.runsAfterBike(run, state.bikeRuns())
@@ -106,6 +113,7 @@ public final class RaptorAccessClosure {
                 if (nextCost < best.getOrDefault(next, INF)) {
                     best.put(next, nextCost);
                     bestBikeRun.put(next, nextRun);
+                    bestWalkRun.put(next, nextWalkRun);
                     out.put(next, new RaptorFinder.Access(
                             nextCost, state.node(), connection.sec(), connection.mode(), nextRun, nextRuns));
                     queue.add(new Entry(next, nextCost));
@@ -131,6 +139,7 @@ public final class RaptorAccessClosure {
         }
         Map<State, Integer> best = new HashMap<>();
         Map<State, Integer> bestBikeRun = new HashMap<>();
+        Map<State, Integer> bestWalkRun = new HashMap<>();
         Map<State, RaptorFinder.Egress> out = new HashMap<>();
         PriorityQueue<Entry> queue = new PriorityQueue<>(Comparator.comparingInt(Entry::cost));
         State dest = new State(destNodeId, 0);
@@ -145,12 +154,17 @@ public final class RaptorAccessClosure {
                 continue; // 낡은 항목
             }
             int run = bestBikeRun.getOrDefault(state, 0);
+            int walkRun = bestWalkRun.getOrDefault(state, 0);
             for (RaptorFinder.Connection connection : byTarget.getOrDefault(state.node(), List.of())) {
                 boolean bike = connection.mode() == TravelMode.BIKE;
                 if (bike && !BikeUsePolicy.allowsBikeConnection(
                         0, run, state.bikeRuns(), connection.sec())) {
                     continue; // 측당 1런·2km 상한 초과 — 가지치기
                 }
+                if (!bike && !WalkUsePolicy.allowsWalk(walkRun, connection.sec())) {
+                    continue; // 연속 도보 15분 초과 — 가지치기
+                }
+                int nextWalkRun = bike ? 0 : walkRun + connection.sec();
                 int nextRun = bike ? run + connection.sec() : 0;
                 int nextRuns = bike
                         ? BikeUsePolicy.runsAfterBike(run, state.bikeRuns())
@@ -160,6 +174,7 @@ public final class RaptorAccessClosure {
                 if (nextCost < best.getOrDefault(next, INF)) {
                     best.put(next, nextCost);
                     bestBikeRun.put(next, nextRun);
+                    bestWalkRun.put(next, nextWalkRun);
                     out.put(next, new RaptorFinder.Egress(
                             nextCost, state.node(), connection.sec(), connection.mode(), nextRun, nextRuns));
                     queue.add(new Entry(next, nextCost));
