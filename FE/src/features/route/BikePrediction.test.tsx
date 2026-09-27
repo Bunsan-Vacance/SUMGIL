@@ -118,16 +118,13 @@ describe('BikePrediction', () => {
     expect(screen.queryByText('현재')).toBeNull()
   })
 
-  it('재고 UNAVAILABLE과 API 오류를 별도로 안내하고 오류는 재시도한다', async () => {
+  it('출발 대여소 재고 UNAVAILABLE과 API 오류를 별도로 안내하고 오류는 재시도한다', async () => {
     const repository: BikePredictionRepository = {
       prediction: vi.fn().mockResolvedValue(prediction),
     }
     let sourceCalls = 0
     const stockRepository: Pick<BikeStationRepository, 'stock'> = {
-      stock: vi.fn((rentalId) => {
-        if (rentalId === 'ST-2') {
-          return Promise.resolve({ ...stock, rentalId: 'ST-2', availableBikes: 6, rackCount: 6 })
-        }
+      stock: vi.fn((_rentalId) => {
         sourceCalls += 1
         if (sourceCalls === 1) {
           return Promise.resolve({
@@ -145,9 +142,9 @@ describe('BikePrediction', () => {
       <BikePrediction route={route} repository={repository} stockRepository={stockRepository} />,
     )
     await waitFor(() => expect(screen.getByText('재고 정보 없음')).toBeTruthy())
-    await waitFor(() =>
-      expect(screen.getByText('반납 대여소 혼잡 · 현장 공간 확인 필요')).toBeTruthy(),
-    )
+    expect(stockRepository.stock).toHaveBeenCalledTimes(1)
+    expect(stockRepository.stock).toHaveBeenCalledWith('ST-1', expect.any(AbortSignal))
+    expect(screen.queryByText('반납 대여소 혼잡 · 현장 공간 확인 필요')).toBeNull()
     rerender(
       <BikePrediction
         route={{ ...route, id: 'retry-stock' }}
