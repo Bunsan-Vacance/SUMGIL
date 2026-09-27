@@ -15,6 +15,7 @@
 - 원인: WALK를 거치면 이전 대중교통 노선 비교가 끊겨 실제 환승이 누락. 덕소→광화문 첫 후보 3회가 `transferCount=0`.
 - 해결방안: WALK 경유 시 직전 대중교통 노선 유지 → 다음 대중교통과 비교. 비용·leg·횟수·순위에 동일 기준.
 - 결과(API 변경사항): `transferCount` 값이 바로잡힌다 (0 → 실제 횟수). 필드 추가·삭제 없음. `TRANSFER` leg 구성이 바뀔 수 있다.
+- 후속 정의(2026-09-27): `transferCount`는 WALK·TRANSFER leg 수가 아니라 실제 BIKE·BUS·SUBWAY 탑승 경계의 사용자용 환승 횟수다. BUS는 `routeOptions` 공통 노선을 이어 타면 0회로 세며, 명시 `TRANSFER`는 다음 실제 탑승 경계에서 한 번 보조한다. 엔진 환승 비용·원본 `transferCount`와 `TRANSFER` leg 구성은 그대로여서 서로 값이 다를 수 있다.
 
 ## 3. 출구 왕복 도보 (233)
 

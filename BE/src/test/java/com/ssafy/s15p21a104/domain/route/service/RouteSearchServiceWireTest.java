@@ -93,6 +93,7 @@ class RouteSearchServiceWireTest {
         assertEquals(TravelMode.TRANSFER, result.get(0).legs().get(1).mode());
         assertEquals(TravelMode.SUBWAY, result.get(0).legs().get(2).mode());
         assertEquals(60 / 60.0, result.get(0).legs().get(1).minutes(), 1e-9);
+        assertEquals(1, result.get(0).transferCount());
     }
 
     @Test
@@ -138,6 +139,45 @@ class RouteSearchServiceWireTest {
         assertEquals(1, result.get(0).legs().size());
         assertEquals(TravelMode.BIKE, result.get(0).legs().get(0).mode());
         assertEquals((120 + 120) / 60.0, result.get(0).totalMinutes());
+    }
+
+    @Test
+    @DisplayName("사용자 환승 횟수는 서비스 응답에서 자전거·지하철 경계를 포함한다")
+    void 사용자_환승횟수_서비스응답_멀티모달() {
+        Station stationD = mockStation("D", "디역");
+        lenient().when(stationRepository.findById("D"))
+                .thenReturn(Optional.of(stationD));
+        lenient().when(graphRegistry.graph()).thenReturn(graphOf(
+                new Edge("A", "R", "BIKE", 60, 0, TravelMode.BIKE),
+                new Edge("R", "B", "WALK", 60, 0, TravelMode.WALK),
+                new Edge("B", "C", "1003", 100, 0, TravelMode.SUBWAY),
+                new Edge("C", "E", "1075", 100, 0, TravelMode.SUBWAY),
+                new Edge("E", "D", "1008", 100, 0, TravelMode.SUBWAY)));
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        infos.put("A", new RouteMapper.StationInfo("A", "에이역", 37.5, 127.0));
+        infos.put("R", new RouteMapper.StationInfo("R", "대여소", 37.5, 127.0));
+        infos.put("B", new RouteMapper.StationInfo("B", "비역", 37.5, 127.0));
+        infos.put("C", new RouteMapper.StationInfo("C", "씨역", 37.5, 127.0));
+        infos.put("E", new RouteMapper.StationInfo("E", "이역", 37.5, 127.0));
+        infos.put("D", new RouteMapper.StationInfo("D", "디역", 37.5, 127.0));
+        lenient().when(graphRegistry.stationInfos()).thenReturn(infos);
+        lenient().when(graphRegistry.transferTimes()).thenReturn(Map.of(
+                new TransferRule.TransferKey("C", "1003", "1075"), 180,
+                new TransferRule.TransferKey("E", "1075", "1008"), 180));
+
+        List<RouteSearchResponse> result = routeSearchService.search("A", "D", null, null, null);
+        RouteSearchResponse candidate = result.stream()
+                .filter(response -> response.legs().stream()
+                        .filter(leg -> leg.mode() == TravelMode.SUBWAY).count() == 3)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(3, candidate.transferCount());
+        assertEquals((60 + 60 + 100 + 100 + 100 + 180 + 180) / 60.0,
+                candidate.totalMinutes(), 1e-9);
+        assertEquals(List.of(TravelMode.BIKE, TravelMode.WALK, TravelMode.SUBWAY,
+                TravelMode.TRANSFER, TravelMode.SUBWAY, TravelMode.TRANSFER, TravelMode.SUBWAY),
+                candidate.legs().stream().map(leg -> leg.mode()).toList());
     }
 
     private Station mockStation(String id, String name) {
