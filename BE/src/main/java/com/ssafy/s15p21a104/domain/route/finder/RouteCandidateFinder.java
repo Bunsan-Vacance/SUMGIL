@@ -210,6 +210,13 @@ public final class RouteCandidateFinder {
         if (!walkable.isEmpty()) {
             paths = walkable;
         }
+        // 수단 교체 상한 3회(337) — 같은 빈손 방지.
+        List<FoundPath> fewChanges = paths.stream()
+                .filter(path -> ModeChangePolicy.allowedPath(path.edges()))
+                .toList();
+        if (!fewChanges.isEmpty()) {
+            paths = fewChanges;
+        }
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {
