@@ -7,11 +7,7 @@ import {
 } from '../../api/repositories'
 import type { BikePrediction, BikePredictionRepository } from '../../api/bikePrediction'
 import type { BikeStationRepository, BikeStock } from '../../api/contracts'
-import {
-  bikePredictionTargetForRoute,
-  bikeReturnTargetForRoute,
-  bikeStockTargetForRoute,
-} from './bikeAvailability'
+import { bikePredictionTargetForRoute, bikeStockTargetForRoute } from './bikeAvailability'
 import type { Route } from './types'
 
 export { bikePredictionTargetForRoute } from './bikeAvailability'
@@ -49,18 +45,6 @@ function updatedTime(value: string | null) {
   return Number.isFinite(date.getTime()) ? displayTime(value) : value
 }
 
-function knownReturnStock(
-  stock: BikeStock | null,
-): stock is BikeStock & { status: 'AVAILABLE'; availableBikes: number; rackCount: number } {
-  return (
-    stock?.status === 'AVAILABLE' &&
-    stock.availableBikes !== null &&
-    stock.rackCount !== undefined &&
-    stock.rackCount !== null &&
-    stock.rackCount > 0
-  )
-}
-
 export default function BikePrediction({
   route,
   repository = bikePredictionRepository,
@@ -73,7 +57,6 @@ export default function BikePrediction({
   const hasBikeLeg = route.legs.some((leg) => leg.mode === 'bike')
   const target = useMemo(() => bikePredictionTargetForRoute(route), [route])
   const stockTargetForRoute = useMemo(() => bikeStockTargetForRoute(route), [route])
-  const returnStockTargetForRoute = useMemo(() => bikeReturnTargetForRoute(route), [route])
   const [retryKey, setRetryKey] = useState(0)
   const [stockRetryKey, setStockRetryKey] = useState(0)
   const [state, setState] = useState<PredictionState>(() =>
@@ -89,12 +72,6 @@ export default function BikePrediction({
       ? { status: 'loading' }
       : { status: 'unavailable', message: '현재 따릉이 재고를 확인할 수 없어요.' },
   )
-  const [returnStockState, setReturnStockState] = useState<StockState>(() =>
-    returnStockTargetForRoute && stockRepository
-      ? { status: 'loading' }
-      : { status: 'unavailable', message: '반납 가능 여부를 확인할 수 없어요.' },
-  )
-
   useEffect(() => {
     if (!target) {
       setState({
@@ -142,32 +119,6 @@ export default function BikePrediction({
     return () => controller.abort()
   }, [route, stockRepository, stockRetryKey, stockTargetForRoute])
 
-  useEffect(() => {
-    if (
-      !returnStockTargetForRoute ||
-      !stockRepository ||
-      returnStockTargetForRoute.rentalId === stockTargetForRoute?.rentalId
-    ) {
-      setReturnStockState({ status: 'unavailable', message: '반납 가능 여부를 확인할 수 없어요.' })
-      return
-    }
-    const controller = new AbortController()
-    setReturnStockState({ status: 'loading' })
-    stockRepository
-      .stock(returnStockTargetForRoute.rentalId, controller.signal)
-      .then((value) => {
-        if (!value) throw new Error('empty-return-stock')
-        return value
-      })
-      .then((value) => {
-        if (!controller.signal.aborted) setReturnStockState({ status: 'success', value })
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setReturnStockState({ status: 'error' })
-      })
-    return () => controller.abort()
-  }, [returnStockTargetForRoute, stockRepository, stockTargetForRoute])
-
   const retry = () => {
     if (state.status === 'error') setRetryKey((value) => value + 1)
   }
@@ -188,15 +139,6 @@ export default function BikePrediction({
     stockState.value.rentalId === stockTargetForRoute.rentalId
       ? stockState.value
       : null
-  const currentReturnStock =
-    returnStockTargetForRoute?.rentalId === stockTargetForRoute?.rentalId
-      ? currentStock
-      : returnStockState.status === 'success' &&
-          returnStockTargetForRoute &&
-          returnStockState.value.rentalId === returnStockTargetForRoute.rentalId
-        ? returnStockState.value
-        : null
-  const knownReturn = knownReturnStock(currentReturnStock) ? currentReturnStock : null
   if (!hasBikeLeg) return null
 
   return (
@@ -206,11 +148,6 @@ export default function BikePrediction({
         {(target || stockTargetForRoute)?.leg.from?.name && (
           <p className="bike-prediction-arrival">
             {(target || stockTargetForRoute)?.leg.from?.name}
-          </p>
-        )}
-        {knownReturn && knownReturn.availableBikes >= knownReturn.rackCount && (
-          <p className="bike-prediction-return-crowded" role="status">
-            <strong>반납 대여소 혼잡 · 현장 공간 확인 필요</strong>
           </p>
         )}
       </div>
