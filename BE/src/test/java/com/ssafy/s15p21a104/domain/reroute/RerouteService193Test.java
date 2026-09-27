@@ -106,4 +106,24 @@ class RerouteService193Test {
             assertTrue(signatures.add(signature.toString()), "중복 후보: " + signature);
         }
     }
+
+    @Test
+    @DisplayName("replan-geometry: 잔여 후보에 표시용 후처리(노선 이름·geometry)를 적용한다 — 검색과 같은 단계")
+    void 표시후처리_적용() {
+        RerouteService plain = serviceWith();
+        java.util.List<java.util.List<RouteSearchResponse>> seen = new java.util.ArrayList<>();
+        RerouteService decorated = plain.withDisplay(routes -> {
+            seen.add(routes);
+            return routes.stream().map(r -> new RouteSearchResponse(
+                    r.routeType(), r.totalMinutes(), r.legs(), r.source(),
+                    12345.0, r.transferCount(), r.congestionPrediction())).toList();
+        });
+
+        List<RerouteResult> result = decorated.replan("B", "C", 0, 0);
+
+        assertEquals(1, seen.size(), "후처리는 잔여 후보 묶음에 한 번");
+        assertTrue(result.size() >= 1);
+        assertTrue(result.stream().allMatch(r -> Double.valueOf(12345.0).equals(r.route().totalDistanceMeters())),
+                "후처리 결과가 응답에 반영돼야 한다");
+    }
 }
