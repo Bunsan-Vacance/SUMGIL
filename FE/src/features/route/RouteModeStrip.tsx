@@ -15,6 +15,7 @@ export default function RouteModeStrip({
   showCongestionLabels?: boolean
 }) {
   const displayLegs = compactLegs(legs)
+  const minWidth = `min(44px, ${100 / Math.max(displayLegs.length, 1)}%)`
   const hasCongestion = displayLegs.some(
     (leg) => isTransitLeg(leg) && segmentCongestionGradeForLeg(leg) !== undefined,
   )
@@ -33,7 +34,7 @@ export default function RouteModeStrip({
               <span
                 className="route-segment-label"
                 key={index}
-                style={{ flexGrow: leg.minutes, color: congestion?.color }}
+                style={{ flexGrow: leg.minutes, minWidth, color: congestion?.color }}
                 title={
                   congestion
                     ? `${segment} 구간 혼잡도 ${congestion.label}`
@@ -61,6 +62,7 @@ export default function RouteModeStrip({
               className={`mode-strip-item ${transfer ? 'transfer' : leg.mode}`}
               style={{
                 flexGrow: leg.minutes,
+                minWidth,
                 backgroundColor: transfer || leg.mode === 'walk' ? 'transparent' : lineColor(leg),
                 color: lineTextColor(leg),
               }}
