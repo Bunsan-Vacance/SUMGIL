@@ -226,6 +226,11 @@ public class RouteSearchService {
             String originStationId, String destStationId, List<TravelMode> modes,
             LocalDateTime departureTime) {
         DepartureSlot slot = DepartureSlot.of(departureTime);
+        // 재고 게이트: 대여 시점(출발 + 누적 소요)의 슬롯 예측 재고로 본다(SPEC 0.8).
+        finder = finder.withBikeStockAt(elapsedSec -> {
+            DepartureSlot at = DepartureSlot.of(departureTime.plusSeconds(elapsedSec));
+            return graphRegistry.bikeStock(at.dowType(), at.timeSlot());
+        });
         List<ScoredCandidate> timeScored = RouteCandidateFinder.filterScoredByModes(
                 finder.findCandidatesWithPaths(
                         graph, originStationId, destStationId, MAX_CANDIDATES, modes),

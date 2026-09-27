@@ -271,6 +271,56 @@ public class RouteGraphRegistry {
         return Map.of();
     }
 
+    /** 재고 예측 조회(선택 주입). 없으면 게이트 기본 허용. */
+    private com.ssafy.s15p21a104.domain.route.repository.RouteBikeStockPredRepository bikeStockPredRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setBikeStockPredRepository(
+            com.ssafy.s15p21a104.domain.route.repository.RouteBikeStockPredRepository bikeStockPredRepository) {
+        this.bikeStockPredRepository = bikeStockPredRepository;
+    }
+
+    private record StockSnapshot(long loadedAtMillis, Map<String, Integer> bikes) {
+    }
+
+    // ponytail: 슬롯별 1시간 캐시 — 예측 적재(매일 10:00 CronJob) 직후 최대 1시간 이전 값. 적재 이벤트 무효화가 생기면 교체.
+    private static final long STOCK_TTL_MILLIS = 60 * 60 * 1000L;
+    private final java.util.concurrent.ConcurrentMap<String, StockSnapshot> stockBySlot =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 슬롯의 대여소별 예상 재고(bike_stock_pred.exp_bikes 반올림). 재고 게이트가 0대 이하를 막는다.
+     * 원천 없음·조회 실패는 빈 맵(기본 허용) — 탐색을 막지 않는다.
+     *
+     * @param dowType 요일 구분
+     * @param timeSlot 30분 슬롯
+     * @return 대여소 ID → 예상 재고(대)
+     */
+    public Map<String, Integer> bikeStock(int dowType, int timeSlot) {
+        if (bikeStockPredRepository == null) {
+            return Map.of();
+        }
+        long now = System.currentTimeMillis();
+        StockSnapshot snapshot = stockBySlot.compute(dowType + ":" + timeSlot, (key, cached) -> {
+            if (cached != null && now - cached.loadedAtMillis() < STOCK_TTL_MILLIS) {
+                return cached;
+            }
+            try {
+                Map<String, Integer> bikes = new HashMap<>();
+                for (com.ssafy.s15p21a104.domain.bike.entity.BikeStockPred pred
+                        : bikeStockPredRepository.findAllById_DowTypeAndId_TimeSlot(dowType, timeSlot)) {
+                    bikes.put(pred.getId().getRentalId(),
+                            pred.getExpBikes().setScale(0, java.math.RoundingMode.HALF_UP).intValue());
+                }
+                return new StockSnapshot(now, Map.copyOf(bikes));
+            } catch (RuntimeException e) {
+                log.warn("따릉이 재고 예측 조회 실패 — 게이트 기본 허용: {}", e.getMessage());
+                return cached != null ? cached : new StockSnapshot(now, Map.of());
+            }
+        });
+        return snapshot.bikes();
+    }
+
     /**
      * 슬롯별 RAPTOR 노선·연결 묶음(217). 지하철만 슬롯 {@code edge_time}으로 조립한다.
      *
