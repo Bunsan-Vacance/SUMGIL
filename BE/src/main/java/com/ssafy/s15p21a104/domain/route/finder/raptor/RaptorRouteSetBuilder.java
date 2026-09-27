@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
  * 이내의 순환이동을 표현한다.
  *
  * <p>버스: 노선별 경유 정류소 CSV(순번) 순서 그대로. 소요는 기존 산식(직선÷14km/h)을
- * 재사용한다. 승차 대기는 버스 headway 배선(218) 전까지 0.
+ * 재사용한다. 승차 대기는 배차간격/2(상한 15분, 미상이면 기본 12분 — 218).
  */
 public final class RaptorRouteSetBuilder {
 
@@ -166,11 +166,30 @@ public final class RaptorRouteSetBuilder {
         return new RaptorFinder.Route(routeId, TravelMode.SUBWAY, List.copyOf(stops), travel, waits);
     }
 
-    /** 버스 노선 CSV(순번) → 순서 배열. 좌표 없는 정류장에서 체인을 끊고 조각별로 노선을 만든다. */
+    /** 버스 승차 대기 상한(초) — 배차가 매우 긴 노선이 대기로 탐색을 지배하지 않게(218). */
+    static final int BUS_BOARD_WAIT_CAP_SEC = 15 * 60;
+    /** 배차간격 미상 노선(718 중 272, 마을버스 상당수)의 기본 배차 — 적재 노선 중앙값 12분(원빈 실측 09-18). 0으로 두면 그 노선에 버스 편향이 남는다. */
+    static final int BUS_DEFAULT_HEADWAY_MIN = 12;
+
+    /** 버스 노선 CSV(순번) → 순서 배열. 배차간격은 전 노선 기본값(12분)으로 본다. */
     public static List<RaptorFinder.Route> busRoutes(
             Map<String, List<BusEdgeBuilder.RouteStop>> routes) {
+        return busRoutes(routes, Map.of());
+    }
+
+    /**
+     * 버스 노선 CSV(순번) → 순서 배열. 좌표 없는 정류장에서 체인을 끊고 조각별로 노선을 만든다.
+     * 승차 대기는 무작위 도착 기대값 = 배차간격/2, 상한 15분, 배차간격 미상이면 기본 12분(218).
+     *
+     * @param headwayMinByRoute 노선 ID → 배차간격(분). 없거나 0 이하면 기본값
+     */
+    public static List<RaptorFinder.Route> busRoutes(
+            Map<String, List<BusEdgeBuilder.RouteStop>> routes, Map<String, Integer> headwayMinByRoute) {
         List<RaptorFinder.Route> out = new ArrayList<>();
         for (Map.Entry<String, List<BusEdgeBuilder.RouteStop>> entry : routes.entrySet()) {
+            Integer headwayMin = headwayMinByRoute.get(entry.getKey());
+            int headway = headwayMin == null || headwayMin <= 0 ? BUS_DEFAULT_HEADWAY_MIN : headwayMin;
+            int boardWaitSec = Math.min(headway * 60 / 2, BUS_BOARD_WAIT_CAP_SEC);
             List<BusEdgeBuilder.RouteStop> stops = new ArrayList<>(entry.getValue());
             stops.sort(Comparator.comparing(BusEdgeBuilder.RouteStop::seq,
                     Comparator.nullsLast(Integer::compareTo)));
@@ -186,8 +205,7 @@ public final class RaptorRouteSetBuilder {
                 if (prev != null) {
                     int sec = Math.max(1, (int) Math.round(BusEdgeBuilder.distanceM(prev, stop)
                             / BusEdgeBuilder.METERS_PER_SEC));
-                    // 218(버스 대기 배선) 전까지 승차 대기 0.
-                    segments.add(new Segment(prev.stopId(), stop.stopId(), sec, 0));
+                    segments.add(new Segment(prev.stopId(), stop.stopId(), sec, boardWaitSec));
                 }
                 prev = stop;
             }
