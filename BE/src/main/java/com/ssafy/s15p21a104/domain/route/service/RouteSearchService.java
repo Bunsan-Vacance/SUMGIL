@@ -493,9 +493,10 @@ public class RouteSearchService {
                     CongestionScorer.worst(legs, levelByRouteId));
             CongestionPrediction prediction = CongestionPredictionResolver.resolve(
                     worst, truncated.get(), departureTime.toLocalDate(), today);
+            int transferCount = LegContract.userTransferCount(legs);
             out.add(new RouteSearchResponse(response.routeType(), response.totalMinutes(),
                     legs, response.source(), response.totalDistanceMeters(),
-                    response.transferCount(), prediction));
+                    transferCount, prediction));
         }
         return out;
     }
