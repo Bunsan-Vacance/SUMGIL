@@ -28,6 +28,8 @@ public final class RerouteService {
 
     private final RouteCandidateFinder candidateFinder;
     private final java.util.function.Supplier<RouteGraph> graphSupplier;
+    /** 표시용 후처리(노선 이름·geometry) — 검색 응답과 같은 단계. 기본은 그대로. */
+    private final java.util.function.UnaryOperator<List<RouteSearchResponse>> display;
 
     /**
      * @param candidateFinder 잔여 매핑용 조립기 (그래프·역정보 주입済)
@@ -35,8 +37,26 @@ public final class RerouteService {
      */
     public RerouteService(RouteCandidateFinder candidateFinder,
                           java.util.function.Supplier<RouteGraph> graphSupplier) {
+        this(candidateFinder, graphSupplier, java.util.function.UnaryOperator.identity());
+    }
+
+    private RerouteService(RouteCandidateFinder candidateFinder,
+                           java.util.function.Supplier<RouteGraph> graphSupplier,
+                           java.util.function.UnaryOperator<List<RouteSearchResponse>> display) {
         this.candidateFinder = candidateFinder;
         this.graphSupplier = graphSupplier;
+        this.display = display;
+    }
+
+    /**
+     * 잔여 후보에 표시용 후처리를 적용하는 사본. 검색 응답은 노선 이름·geometry를 붙이는데
+     * replan만 빠져 FE 지도에 선이 안 그려지던 문제(TO_BE-bike-reroute-route-03 §1).
+     *
+     * @param display 후보 묶음 → 이름·geometry가 붙은 후보 묶음(순서 유지)
+     * @return 후처리만 바뀐 새 서비스
+     */
+    public RerouteService withDisplay(java.util.function.UnaryOperator<List<RouteSearchResponse>> display) {
+        return new RerouteService(candidateFinder, graphSupplier, java.util.Objects.requireNonNull(display, "display"));
     }
 
     /**
@@ -79,8 +99,15 @@ public final class RerouteService {
                 break;
             }
         }
-        result.sort(Comparator.comparingDouble(r -> r.route().totalMinutes()));
-        return List.copyOf(result);
+        // geometry 후처리는 도보 표시 시간을 실측으로 바꾸고 총계를 leg 합으로 다시 맞춘다 — 그 뒤에 정렬.
+        List<RouteSearchResponse> shown = display.apply(result.stream().map(RerouteResult::route).toList());
+        List<RerouteResult> decorated = new ArrayList<>();
+        for (int i = 0; i < result.size() && i < shown.size(); i++) {
+            RerouteResult base = result.get(i);
+            decorated.add(new RerouteResult(base.reason(), base.source(), shown.get(i)));
+        }
+        decorated.sort(Comparator.comparingDouble(r -> r.route().totalMinutes()));
+        return List.copyOf(decorated);
     }
 
     private RouteGraph graphOf() {
