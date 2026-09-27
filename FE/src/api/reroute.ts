@@ -259,6 +259,15 @@ function findBoundary(route: Route, fromStep: number): ResolvedBoundary | null {
   return null
 }
 
+/** 목적지가 장소(좌표)라 역 ID가 없을 때, 경로의 마지막 지하철 구간 도착역 ID로 대신한다. */
+function lastSubwayStationId(route: Route): string | undefined {
+  for (let i = route.legs.length - 1; i >= 0; i -= 1) {
+    const leg = route.legs[i]
+    if (leg.mode === 'subway') return leg.to?.id?.trim() || undefined
+  }
+  return undefined
+}
+
 /** 호출 조건을 모두 만족할 때만 요청을 만들고, 수락 시 `keepLegs`로 쓸 `legIndex`를 함께 돌려준다.
  * 하나라도 어긋나면 null — 좌표·역 정보를 추측해서 채우지 않는다. */
 export function buildRerouteRequest(
@@ -269,10 +278,15 @@ export function buildRerouteRequest(
   const route = state.route
   if (!route || state.completed) return null
   const currentLeg = route.legs[state.step]
-  if (!currentLeg || currentLeg.mode !== 'subway') return null
+  if (!currentLeg) return null
   const boundary = findBoundary(route, state.step)
-  if (!boundary || state.step >= boundary.legIndex) return null
-  const destStationId = state.destination?.stationId?.trim()
+  if (!boundary) return null
+  // 지하철로 경계 전까지 가는 중이거나, 경계 구간(대여소로 걷는 중) 자체에 있을 때 호출한다.
+  // 후자는 출발 직후 따릉이를 타는 경로(첫 WALK→BIKE)를 위한 것이다.
+  const onSubwayBeforeBoundary = currentLeg.mode === 'subway' && state.step < boundary.legIndex
+  const walkingToRental = state.step === boundary.legIndex
+  if (!onSubwayBeforeBoundary && !walkingToRental) return null
+  const destStationId = state.destination?.stationId?.trim() || lastSubwayStationId(route)
   if (!destStationId) return null
   // 현재 leg는 전체 시간으로 근사하고, 그 뒤 boundary까지의 leg 시간을 더해 반올림한다.
   const etaToRentalMinutes = Math.round(
