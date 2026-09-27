@@ -49,12 +49,16 @@ public final class CongestionCostModel {
     public static KShortestPathFinder.EdgeCostModel of(double lambda, LevelSource levels,
                                                         BusRouteIndex busRouteIndex) {
         Objects.requireNonNull(levels, "levels");
+        // 호출부 조회는 DB 단건이라, 탐색 핫루프에서 같은 노선을 매번 묻지 않도록 모델 수명(요청 1회) 동안 기억한다(269).
+        java.util.Map<String, java.util.Optional<Double>> memo = new java.util.concurrent.ConcurrentHashMap<>();
+        LevelSource cached = (type, id) -> memo.computeIfAbsent(type + ":" + id,
+                key -> java.util.Optional.ofNullable(levels.levelOf(type, id))).orElse(null);
         return edge -> {
             Objects.requireNonNull(edge, "edge");
             if (edge.mode() != TravelMode.SUBWAY && edge.mode() != TravelMode.BUS) {
                 return edge.travelSec();
             }
-            Double level = levelOf(edge, levels, busRouteIndex);
+            Double level = levelOf(edge, cached, busRouteIndex);
             if (level == null) {
                 return edge.travelSec();
             }
