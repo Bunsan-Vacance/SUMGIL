@@ -77,4 +77,60 @@ class SubwayDirectionResolverTest {
     void 숫자아닌_역번호_보류() {
         assertTrue(SubwayDirectionResolver.resolve("D004", "A01", "1113").isEmpty());
     }
+
+    @Test
+    @DisplayName("환승역이 다른 노선의 작은 번호를 ID로 써도(교대=223) 그 노선의 역번호로 방향을 판정한다")
+    void 환승역_노선별_역번호() {
+        // 3호선: 고속터미널 0329 → 교대 0330 → 남부터미널 0331. 교대 station_id는 2호선 번호 223.
+        assertEquals(Optional.of("상선"), SubwayDirectionResolver.resolve("223", "329", "1003")); // 교대→고속터미널
+        assertEquals(Optional.of("하선"), SubwayDirectionResolver.resolve("329", "223", "1003")); // 고속터미널→교대
+        assertEquals(Optional.of("하선"), SubwayDirectionResolver.resolve("223", "331", "1003")); // 교대→남부터미널
+    }
+
+    @Test
+    @DisplayName("3~8호선 인접 구간 전수 — 노선 순서(역 좌표 CSV)대로 가면 모두 하선, 거꾸로 가면 모두 상선")
+    void 인접구간_전수() throws Exception {
+        java.util.Map<String, String> renamed = java.util.Map.of("당고개", "불암산", "뚝섬유원지", "자양");
+        // 역 좌표 CSV의 역번호는 station-ids.csv와 어긋나는 곳이 있어(6호선 화랑대·봉화산) 노선+역명으로 잇는다.
+        java.util.Map<String, String> sidByLineName = new java.util.HashMap<>();
+        try (var in = getClass().getClassLoader().getResourceAsStream("data/subway/conf/station-ids.csv");
+             var reader = new java.io.BufferedReader(new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8))) {
+            reader.readLine();
+            for (String line; (line = reader.readLine()) != null; ) {
+                String[] cells = line.split(",", -1);
+                for (String code : cells[2].split(";")) {
+                    sidByLineName.put(code.split(":")[0] + ":" + cells[1], cells[0]);
+                }
+            }
+        }
+        java.util.Map<String, java.util.List<String[]>> byLine = new java.util.TreeMap<>();
+        try (var in = getClass().getClassLoader().getResourceAsStream("data/subway/seoulmetro-station-coords_20250814.csv");
+             var reader = new java.io.BufferedReader(new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8))) {
+            reader.readLine();
+            for (String line; (line = reader.readLine()) != null; ) {
+                String[] cells = line.split(",", -1);
+                byLine.computeIfAbsent(cells[1], key -> new java.util.ArrayList<>()).add(cells);
+            }
+        }
+        java.util.List<String> wrong = new java.util.ArrayList<>();
+        int checked = 0;
+        for (String lineNo : java.util.List.of("3", "4", "5", "6", "7", "8")) {
+            String lineId = "100" + lineNo;
+            java.util.List<String[]> rows = byLine.get(lineNo);
+            rows.sort(java.util.Comparator.comparingInt(r -> Integer.parseInt(r[0])));
+            for (int i = 0; i + 1 < rows.size(); i++) {
+                String nameA = rows.get(i)[3].trim();
+                String nameB = rows.get(i + 1)[3].trim();
+                String a = sidByLineName.get(lineId + ":" + renamed.getOrDefault(nameA, nameA));
+                String b = sidByLineName.get(lineId + ":" + renamed.getOrDefault(nameB, nameB));
+                checked++;
+                if (!Optional.of("하선").equals(SubwayDirectionResolver.resolve(a, b, lineId))
+                        || !Optional.of("상선").equals(SubwayDirectionResolver.resolve(b, a, lineId))) {
+                    wrong.add(lineNo + "호선 " + rows.get(i)[3] + "→" + rows.get(i + 1)[3]);
+                }
+            }
+        }
+        assertTrue(checked > 150, "검사 구간이 너무 적다: " + checked);
+        assertTrue(wrong.isEmpty(), "방향이 뒤집힌 구간 " + wrong.size() + "개: " + wrong);
+    }
 }
