@@ -75,6 +75,15 @@ function isBikeRoute(route: Route) {
   return route.legs.some((leg) => leg.mode === 'bike')
 }
 
+function isBikeAvailabilityPending(
+  route: Route,
+  availability: Record<string, BikeRouteAvailability>,
+) {
+  if (!isBikeRoute(route)) return false
+  const status = availability[route.id]?.status
+  return status === undefined || status === 'checking'
+}
+
 function canRecommend(route: Route, availability: Record<string, BikeRouteAvailability>) {
   return !isBikeRoute(route) || availability[route.id]?.status === 'available'
 }
@@ -144,6 +153,9 @@ export default function ResultsPage({
   const [localPriority, setLocalPriority] = useState<Priority>(() => priority)
   const liveApi = isLiveApi ?? false
   const bikeAvailability = useBikeRouteAvailability(visible)
+  const bikeAvailabilityPending = visible.some((route) =>
+    isBikeAvailabilityPending(route, bikeAvailability),
+  )
   const featured = featuredRoutes(visible, bikeAvailability)
   const featuredIds = new Set(featured.map(({ route }) => route.id))
   const remaining = visible.filter((route) => !featuredIds.has(route.id))
@@ -229,7 +241,7 @@ export default function ResultsPage({
           </button>
         </div>
 
-        {status === 'loading' ? (
+        {status === 'loading' || (status === 'success' && bikeAvailabilityPending) ? (
           <div className="empty results-state" role="status">
             <span className="spinner" />
             <h2>경로를 찾고 있어요</h2>

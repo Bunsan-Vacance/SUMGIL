@@ -151,6 +151,16 @@ describe('경로 검색 요청 수명', () => {
     )
   })
 
+  it('관련없는 parent rerender에서는 visible 배열과 자전거 확인 batch를 재생성하지 않는다', () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result, rerender } = renderHook(() => useTrip(loadedTrip, repository))
+    const visible = result.current.visible
+
+    rerender()
+
+    expect(result.current.visible).toBe(visible)
+  })
+
   it('성공한 검색 뒤 필터를 바꾸면 도보를 포함해 재검색한다', async () => {
     const repository: RouteRepository = { search: vi.fn(async () => routes) }
     const { result } = renderHook(() => useTrip(loadedTrip, repository))
