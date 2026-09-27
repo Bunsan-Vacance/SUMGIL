@@ -16,14 +16,14 @@ public final class BikeEdgeBuilder {
     public static final double RADIUS_M = 1000.0;
 
     /**
-     * 대여 1회(연속 BIKE 구간) 상한(초) — 2km ÷ 15km/h = 480초(사용자 결정 2026-09-22, 1km→2km).
+     * 대여 1회(연속 BIKE 구간) 상한(초) — 12km/h 기준 약 2km인 600초를 적용한다.
      * 초과하는 연속 자전거 구간은 접근·이탈 closure·엔진 이완·후보 필터에서 제외한다.
      * (1km였을 때 역삼→한티 1,533m 직행 자전거가 잘리는 회귀가 있어 상향.)
      */
-    public static final int MAX_ACT_SEC = 480;
+    public static final int MAX_ACT_SEC = 600;
 
-    /** 자전거 속도(m/s). 15km/h. */
-    public static final double METERS_PER_SEC = 15_000.0 / 3600.0;
+    /** 자전거 속도(m/s). 12km/h. */
+    public static final double METERS_PER_SEC = 12_000.0 / 3600.0;
 
     /** BIKE 엣지의 routeId. 노선 전환(환승 집계·페널티) 기준이 된다. */
     public static final String BIKE_ROUTE_ID = "BIKE";
