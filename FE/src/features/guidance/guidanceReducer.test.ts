@@ -94,6 +94,28 @@ describe('길안내 진행 상태', () => {
     expect(replanned.train).toBeNull()
   })
 
+  it('keepLegs가 있으면 step 대신 그 지점까지 원본 구간을 보존한다(AI 재안내)', () => {
+    const active = { ...initialGuidance, route: routes[0], step: 1, train: '09:42' }
+    const reroute = { ...routes[1], id: 'reroute:reco-1', legs: routes[1].legs.slice(1) }
+    const replanned = guidanceReducer(active, { type: 'replan', route: reroute, keepLegs: 3 })
+    expect(replanned.route?.legs).toEqual([...routes[0].legs.slice(0, 3), ...reroute.legs])
+    expect(replanned.step).toBe(1)
+    expect(replanned.train).toBeNull()
+  })
+
+  it('keepLegs가 범위를 벗어나면 step 기준으로 되돌린다', () => {
+    const active = { ...initialGuidance, route: routes[0], step: 2 }
+    const reroute = { ...routes[1], legs: routes[1].legs.slice(1) }
+    const tooSmall = guidanceReducer(active, { type: 'replan', route: reroute, keepLegs: 1 })
+    expect(tooSmall.route?.legs).toEqual([...routes[0].legs.slice(0, 2), ...reroute.legs])
+    const tooLarge = guidanceReducer(active, {
+      type: 'replan',
+      route: reroute,
+      keepLegs: routes[0].legs.length + 1,
+    })
+    expect(tooLarge.route?.legs).toEqual([...routes[0].legs.slice(0, 2), ...reroute.legs])
+  })
+
   it('도보와 자전거는 연속된 정확한 도착 위치 두 번으로 진행한다', () => {
     const active = { ...initialGuidance, route: routes[0], step: 0 }
     const endpoint = routes[0].legs[0].to!
