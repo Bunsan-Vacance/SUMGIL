@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { routeRepository } from '../../api/repositories'
 import { RepositoryError } from '../../api/errors'
 import type { RouteRepository } from '../../api/contracts'
@@ -46,6 +46,10 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
   const departureOverride = useRef<string | null>(null)
   const priorityRef = useRef(initial.priority)
   const lastDepartureAt = useRef(initial.candidates[0]?.departedAt)
+  const visible = useMemo(
+    () => getRoutes(state.candidates, state.enabled, state.priority),
+    [state.candidates, state.enabled, state.priority],
+  )
   useEffect(() => () => request.current?.abort(), [])
   const search = async (
     destination: Place,
@@ -110,7 +114,7 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
   return {
     ...state,
     departureTime,
-    visible: getRoutes(state.candidates, state.enabled, state.priority),
+    visible,
     search,
     setOrigin: (place: Place) => {
       if (place.id !== state.origin.id) request.current?.abort()
