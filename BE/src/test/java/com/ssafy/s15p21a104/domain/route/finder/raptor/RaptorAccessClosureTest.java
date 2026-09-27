@@ -122,4 +122,25 @@ class RaptorAccessClosureTest {
         assertEquals(1, egress.get("R2").bikeRuns(), "R2까지 1런이어야 한다");
         assertFalse(egress.containsKey("S"), "두 번째 자전거 런이 남았다");
     }
+
+    @Test
+    @DisplayName("W1: 연속 도보 15분 초과는 접근·이탈에서 잘린다 — 도보 체인(역→대여소→역…) 차단, 자전거는 도보 누적을 끊는다")
+    void w1_연속도보_상한() {
+        // 도보 홉 400초 ×3 = 1200초(20분) > 900초. 자전거를 끼면 도보 누적이 0으로 돌아간다.
+        List<RaptorFinder.Connection> walks = List.of(
+                new RaptorFinder.Connection("O", "A", 400, TravelMode.WALK),
+                new RaptorFinder.Connection("A", "B", 400, TravelMode.WALK),
+                new RaptorFinder.Connection("B", "C", 400, TravelMode.WALK),
+                new RaptorFinder.Connection("A", "R1", 100, TravelMode.WALK),
+                new RaptorFinder.Connection("R1", "R2", 200, TravelMode.BIKE),
+                new RaptorFinder.Connection("R2", "D", 400, TravelMode.WALK));
+
+        Map<String, RaptorFinder.Access> access = RaptorAccessClosure.from("O", walks);
+        assertEquals(800, access.get("B").costSec()); // 800초 — 상한 안
+        assertFalse(access.containsKey("C"), "연속 도보 1200초가 남았다");
+        assertEquals(1100, access.get("D").costSec()); // 도보 500 → 자전거 200 → 도보 400(누적 리셋)
+
+        Map<String, RaptorFinder.Egress> egress = RaptorAccessClosure.to("C", walks);
+        assertFalse(egress.containsKey("O"), "역방향도 연속 도보 1200초가 남았다");
+    }
 }
