@@ -203,6 +203,6 @@ export function useGuidance(trackingEnabled = false) {
     locationStatus: (state.locationStatus || 'idle') as GuidanceLocationStatus,
     setTrain: (time: string, arrival?: TrainArrival | null) =>
       dispatch({ type: 'train', time, arrival }),
-    replan: (route: Route) => dispatch({ type: 'replan', route }),
+    replan: (route: Route, keepLegs?: number) => dispatch({ type: 'replan', route, keepLegs }),
   }
 }

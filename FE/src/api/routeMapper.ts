@@ -28,7 +28,14 @@ function finite(value: unknown, min: number, max: number) {
 }
 
 function parseGeometry(value: unknown, status: unknown): RouteGeometry | undefined {
-  if (status !== undefined && status !== 'available' && status !== 'unavailable') {
+  // 'estimated'는 AI 재안내 도보 구간(walkLeg) 전용 상태다 — 실경로 조회 없이 직선 추정한
+  // 좌표라는 뜻이며, 'available'과 마찬가지로 좌표는 그대로 유지한다(TO_FE-bike-reroute-04.md 2.2절).
+  if (
+    status !== undefined &&
+    status !== 'available' &&
+    status !== 'unavailable' &&
+    status !== 'estimated'
+  ) {
     throw new RepositoryError('invalid-response', '지원하지 않는 경로 좌표 상태 응답이에요.')
   }
   if (status === 'unavailable' || value === null || value === undefined) return undefined

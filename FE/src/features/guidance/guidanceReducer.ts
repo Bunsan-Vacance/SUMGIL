@@ -60,7 +60,7 @@ export type GuidanceAction =
   | { type: 'set-step'; step: number }
   | { type: 'confirm-step' }
   | { type: 'train'; time: string; arrival?: TrainArrival | null }
-  | { type: 'replan'; route: Route }
+  | { type: 'replan'; route: Route; keepLegs?: number }
   | { type: 'location-status'; status: GuidanceLocationStatus }
   | { type: 'location'; latitude: number; longitude: number; accuracy: number }
 
@@ -243,7 +243,16 @@ export function guidanceReducer(state: GuidanceState, action: GuidanceAction): G
     }
     case 'replan': {
       if (!state.route || state.completed || !action.route.legs.length) return state
-      const completedLegs = state.route.legs.slice(0, state.step)
+      // 재안내(AI reroute)는 대여소 경계 leg까지 원본 구간을 보존해야 해서 step보다 뒤를 요구할
+      // 수 있다 — 범위를 벗어나면 기존 재탐색과 같은 step 기준으로 되돌린다(추측하지 않는다).
+      const keepLegs =
+        action.keepLegs !== undefined &&
+        Number.isInteger(action.keepLegs) &&
+        action.keepLegs >= state.step &&
+        action.keepLegs <= state.route.legs.length
+          ? action.keepLegs
+          : state.step
+      const completedLegs = state.route.legs.slice(0, keepLegs)
       const legs = [...completedLegs, ...action.route.legs]
       const completedMinutes = completedLegs.reduce((total, leg) => total + leg.minutes, 0)
       const proposalAnchor = action.route.departedAt || state.route.departedAt
