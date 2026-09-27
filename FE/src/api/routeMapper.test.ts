@@ -263,7 +263,7 @@ describe('경로 응답 확장 필드', () => {
     })
   })
 
-  it('transferCount가 없으면 transit 노선 변경만 환승으로 세고 자전거 경계는 세지 않는다', () => {
+  it('transferCount가 없으면 자전거와 대중교통 경계를 포함해 실제 탑승 전환을 센다', () => {
     const route = mapBackendRoute(
       response({
         transferCount: undefined,
@@ -279,7 +279,184 @@ describe('경로 응답 확장 필드', () => {
       '2026-09-17T00:00:00.000Z',
     )
 
+    expect(route.transfers).toBe(2)
+  })
+
+  it('명시 TRANSFER는 다음 실제 탑승에 한 번만 반영하고 차량 변경과 중복하지 않는다', () => {
+    const legs = [
+      { mode: 'WALK', minutes: 1 },
+      { mode: 'BIKE', minutes: 2 },
+      { mode: 'WALK', minutes: 1 },
+      { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+      { mode: 'TRANSFER', minutes: 1 },
+      { mode: 'SUBWAY', routeId: '1075', minutes: 2 },
+      { mode: 'TRANSFER', minutes: 1 },
+      { mode: 'SUBWAY', routeId: '1008', minutes: 2 },
+    ]
+
+    expect(mapBackendRoute(response({ transferCount: undefined, legs }), 0, '').transfers).toBe(3)
+    expect(mapBackendRoute(response({ transferCount: null, legs }), 0, '').transfers).toBe(3)
+    expect(mapBackendRoute(response({ transferCount: 3, legs }), 0, '').transfers).toBe(3)
+    expect(mapBackendRoute(response({ transferCount: 0, legs }), 0, '').transfers).toBe(0)
+
+    const sameLineTransfer = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+          { mode: 'TRANSFER', minutes: 1 },
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+        ],
+      }),
+      0,
+      '',
+    )
+
+    expect(sameLineTransfer.transfers).toBe(1)
+  })
+
+  it('대중교통에서 자전거로 전환하는 경계도 한 번 센다', () => {
+    const route = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+          { mode: 'WALK', minutes: 1 },
+          { mode: 'BIKE', routeId: 'bike-a', minutes: 2 },
+        ],
+      }),
+      0,
+      '',
+    )
+
     expect(route.transfers).toBe(1)
+
+    const emptyOptions = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          {
+            mode: 'BUS',
+            routeId: '740',
+            minutes: 2,
+            routeOptions: [{ routeId: '740' }],
+          },
+          { mode: 'BUS', routeId: '740', minutes: 2, routeOptions: [] },
+        ],
+      }),
+      0,
+      '',
+    )
+
+    expect(emptyOptions.transfers).toBe(0)
+  })
+
+  it('자전거 구간 사이 도보는 같은 자전거 탑승으로 세고 단독 자전거는 0이다', () => {
+    const route = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+          { mode: 'WALK', minutes: 1 },
+          { mode: 'BIKE', routeId: 'bike-a', minutes: 2 },
+          { mode: 'WALK', minutes: 1 },
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+        ],
+      }),
+      0,
+      '',
+    )
+    const standaloneBike = mapBackendRoute(
+      response({ transferCount: undefined, legs: [{ mode: 'BIKE', minutes: 2 }] }),
+      0,
+      '',
+    )
+
+    expect(route.transfers).toBe(2)
+    expect(standaloneBike.transfers).toBe(0)
+  })
+
+  it('BUS 구간은 누적 공통 노선으로 판단하고 환승 시 현재 집합으로 재설정한다', () => {
+    const route = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          {
+            mode: 'BUS',
+            routeId: 'BUS_CORRIDOR',
+            minutes: 2,
+            routeOptions: [{ routeId: '108' }, { routeId: '143' }],
+          },
+          {
+            mode: 'BUS',
+            routeId: 'BUS_CORRIDOR',
+            minutes: 2,
+            routeOptions: [{ routeId: '143' }, { routeId: '201' }],
+          },
+          {
+            mode: 'BUS',
+            routeId: 'BUS_CORRIDOR',
+            minutes: 2,
+            routeOptions: [{ routeId: '201' }],
+          },
+          {
+            mode: 'BUS',
+            routeId: 'BUS_CORRIDOR',
+            minutes: 2,
+            routeOptions: [{ routeId: '201' }],
+          },
+        ],
+      }),
+      0,
+      '',
+    )
+
+    expect(route.transfers).toBe(1)
+  })
+
+  it('같은 지하철 노선 분할은 0, 다른 노선은 1로 센다', () => {
+    const sameLine = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+        ],
+      }),
+      0,
+      '',
+    )
+    const differentLine = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+          { mode: 'SUBWAY', routeId: '1008', minutes: 2 },
+        ],
+      }),
+      0,
+      '',
+    )
+
+    expect(sameLine.transfers).toBe(0)
+    expect(differentLine.transfers).toBe(1)
+  })
+
+  it('첫 탑승 전과 마지막 탑승 뒤의 TRANSFER는 환승으로 세지 않는다', () => {
+    const route = mapBackendRoute(
+      response({
+        transferCount: undefined,
+        legs: [
+          { mode: 'TRANSFER', minutes: 1 },
+          { mode: 'SUBWAY', routeId: '1003', minutes: 2 },
+          { mode: 'TRANSFER', minutes: 1 },
+        ],
+      }),
+      0,
+      '',
+    )
+
+    expect(route.transfers).toBe(0)
   })
 
   it('자전거 endpoint의 명시 rental ID를 node ID와 구분해 보존한다', () => {

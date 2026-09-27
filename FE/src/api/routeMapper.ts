@@ -259,6 +259,70 @@ function mapCongestionPrediction(value: unknown): CongestionPrediction | undefin
   }
 }
 
+function busRouteSet(leg: Route['legs'][number]) {
+  if (leg.busRouteOptions?.length) {
+    return new Set(leg.busRouteOptions.map((option) => option.routeId))
+  }
+  return leg.routeId && leg.routeId !== 'BUS' ? new Set([leg.routeId]) : undefined
+}
+
+function commonBusRoutes(left: Set<string>, right: Set<string>) {
+  return new Set([...left].filter((routeId) => right.has(routeId)))
+}
+
+function countFallbackTransfers(legs: Route['legs']) {
+  let count = 0
+  let previous: Route['legs'][number] | undefined
+  let runningBusRoutes: Set<string> | undefined
+  let pendingTransfer = false
+
+  for (const leg of legs) {
+    if (leg.mode === 'walk') {
+      if (leg.transfer) pendingTransfer = true
+      continue
+    }
+
+    if (!previous) {
+      previous = leg
+      runningBusRoutes = leg.mode === 'bus' ? busRouteSet(leg) : undefined
+      pendingTransfer = false
+      continue
+    }
+
+    const currentBusRoutes = leg.mode === 'bus' ? busRouteSet(leg) : undefined
+    let vehicleTransfer = false
+    if (pendingTransfer) {
+      vehicleTransfer = true
+      runningBusRoutes = currentBusRoutes
+    } else if (previous.mode === 'bike' || leg.mode === 'bike') {
+      vehicleTransfer = previous.mode !== leg.mode
+      runningBusRoutes = currentBusRoutes
+    } else if (previous.mode !== leg.mode) {
+      vehicleTransfer = true
+      runningBusRoutes = currentBusRoutes
+    } else if (leg.mode === 'subway') {
+      vehicleTransfer =
+        previous.routeId !== undefined &&
+        leg.routeId !== undefined &&
+        previous.routeId !== leg.routeId
+      runningBusRoutes = undefined
+    } else if (runningBusRoutes !== undefined && currentBusRoutes !== undefined) {
+      const commonRoutes = commonBusRoutes(runningBusRoutes, currentBusRoutes)
+      vehicleTransfer = commonRoutes.size === 0
+      runningBusRoutes = vehicleTransfer ? currentBusRoutes : commonRoutes
+    } else {
+      vehicleTransfer = false
+      runningBusRoutes = currentBusRoutes
+    }
+
+    if (vehicleTransfer) count += 1
+    pendingTransfer = false
+    previous = leg
+  }
+
+  return count
+}
+
 export function mapBackendRoute(value: unknown, index: number, departedAt: string): Route {
   if (!isRecord(value) || !text(value.routeType) || !finite(value.totalMinutes, 0, 24 * 60)) {
     throw new RepositoryError('invalid-response', '경로 응답이 올바르지 않아요.')
@@ -358,27 +422,13 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
         .filter((line): line is string => !!line),
     ),
   ]
-  const explicitTransfers = rawLegs.filter(
-    (leg) =>
-      isRecord(leg) &&
-      (leg.transitionType === 'TRANSFER' ||
-        (leg.transitionType == null && leg.mode === 'TRANSFER')),
-  ).length
-  const transitRouteIds = rawLegs
-    .filter((leg) => isRecord(leg) && (leg.mode === 'SUBWAY' || leg.mode === 'BUS') && leg.routeId)
-    .map((leg) => (isRecord(leg) ? text(leg.routeId) : undefined))
-    .filter((routeId): routeId is string => !!routeId)
-  const routeTransitions = transitRouteIds
-    .slice(1)
-    .reduce((count, routeId, index) => count + (routeId !== transitRouteIds[index] ? 1 : 0), 0)
   if (
     value.transferCount != null &&
     (!Number.isInteger(value.transferCount) || (value.transferCount as number) < 0)
   ) {
     throw new RepositoryError('invalid-response', '환승 횟수 응답이 올바르지 않아요.')
   }
-  const transfers =
-    (value.transferCount as number | undefined) ?? (explicitTransfers || routeTransitions)
+  const transfers = (value.transferCount as number | undefined) ?? countFallbackTransfers(legs)
   const walkingLegs = legs.filter(
     (leg) => leg.mode === 'walk' && !leg.transfer && !leg.transitionType,
   )
