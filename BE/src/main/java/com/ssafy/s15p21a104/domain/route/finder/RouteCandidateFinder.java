@@ -202,6 +202,14 @@ public final class RouteCandidateFinder {
         }
         // 대여 1회(연속 BIKE) 상한 초과 후보 제거(5부 T3) — 엔진·접근 closure 밖(레거시 폴백 포함)에서도 방어.
         paths = paths.stream().filter(path -> BikeUsePolicy.allowedPath(path.edges())).toList();
+        // 연속 도보 15분 상한(2026-09-27) 안전망 — 레거시 폴백의 도보 체인까지. 단 빈손 방지(5부 §2):
+        // 상한을 지키는 후보가 하나도 없으면(걸어서만 닿는 곳) 원래 후보를 그대로 둔다.
+        List<FoundPath> walkable = paths.stream()
+                .filter(path -> com.ssafy.s15p21a104.domain.route.walk.WalkUsePolicy.allowedPath(path.edges()))
+                .toList();
+        if (!walkable.isEmpty()) {
+            paths = walkable;
+        }
 
         Map<String, ScoredCandidate> byLegSignature = new LinkedHashMap<>();
         for (FoundPath found : paths) {
