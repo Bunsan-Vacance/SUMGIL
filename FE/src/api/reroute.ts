@@ -223,13 +223,17 @@ export function createBackendRerouteRepository(baseUrl: string): RerouteReposito
 
 export const aiBaseUrl = import.meta.env.VITE_AI_BASE_URL?.trim().replace(/\/+$/, '') || null
 export const isRerouteMockEnabled =
-  import.meta.env.VITE_REROUTE_MOCK?.trim().toLowerCase() === 'true' || !aiBaseUrl
+  import.meta.env.VITE_REROUTE_MOCK?.trim().toLowerCase() === 'true'
 export const isRerouteDebugForceEnabled =
   import.meta.env.VITE_REROUTE_DEBUG_FORCE?.trim().toLowerCase() === 'true'
 
-export const rerouteRepository: RerouteRepository = isRerouteMockEnabled
+// AI 베이스 URL도 mock 플래그도 없으면 재안내 확인을 아예 끈다(null) — 다른 mock과 달리 URL 부재를
+// mock으로 대체하지 않는다. mock 기본 상태가 proposal이라 운영 빌드에서 팝업이 뜨면 안 되기 때문이다.
+export const rerouteRepository: RerouteRepository | null = isRerouteMockEnabled
   ? mockRerouteRepository
-  : createBackendRerouteRepository(aiBaseUrl!)
+  : aiBaseUrl
+    ? createBackendRerouteRepository(aiBaseUrl)
+    : null
 
 // ---- 요청 조립(설계 결정 표 "호출 조건") ----
 

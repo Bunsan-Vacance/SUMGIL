@@ -61,7 +61,7 @@ function hasRouteLocation(place: Place) {
 export function useRoutePlanner(
   repository?: RouteRepository,
   guidanceApi: GuidanceRepository = defaultGuidanceRepository,
-  rerouteApi: RerouteRepository = defaultRerouteRepository,
+  rerouteApi: RerouteRepository | null = defaultRerouteRepository,
 ) {
   const navigation = useNavigation()
   const { go, replace } = navigation
@@ -155,7 +155,7 @@ export function useRoutePlanner(
   )
   useRerouteCheck({
     state: guidance,
-    enabled: screen === 'guide',
+    enabled: screen === 'guide' && rerouteApi !== null,
     repository: rerouteApi,
     debugForce: isRerouteDebugForceEnabled,
     onProposal: (proposal, legIndex) => {

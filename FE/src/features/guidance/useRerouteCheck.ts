@@ -19,7 +19,7 @@ function createSessionId() {
 interface UseRerouteCheckOptions {
   state: GuidanceState
   enabled: boolean
-  repository: RerouteRepository
+  repository: RerouteRepository | null
   debugForce?: boolean
   onProposal: (proposal: RerouteCheckResponse, legIndex: number) => void
 }
@@ -50,7 +50,7 @@ export function useRerouteCheck({
     enabled && buildRerouteRequest(state, sessionIdRef.current, { debugForce }) !== null
 
   useEffect(() => {
-    if (!eligible) return
+    if (!eligible || !repository) return
     let cancelled = false
     let controller: AbortController | null = null
     const runCheck = () => {
