@@ -186,7 +186,8 @@ public final class RouteScoreRanker {
     public List<RouteSearchResponse> topCalmByLink(
             List<ScoredCandidate> candidates, LocalDateTime departureTime,
             LinkCongestionScorer.LinkLevelLookup lookup, int n, BusLevelLookup busLevels) {
-        Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
+        // 입력(시간순) 순서 유지 — HashMap 순회는 enum 해시 때문에 실행마다 달라진다(271).
+        Map<RouteSearchResponse, Double> scoreByCandidate = new java.util.LinkedHashMap<>();
         for (ScoredCandidate candidate : candidates) {
             Double score = worstScore(candidate, departureTime, lookup, busLevels);
             if (score != null) {
@@ -198,9 +199,11 @@ public final class RouteScoreRanker {
         }
 
         // 점수 있는 후보만 혼잡순에 넣는다. 점수 없는 후보를 끼우면 순위 조작이다.
+        // 동점은 소요시간 짧은 순(271).
         List<RouteSearchResponse> scored = new ArrayList<>(scoreByCandidate.keySet());
-        scored.sort(Comparator.comparingDouble(
-                candidate -> scoreByCandidate.getOrDefault(candidate, Double.MAX_VALUE)));
+        scored.sort(Comparator.<RouteSearchResponse>comparingDouble(
+                candidate -> scoreByCandidate.getOrDefault(candidate, Double.MAX_VALUE))
+                .thenComparingDouble(RouteSearchResponse::totalMinutes));
 
         List<RouteSearchResponse> relabeled = new ArrayList<>();
         boolean lowestTagged = false;

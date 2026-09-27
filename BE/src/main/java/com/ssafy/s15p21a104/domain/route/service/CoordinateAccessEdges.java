@@ -90,7 +90,9 @@ public final class CoordinateAccessEdges {
 
         List<Edge> edges = new ArrayList<>();
         for (Candidate candidate : picked) {
-            int sec = (int) Math.round(candidate.distanceM() / WalkEdgeBuilder.METERS_PER_SEC);
+            // 도보 엣지와 같은 우회율(270) — 반경 판정은 직선, 비용에만 얹는다.
+            int sec = (int) Math.round(candidate.distanceM() * WalkEdgeBuilder.CIRCUITY
+                    / WalkEdgeBuilder.METERS_PER_SEC);
             edges.add(outgoing
                     ? new Edge(placeNodeId, candidate.nodeId(), WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK)
                     : new Edge(candidate.nodeId(), placeNodeId, WalkEdgeBuilder.WALK_ROUTE_ID, sec, 0, TravelMode.WALK));
