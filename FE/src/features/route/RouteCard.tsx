@@ -21,7 +21,9 @@ function isBikeRoute(route: Route) {
 }
 
 function availabilityLabel(availability: BikeRouteAvailability) {
-  if (availability.status === 'rental-unavailable') return null
+  if (availability.status === 'rental-unavailable' || availability.status === 'return-crowded') {
+    return null
+  }
   const message = bikeRouteAvailabilityMessage(availability.status)
   if (!message || availability.status === 'checking') return message
   if (availability.status !== 'unknown') return message
