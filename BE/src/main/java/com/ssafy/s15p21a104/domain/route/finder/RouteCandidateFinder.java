@@ -486,6 +486,27 @@ public final class RouteCandidateFinder {
     }
 
     /**
+     * 속도 그룹(첫 LOW_CONGESTION 앞까지)을 표시 총시간순으로 다시 정렬하고 라벨을 다시 매긴다
+     * (S15P21A104-268). 탐색 순위는 직선 도보 비용 기준이라, 도보 표시 시간을 폴리라인 실측으로
+     * 정정하면(7e446a3) 더 짧은 후보가 SHORTEST 뒤에 남을 수 있다. 혼잡 그룹은 혼잡순이라 그대로 둔다.
+     *
+     * @param candidates geometry 정정이 끝난 최종 후보(속도 → 혼잡 → 채움 순)
+     * @return 속도 그룹만 재정렬한 목록
+     */
+    public static List<RouteSearchResponse> reorderSpeedByTotalMinutes(List<RouteSearchResponse> candidates) {
+        int speedEnd = 0;
+        while (speedEnd < candidates.size()
+                && candidates.get(speedEnd).routeType() != RouteType.LOW_CONGESTION) {
+            speedEnd++;
+        }
+        List<RouteSearchResponse> speed = new ArrayList<>(candidates.subList(0, speedEnd));
+        speed.sort(Comparator.comparingDouble(RouteSearchResponse::totalMinutes)); // 안정 정렬 — 동률은 탐색 순서
+        List<RouteSearchResponse> out = new ArrayList<>(relabelByRank(speed));
+        out.addAll(candidates.subList(speedEnd, candidates.size()));
+        return out;
+    }
+
+    /**
      * 허용 수단만 남긴다. WALK·TRANSFER는 항상 허용(접근·연결용).
      *
      * @param candidates 후보 목록

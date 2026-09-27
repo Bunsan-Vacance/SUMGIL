@@ -678,8 +678,13 @@ public class RouteSearchService {
     /**
      * 후보 목록에 geometry를 붙인다(213 T3). {@link RouteGeometryEnhancer}가 후보별
      * 병렬 후처리 + 순서 보장 + 실패 격리를 맡는다. 서비스는 레지스트리 조회 함수만 넘긴다.
+     * 도보 표시 시간 정정으로 총시간이 바뀌므로 속도 그룹 순서·SHORTEST를 다시 맞춘다(268).
      */
     private List<RouteSearchResponse> withGeometryAll(List<RouteSearchResponse> candidates) {
+        return RouteCandidateFinder.reorderSpeedByTotalMinutes(enhanceGeometry(candidates));
+    }
+
+    private List<RouteSearchResponse> enhanceGeometry(List<RouteSearchResponse> candidates) {
         return new RouteGeometryEnhancer(
                 (routeId, fromLat, fromLng, toLat, toLng) -> railGeometryRegistry.geometryForLeg(
                         routeId, fromLat, fromLng, toLat, toLng),
