@@ -101,11 +101,9 @@ SDK 로더는 진행 중인 Promise를 공유하고 실패하면 다시 시도�
 
 대여소 아이콘을 선택하면 nearby의 rentalId로 `/api/bike-stations/{rentalId}/stock`을 조회하고 바텀시트에 표시한다. AVAILABLE은 0대를 포함한 유효한 재고, STALE은 수집 시각과 함께 마지막 확인 값, UNAVAILABLE은 재고 확인 불가로 표시한다. 실패 시 재시도하며 선택 변경·닫기 시 이전 요청을 취소하고 늦은 응답을 무시한다. 수집기가 없는 로컬 환경에서는 UNAVAILABLE이 정상이다.
 
-경로 결과의 BIKE 후보는 출발 대여소의 prediction과 stock, 반납 대여소의 stock을 함께 확인한다. 도착 시 `predictedBikes: 0`이면 `도착 시 대여할 자전거가 없어요.`, 도착 예측이 없을 때 최신 `AVAILABLE` 재고의 `availableBikes: 0`이면 `현재 대여 가능한 자전거가 없어요. 도착 시 이용 가능 여부는 확인이 필요해요.`로 표시한다. 반납 대여소의 최신 `AVAILABLE` 응답에서 `rackCount > 0`이고 `availableBikes >= rackCount`이면 반납 가능 여부를 단정하지 않고 `return-crowded`로 판정하되 경로 카드의 혼잡 안내 문구는 표시하지 않는다. 도착 시 대여 예측이 양수이고 최신 반납 재고가 `rackCount > 0`, `availableBikes < rackCount`를 만족하면 혼잡 경고 없는 추천 후보로 분류한다. 이는 실제 반납 가능 여부를 보장하지 않는다. `rackCount`가 0·null·누락이거나 STALE·UNAVAILABLE·요청 오류면 반납 가능 여부 미확인으로 표시하고 추천에서 제외한다.
+경로 결과의 BIKE 후보는 경로 소요 시간과 `congestionPrediction`을 기준으로 즉시 표시·추천한다. 결과 화면은 출발 대여소 재고·도착 예측이나 반납 대여소 stock을 조회하지 않으며, 해당 값으로 후보를 숨기거나 추천에서 제외하지 않는다. 선택한 경로의 상세 화면에서만 출발 대여소의 현재 stock과 도착 시 prediction을 별도로 조회해 표시한다.
 
-`GET /api/bike-stations/{rentalId}/stock`은 경로 변수 `rentalId`를 요청하고 `{ rentalId, availableBikes, stockUpdatedAt, status, rackCount? }`를 `success: true`의 `data`로 반환한다. `BikeStock.rackCount`는 총 거치대 수를 뜻하는 optional `number | null` 필드다. 숫자는 0 이상의 정수이며, `null` 또는 필드 누락은 반납 가능 여부 미확인을 뜻한다. 기존 응답(`rentalId`, `availableBikes`, `stockUpdatedAt`, `status`)은 그대로 유효하다. 성공 응답은 `AVAILABLE`/`STALE` 상태와 수집 시각을 포함하며, 값이 없으면 null/누락으로 보존한다. API 오류와 형식 오류는 빈 성공 응답으로 바꾸지 않고 후보를 확인 필요 상태로 둔다.
-
-반납 혼잡 시안은 `VITE_ROUTE_SEARCH_MOCK=true`, `VITE_BIKE_PREDICTION_MOCK=true`, `VITE_BIKE_STOCK_MOCK=true`를 명시해 확인한다. 이 조합은 `source: MOCK` 경로와 조회한 대여소 ID에 맞춘 `availableBikes: 6`, `rackCount: 6` 샘플을 사용하며 화면에 `샘플`을 표시한다. 운영 환경에서 mock으로 자동 대체하지 않는다. 거치대가 가득 차도 반납할 수 있다는 안내는 [서울시 공식 따릉이 반납 안내](https://mediahub.seoul.go.kr/archives/2006926)를 따른다. FE는 현장 운영 상태를 알 수 없으므로 혼잡 경고만 표시한다.
+`GET /api/bike-stations/{rentalId}/stock`은 경로 변수 `rentalId`를 요청하고 `{ rentalId, availableBikes, stockUpdatedAt, status, rackCount? }`를 `success: true`의 `data`로 반환한다. `BikeStock.rackCount`는 총 거치대 수를 뜻하는 optional `number | null` 필드다. 숫자는 0 이상의 정수이며, `null` 또는 필드 누락은 거치대 수 미제공으로 보존한다. 기존 응답(`rentalId`, `availableBikes`, `stockUpdatedAt`, `status`)은 그대로 유효하다. 성공 응답은 `AVAILABLE`/`STALE` 상태와 수집 시각을 포함하며, 값이 없으면 null/누락으로 보존한다. API 오류와 형식 오류는 빈 성공 응답으로 바꾸지 않고 상세 화면에서 재시도 또는 정보 없음으로 표시한다.
 
 대여소 표시 토글은 기본 켜짐이며 지도 영역 오른쪽 위에 둔다. 표시 상태는 지도 컴포넌트가 관리하고 경로선은 숨기지 않는다. 재고 응답 검증과 오류 변환은 API 저장소에서 처리한다.
 

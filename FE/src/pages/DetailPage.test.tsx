@@ -170,7 +170,7 @@ describe('경로 상세 버스 선택', () => {
     expect(card.querySelector('.route-stop-congestion')?.textContent).toBe('혼잡')
   })
 
-  it('같은 시트에서 안내를 시작해도 따릉이 예측과 혼잡 안내를 유지한다', async () => {
+  it('같은 시트에서 안내를 시작해도 따릉이 예측을 유지하고 반납 재고는 조회하지 않는다', async () => {
     const current: Route = {
       ...route('bike', 'BUS', '버스'),
       departedAt: new Date().toISOString(),
@@ -195,7 +195,7 @@ describe('경로 상세 버스 선택', () => {
     const { rerender } = render(<DetailPage {...props} />)
     await waitFor(() => expect(screen.getByText('4대 예상')).toBeTruthy())
     expect(screen.getByText('6대')).toBeTruthy()
-    expect(screen.getByText('반납 대여소 혼잡 · 현장 공간 확인 필요')).toBeTruthy()
+    expect(screen.queryByText('반납 대여소 혼잡 · 현장 공간 확인 필요')).toBeNull()
     const sheet = screen.getByRole('region', { name: '경로 안내 패널' })
     fireEvent.click(screen.getByRole('button', { name: '바텀시트 펼치기' }))
     rerender(

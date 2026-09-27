@@ -204,12 +204,6 @@
   font-size: 17px;
   font-weight: 600;
 }
-.route-detail-sheet .bike-prediction-return-crowded {
-  font-size: 12px;
-}
-.route-detail-sheet .bike-prediction-return-crowded strong {
-  font-weight: 500;
-}
 @media (max-width: 360px) {
   .route-detail-sheet .sheet-body {
     padding-inline: 16px;
