@@ -5,6 +5,7 @@ import { previewTripFor } from './preview'
 import { useToast } from '../components/useToast'
 import { useTrip } from '../features/route/useTrip'
 import { useGuidance } from '../features/guidance/useGuidance'
+import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
 import type { RouteRepository } from '../api/contracts'
@@ -16,6 +17,13 @@ import {
   type ReplanProposal,
   type TrainArrival,
 } from '../api/guidance'
+import {
+  rerouteRepository as defaultRerouteRepository,
+  isRerouteDebugForceEnabled,
+  proposalToRoute,
+  type RerouteCheckResponse,
+  type RerouteRepository,
+} from '../api/reroute'
 
 interface ReplanState {
   status: GuidanceRequestStatus
@@ -53,6 +61,7 @@ function hasRouteLocation(place: Place) {
 export function useRoutePlanner(
   repository?: RouteRepository,
   guidanceApi: GuidanceRepository = defaultGuidanceRepository,
+  rerouteApi: RerouteRepository = defaultRerouteRepository,
 ) {
   const navigation = useNavigation()
   const { go, replace } = navigation
@@ -67,6 +76,10 @@ export function useRoutePlanner(
   const [arrivals, setArrivals] = useState<TrainArrival[]>([])
   const [arrivalStatus, setArrivalStatus] = useState<GuidanceRequestStatus>('idle')
   const [replan, setReplan] = useState<ReplanState>(initialReplan)
+  const [rerouteProposal, setRerouteProposal] = useState<{
+    proposal: RerouteCheckResponse
+    legIndex: number
+  } | null>(null)
   const arrivalRequest = useRef<AbortController | null>(null)
   const replanRequest = useRef<AbortController | null>(null)
   const requestSequence = useRef(0)
@@ -116,6 +129,7 @@ export function useRoutePlanner(
     setArrivals([])
     setArrivalStatus('idle')
     setReplan(initialReplan)
+    setRerouteProposal(null)
   }, [screen, setMessage])
   useEffect(() => {
     const previous = guidanceCursor.current
@@ -127,6 +141,7 @@ export function useRoutePlanner(
       setArrivals([])
       setArrivalStatus('idle')
       setReplan(initialReplan)
+      setRerouteProposal(null)
     }
     guidanceCursor.current = { route: guidance.route, step: guidance.step }
   }, [guidance.route, guidance.step])
@@ -138,6 +153,16 @@ export function useRoutePlanner(
     },
     [],
   )
+  useRerouteCheck({
+    state: guidance,
+    enabled: screen === 'guide',
+    repository: rerouteApi,
+    debugForce: isRerouteDebugForceEnabled,
+    onProposal: (proposal, legIndex) => {
+      setRerouteProposal({ proposal, legIndex })
+      setModal((current) => (current === null ? 'reroute' : current))
+    },
+  })
   const openSearch = (target: 'origin' | 'destination') => {
     setSearchTarget(target)
     setSearchReturnScreen(screen === 'results' ? 'results' : 'home')
@@ -325,6 +350,7 @@ export function useRoutePlanner(
     setArrivals([])
     setArrivalStatus('idle')
     setReplan(initialReplan)
+    setRerouteProposal(null)
     setModal(null)
   }
   const openReplan = () => {
@@ -394,6 +420,22 @@ export function useRoutePlanner(
     guidance.replan(proposal.route)
     closeGuidanceDialog()
   }
+  const acceptReroute = () => {
+    const current = rerouteProposal
+    if (!current) return
+    try {
+      const route = proposalToRoute(current.proposal, new Date().toISOString())
+      guidance.replan(route, current.legIndex)
+    } catch (error) {
+      setMessage(
+        error instanceof RepositoryError ? error.message : '재안내 경로를 적용하지 못했어요.',
+      )
+    }
+    closeGuidanceDialog()
+  }
+  const dismissReroute = () => {
+    closeGuidanceDialog()
+  }
   return {
     screen,
     go,
@@ -431,6 +473,9 @@ export function useRoutePlanner(
     arrivals,
     arrivalStatus,
     replan,
+    rerouteProposal,
+    acceptReroute,
+    dismissReroute,
     destinationName:
       screen === 'guide' || screen === 'arrival'
         ? guidance.destination?.name || '도곡역'

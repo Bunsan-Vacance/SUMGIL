@@ -212,6 +212,7 @@ export default function App() {
             currentRemaining={guidance.route ? remaining(guidance.route, guidance.step) : 0}
             replanStatus={planner.replan.status}
             replanError={planner.replan.error}
+            rerouteProposal={planner.rerouteProposal?.proposal ?? null}
             onClose={planner.closeGuidanceDialog}
             onExit={planner.exitGuide}
             onTrain={(arrival) => {
@@ -221,6 +222,8 @@ export default function App() {
             onLoadArrivals={planner.openTrain}
             onLoadReplan={planner.requestReplan}
             onAcceptReplan={planner.acceptReplan}
+            onAcceptReroute={planner.acceptReroute}
+            onDismissReroute={planner.dismissReroute}
           />
         )}
     </div>

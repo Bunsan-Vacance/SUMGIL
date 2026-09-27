@@ -1,9 +1,10 @@
 import Modal from '../../components/Modal'
 import type { Leg } from '../route/types'
 import type { ReplanProposal, TrainArrival } from '../../api/guidance'
+import type { RerouteCheckResponse } from '../../api/reroute'
 import { roundMinutes } from '../route/selectors'
 
-export type GuidanceDialog = 'exit' | 'train' | 'replan'
+export type GuidanceDialog = 'exit' | 'train' | 'replan' | 'reroute'
 export type GuidanceRequestStatus =
   | 'idle'
   | 'loading'
@@ -24,12 +25,15 @@ interface Props {
   currentRemaining: number
   replanStatus: GuidanceRequestStatus
   replanError?: string
+  rerouteProposal: RerouteCheckResponse | null
   onClose: () => void
   onExit: () => void
   onTrain: (arrival: TrainArrival | null) => void
   onLoadArrivals: () => void
   onLoadReplan: () => void
   onAcceptReplan: (proposal: ReplanProposal) => void
+  onAcceptReroute: () => void
+  onDismissReroute: () => void
 }
 
 function formatArrival(value: string) {
@@ -50,12 +54,15 @@ export default function GuidanceDialogs({
   currentRemaining,
   replanStatus,
   replanError,
+  rerouteProposal,
   onClose,
   onExit,
   onTrain,
   onLoadArrivals,
   onLoadReplan,
   onAcceptReplan,
+  onAcceptReroute,
+  onDismissReroute,
 }: Props) {
   if (dialog === 'exit')
     return (
@@ -123,6 +130,54 @@ export default function GuidanceDialogs({
           <button className="text-button full" onClick={() => onTrain(null)}>
             열차 정보 없이 탑승 확인
           </button>
+        )}
+      </Modal>
+    )
+  }
+  if (dialog === 'reroute') {
+    const target = rerouteProposal?.target
+    const alternative = rerouteProposal?.alternative
+    const walkLeg = rerouteProposal?.walkLeg
+    const estimatedWalk = walkLeg?.geometryStatus === 'estimated' || walkLeg?.estimated === true
+    return (
+      <Modal title="대여소를 바꿔볼까요?" onClose={onClose}>
+        {!rerouteProposal || !alternative ? (
+          <p className="dialog-state" role="alert">
+            재안내 정보를 불러오지 못했어요.
+          </p>
+        ) : (
+          <div className="proposal-list">
+            {rerouteProposal.reason && <p className="section-label">{rerouteProposal.reason}</p>}
+            <article className="proposal-card">
+              <div>
+                <strong>{target?.name || '현재 대여소'}</strong>
+                <span>
+                  현재 {target?.currentBikes ?? 0}대
+                  {target?.predictedStock != null &&
+                    ` · 예상 재고 ${target.predictedStock.toFixed(1)}대`}
+                </span>
+              </div>
+            </article>
+            <article className="proposal-card">
+              <div>
+                <strong>{alternative.name || '대안 대여소'}</strong>
+                <span>
+                  {alternative.distanceMeters}m
+                  {alternative.currentBikes != null && ` · 현재 ${alternative.currentBikes}대`}
+                  {alternative.predictedStock != null &&
+                    ` · 예상 재고 ${alternative.predictedStock.toFixed(1)}대`}
+                </span>
+                {estimatedWalk && <small>도보 추정</small>}
+                {rerouteProposal.recommendedBy === 'AGENT' && <small>AI 추천</small>}
+              </div>
+              <button className="primary" onClick={onAcceptReroute}>
+                이 대여소로 변경
+              </button>
+            </article>
+            <button className="secondary full" onClick={onDismissReroute}>
+              기존 경로 유지
+            </button>
+          </div>
         )}
       </Modal>
     )
