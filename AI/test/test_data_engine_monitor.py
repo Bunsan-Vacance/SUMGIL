@@ -1,9 +1,9 @@
-import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 
 from DATA_ENGINE.monitor.check_collection_freshness import (
@@ -34,19 +34,22 @@ from DATA_ENGINE.monitor.notify_discord import (
 from DATA_ENGINE.monitor.notify_discord import main as discord_main
 
 
-def touch_with_age(path: Path, age_min: float, now_ts: float) -> None:
+def write_latest_with_age(path: Path, column: str, age_min: float, now_ts: float) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"parquet placeholder")
-    timestamp = now_ts - age_min * 60
-    os.utime(path, (timestamp, timestamp))
+    timestamp = datetime.fromtimestamp(now_ts, tz=ZoneInfo("Asia/Seoul")) - timedelta(
+        minutes=age_min
+    )
+    pd.DataFrame({column: [timestamp.replace(tzinfo=None)]}).to_parquet(path, index=False)
 
 
 def test_check_latest_file_fresh(tmp_path):
     now_ts = time.time()
     latest_path = tmp_path / "latest.parquet"
-    touch_with_age(latest_path, age_min=4, now_ts=now_ts)
+    write_latest_with_age(latest_path, "updated_at", age_min=4, now_ts=now_ts)
 
-    result = check_latest_file("bike", latest_path, max_age_min=10, now_ts=now_ts)
+    result = check_latest_file(
+        "bike", latest_path, max_age_min=10, timestamp_column="updated_at", now_ts=now_ts
+    )
 
     assert result.ok is True
     assert result.status == "fresh"
@@ -54,7 +57,9 @@ def test_check_latest_file_fresh(tmp_path):
 
 
 def test_check_latest_file_missing(tmp_path):
-    result = check_latest_file("bike", tmp_path / "missing.parquet", max_age_min=10)
+    result = check_latest_file(
+        "bike", tmp_path / "missing.parquet", max_age_min=10, timestamp_column="updated_at"
+    )
 
     assert result.ok is False
     assert result.status == "missing"
@@ -64,9 +69,15 @@ def test_check_latest_file_missing(tmp_path):
 def test_check_latest_file_stale(tmp_path):
     now_ts = time.time()
     latest_path = tmp_path / "latest.parquet"
-    touch_with_age(latest_path, age_min=31, now_ts=now_ts)
+    write_latest_with_age(latest_path, "ingested_at", age_min=31, now_ts=now_ts)
 
-    result = check_latest_file("weather", latest_path, max_age_min=20, now_ts=now_ts)
+    result = check_latest_file(
+        "weather",
+        latest_path,
+        max_age_min=20,
+        timestamp_column="ingested_at",
+        now_ts=now_ts,
+    )
 
     assert result.ok is False
     assert result.status == "stale"
@@ -76,7 +87,41 @@ def test_check_latest_file_stale(tmp_path):
 
 def test_check_latest_file_rejects_non_positive_threshold(tmp_path):
     with pytest.raises(ValueError, match="max_age_min must be positive"):
-        check_latest_file("bike", tmp_path / "latest.parquet", max_age_min=0)
+        check_latest_file(
+            "bike", tmp_path / "latest.parquet", max_age_min=0, timestamp_column="updated_at"
+        )
+
+
+def test_check_latest_file_rejects_missing_timestamp_column(tmp_path):
+    path = tmp_path / "latest.parquet"
+    pd.DataFrame({"other": ["value"]}).to_parquet(path, index=False)
+
+    result = check_latest_file("bike", path, 10, "updated_at")
+
+    assert result.ok is False
+    assert result.status == "invalid"
+    assert "column=updated_at" in result.message
+
+
+def test_check_latest_file_rejects_stale_rows_when_latest_is_fresh(tmp_path):
+    now_ts = time.time()
+    now = datetime.fromtimestamp(now_ts, tz=ZoneInfo("Asia/Seoul"))
+    path = tmp_path / "latest_stock.parquet"
+    pd.DataFrame(
+        {
+            "updated_at": [
+                (now - timedelta(minutes=2)).replace(tzinfo=None),
+                (now - timedelta(minutes=31)).replace(tzinfo=None),
+            ]
+        }
+    ).to_parquet(path, index=False)
+
+    result = check_latest_file("bike", path, 10, "updated_at", row_max_age_min=30, now_ts=now_ts)
+
+    assert result.ok is False
+    assert result.status == "stale_rows"
+    assert result.stale_rows == 1
+    assert "count=1" in result.message
 
 
 def test_build_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
@@ -85,28 +130,75 @@ def test_build_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
     assert checks == [
         FreshnessCheck(
             name="bike",
-            path=tmp_path / "data/BIKE/raw/realtime/latest.parquet",
+            path=tmp_path / "data/BIKE/raw/realtime/latest_stock.parquet",
             max_age_min=10,
+            timestamp_column="updated_at",
+            row_max_age_min=30,
         ),
         FreshnessCheck(
             name="weather",
-            path=tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest.parquet",
+            path=tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet",
             max_age_min=20,
+            timestamp_column="ingested_at",
         ),
     ]
+
+
+def test_freshness_checks_kafka_latest_not_poller(tmp_path, capsys):
+    now_ts = time.time()
+    write_latest_with_age(
+        tmp_path / "data/BIKE/raw/realtime/latest.parquet", "collected_at", 4, now_ts
+    )
+    write_latest_with_age(
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest.parquet",
+        "collected_at",
+        4,
+        now_ts,
+    )
+
+    assert main(["--ai-root", str(tmp_path), "--no-subway"]) == 1
+    output = capsys.readouterr().out
+    assert "latest_stock.parquet" in output
+    assert "latest_by_grid.parquet" in output
+
+    write_latest_with_age(
+        tmp_path / "data/BIKE/raw/realtime/latest_stock.parquet", "updated_at", 4, now_ts
+    )
+    write_latest_with_age(
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet",
+        "ingested_at",
+        60,
+        now_ts,
+    )
+    assert main(["--ai-root", str(tmp_path), "--no-subway"]) == 0
+
+
+def test_freshness_rejects_stale_kafka_latest(tmp_path):
+    now_ts = time.time()
+    write_latest_with_age(
+        tmp_path / "data/BIKE/raw/realtime/latest_stock.parquet", "updated_at", 4, now_ts
+    )
+    write_latest_with_age(
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet",
+        "ingested_at",
+        95,
+        now_ts,
+    )
+
+    assert main(["--ai-root", str(tmp_path), "--no-subway"]) == 1
 
 
 def test_check_freshness_returns_all_results(tmp_path):
     now_ts = time.time()
     fresh_path = tmp_path / "fresh.parquet"
     stale_path = tmp_path / "stale.parquet"
-    touch_with_age(fresh_path, age_min=3, now_ts=now_ts)
-    touch_with_age(stale_path, age_min=30, now_ts=now_ts)
+    write_latest_with_age(fresh_path, "observed_at", age_min=3, now_ts=now_ts)
+    write_latest_with_age(stale_path, "observed_at", age_min=30, now_ts=now_ts)
 
     results = check_freshness(
         [
-            FreshnessCheck("bike", fresh_path, 10),
-            FreshnessCheck("weather", stale_path, 20),
+            FreshnessCheck("bike", fresh_path, 10, "observed_at"),
+            FreshnessCheck("weather", stale_path, 20, "observed_at"),
         ],
         now_ts=now_ts,
     )
@@ -116,14 +208,20 @@ def test_check_freshness_returns_all_results(tmp_path):
 
 def test_main_returns_zero_when_all_latest_files_are_fresh(tmp_path, capsys):
     now_ts = time.time()
-    touch_with_age(tmp_path / "data/BIKE/raw/realtime/latest.parquet", age_min=4, now_ts=now_ts)
-    touch_with_age(
-        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest.parquet",
+    write_latest_with_age(
+        tmp_path / "data/BIKE/raw/realtime/latest_stock.parquet",
+        "updated_at",
+        age_min=4,
+        now_ts=now_ts,
+    )
+    write_latest_with_age(
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast/latest_by_grid.parquet",
+        "ingested_at",
         age_min=9,
         now_ts=now_ts,
     )
 
-    exit_code = main(["--ai-root", str(tmp_path)])
+    exit_code = main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -133,9 +231,14 @@ def test_main_returns_zero_when_all_latest_files_are_fresh(tmp_path, capsys):
 
 def test_main_returns_one_when_any_latest_file_fails(tmp_path, capsys):
     now_ts = time.time()
-    touch_with_age(tmp_path / "data/BIKE/raw/realtime/latest.parquet", age_min=4, now_ts=now_ts)
+    write_latest_with_age(
+        tmp_path / "data/BIKE/raw/realtime/latest_stock.parquet",
+        "updated_at",
+        age_min=4,
+        now_ts=now_ts,
+    )
 
-    exit_code = main(["--ai-root", str(tmp_path)])
+    exit_code = main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -148,6 +251,15 @@ def create_snapshots(base_path: Path, slot: HourSlot, count: int) -> None:
     path.mkdir(parents=True, exist_ok=True)
     for index in range(count):
         (path / f"snapshot_20260913T01{index:02d}00.parquet").write_bytes(b"snapshot")
+
+
+def create_kafka_snapshots(base_path: Path, slot: HourSlot, count: int, topic: str) -> None:
+    path = partition_path(base_path, slot)
+    path.mkdir(parents=True, exist_ok=True)
+    for index in range(count):
+        pd.DataFrame({"kafka_topic": [topic]}).to_parquet(
+            path / f"snapshot_kafka_{index:03d}.parquet", index=False
+        )
 
 
 def test_completed_hour_slots_returns_previous_kst_hours_newest_first():
@@ -186,6 +298,19 @@ def test_count_partition_snapshots_counts_only_snapshot_parquet(tmp_path):
     (path / "snapshot_c.tmp").write_bytes(b"tmp")
 
     assert count_partition_snapshots(base_path, slot) == 2
+
+
+def test_count_partition_snapshots_counts_only_matching_kafka_topic(tmp_path):
+    base_path = tmp_path / "data"
+    slot = HourSlot(dt="2026-09-13", hh="02")
+    create_kafka_snapshots(base_path, slot, 2, "bike.stock")
+    path = partition_path(base_path, slot)
+    pd.DataFrame({"kafka_topic": ["weather.nowcast"]}).to_parquet(
+        path / "snapshot_wrong_topic.parquet", index=False
+    )
+    pd.DataFrame({"stationId": ["ST-1"]}).to_parquet(path / "snapshot_poller.parquet", index=False)
+
+    assert count_partition_snapshots(base_path, slot, "bike.stock") == 2
 
 
 def test_check_partition_ok_when_count_meets_minimum(tmp_path):
@@ -264,21 +389,47 @@ def test_build_partition_checks_uses_ai_root_and_distinct_thresholds(tmp_path):
             name="bike",
             base_path=tmp_path / "data/BIKE/raw/realtime",
             min_count=10,
+            required_topic="bike.stock",
         ),
         PartitionCheck(
             name="weather",
             base_path=tmp_path / "data/EXTERNAL/weather/raw/nowcast",
             min_count=5,
+            required_topic="weather.nowcast",
         ),
     ]
 
 
+def test_partition_monitor_counts_only_kafka_snapshots(tmp_path):
+    slot = completed_hour_slots(1)[0]
+    bike = tmp_path / "data/BIKE/raw/realtime"
+    weather = tmp_path / "data/EXTERNAL/weather/raw/nowcast"
+    bike_slot = partition_path(bike, slot)
+    bike_slot.mkdir(parents=True)
+    pd.DataFrame({"stationId": ["ST-1"]}).to_parquet(
+        bike_slot / "snapshot_poller.parquet", index=False
+    )
+    weather_slot = partition_path(weather, slot)
+    weather_slot.mkdir(parents=True)
+    pd.DataFrame({"category": ["T1H"]}).to_parquet(
+        weather_slot / "snapshot_poller.parquet", index=False
+    )
+
+    assert partition_main(["--ai-root", str(tmp_path), "--no-subway"]) == 1
+
+    create_kafka_snapshots(bike, slot, 10, "bike.stock")
+    create_kafka_snapshots(weather, slot, 1, "weather.nowcast")
+    assert partition_main(["--ai-root", str(tmp_path), "--no-subway"]) == 0
+
+
 def test_partition_main_returns_zero_when_all_partitions_meet_minimum(tmp_path, capsys):
     slot = completed_hour_slots(1)[0]
-    create_snapshots(tmp_path / "data/BIKE/raw/realtime", slot, count=10)
-    create_snapshots(tmp_path / "data/EXTERNAL/weather/raw/nowcast", slot, count=5)
+    create_kafka_snapshots(tmp_path / "data/BIKE/raw/realtime", slot, 10, "bike.stock")
+    create_kafka_snapshots(
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast", slot, 1, "weather.nowcast"
+    )
 
-    exit_code = partition_main(["--ai-root", str(tmp_path)])
+    exit_code = partition_main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -288,9 +439,9 @@ def test_partition_main_returns_zero_when_all_partitions_meet_minimum(tmp_path, 
 
 def test_partition_main_returns_one_when_any_partition_fails(tmp_path, capsys):
     slot = completed_hour_slots(1)[0]
-    create_snapshots(tmp_path / "data/BIKE/raw/realtime", slot, count=10)
+    create_kafka_snapshots(tmp_path / "data/BIKE/raw/realtime", slot, 10, "bike.stock")
 
-    exit_code = partition_main(["--ai-root", str(tmp_path)])
+    exit_code = partition_main(["--ai-root", str(tmp_path), "--no-subway"])
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -421,3 +572,28 @@ def test_discord_main_dry_run_returns_zero(capsys):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "DRY_RUN discord notification skipped" in captured.out
+
+
+def test_discord_main_loads_dotenv_before_resolving_defaults(monkeypatch):
+    loaded = []
+
+    def fake_load_dotenv():
+        loaded.append(True)
+        monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/from-env")
+
+    posted = []
+
+    class Response:
+        status_code = 204
+        text = ""
+
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    monkeypatch.setattr("DATA_ENGINE.monitor.notify_discord.load_dotenv", fake_load_dotenv)
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.notify_discord.requests.post",
+        lambda url, **_kwargs: posted.append(url) or Response(),
+    )
+
+    assert discord_main(["--message", "test", "--server-name", "server"]) == 0
+    assert loaded == [True]
+    assert posted == ["https://discord.example/from-env"]

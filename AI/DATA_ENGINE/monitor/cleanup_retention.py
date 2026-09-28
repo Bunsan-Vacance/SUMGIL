@@ -3,19 +3,35 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from DATA_ENGINE.archive.manifest import (
     DEFAULT_ARCHIVE_BACKEND,
     DEFAULT_MANIFEST_PATH,
     has_successful_archive,
 )
+from DATA_ENGINE.archive.storage.drive_client import (
+    DRIVE_FOLDER_MIME_TYPE,
+    build_drive_service,
+    file_md5,
+    find_folder_path,
+    list_folder_files,
+)
+from DATA_ENGINE.archive.targets import build_archive_datasets
+from DATA_ENGINE.archive.upload_raw_partitions import (
+    build_drive_root_folder_ids,
+    drive_destination_for_partition,
+)
 from DATA_ENGINE.collect.common import KST
+from DATA_ENGINE.monitor.notify_discord import notify_failure
 
 AI_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RETENTION_HOURS = 48
@@ -23,6 +39,8 @@ DEFAULT_BIKE_BASE = Path("data/BIKE/raw/realtime")
 DEFAULT_WEATHER_BASE = Path("data/EXTERNAL/weather/raw/nowcast")
 DEFAULT_SUBWAY_BASE = Path("data/SUBWAY/raw/arrival")
 SNAPSHOT_PATTERN = "dt=*/hh=*/snapshot_*.parquet"
+RETENTION_ALERT_TITLE = "[DATA_ENGINE] retention 삭제 보류 (Drive 백업 미검증)"
+MAX_ALERT_LINES = 10
 
 
 @dataclass(frozen=True)
@@ -39,6 +57,8 @@ class CleanupCandidate:
     path: Path
     size_bytes: int
     age_hours: float
+    mtime_ns: int | None = None
+    verified_md5: str | None = None
 
     @property
     def target_name(self) -> str:
@@ -67,6 +87,65 @@ class CleanupResult:
     @property
     def candidate_bytes(self) -> int:
         return sum(candidate.size_bytes for candidate in self.candidates)
+
+
+@dataclass(frozen=True)
+class ArchiveFileVerification:
+    reason: str | None
+    md5: str | None = None
+
+
+class DriveArchiveVerifier:
+    def __init__(self, ai_root: Path):
+        self.ai_root = ai_root
+        self.service = None
+        self.folder_files: dict[tuple[str, str, str], list[dict[str, str]]] = {}
+        self.prefixes = {
+            dataset.name: dataset.archive_prefix.as_posix()
+            for dataset in build_archive_datasets(ai_root)
+        }
+
+    def __call__(self, dataset: str, dt: str, hh: str, path: Path) -> ArchiveFileVerification:
+        if self.service is None:
+            auth_mode = os.environ.get("DATA_ENGINE_DRIVE_AUTH_MODE", "service_account")
+            service_account = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "")
+            oauth_token = os.environ.get("GOOGLE_OAUTH_TOKEN_FILE", "")
+            self.service = build_drive_service(
+                auth_mode=auth_mode,
+                service_account_file=Path(service_account) if service_account else None,
+                oauth_token_file=Path(oauth_token) if oauth_token else None,
+            )
+
+        key = (dataset, dt, hh)
+        if key not in self.folder_files:
+            archive_path = f"{self.prefixes[dataset]}/dt={dt}/hh={hh}"
+            root_id, relative_path = drive_destination_for_partition(
+                dataset, archive_path, build_drive_root_folder_ids()
+            )
+            if not root_id:
+                return ArchiveFileVerification("archive_root_missing")
+            folder_id = find_folder_path(self.service, root_id, relative_path)
+            self.folder_files[key] = list_folder_files(self.service, folder_id) if folder_id else []
+
+        matches = [
+            item
+            for item in self.folder_files[key]
+            if item.get("name") == path.name and item.get("mimeType") != DRIVE_FOLDER_MIME_TYPE
+        ]
+        if not matches:
+            return ArchiveFileVerification("archive_file_missing")
+        if len(matches) != 1:
+            return ArchiveFileVerification("archive_file_ambiguous")
+        remote = matches[0]
+        if "size" not in remote or int(remote["size"]) != path.stat().st_size:
+            return ArchiveFileVerification("archive_size_mismatch")
+        remote_md5 = remote.get("md5Checksum")
+        if not remote_md5:
+            return ArchiveFileVerification("archive_checksum_missing")
+        local_md5 = file_md5(path)
+        if local_md5 != remote_md5:
+            return ArchiveFileVerification("archive_checksum_mismatch")
+        return ArchiveFileVerification(None, local_md5)
 
 
 def current_kst_partition(*, now: datetime | None = None) -> tuple[str, str]:
@@ -160,6 +239,8 @@ def find_cleanup_candidates(
     archive_backend: str = DEFAULT_ARCHIVE_BACKEND,
     now_ts: float | None = None,
     current_slot: tuple[str, str] | None = None,
+    ai_root: Path = AI_ROOT,
+    verify_archive_file: Callable[[str, str, str, Path], ArchiveFileVerification] | None = None,
 ) -> tuple[list[CleanupCandidate], list[CleanupSkip]]:
     if retention_hours <= 0:
         raise ValueError("retention_hours must be positive")
@@ -173,6 +254,9 @@ def find_cleanup_candidates(
 
     candidates: list[CleanupCandidate] = []
     skips: list[CleanupSkip] = []
+    if require_archive_success and verify_archive_file is None:
+        verify_archive_file = DriveArchiveVerifier(ai_root)
+    archive_success: dict[tuple[str, str, str], bool] = {}
     for target in targets:
         if not target.base_path.exists():
             continue
@@ -190,13 +274,12 @@ def find_cleanup_candidates(
             age_hours = max(0.0, (now_ts - stat.st_mtime) / 3600)
             if age_hours <= retention_hours:
                 continue
-            if require_archive_success and not has_successful_archive(
-                manifest_path,
-                target.name,
-                dt,
-                hh,
-                backend=archive_backend,
-            ):
+            partition_key = (target.name, dt, hh)
+            if require_archive_success and partition_key not in archive_success:
+                archive_success[partition_key] = has_successful_archive(
+                    manifest_path, target.name, dt, hh, backend=archive_backend
+                )
+            if require_archive_success and not archive_success[partition_key]:
                 skips.append(
                     CleanupSkip(
                         dataset=target.name,
@@ -208,6 +291,19 @@ def find_cleanup_candidates(
                 )
                 continue
 
+            verification = ArchiveFileVerification(None)
+            if require_archive_success:
+                if archive_backend != "drive":
+                    verification = ArchiveFileVerification("archive_backend_unsupported")
+                else:
+                    try:
+                        verification = verify_archive_file(target.name, dt, hh, path)
+                    except Exception:  # noqa: BLE001 - A failed check must never permit deletion.
+                        verification = ArchiveFileVerification("archive_verification_error")
+                if verification.reason is not None:
+                    skips.append(CleanupSkip(target.name, dt, hh, path, verification.reason))
+                    continue
+
             candidates.append(
                 CleanupCandidate(
                     dataset=target.name,
@@ -216,6 +312,8 @@ def find_cleanup_candidates(
                     path=path,
                     size_bytes=stat.st_size,
                     age_hours=age_hours,
+                    mtime_ns=stat.st_mtime_ns,
+                    verified_md5=verification.md5,
                 )
             )
 
@@ -236,6 +334,19 @@ def cleanup_candidates(
     deleted_count = 0
     deleted_bytes = 0
     for candidate in candidates:
+        try:
+            current = candidate.path.stat()
+            if current.st_size != candidate.size_bytes:
+                continue
+            if candidate.mtime_ns is not None and current.st_mtime_ns != candidate.mtime_ns:
+                continue
+            if (
+                candidate.verified_md5 is not None
+                and file_md5(candidate.path) != candidate.verified_md5
+            ):
+                continue
+        except OSError:
+            continue
         candidate.path.unlink()
         deleted_count += 1
         deleted_bytes += candidate.size_bytes
@@ -252,6 +363,8 @@ def run_cleanup(
     archive_backend: str = DEFAULT_ARCHIVE_BACKEND,
     now_ts: float | None = None,
     current_slot: tuple[str, str] | None = None,
+    ai_root: Path = AI_ROOT,
+    verify_archive_file: Callable[[str, str, str, Path], ArchiveFileVerification] | None = None,
 ) -> CleanupResult:
     candidates, skips = find_cleanup_candidates(
         targets,
@@ -261,6 +374,8 @@ def run_cleanup(
         archive_backend=archive_backend,
         now_ts=now_ts,
         current_slot=current_slot,
+        ai_root=ai_root,
+        verify_archive_file=verify_archive_file,
     )
     deleted_count, deleted_bytes = cleanup_candidates(candidates, yes=yes)
     return CleanupResult(
@@ -306,6 +421,25 @@ def print_cleanup_result(result: CleanupResult) -> None:
         )
 
 
+def build_skip_alert(result: CleanupResult) -> str:
+    """Summarize skipped files by partition; each is past retention yet unverified on Drive."""
+    counts: dict[tuple[str, str, str, str], int] = {}
+    for skip in result.skips:
+        key = (skip.reason, skip.dataset, skip.dt, skip.hh)
+        counts[key] = counts.get(key, 0) + 1
+    lines = [
+        f"{reason} {dataset} dt={dt} hh={hh} files={count}"
+        for (reason, dataset, dt, hh), count in sorted(counts.items())
+    ]
+    shown = lines[:MAX_ALERT_LINES]
+    if len(lines) > len(shown):
+        shown.append(f"... 외 {len(lines) - len(shown)}개 파티션")
+    return (
+        f"retention {result.retention_hours:g}h 초과 파일 {len(result.skips)}개를 "
+        "Drive 검증 실패로 삭제하지 않았다(파일은 보존됨).\n" + "\n".join(shown)
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Clean up old DATA_ENGINE realtime raw snapshot parquet files.",
@@ -333,6 +467,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Delete only partitions whose latest archive manifest status is success.",
     )
     parser.add_argument(
+        "--notify-discord",
+        action="store_true",
+        help="Send a Discord alert when old files are kept because Drive verification failed.",
+    )
+    parser.add_argument(
         "--manifest-path",
         type=Path,
         default=DEFAULT_MANIFEST_PATH,
@@ -352,8 +491,8 @@ def resolve_project_path(ai_root: Path, path: Path) -> Path:
     return ai_root / path
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def run(args: argparse.Namespace) -> int:
+    load_dotenv(args.ai_root / ".env")
     targets = build_retention_targets(args.ai_root)
     manifest_path = resolve_project_path(args.ai_root, args.manifest_path)
     result = run_cleanup(
@@ -363,9 +502,25 @@ def main(argv: list[str] | None = None) -> int:
         require_archive_success=args.require_archive_success,
         manifest_path=manifest_path,
         archive_backend=args.archive_backend,
+        ai_root=args.ai_root,
     )
     print_cleanup_result(result)
+    if args.notify_discord and result.skips:
+        notify_failure(build_skip_alert(result), title=RETENTION_ALERT_TITLE)
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        return run(args)
+    except Exception as exc:  # 설정 오류 등으로 정리 자체가 못 돌 때도 알린 뒤 그대로 올린다.
+        if args.notify_discord and args.yes:
+            notify_failure(
+                f"retention 정리 중단: {type(exc).__name__}: {exc}",
+                title=RETENTION_ALERT_TITLE,
+            )
+        raise
 
 
 if __name__ == "__main__":

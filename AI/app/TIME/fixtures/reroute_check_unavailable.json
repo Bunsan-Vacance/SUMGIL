@@ -1,0 +1,27 @@
+{
+  "request": {
+    "sessionId": "FIXTURE-UNAVAILABLE",
+    "step": 0,
+    "rentalId": "ST-UNKNOWN",
+    "etaToRentalMinutes": 10,
+    "destStationId": "DEST-1",
+    "boundary": {
+      "legIndex": 1,
+      "nodeId": "ND-221",
+      "lat": 37.5665,
+      "lng": 126.978
+    }
+  },
+  "response": {
+    "status": "unavailable",
+    "recommendationId": null,
+    "validUntil": null,
+    "recommendedBy": null,
+    "reason": "target_unknown",
+    "target": null,
+    "alternative": null,
+    "boundary": null,
+    "walkLeg": null,
+    "route": null
+  }
+}

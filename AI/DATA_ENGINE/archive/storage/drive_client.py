@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -124,6 +126,70 @@ def ensure_folder_path(service, root_folder_id: str, relative_path: str) -> str:
         else:
             parent_id = str(existing["id"])
     return parent_id
+
+
+def find_folder_path(service, root_folder_id: str, relative_path: str) -> str | None:
+    parent_id = root_folder_id
+    for part in [item for item in Path(relative_path).parts if item not in {"", "."}]:
+        child = find_child(service, parent_id, part, mime_type=DRIVE_FOLDER_MIME_TYPE)
+        if child is None:
+            return None
+        parent_id = str(child["id"])
+    return parent_id
+
+
+def list_folder_files(service, folder_id: str) -> list[dict[str, str]]:
+    files: list[dict[str, str]] = []
+    page_token = None
+    while True:
+        request = service.files().list(
+            q=f"'{_escape_drive_query_value(folder_id)}' in parents and trashed = false",
+            spaces="drive",
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+            fields="nextPageToken,files(id,name,mimeType,size,md5Checksum)",
+            pageSize=1000,
+            **({"pageToken": page_token} if page_token else {}),
+        )
+        response = request.execute()
+        files.extend(response.get("files", []))
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            return files
+
+
+def file_md5(path: Path) -> str:
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def match_local_file(local_file: Path, remote_files: Iterable[dict[str, str]]) -> str:
+    """Compare a local file against a folder's remote listing by name, size, and md5.
+
+    Returns one of: "missing", "verified", "ambiguous", "size_mismatch",
+    "checksum_missing", "checksum_mismatch".
+    """
+    matches = [
+        item
+        for item in remote_files
+        if item.get("name") == local_file.name and item.get("mimeType") != DRIVE_FOLDER_MIME_TYPE
+    ]
+    if not matches:
+        return "missing"
+    if len(matches) != 1:
+        return "ambiguous"
+    remote = matches[0]
+    if "size" not in remote or int(remote["size"]) != local_file.stat().st_size:
+        return "size_mismatch"
+    remote_md5 = remote.get("md5Checksum")
+    if not remote_md5:
+        return "checksum_missing"
+    if file_md5(local_file) != remote_md5:
+        return "checksum_mismatch"
+    return "verified"
 
 
 def upload_file(

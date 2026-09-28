@@ -1,0 +1,242 @@
+# pandas vs PySpark 실측 — 실제 BIKE 도메인 데이터 기준 (Spark 도입 지점 판정)
+
+## 한 줄 결론
+
+**대여이력(6개월 이상)·재고 raw 누적(지금 규모) 둘 다 Spark가 실제로 이긴다.** 165(`spark-compare-check`)는
+CROWD 패널을 증폭한 프록시 데이터로 교차점(2,000만~5,000만 행)을 쟀는데, 이번엔 **진짜 BIKE 원본 데이터**로
+그 교차점을 직접 재현했고, 재고 누적은 예상과 다르게 **행 수가 아니라 파일 개수 때문에 지금 규모에서도 이미 이긴다.**
+
+관련: `validation/INFRA/spark-compare-check/RESULTS.md`(165, 프록시 데이터 기준 최초 실측).
+이 문서는 그 후속으로, 실제 Spark 도입 후보 두 지점(따릉이 대여이력, 따릉이 재고 raw 누적)을 **실제 원본**으로 검증한다.
+
+## 1. 왜 다시 쟀나
+
+- 165는 CROWD 패널(날짜를 밀어 증폭한 프록시)로 교차점을 쟀다. 실제로 Spark를 붙일 후보 지점(BIKE 대여이력,
+  BIKE 재고 raw 누적)의 진짜 데이터로도 같은 교차점이 나오는지 확인이 안 된 상태였다.
+- 두 팀원 문서(165 원본의 "다음 티켓 권장"과, 이후 "서연이 알아야 할 결정사항")가 서로 다른 지점을 1순위로
+  가리키고 있어(대여이력 vs 재고 누적), 숫자로 직접 비교해서 정하기로 했다.
+
+## 2. 실행 조건
+
+| 항목 | 값 |
+| --- | --- |
+| 환경 | 로컬 PC, 22코어, RAM 33.8GB, Windows 11 |
+| Python | miniforge base, pandas 3.0.5, pyarrow 25.0.1 |
+| Spark | pyspark 4.2.0, OpenJDK 21(Temurin), `local[*]`, `driver.memory=8g`, `shuffle.partitions=200` |
+| 데이터 — 대여이력 | `AI/data/BIKE/raw/rental_history/`(원본, 24개월 로컬 보유) |
+| 데이터 — 재고 누적 | EC2(`j15a104a`)에서 scp로 받은 실제 누적분 613MB, 10일치(2026-09-13~22), 5,154개 파일 |
+| 반복 | 각 지점 1회(정확성 우선 확인용 — 165처럼 반복 재현은 다음 과제) |
+
+실행:
+```bash
+cd AI/validation/INFRA/spark-bike-candidates-check
+python bench_rental.py --months 1,3,6,12
+python bench_bike_realtime.py
+```
+
+## 3. 결과
+
+### 3.1 정확성 — 5개 지점 전부 일치 (속도 비교의 전제)
+
+| 대상 | 행수 일치 | 최대 절대오차 |
+| --- | --- | --- |
+| 대여이력 1/3/6/12개월 | 전부 일치 | 0.0 |
+| 재고 누적(10일) | 156,209 = 156,209 | 3.6e-15(부동소수점 오차 수준) |
+
+### 3.2 처리 시간·메모리
+
+비율은 `Spark ÷ pandas`, 1보다 작으면 Spark 승.
+
+| 대상 | 원본 행수(또는 파일 수) | pandas | Spark | 비율 |
+| --- | --- | --- | --- | --- |
+| 대여이력 1개월 | 395만 행 | **22.8초** · 1.3GB | 50.9초 · 3.0GB | 2.23 |
+| 대여이력 3개월 | 1,403만 행 | 84.0초 · 3.8GB | 86.9초 · 4.8GB | 1.04(동률) |
+| 대여이력 6개월 | 4,075만 행 | 239.1초 · 13.7GB | **72.5초** · 8.2GB | **0.30** |
+| 대여이력 12개월 | 8,162만 행 | 262.4초 · 19.8GB | **79.9초** · 12.3GB | **0.31** |
+| 재고 누적(10일 실측) | 파일 5,154개 | 187.3초 · 3.5GB | **55.9초** · 3.9GB | **0.30** |
+
+**교차점은 6개월(4,075만 행) 부근** — 165가 프록시 데이터로 예측한 2,000만~5,000만 행 구간과 일치한다.
+**재고 누적은 예상과 다르다.** 결정문서는 "1년 쌓여 2.7억 행이 돼야 이긴다"고 가정했는데, 실측 결과
+**지금(10일치)도 이미 3.3배 이긴다.** 원인은 행 수가 아니라 **작은 파일 5,154개를 여는 I/O 패턴** —
+pandas는 순차로 하나씩 열고, Spark는 병렬로 읽는다. 즉 이 지점의 교차 조건은 "행 수"가 아니라
+"누적 파일 개수"다.
+
+## 4. 실행 중 발견한 실무 이슈 (전부 코드에 반영·해결함)
+
+이 항목들이 팀원 제안서의 "신규 코드: 세션 빌더·혼합 스키마 리더" 비용이 실제로 무엇인지 보여준다.
+
+| # | 문제 | 원인 | 해결 |
+| --- | --- | --- | --- |
+| 1 | Spark 4.x CSV 리더가 cp949(한글 인코딩)를 거부 | `charset` 허용 목록이 UTF-8류로 고정(`multiLine` 켜도 동일) | UTF-8로 1회 변환 후 캐시(변환 시간은 별도 기록, `spark_utf8_convert_sec`) |
+| 2 | 재고 raw 5,154개 중 425개가 다른 스키마 | 컨슈머가 도중에 옛 직결 스키마 → Kafka 봉투 스키마로 바뀜 | 스키마별로 파일을 나눠 읽고 공통 컬럼으로 맞춘 뒤 `unionByName` |
+| 3 | 대여이력 12개월 중 1개 파일이 cp949 디코딩 실패 | `2024-11-27`치가 헤더만 있는 빈 파일(그날 수집 결손), 인코딩도 UTF-8로 따로 저장됨 | 값을 채우지 않고 그 날짜만 skip(원칙 8) |
+| 4 | 재고 정확도 첫 두 번 실패(행수 156,209 vs 180,889, 오차 215) | ① pandas는 `entity_id`↔payload `stationId` 불일치 행을 버리는데 Spark엔 그 검증이 없었음 ② 시각 컬럼이 이미 `Asia/Seoul` tz-aware로 저장돼 있는데 Spark에서 UTC→KST 변환을 한 번 더 걸어 9시간 이중 이동 | 검증 로직 이식 + `spark.sql.session.timeZone=Asia/Seoul` 설정 + 불필요한 이중 변환 제거 |
+
+**4번이 가장 중요하다.** 정확도 검증 없이 속도만 쟀으면 "Spark가 3.3배 빠르다"는 결과를 잘못된 계산 위에서
+믿을 뻔했다 — `AI/CLAUDE.md`의 "정확성을 속도보다 먼저 본다" 원칙이 실제로 여기서 버그를 잡았다.
+
+## 5. 핵심 인사이트
+
+1. **165의 프록시 기반 교차점(2,000만~5,000만 행)이 실제 BIKE 데이터로도 그대로 재현됐다.** 대여이력
+   6개월(4,075만 행)에서 뒤집히고 12개월까지 비율이 유지된다(0.30~0.31로 안정적).
+2. **재고 누적은 "행 수 임계"가 아니라 "파일 개수 임계"로 이긴다.** 10일치 5,154개 파일만으로도 이미
+   3.3배다. 시간이 지나 파일이 더 쌓이면(연 단위면 수십만 개) 격차가 더 벌어질 가능성이 높다 — 별도로
+   "파일 개수 vs 속도" 스윕을 해보면 이 지점의 진짜 교차 조건(예: 파일 500개? 1,000개?)을 알 수 있다(다음 과제).
+3. **Spark 도입 비용에 인코딩·스키마 통합 작업이 실제로 들어간다.** cp949 미지원, 혼합 스키마 두 문제
+   모두 처음엔 안 보이다가 실행하고 나서 드러났다 — "세션 빌더 + 혼합 스키마 리더"가 팀원 제안서에 이미
+   비용 항목으로 잡혀 있던 이유가 실제로 확인됐다.
+4. **타임존 이중 변환은 조용히 틀린 값을 낸다.** 행 수가 다르게 나와서(156,209 vs 180,889) 바로 잡을 수
+   있었지만, 만약 두 엔진의 행 수가 우연히 같았다면 값만 미묘하게 틀린 채 못 잡았을 수 있다 — 정확성 검증을
+   "행수 일치"뿐 아니라 값 자체까지 반드시 같이 봐야 하는 이유다.
+
+## 6. 권장 — 어디부터 붙이나
+
+**재고 raw 누적 재집계를 먼저 추천한다.**
+- 지금 규모에서 바로 증명 가능(대여이력은 6개월 쌓일 때까지 기다려야 이김 — 이미 12개월치가 있어서 즉시 검증은
+  가능했지만, "매달 새로 쌓이는" 운영 관점에서는 재고가 더 빨리 임계를 넘는다).
+- 소유 코드가 서연 담당 파이프라인(Kafka consumer → raw parquet)이라 구현·배포를 끝까지 직접 통제할 수 있다.
+- `DATA_ENGINE/batch/build_bike_stock_5min.py`의 프로덕션 로직을 그대로 재사용해서 만들었기 때문에
+  실제 운영 코드로 승격할 때 별도 재설계가 필요 없다(`bike_realtime_ops.py`의 `op_pandas`가 그 함수를 직접 호출).
+
+대여이력은 후속으로, 담당(BIKE 예측 파이프라인 소유자 확인 후) 진행을 권한다.
+
+## 7. 한계·다음 과제
+
+- 각 지점 1회 측정이다. 165처럼 반복 측정·환경 조건(로컬 vs 실제 서버) 재확인이 필요하다.
+- 재고 누적의 "파일 개수 임계"를 아직 스윕하지 않았다 — 몇 개부터 이기는지 모른다.
+- Windows 로컬 기준이다. 실제 배포는 EC2/Linux라 쓰기 경로 포함 재측정이 필요하다(165도 같은 한계).
+- `DATA_ENGINE/spark/` 공통 모듈(세션 빌더·혼합 스키마 리더·지표 모듈)은 아직 정식 코드로 승격 안 됨 —
+  이 벤치의 `common.py`/`bike_realtime_ops.py`가 그 초안 역할을 할 수 있다.
+
+## 8. 후속(274-A) — 진짜 운영 계산으로 재검증
+
+3번(재고 raw 누적)·6번(권장)에서 다룬 것과 **실제 프로덕션 baseline 계산은 다른 코드였다.**
+`app/BIKE/pipeline/lookup.py`의 `StockProfileBaseline.fit_streaming()`(`train.py`가 모델
+재학습 시 호출)이 진짜 "누적 재집계"였고, 입력도 Kafka 실시간 원본이 아니라
+`validation/BYC/full-coverage-check/outputs/full-run/train_netflow_q3_mapped_full_202401~
+202411.parquet`(11개월, **250.7M행** — 이 문서 도입부에서 처음 지목했던 그 파일)이었다.
+
+이 로직을 그대로 Spark로 재현해서(`DATA_ENGINE/spark/jobs/bike_avg_baseline.py`) 실제 11개월
+전체로 재측정했다.
+
+| | pandas(`fit_streaming`, production) | Spark |
+| --- | --- | --- |
+| 시간 | 24.8초 | 18.3초 |
+| 비율 | — | 0.74(Spark 26% 빠름) |
+| 결과 | 361,042행 | 361,042행 — **완전 일치**(오차 0.0) |
+
+**여기서는 격차가 크지 않다(26%).** 3·6번의 대여이력·재고 raw 벤치(3.3배)와 다르다. 이유는
+`fit_streaming()` 자체가 **이미 파일 단위 부분합 스트리밍으로 최적화된 pandas 코드**라서다
+— "행 수가 많으면 Spark가 압승"이 아니라 "원래 pandas 구현이 얼마나 최적화됐는가"가 격차를
+갈랐다. 250M행이라는 숫자만 보고 서둘러 결론 내리면 안 된다는 걸 이번에 확인했다.
+
+**A안(대조용)으로 붙였다** — `train.py`는 그대로 두고, 같은 값이 나오는지만 확인했다.
+`app/`이 `DATA_ENGINE/`을 import하지 않는다는 계층 규칙(`AI/CLAUDE.md`) 때문에 `train.py`가
+Spark를 직접 고르게 하려면(B안) 별도 설계가 필요하다 — 아직 미착수.
+
+합성 데이터 단위 테스트 3건 추가(`test/test_data_engine_spark_bike_avg_baseline.py`) —
+horizon 필터·NaN 제외·dow_type(토/일/평일) 분기를 실제 로직과 대조했다.
+
+## 9. B안 — `train.py`가 실제로 Spark를 고르게 통합
+
+8절은 대조용(A안)이었다. 이번엔 `app/BIKE/pipeline/lookup.py`의 `StockProfileBaseline`에
+`fit_streaming_spark()`를 추가하고, `train.py --engine {pandas,spark}`로 실제 선택 가능하게
+만들었다(기본값은 여전히 `pandas` — avg는 "정직한 baseline"이라 검증 없이 기본 경로를
+안 바꾼다는 원칙).
+
+계층 규칙(`AI/CLAUDE.md`: `app/`은 `DATA_ENGINE/`을 import하지 않는다) 때문에
+`DATA_ENGINE.spark`를 가져다 쓰지 않고 8절 로직을 `app/BIKE/pipeline/lookup.py` 안에 직접
+재구현했다 — 두 구현(`DATA_ENGINE/spark/jobs/bike_avg_baseline.py`, `lookup.py`)이 갈라지지
+않도록 로직을 바꿀 땐 둘 다 같이 바꿔야 한다.
+
+**스모크 검증**: `python -m app.BIKE.pipeline.train --train-months 202401 202402
+--valid-months 202412 --test-months 202507 --tag smoke-spark-engine --engine spark
+--sample-frac 0.05`을 실제로 끝까지 돌렸다.
+
+- `[avg] train 2개 파일 spark 집계...` → 312,111행(같은 2개월 pandas 결과와 행수 일치)
+- LightGBM 학습까지 정상 진행(early stopping, 38 iteration), 아티팩트 정상 저장
+- `stock_profile_avg.parquet` 스키마·값 확인 완료(`od_station_id, dow_type, time_slot,
+  exp_bikes, p_empty, p_full`)
+- 합성 데이터 단위 테스트 추가(`test/BIKE/test_bike_lookup_spark.py`) — `fit_streaming()`과
+  `fit_streaming_spark()` 값 일치 확인, BIKE 도메인 전체 회귀(49건) 통과
+
+**즉 "만들어두기만 하는" 상태를 벗어났다** — `--engine spark`를 켜면 실제로 다음 모델
+재학습이 이 경로를 타고, 그 결과가 지금과 동일한 서빙 체인(`refresh_avg.py` →
+`bike-avg-batch` → BE)에 그대로 들어간다.
+
+## 10. 서버(EC2, `j15a104a`) 실측 — 재고 raw 누적을 실제로 상시 배치로 배포
+
+"사람이 가끔 켜는 것"이 아니라 **서버가 스스로 도는 상시 운영**을 만들려고, 4번(재고 raw
+누적)을 `DATA_ENGINE/spark/jobs/bike_realtime_reprocess.py`로 정식 승격하고 EC2에 배포했다.
+
+- Java 21(`default-jdk-headless`) 서버에 신규 설치
+- `DATA_ENGINE/spark/` 공통 모듈 + 잡 코드 scp 배포
+- systemd `bike-realtime-reprocess.service`/`.timer` 설치, **매주 일 04:00(Asia/Seoul)** 자동 실행으로 등록
+
+**서버 실측(3코어·4GB, 로컬 22코어와 다른 환경)**:
+
+| | pandas | Spark |
+| --- | --- | --- |
+| 파일 수 | 4,366개 | 4,366개 |
+| 시간 | 367.1초 | **96.6초** |
+| 비율 | — | **0.263(Spark 3.8배 빠름)** |
+| 결과 | 120,748행 | 120,748행 — **완전 일치**(오차 3.6e-15) |
+
+로컬(22코어, 4.4배)보다는 배수가 약간 작지만(3.8배) **코어가 22개에서 3개로 줄어도 Spark
+우위가 거의 그대로 유지된다** — 이 작업의 병목이 CPU 병렬도가 아니라 파일 I/O라서다(273
+§2.6 "병렬도의 대가가 메모리다"와 같은 결의 관찰). 실제 산출물(`data/BIKE/processed/
+realtime_stock_profile/part.parquet`)도 정상 생성 확인.
+
+출력은 서빙에 연결하지 않았다 — 품질 리포트용이며, `refresh_avg.py`(avg 서빙 경로)는
+그대로 둔다.
+
+## 11. 운영 반영 Phase 1 — 실제 규모(45% 샘플, 11개월) `--engine spark` vs `pandas` 최종 검증
+
+9절 스모크(2개월, 5% 샘플)를 통과한 뒤, 실제 재학습에 가까운 규모로 마지막 게이트를 통과시켰다.
+같은 커맨드를 엔진만 바꿔 두 번 실행:
+
+```
+python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v-spark-check  --engine spark
+python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v-pandas-check --random-state 42
+```
+
+(`train_months/valid_months/test_months`, `sample_frac=0.45`, `station_categories=2583` 등
+`meta.json`에 남긴 조건 전부 동일 — 랜덤 샘플링 시드만 pandas 쪽에 명시했고 avg baseline
+자체는 시드에 의존하지 않는 결정적 집계라 결과에 영향 없음.)
+
+**결과 — 산출물 완전 일치:**
+
+| | pandas (`v-pandas-check`) | Spark (`v-spark-check`) |
+| --- | --- | --- |
+| avg 프로필 행 수 | 361,042 | 361,042 |
+| `stock_profile_avg.parquet` 값 | — | **완전 일치(모든 수치 컬럼 max_abs_err = 0.0)** |
+| LightGBM 학습 행 수 | 84,060,415 | 84,060,415 |
+| LightGBM eval (valid/test 4구간 MAE·RMSE·R²·방향정확도) | — | **소수점 16자리까지 동일** |
+
+avg baseline 산출물이 완전히 같으므로 그 뒤 LightGBM 학습·평가가 바이트 단위로 똑같이
+재현된 것은 당연한 결과다 — 즉 **`--engine spark`로 바꿔도 서빙에 나가는 예측값이 전혀
+달라지지 않는다**는 걸 실제 운영 규모에서 확인했다.
+
+**시간(`train_time_sec`, avg baseline+LightGBM 학습 합산)은 "비교"로 안 올린다** —
+`AI/CLAUDE.md`의 동등 조건 원칙 위반: 이 두 실행은 같은 머신에서 순차로 돌았지만 그 사이
+다른 백그라운드 작업(차트 자료 조사용 파일 읽기 등)이 같이 떠 있어 CPU를 나눠 썼다.
+pandas 254.1초 vs spark 569.5초로 기록됐는데, 이 방향(pandas가 더 빠름)은 8절의 통제된
+측정(pandas 24.8초 vs spark 18.3초, avg baseline만 격리 측정)과도 반대라 컨디션 차이로
+보는 게 맞다 — Spark 세션 기동(JVM warm-up) 오버헤드가 이런 반복 실행에서 매번 붙는다는
+점은 참고할 만하지만, 이 표만으로 "pandas가 더 빠르다"고 결론 내리지 않는다. 시간을 다시
+재려면 두 실행을 유휴 상태에서 단독으로 재실행해야 한다(우선순위 낮음 — 정확도 게이트는
+이미 통과했고, 8절 통제 측정이 이미 남아 있음).
+
+**결론 — Phase 1 게이트 통과.** 다음 실제 BIKE 모델 재학습부터 `--engine spark`를 정식으로
+써도 된다(기본값은 여전히 pandas로 둔다 — 필요할 때 옵트인). Phase 2(README에 Java/pyspark
+요구사항 문서화)·Phase 3(기본 엔진 정책 유지 재확인)·Phase 4(다음 실 재학습에서 실제
+`--engine spark` 사용)는 후속 커밋에서 진행한다.
+
+## 원본
+
+`results.jsonl`(같은 폴더) — 3~7절(대여이력·재고 raw) 실행 조건·수치 원본.
+8절(`fit_streaming` 재현) 실행 결과는 `DATA_ENGINE/spark/jobs/bike_avg_baseline.py` 실행 시
+`--out`으로 저장(1회성 산출물이라 리포에는 안 남김) — 위 표가 그 값이다.
+11절 실행 결과는 `models/BIKE/v-spark-check_20260923-1701/meta.json`·
+`v-pandas-check_20260923-1716/meta.json`(둘 다 `.gitignore` 대상, 로컬 산출물)에 남아 있다.
+이 문서와 어긋나면 이 문서가 맞다(8·11절은 재현 명령이 있으므로 재실행해서 확인 가능).

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,30 @@ def raw_frame() -> pd.DataFrame:
                 datetime(2026, 9, 13, 1, 5, tzinfo=ZoneInfo("Asia/Seoul")),
             ],
             "source": ["direct_poll", "direct_poll"],
+        }
+    )
+
+
+def kafka_frame(
+    *,
+    station_id: str = "ST-1",
+    stock: str = "5",
+    ingested_at: str = "2026-09-13T01:06:00+09:00",
+) -> pd.DataFrame:
+    payload = {
+        "stationId": station_id,
+        "stationName": "101. station",
+        "rackTotCnt": "10",
+        "parkingBikeTotCnt": stock,
+        "shared": "50",
+        "stationLatitude": "37.1",
+        "stationLongitude": "127.1",
+    }
+    return pd.DataFrame(
+        {
+            "entity_id": [station_id],
+            "ingested_at": [ingested_at],
+            "payload_json": [json.dumps(payload)],
         }
     )
 
@@ -78,6 +103,72 @@ def test_build_bike_stock_5min_reads_date_partition(tmp_path):
 
     assert len(df) == 2
     assert set(df["station_id"]) == {"ST-1", "ST-2"}
+
+
+def test_build_bike_stock_5min_reads_kafka_partition(tmp_path):
+    base = tmp_path / "raw"
+    path = base / "dt=2026-09-13" / "hh=01" / "snapshot_kafka.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kafka_frame().to_parquet(path, index=False)
+
+    df = build_bike_stock_5min(base, "2026-09-13")
+
+    assert df.to_dict("records") == [
+        {
+            "station_id": "ST-1",
+            "station_name": "101. station",
+            "rack_total_count": 10,
+            "current_bike_count": 5,
+            "shared": 50,
+            "stock_ratio": 0.5,
+            "station_latitude": 37.1,
+            "station_longitude": 127.1,
+            "collected_at": pd.Timestamp("2026-09-13T01:06:00+09:00"),
+            "collected_date": "2026-09-13",
+            "collected_hour": 1,
+            "collected_minute": 6,
+            "source": "bike.stock",
+        }
+    ]
+
+
+def test_build_bike_stock_5min_deduplicates_mixed_sources_by_slot(tmp_path):
+    base = tmp_path / "raw"
+    poller_path = base / "dt=2026-09-13" / "hh=01" / "snapshot_poller.parquet"
+    kafka_path = base / "dt=2026-09-13" / "hh=01" / "snapshot_kafka.parquet"
+    poller_path.parent.mkdir(parents=True, exist_ok=True)
+    poller = raw_frame().head(1)
+    poller.loc[:, "collected_at"] = datetime(2026, 9, 13, 1, 5, tzinfo=ZoneInfo("Asia/Seoul"))
+    poller.to_parquet(poller_path, index=False)
+    kafka_frame(stock="7", ingested_at="2026-09-13T01:06:00+09:00").to_parquet(
+        kafka_path, index=False
+    )
+
+    df = build_bike_stock_5min(base, "2026-09-13")
+
+    assert len(df) == 1
+    assert df.loc[0, "current_bike_count"] == 7
+    assert df.loc[0, "source"] == "bike.stock"
+
+
+def test_build_bike_stock_5min_skips_invalid_kafka_rows(tmp_path, caplog):
+    base = tmp_path / "raw"
+    path = base / "dt=2026-09-13" / "hh=01" / "snapshot_kafka.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = pd.concat(
+        [kafka_frame(), kafka_frame(station_id="ST-2"), kafka_frame(station_id="ST-3")],
+        ignore_index=True,
+    )
+    frame.loc[1, "payload_json"] = "not json"
+    missing_field = json.loads(frame.loc[2, "payload_json"])
+    del missing_field["stationLongitude"]
+    frame.loc[2, "payload_json"] = json.dumps(missing_field)
+    frame.to_parquet(path, index=False)
+
+    df = build_bike_stock_5min(base, "2026-09-13")
+
+    assert df["station_id"].tolist() == ["ST-1"]
+    assert "Skipped 2 invalid Kafka bike rows" in caplog.text
 
 
 def test_main_is_dry_run_without_yes(tmp_path, capsys):

@@ -42,13 +42,14 @@ def _festivals(**overrides):
         "end_date": pd.to_datetime(["2024-10-05", "2024-10-05", "2024-08-31"]),
         "lat": [37.5, 37.5, 37.6],
         "lon": [127.0, 127.0, 127.1],
+        "source_year": [2024, 2024, 2024],
     }
     base.update(overrides)
     return pd.DataFrame(base)
 
 
 def test_drop_duplicate_festivals_merges_same_event_registered_twice():
-    """이름·기간·좌표가 같으면 ID가 달라도 한 축제다 — 안 합치면 개수가 2배로 잡힌다."""
+    """이름·기간이 같으면 ID·좌표가 달라도 한 축제다 — 안 합치면 개수가 2배로 잡힌다."""
     deduped, removed = drop_duplicate_festivals(_festivals())
 
     assert removed == 1
@@ -67,6 +68,42 @@ def test_drop_duplicate_festivals_keeps_same_name_on_different_dates():
 
     assert removed == 0
     assert len(deduped) == 3
+
+
+def test_drop_duplicate_festivals_ignores_coordinate_drift_and_keeps_latest_year():
+    """좌표가 소수점 아래에서 달라도(227/318) 같은 축제로 보고, 최신 등록분을 남긴다."""
+    df = _festivals(
+        festival_id=["a-2024", "a-2025", "c"],
+        name=["불꽃축제", "불꽃축제", "박물관 기획전"],
+        lat=[37.50001, 37.50002, 37.6],
+        source_year=[2024, 2025, 2024],
+    )
+
+    deduped, removed = drop_duplicate_festivals(df)
+
+    assert removed == 1
+    kept = deduped[deduped["name"] == "불꽃축제"]
+    assert len(kept) == 1
+    assert kept.iloc[0]["festival_id"] == "a-2025"
+    assert kept.iloc[0]["source_year"] == 2025
+
+
+def test_drop_duplicate_festivals_prefers_row_with_coordinates():
+    """좌표가 없는 중복 행이 있으면 좌표가 있는 행을 남긴다 — 최신 연도라도 좌표 유무가 우선이다."""
+    df = _festivals(
+        festival_id=["a-2024", "a-2025", "c"],
+        lat=[37.5, None, 37.6],
+        lon=[127.0, None, 127.1],
+        source_year=[2024, 2025, 2024],
+    )
+
+    deduped, removed = drop_duplicate_festivals(df)
+
+    assert removed == 1
+    kept = deduped[deduped["name"] == "불꽃축제"]
+    assert len(kept) == 1
+    assert kept.iloc[0]["festival_id"] == "a-2024"
+    assert pd.notna(kept.iloc[0]["lat"])
 
 
 def test_add_duration_days_counts_single_day_festival_as_one():

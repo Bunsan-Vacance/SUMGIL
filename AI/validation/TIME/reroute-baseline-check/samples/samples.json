@@ -1,0 +1,716 @@
+[
+  {
+    "id": "s00_large_score_gap",
+    "label": "large_score_gap",
+    "description": "후보 2개, 점수 차 큼(가깝고 안전 vs 멀고 위험)",
+    "n_candidates": 2,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "p_empty",
+        "facts": {
+          "eta_minutes": 10,
+          "current_stock": 0,
+          "predicted_stock": 0.2,
+          "p_empty": 0.92,
+          "p_full": 0.0,
+          "source": "lightgbm",
+          "model_horizon_min": 10
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-0",
+        "name": "역삼",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 0,
+        "predicted_stock": 0.2,
+        "p_empty": 0.92,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10
+      },
+      "eta_minutes": 10,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C0A",
+            "name": "교대",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 80.0,
+          "reading": {
+            "current_stock": 6,
+            "predicted_stock": 5.5,
+            "p_empty": 0.05,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C0B",
+            "name": "사당",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 900.0,
+          "reading": {
+            "current_stock": 1,
+            "predicted_stock": 0.8,
+            "p_empty": 0.85,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  },
+  {
+    "id": "s01_small_score_gap",
+    "label": "small_score_gap",
+    "description": "후보 2개, 점수 차 작음(거의 동점)",
+    "n_candidates": 2,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "p_empty",
+        "facts": {
+          "eta_minutes": 8,
+          "current_stock": 0,
+          "predicted_stock": 0.4,
+          "p_empty": 0.8,
+          "p_full": 0.0,
+          "source": "lightgbm",
+          "model_horizon_min": 10
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-1",
+        "name": "잠실",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 0,
+        "predicted_stock": 0.4,
+        "p_empty": 0.8,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10
+      },
+      "eta_minutes": 8,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C1A",
+            "name": "잠실나루",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 150.0,
+          "reading": {
+            "current_stock": 3,
+            "predicted_stock": 2.8,
+            "p_empty": 0.4,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C1B",
+            "name": "종합운동장",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 170.0,
+          "reading": {
+            "current_stock": 3,
+            "predicted_stock": 2.6,
+            "p_empty": 0.38,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  },
+  {
+    "id": "s02_single_candidate",
+    "label": "single_candidate",
+    "description": "후보 1개(LLM 미호출 지름길 경로)",
+    "n_candidates": 1,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "p_empty",
+        "facts": {
+          "eta_minutes": 12,
+          "current_stock": 0,
+          "predicted_stock": 0.3,
+          "p_empty": 0.88,
+          "p_full": 0.0,
+          "source": "lightgbm",
+          "model_horizon_min": 10
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-2",
+        "name": "홍대입구",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 0,
+        "predicted_stock": 0.3,
+        "p_empty": 0.88,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10
+      },
+      "eta_minutes": 12,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C2A",
+            "name": "합정",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 120.0,
+          "reading": {
+            "current_stock": 4,
+            "predicted_stock": 3.5,
+            "p_empty": 0.15,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  },
+  {
+    "id": "s03_near_risky_far_safe",
+    "label": "near_risky_far_safe",
+    "description": "가깝지만 재고 불안한 후보 vs 멀지만 안정적인 후보",
+    "n_candidates": 2,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "p_empty",
+        "facts": {
+          "eta_minutes": 9,
+          "current_stock": 1,
+          "predicted_stock": 0.6,
+          "p_empty": 0.75,
+          "p_full": 0.0,
+          "source": "lightgbm",
+          "model_horizon_min": 10
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-3",
+        "name": "강남",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 1,
+        "predicted_stock": 0.6,
+        "p_empty": 0.75,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10
+      },
+      "eta_minutes": 9,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C3A",
+            "name": "역삼",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 90.0,
+          "reading": {
+            "current_stock": 2,
+            "predicted_stock": 1.0,
+            "p_empty": 0.75,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C3B",
+            "name": "양재",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 700.0,
+          "reading": {
+            "current_stock": 8,
+            "predicted_stock": 7.5,
+            "p_empty": 0.05,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  },
+  {
+    "id": "s04_many_candidates",
+    "label": "many_candidates",
+    "description": "후보 4개, 점수 분포가 넓다",
+    "n_candidates": 4,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "p_empty",
+        "facts": {
+          "eta_minutes": 15,
+          "current_stock": 0,
+          "predicted_stock": 0.1,
+          "p_empty": 0.95,
+          "p_full": 0.0,
+          "source": "lightgbm",
+          "model_horizon_min": 10
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-4",
+        "name": "서울역",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 0,
+        "predicted_stock": 0.1,
+        "p_empty": 0.95,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10
+      },
+      "eta_minutes": 15,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C40",
+            "name": "남대문",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 100.0,
+          "reading": {
+            "current_stock": 5,
+            "predicted_stock": 4.5,
+            "p_empty": 0.1,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C41",
+            "name": "회현",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 300.0,
+          "reading": {
+            "current_stock": 3,
+            "predicted_stock": 2.8,
+            "p_empty": 0.3,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C42",
+            "name": "숙대입구",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 500.0,
+          "reading": {
+            "current_stock": 4,
+            "predicted_stock": 3.9,
+            "p_empty": 0.2,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C43",
+            "name": "공덕",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 150.0,
+          "reading": {
+            "current_stock": 1,
+            "predicted_stock": 0.9,
+            "p_empty": 0.6,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  },
+  {
+    "id": "s05_proxy_predicted_stock",
+    "label": "proxy_predicted_stock",
+    "description": "p_empty 없이 predicted_stock 근사(proxy)로만 판단",
+    "n_candidates": 2,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "low_predicted_stock",
+        "facts": {
+          "eta_minutes": 11,
+          "current_stock": 0,
+          "predicted_stock": 0.4,
+          "p_empty": null,
+          "p_full": 0.0,
+          "source": "lightgbm",
+          "model_horizon_min": 10
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-5",
+        "name": "여의도",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 0,
+        "predicted_stock": 0.4,
+        "p_empty": null,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10
+      },
+      "eta_minutes": 11,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C5A",
+            "name": "당산",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 200.0,
+          "reading": {
+            "current_stock": 1,
+            "predicted_stock": 0.5,
+            "p_empty": null,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C5B",
+            "name": "영등포",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 350.0,
+          "reading": {
+            "current_stock": 6,
+            "predicted_stock": 4.0,
+            "p_empty": null,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  },
+  {
+    "id": "s06_low_confidence_facts",
+    "label": "low_confidence_facts",
+    "description": "facts가 다른 값(ETA 상한 근접·p_full>0·horizon=30)",
+    "n_candidates": 2,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "p_empty",
+        "facts": {
+          "eta_minutes": 28,
+          "current_stock": 1,
+          "predicted_stock": 0.9,
+          "p_empty": 0.72,
+          "p_full": 0.05,
+          "source": "lightgbm",
+          "model_horizon_min": 30
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-6",
+        "name": "건대입구",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 1,
+        "predicted_stock": 0.9,
+        "p_empty": 0.72,
+        "p_full": 0.05,
+        "source": "lightgbm",
+        "model_horizon_min": 30
+      },
+      "eta_minutes": 28,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C6A",
+            "name": "성수",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 250.0,
+          "reading": {
+            "current_stock": 5,
+            "predicted_stock": 4.2,
+            "p_empty": 0.12,
+            "p_full": 0.1,
+            "source": "lightgbm",
+            "model_horizon_min": 30
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C6B",
+            "name": "뚝섬",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 600.0,
+          "reading": {
+            "current_stock": 2,
+            "predicted_stock": 1.8,
+            "p_empty": 0.3,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 30
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  },
+  {
+    "id": "s07_three_candidates_close",
+    "label": "three_candidates_close",
+    "description": "후보 3개, 인접 점수가 촘촘해 순위가 민감하다",
+    "n_candidates": 3,
+    "context": {
+      "decision": {
+        "fired": true,
+        "reason": "p_empty",
+        "facts": {
+          "eta_minutes": 7,
+          "current_stock": 0,
+          "predicted_stock": 0.2,
+          "p_empty": 0.9,
+          "p_full": 0.0,
+          "source": "lightgbm",
+          "model_horizon_min": 10
+        }
+      },
+      "target": {
+        "rental_id": "TARGET-7",
+        "name": "신촌",
+        "lat": 37.5,
+        "lng": 127.0,
+        "rack_count": 10,
+        "current_stock": 5,
+        "updated_at": null
+      },
+      "target_reading": {
+        "current_stock": 0,
+        "predicted_stock": 0.2,
+        "p_empty": 0.9,
+        "p_full": 0.0,
+        "source": "lightgbm",
+        "model_horizon_min": 10
+      },
+      "eta_minutes": 7,
+      "candidates": [
+        {
+          "station": {
+            "rental_id": "C70",
+            "name": "이대",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 100.0,
+          "reading": {
+            "current_stock": 3,
+            "predicted_stock": 2.5,
+            "p_empty": 0.3,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C71",
+            "name": "신촌역",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 120.0,
+          "reading": {
+            "current_stock": 3,
+            "predicted_stock": 2.5,
+            "p_empty": 0.28,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        },
+        {
+          "station": {
+            "rental_id": "C72",
+            "name": "아현",
+            "lat": 37.5,
+            "lng": 127.0,
+            "rack_count": 10,
+            "current_stock": 5,
+            "updated_at": null
+          },
+          "distance_m": 140.0,
+          "reading": {
+            "current_stock": 3,
+            "predicted_stock": 2.5,
+            "p_empty": 0.26,
+            "p_full": 0.0,
+            "source": "lightgbm",
+            "model_horizon_min": 10
+          },
+          "error": null
+        }
+      ],
+      "dest_station_id": null
+    }
+  }
+]

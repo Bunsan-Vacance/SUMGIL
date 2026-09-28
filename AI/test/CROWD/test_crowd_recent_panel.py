@@ -105,31 +105,39 @@ def test_load_recent_long_missing_returns_none(tmp_path):
     assert df is not None and str(df["date"].dtype).startswith("datetime64")
 
 
-def test_predict_day_uses_recent_history_and_falls_back_without_it():
+def test_predict_day_reports_availability_from_recent_history():
+    """143 확장이 이력 창(lag 가용성)에 미치는 영향 — 라우팅 자체는 `test_crowd_routing.py`가 본다.
+
+    여기서는 `override_kind`로 라우팅을 건너뛰고 lookup 하나로 고정해, `extend_panel_with_recent`가
+    실제로 `predict_day`가 보는 이력을 늘리는지만 확인한다(197: 옛 "이력 전무 → lookup 강제 대체"
+    fallback은 없어졌고, 지금은 `no_lag`도 라우팅이 정한 예측기를 쓴다 — `meta.predictor_fallback`은
+    키만 남고 항상 `None`이다).
+    """
     panel = _panel()
     lookup = build_predictor("lookup", train_panel=panel)
 
-    class Fake:
-        kind = "lightgbm"
-        version = "fake"
+    def factory(kind: str):
+        assert kind == "lookup"
+        return lookup
 
-        def predict(self, window, segments):
-            raise AssertionError("이력이 없으면 호출되지 않아야 한다")
-
-    # 이력 없음(패널 끝 12-31, 대상 01-10) → lookup 대체
+    # 이력 없음(패널 끝 12-31, 대상 01-10) → avail은 no_lag, override로 lookup 고정
     _, meta = predict_day(
-        Fake(), panel, pd.Timestamp("2026-01-10"), [], HOLIDAYS, None, fallback=lookup
+        factory, panel, pd.Timestamp("2026-01-10"), [], HOLIDAYS, None, override_kind="lookup"
     )
     assert meta["history_days_present"] == 0
-    assert meta["predictor"] == "lookup" and meta["predictor_fallback"] == "no_history"
-    # 최근 실측을 이어붙이면 이력이 생기고 lag1d_available
+    assert meta["availability"] == "no_lag"
+    assert meta["predictor"] == "lookup" and meta["predictor_fallback"] is None
+    assert meta["predictor_override"] is True and meta["routing_rule"] is None
+
+    # 최근 실측을 이어붙이면 이력이 생기고 lag1d_available(1주 전은 아직 없어 d1_only)
     ext, _ = extend_panel_with_recent(
         panel, _recent(dates=("2026-01-08", "2026-01-09")), holidays=HOLIDAYS
     )
     pred, meta = predict_day(
-        lookup, ext, pd.Timestamp("2026-01-10"), [], HOLIDAYS, None, fallback=lookup
+        factory, ext, pd.Timestamp("2026-01-10"), [], HOLIDAYS, None, override_kind="lookup"
     )
     assert meta["history_days_present"] == 2 and meta["lag1d_available"] is True
+    assert meta["availability"] == "d1_only"
     assert meta["predictor_fallback"] is None and meta["history_dates"] == [
         "2026-01-08",
         "2026-01-09",

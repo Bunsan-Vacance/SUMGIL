@@ -10,13 +10,20 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from DATA_ENGINE.collect.common import KST
+from DATA_ENGINE.monitor.operating_window import (
+    OperatingWindow,
+    parse_hhmm,
+    subway_window_from_env,
+)
 
 AI_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BIKE_BASE = Path("data/BIKE/raw/realtime")
 DEFAULT_WEATHER_BASE = Path("data/EXTERNAL/weather/raw/nowcast")
+DEFAULT_SUBWAY_BASE = Path("data/SUBWAY/raw/arrival")
 DEFAULT_HOURS = 1
 DEFAULT_BIKE_MIN_COUNT = 10
-DEFAULT_WEATHER_MIN_COUNT = 5
+DEFAULT_WEATHER_MIN_COUNT = 1
+DEFAULT_SUBWAY_MIN_RUNS = 30
 
 
 @dataclass(frozen=True)
@@ -30,6 +37,9 @@ class PartitionCheck:
     name: str
     base_path: Path
     min_count: int
+    required_topic: str | None = None
+    count_poll_runs: bool = False
+    window: OperatingWindow | None = None
 
 
 @dataclass(frozen=True)
@@ -70,11 +80,50 @@ def partition_path(base_path: Path, slot: HourSlot) -> Path:
     return base_path / f"dt={slot.dt}" / f"hh={slot.hh}"
 
 
-def count_partition_snapshots(base_path: Path, slot: HourSlot) -> int:
+def slot_start(slot: HourSlot) -> datetime:
+    return datetime.strptime(f"{slot.dt} {slot.hh}", "%Y-%m-%d %H").replace(tzinfo=KST)
+
+
+def count_partition_snapshots(
+    base_path: Path,
+    slot: HourSlot,
+    required_topic: str | None = None,
+    *,
+    count_poll_runs: bool = False,
+) -> int:
+    """Count snapshot files, or distinct ``poll_run_at`` runs when ``count_poll_runs``.
+
+    One poll run can be split across several parquet files, so poll runs are the
+    reliable unit for topics whose producer emits a fixed cadence.
+    """
     path = partition_path(base_path, slot)
     if not path.exists():
         return 0
-    return sum(1 for item in path.glob("snapshot_*.parquet") if item.is_file())
+    files = (item for item in path.glob("snapshot_*.parquet") if item.is_file())
+    if required_topic is None:
+        return sum(1 for _ in files)
+    import pyarrow.parquet as pq
+
+    count = 0
+    runs: set[object] = set()
+    for item in files:
+        if "kafka_topic" not in pq.read_schema(item).names:
+            continue
+        columns = ["kafka_topic"]
+        if count_poll_runs:
+            if "poll_run_at" not in pq.read_schema(item).names:
+                continue
+            columns.append("poll_run_at")
+        table = pq.read_table(item, columns=columns)
+        topics = table.column("kafka_topic").to_pylist()
+        if count_poll_runs:
+            polled = table.column("poll_run_at").to_pylist()
+            runs.update(
+                run for topic, run in zip(topics, polled) if topic == required_topic and run
+            )
+        elif required_topic in topics:
+            count += 1
+    return len(runs) if count_poll_runs else count
 
 
 def check_partition(check: PartitionCheck, slot: HourSlot) -> PartitionResult:
@@ -82,7 +131,24 @@ def check_partition(check: PartitionCheck, slot: HourSlot) -> PartitionResult:
         raise ValueError("min_count must be positive")
 
     path = partition_path(check.base_path, slot)
-    count = count_partition_snapshots(check.base_path, slot)
+    if check.window is not None and not check.window.covers_hour(slot_start(slot)):
+        return PartitionResult(
+            name=check.name,
+            path=path,
+            slot=slot,
+            count=0,
+            min_count=check.min_count,
+            ok=True,
+            status="outside_window",
+            message=(
+                f"SKIP {check.name} partition outside operating window: "
+                f"dt={slot.dt} hh={slot.hh} path={path}"
+            ),
+        )
+
+    count = count_partition_snapshots(
+        check.base_path, slot, check.required_topic, count_poll_runs=check.count_poll_runs
+    )
     if count == 0:
         return PartitionResult(
             name=check.name,
@@ -139,19 +205,35 @@ def build_partition_checks(
     ai_root: Path,
     bike_min_count: int,
     weather_min_count: int,
+    subway_min_runs: int | None = None,
+    subway_window: OperatingWindow | None = None,
 ) -> list[PartitionCheck]:
-    return [
+    checks = [
         PartitionCheck(
             name="bike",
             base_path=ai_root / DEFAULT_BIKE_BASE,
             min_count=bike_min_count,
+            required_topic="bike.stock",
         ),
         PartitionCheck(
             name="weather",
             base_path=ai_root / DEFAULT_WEATHER_BASE,
             min_count=weather_min_count,
+            required_topic="weather.nowcast",
         ),
     ]
+    if subway_min_runs is not None:
+        checks.append(
+            PartitionCheck(
+                name="subway",
+                base_path=ai_root / DEFAULT_SUBWAY_BASE,
+                min_count=subway_min_runs,
+                required_topic="subway.arrival",
+                count_poll_runs=True,
+                window=subway_window,
+            )
+        )
+    return checks
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -182,7 +264,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_WEATHER_MIN_COUNT,
         help="Minimum weather snapshots per completed hour.",
     )
+    parser.add_argument(
+        "--subway-min-runs",
+        type=int,
+        default=DEFAULT_SUBWAY_MIN_RUNS,
+        help="Minimum distinct subway poll runs per fully-operating hour.",
+    )
+    parser.add_argument(
+        "--subway-window-start",
+        default=None,
+        help="Subway operating window start HH:MM (env SUBWAY_OPERATING_START).",
+    )
+    parser.add_argument(
+        "--subway-window-end",
+        default=None,
+        help="Subway operating window end HH:MM (env SUBWAY_OPERATING_END).",
+    )
+    parser.add_argument(
+        "--no-subway",
+        action="store_true",
+        help="Skip the subway.arrival check.",
+    )
     return parser.parse_args(argv)
+
+
+def resolve_subway_window(args: argparse.Namespace) -> OperatingWindow:
+    if args.subway_window_start or args.subway_window_end:
+        default = subway_window_from_env()
+        return OperatingWindow(
+            parse_hhmm(args.subway_window_start) if args.subway_window_start else default.start_min,
+            parse_hhmm(args.subway_window_end) if args.subway_window_end else default.end_min,
+        )
+    return subway_window_from_env()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,6 +305,8 @@ def main(argv: list[str] | None = None) -> int:
         args.ai_root,
         bike_min_count=args.bike_min_count,
         weather_min_count=args.weather_min_count,
+        subway_min_runs=None if args.no_subway else args.subway_min_runs,
+        subway_window=None if args.no_subway else resolve_subway_window(args),
     )
     results = check_partitions(checks, slots)
     for result in results:

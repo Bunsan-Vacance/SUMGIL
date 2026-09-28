@@ -1,0 +1,27 @@
+{
+  "request": {
+    "sessionId": "FIXTURE-NO-ALTERNATIVE",
+    "step": 0,
+    "rentalId": "ST-TARGET",
+    "etaToRentalMinutes": 10,
+    "destStationId": "DEST-1",
+    "boundary": {
+      "legIndex": 1,
+      "nodeId": "ND-221",
+      "lat": 37.5665,
+      "lng": 126.978
+    }
+  },
+  "response": {
+    "status": "no_alternative",
+    "recommendationId": null,
+    "validUntil": null,
+    "recommendedBy": null,
+    "reason": "no_nearby_station",
+    "target": null,
+    "alternative": null,
+    "boundary": null,
+    "walkLeg": null,
+    "route": null
+  }
+}

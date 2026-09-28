@@ -11,14 +11,18 @@ from app.CROWD.pipeline.dl.dataset import (
     EVENT_STATIC_COLS,
     N_SLOTS,
     SEQ_CHANNELS,
+    SPLITS,
     STAT_FEATURES,
     SequencePanel,
     encode_events,
     fit_event_stats,
     fit_scale,
+    load_derived_slim,
     observed_channels,
+    parse_splits,
     scenario_seq,
     seq_channels_for,
+    splits_with_train_start,
     stat_features_for,
     truncate_seq,
 )
@@ -440,3 +444,140 @@ def test_scenario_seq_keeps_only_named_lag_across_all_observed_channels():
     assert np.all(out[:, :-1, :, obs] == 0)  # D−1 자리만 남는다
     np.testing.assert_array_equal(out[:, -1, :, obs], x[:, -1, :, obs])
     assert np.all(scenario_seq(x, "no_lag", "neighbor")[..., obs] == 0)
+
+
+# ── 145 후속: 학습 창 확장(`splits_with_train_start`) ──
+
+
+def test_splits_with_train_start_moves_train_only_and_does_not_mutate_base():
+    moved = splits_with_train_start("2023-01-01")
+    assert moved["train"] == ("2023-01-01", SPLITS["train"][1])
+    assert moved["valid"] == SPLITS["valid"] and moved["eval"] == SPLITS["eval"]
+    # 원본 SPLITS는 그대로다(같은 dict를 돌려주지 않는다)
+    assert SPLITS["train"] == ("2024-01-01", "2024-10-31")
+    with pytest.raises(ValueError):
+        splits_with_train_start("2024-11-15")  # 학습 종료일(2024-10-31)보다 뒤
+
+
+def test_split_index_default_matches_explicit_splits_and_moves_with_override(panel):
+    derived, scale, sp = panel
+    stats = fit_event_stats(derived[derived["date"] <= "2024-03-14"])
+    sp_explicit = SequencePanel.build(derived, scale, stats, holidays=NO_HOLIDAYS, splits=SPLITS)
+    _, d_idx = sp.split_index("train")
+    _, d_idx2 = sp_explicit.split_index("train")
+    np.testing.assert_array_equal(np.sort(d_idx), np.sort(d_idx2))
+    # 기본 SPLITS는 패널 전체(2024-03)를 덮으므로 학습 표본의 최소 날짜는 패널 시작일이다
+    assert sp.dates[d_idx.min()] == DATES[0]
+
+    moved_splits = splits_with_train_start("2024-03-08")
+    sp_moved = SequencePanel.build(derived, scale, stats, holidays=NO_HOLIDAYS, splits=moved_splits)
+    _, d_idx_moved = sp_moved.split_index("train")
+    assert sp_moved.dates[d_idx_moved.min()] == pd.Timestamp("2024-03-08")
+    # 검증·평가는 이 패널 범위(3월) 밖이라 기본·이동 둘 다 빈 표본으로 그대로다
+    for name in ("valid", "eval"):
+        assert len(sp.split_index(name)[0]) == 0
+        assert len(sp_moved.split_index(name)[0]) == 0
+
+
+def test_load_derived_slim_requires_cache_path_when_panel_path_given(tmp_path):
+    with pytest.raises(ValueError):
+        load_derived_slim(panel_path=tmp_path / "존재하지_않는_패널.parquet")
+
+
+# ── 200 B부: `--splits` 전체 재정의(`parse_splits`) ──
+
+VALID_SPLITS_JSON = (
+    '{"train": ["2024-01-01", "2025-10-31"], "valid": ["2025-11-01", "2025-12-31"],'
+    ' "eval": ["2026-01-01", "2026-12-31"]}'
+)
+
+
+def test_parse_splits_valid_json_returns_three_tuples():
+    parsed = parse_splits(VALID_SPLITS_JSON)
+    assert parsed == {
+        "train": ("2024-01-01", "2025-10-31"),
+        "valid": ("2025-11-01", "2025-12-31"),
+        "eval": ("2026-01-01", "2026-12-31"),
+    }
+
+
+def test_parse_splits_allows_single_day_block():
+    parsed = parse_splits(
+        '{"train": ["2024-01-01", "2024-01-01"], "valid": ["2024-01-02", "2024-01-02"],'
+        ' "eval": ["2024-01-03", "2024-01-03"]}'
+    )
+    assert parsed["train"] == ("2024-01-01", "2024-01-01")
+
+
+def test_parse_splits_rejects_malformed_json():
+    with pytest.raises(ValueError):
+        parse_splits("{이건 JSON이 아니다")
+
+
+def test_parse_splits_rejects_non_object_json():
+    with pytest.raises(ValueError):
+        parse_splits('["train", "valid", "eval"]')
+
+
+def test_parse_splits_rejects_missing_key():
+    with pytest.raises(ValueError, match="train.*valid.*eval|키"):
+        parse_splits(
+            '{"train": ["2024-01-01", "2024-10-31"], "valid": ["2024-11-01", "2024-12-31"]}'
+        )
+
+
+def test_parse_splits_rejects_extra_key():
+    with pytest.raises(ValueError):
+        parse_splits(
+            '{"train": ["2024-01-01", "2024-10-31"], "valid": ["2024-11-01", "2024-12-31"],'
+            ' "eval": ["2025-01-01", "2025-12-31"], "extra": ["2026-01-01", "2026-01-02"]}'
+        )
+
+
+def test_parse_splits_rejects_non_two_element_value():
+    with pytest.raises(ValueError):
+        parse_splits(
+            '{"train": ["2024-01-01"], "valid": ["2024-11-01", "2024-12-31"],'
+            ' "eval": ["2025-01-01", "2025-12-31"]}'
+        )
+
+
+def test_parse_splits_rejects_unparseable_date():
+    with pytest.raises(ValueError):
+        parse_splits(
+            '{"train": ["안녕", "2024-10-31"], "valid": ["2024-11-01", "2024-12-31"],'
+            ' "eval": ["2025-01-01", "2025-12-31"]}'
+        )
+
+
+def test_parse_splits_rejects_reversed_block():
+    with pytest.raises(ValueError):
+        parse_splits(
+            '{"train": ["2024-10-31", "2024-01-01"], "valid": ["2024-11-01", "2024-12-31"],'
+            ' "eval": ["2025-01-01", "2025-12-31"]}'
+        )
+
+
+def test_parse_splits_rejects_overlapping_train_and_valid():
+    with pytest.raises(ValueError):
+        parse_splits(
+            '{"train": ["2024-01-01", "2024-11-15"], "valid": ["2024-11-01", "2024-12-31"],'
+            ' "eval": ["2025-01-01", "2025-12-31"]}'
+        )
+
+
+def test_parse_splits_rejects_overlapping_valid_and_eval():
+    with pytest.raises(ValueError):
+        parse_splits(
+            '{"train": ["2024-01-01", "2024-10-31"], "valid": ["2024-11-01", "2024-12-31"],'
+            ' "eval": ["2024-12-15", "2025-12-31"]}'
+        )
+
+
+def test_parse_splits_rejects_touching_boundaries_without_gap():
+    # train[1] < valid[0]은 엄격한 부등호다 — 같은 날은 허용하지 않는다
+    with pytest.raises(ValueError):
+        parse_splits(
+            '{"train": ["2024-01-01", "2024-11-01"], "valid": ["2024-11-01", "2024-12-31"],'
+            ' "eval": ["2025-01-01", "2025-12-31"]}'
+        )

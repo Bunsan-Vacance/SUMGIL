@@ -1,0 +1,24 @@
+# CROWD 혼잡도 예측 배치(app.CROWD.pipeline.batch_predict) systemd 유닛(oneshot).
+# crowd-batch-predict.timer 가 매일 09:30(Asia/Seoul)에 이 서비스를 띄운다.
+#
+# 설치:
+#   bash AI/DATA_ENGINE/scripts/install_data_engine_services.sh
+#   sudo systemctl enable --now crowd-batch-predict.timer
+#
+# TimeoutStartSec=30min은 첫 서버 실행에서 실측한 뒤 조정할 가드값이다 — 아직 EC2에서
+# 소요 시간을 재지 않았다.
+
+[Unit]
+Description=CROWD subway congestion daily batch prediction
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=<REPO_ROOT>/AI
+EnvironmentFile=<REPO_ROOT>/AI/.env
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/usr/bin/bash <REPO_ROOT>/AI/DATA_ENGINE/scripts/run_crowd_batch_predict.sh
+TimeoutStartSec=30min
+StandardOutput=append:<REPO_ROOT>/AI/logs/crowd_batch_predict.log
+StandardError=append:<REPO_ROOT>/AI/logs/crowd_batch_predict.log

@@ -4,7 +4,7 @@
 명시해두고 실제 실행은 데이터 수집 이후로 미룬다 (report.py 에서 orchestration).
 
 공통 기대 스키마:
-  snapshots (재고 스냅샷, 실시간 폴러 산출물 누적):
+  snapshots (재고 스냅샷, Kafka raw를 평탄화한 결과):
     stationId, stationName, rackTotCnt, parkingBikeTotCnt, shared,
     stationLatitude, stationLongitude, collected_at(tz-aware)
 

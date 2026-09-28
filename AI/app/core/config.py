@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AI_ROOT = Path(__file__).resolve().parents[2]
@@ -19,11 +20,81 @@ class Settings(BaseSettings):
     crowd_models_dir: Path = AI_ROOT / "models" / "CROWD"
     # 예측기 종류: auto(아티팩트 있으면 lightgbm, 없으면 lookup) | lookup | lightgbm | llm
     crowd_predictor: str = "auto"
+    # 197: DL 배포 아티팩트를 이름으로 고정한다. latest_artifact(kind="dl")는 폴더명 정렬 최신을
+    # 고르는데, DL 변형이 18개라 이름 운에 맡기면 dl_lstm_*(대조군)이 dl_gru_*(채택 구성)보다
+    # 뒤에 와서 잘못 뽑힌다 — 198 V3(정적 이벤트 없음) 판정이 이 이름을 가리키게 명시로 고정한다.
+    # 200: 2024+2025 전체(학습 2024-01~2025-10, 검증 2025-11~12)로 최종 fit한 V3 s42. 이전 배포
+    # `dl_gru_s14_noev_s42_20260914-1358`(2024 단독)은 롤백용으로 남겨둔다. 이름 정렬 최신은 여전히
+    # `dl_lstm_s14_noev_s44_*`(대조군)라 고정 없이는 잘못 뽑힌다.
+    crowd_dl_artifact: str = "dl_gru_s14_noev_s42_train2024-2025"
+    # 145 후속 — LightGBM 배포 아티팩트도 이름으로 고정한다(`latest_artifact` 이름 정렬은
+    # `_masked-stack_`이 뒤에 와 우연히 맞지만 운에 맡기지 않는다). `None`이면 예전처럼
+    # `latest_artifact(kind="lightgbm")`, 그것도 없으면 lookup.
+    # 200: 2024+2025 전체로 최종 fit한 마스킹 stack 아티팩트(2023 제외 근거 masking-check 13·17절).
+    # 이전 배포 `..._masked-stack_20260917-1113`(2024 단독)은 롤백용으로 남겨둔다.
+    crowd_lgbm_artifact: str | None = "festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025"
     # 혼잡도 등급 임계치(%). 팀 논의 A-2 미확정 — 국토부 150/170/190은 판별력이 없어(90) 분포 기준 기본값.
     crowd_grade_thresholds: str = "50,100"
+    # 200: 배치 서빙이 읽는 이벤트 표 목록(콤마 구분, `CROWD_PROCESSED` 아래). 학습은
+    # `dataset.EVENTS_NAME` 하나만 쓴다. 뒤 파일이 같은 (date, station_no)를 덮어쓴다. 명시
+    # 목록인 이유: glob으로 잡으면 실험용 표(`_2023_2025` 등)가 섞인다.
+    crowd_events_files: str = (
+        "crowd_station_events_2024_2025.parquet,crowd_station_events_2026_2026.parquet"
+    )
     # LLM 예측기(실험 축). 키가 없으면 llm kind는 명확한 오류로 막힌다.
     crowd_llm_api_key: str | None = None
     crowd_llm_model: str | None = None
+
+    # ── TIME LLM 에이전트(203) — 실시간 재탐색 `AgentStrategy`가 쓰는 게이트웨이 설정 ──
+    # env는 GMS_API_KEY에서 읽는다(.env.example에 이미 항목 있음). TIME_LLM_API_KEY로도
+    # 덮어쓸 수 있게 별칭을 둔다 — 게이트웨이가 여럿으로 갈릴 경우를 대비한 여지다.
+    time_llm_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("TIME_LLM_API_KEY", "GMS_API_KEY")
+    )
+    # 게이트웨이 주소·모델명. **기본값 없음** — 어느 쪽도 아직 확정되지 않았다
+    # (`TOOL_CONTRACT.md` 6절 5번).
+    time_llm_base_url: str | None = None
+    time_llm_model: str | None = None
+    time_llm_timeout_sec: float = 4.0
+    # 331 real 실측(GMS gpt-5.4-mini, 표본 7건) 출력 65~76토큰 — 사유 120자 상한
+    # (`time_agent_reason_max_chars`)이면 이 범위를 벗어나기 어렵다. 여유 2배인 160으로
+    # 상한을 걸어 출력 폭주(요금·지연)만 막는다 — 정상 응답을 자르지 않는 값이다
+    # (`validation/TIME/reroute-baseline-check/RESULTS.md` real 절 토큰 분해).
+    time_llm_max_output_tokens: int = 160
+    # BE 재안내 API(POST /api/routes/replan 등) 주소. 회신값 http://be:8080, 무인증
+    # (`.claude/handoff/TO_FE-bike-reroute-04.md`). env는 BE_BASE_URL에서도 읽는다 —
+    # time_llm_api_key와 같은 패턴으로 별칭을 둔다.
+    time_be_base_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("TIME_BE_BASE_URL", "BE_BASE_URL")
+    )
+    time_be_timeout_sec: float = 3.0
+    # 재안내 추천(`recommendationId`)의 유효 기간(초). 라우터가 `validUntil` 계산에 쓴다.
+    time_recommendation_ttl_sec: float = 600.0
+    # 세션당 LLM 호출·토큰 상한. **잠정값, 근거 없음** — 실제 프롬프트 크기·게이트웨이 단가를
+    # 보지 못한 채 우선 막아둔 값이다. 표를 확보하면 다시 정한다(트리거 임계값과 같은 처지).
+    time_llm_max_calls_per_session: int = 3
+    time_llm_max_tokens_per_session: int = 8000
+    # 안내 문장 길이 상한. **잠정값** — FE 회신이 팝업 길이 합의를 요청해 우선 숫자를 박아뒀다.
+    time_agent_reason_max_sentences: int = 2
+    time_agent_reason_max_chars: int = 120
+
+    # 239: 열차·노드 표(`predictions_train_*.parquet`) 산출 여부. 기본 False — BE 적재 경로가
+    # 정해지기 전까지 기존 산출물(`predictions_*.parquet`과 메타 값)을 바꾸지 않는다.
+    crowd_train_table: bool = False
+    # 239: 135 시각표 파서 산출물(공공데이터포털 15098251). 열차 표 옵션을 켰는데 이 파일이
+    # 없으면 `timetable.load_timetable`이 무엇을 먼저 돌려야 하는지 알려주는 오류를 낸다.
+    crowd_timetable_path: Path = AI_ROOT / "data" / "CROWD" / "interim" / "timetable_long.parquet"
+    # 244: 링크(from/to) 표(`predictions_link_{date}.parquet` + BE용 CSV) 산출 여부. 기본 False —
+    # B-5 적재 계약은 확정됐지만(`.claude/handoff/response/FROME_BE-crowd-pred-load-path.md`)
+    # 배치 스케줄이 아직 등록되지 않아, 첫 릴리스는 명시적으로 켰을 때만 만든다.
+    crowd_link_table: bool = False
+    # 9호선 2·3단계(언주 4126~중앙보훈병원 4138) lookup 기준선 서빙 여부. **모델에는 절대
+    # 넣지 않는다** — station_no가 학습 패널에 0건이라 모델(`pipeline/features.CATEGORICAL_COLS`)
+    # 기준으로는 미학습 범주가 된다. True면 배치가 그 13역을 day_type×station_no×time_slot
+    # lookup 평균으로만 채워 슬롯·링크 표에 편입하고 `pred_source="lookup_line9"`로 구분한다.
+    # 기본 True — 9호선 편입이 목적이고 BE가 아직 적재를 시작하지 않아 호환 부담이 없다.
+    # CLI `--line9`/`--no-line9`로 이번 실행만 덮어쓸 수 있다.
+    crowd_line9_serving: bool = True
 
     # ── BIKE 서빙 ──
     # bike_stock_pred 표가 놓이는 곳. CROWD와 달리 날짜별 파일이 아니라 **단일 최신 표**다
@@ -44,9 +115,101 @@ class Settings(BaseSettings):
     # 이 시간(초)보다 오래된 updated_at은 신뢰하지 않고 "없음"으로 취급한다.
     bike_live_stock_max_staleness_seconds: float = 300.0
 
+    # ── BIKE D-1/D-7 lag (LightGBM anchor+horizon 서빙용, Phase 2) ──
+    # snapshot_stock_history.py(30분마다)가 쌓는 일별 관측 로그.
+    bike_stock_history_dir: Path = AI_ROOT / "data" / "BIKE" / "raw" / "realtime" / "stock_history"
+    # update_lag_lookup.py(하루 1회)가 위 로그를 집계해 만드는 표 — lag_features.attach_lag()가
+    # 그대로 읽을 수 있는 스키마(od_station_id·lag_date·lag_time_slot·lag_stock)를 쓴다.
+    bike_lag_lookup_path: Path = (
+        AI_ROOT / "data" / "BIKE" / "raw" / "realtime" / "lag_lookup_live.parquet"
+    )
+    # D-7까지만 있으면 되므로 여유를 조금 둔 보관 기간(일). 이보다 오래된 관측 로그·lookup
+    # 행은 update_lag_lookup.py가 정리한다.
+    bike_lag_lookup_retention_days: int = 10
+
+    # ── BIKE 실시간 예측 모델(anchor+horizon LightGBM, S15P21A104-160 Phase 5~6) ──
+    # train.py --feature-set v4_weather --train-empty-full 로 만든 아티팩트. station_categories.json이
+    # 저장된 버전이어야 한다(2026-09-17 이전 아티팩트는 이 파일이 없어 못 씀).
+    # 2026-09-17 20:37 아티팩트부터 model_is_empty.txt/model_is_full.txt(p_empty/p_full
+    # 분류기, S15P21A104-160 Phase 6)가 같이 들어있다 — 이전 아티팩트는 회귀만 있고
+    # 없어도 predictor_eta.LightGBMEtaPredictor가 없는 파일로 판단해 p_empty/p_full만 None으로 둔다.
+    # 회귀는 이전 아티팩트(45% 샘플)보다 전체 데이터로 다시 학습돼 소폭 개선됐다
+    # (valid MAE 1.4797->1.4741, R² 0.3319->0.3364) — validation/BYC/eta-empty-full-check/RESULTS.md.
+    bike_eta_model_dir: Path = AI_ROOT / "models" / "BIKE" / "v4-weather-final_20260917-2037"
+    # 역별 rack_count 룩업(학습 원본 대신 미리 뽑아둔 작은 파일) —
+    # validation/BYC/anchor-horizon-feature-check/src/build_station_master.py가 만듦.
+    bike_station_master_path: Path = (
+        AI_ROOT / "data" / "EXTERNAL" / "station" / "processed" / "station_master.parquet"
+    )
+    # 날씨 실시간 스냅샷(팀원이 별도로 구축 중) — weather.nowcast Kafka 토픽을
+    # bike.stock처럼 최신 스냅샷화한 결과. 없거나 오래되면 자동으로 temp=0/is_rain=False로
+    # 폴백하므로, 이 계약(경로·컬럼)만 맞으면 코드 변경 없이 연결된다.
+    bike_live_weather_path: Path = (
+        AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw" / "nowcast" / "latest_weather.parquet"
+    )
+    # 날씨 수집기는 약 1시간 간격 실행. 실측(관측 70회) 결과 다음 관측 직전 기존값 나이가
+    # 최대 129.6분이었고 120분 기준으로도 22/69 구간이 폴백에 걸려, 실제 수집 주기 대비
+    # 20분 여유를 둔 150분(9,000초)으로 잡았다 — 운영 초기값이며 지연 기록을 보고 재조정한다.
+    bike_live_weather_max_staleness_seconds: float = 9000.0
+
+    # ── TIME 재안내 트리거(203/302) — 따릉이 재고 고갈 ──
+    # ⚠️ 아래 넷은 **잠정값이다.** 실제 재고·p_empty 분포를 보지 못한 채 데모를 위해 우선
+    # 박아둔 값이라, 데모 이후 실측 분포를 보고 다시 정한다 — 그때까지는 "근거 있는 값"으로
+    # 인용하지 않는다(이전 CROWD 등급/퍼센트 트리거 임계값과 같은 처지).
+    #
+    # p_empty(분류기의 도착 슬롯 0대 확률) 상한. 이 값 이상이면 고갈로 본다.
+    time_trigger_p_empty: float = 0.7
+    # predicted_stock(도착 시점 예측 재고) 하한. p_empty가 없을 때의 폴백 신호다.
+    time_trigger_min_stock: float = 1.0
+    # ETA 상한(분). 학습 horizon(5·10·15·30)을 크게 벗어난 예측은 근거로 쓰지 않는다.
+    time_trigger_max_eta_min: int = 30
+    # 같은 이동 중 재안내 팝업이 반복해서 뜨는 것을 막는다.
+    time_trigger_cooldown_sec: float = 600.0
+    # dev 전용 강제 트리거(`debugForceTrigger`) 허용 여부. 운영 환경에서는 반드시 False로 둔다 —
+    # 이 플래그 자체가 트리거 규칙 1~4(오류·horizon·신뢰도·쿨다운)를 우회시키진 않지만, 6·7번
+    # 판정을 건너뛰고 강제로 띄우는 경로라 데모·QA 외에는 열어두지 않는다.
+    time_debug_force_trigger_enabled: bool = False
+    # 301-B: 시연용 강제 재고 고갈 override 대상 대여소(쉼표 구분 ID 목록). 이 목록에 든 대여소는
+    # `get_eta_stock` 응답이 `adapters.DebugEmptyStockAdapter`를 거치며 재고 0으로 덮어써진다.
+    # **`time_debug_force_trigger_enabled`가 True일 때만 효력이 있다**(게이트 AND) — 운영에서는
+    # 둘 다 False라 이 목록이 채워져 있어도 아무 일도 일어나지 않는다. 대상 대여소로도 재안내
+    # 후보로도 같은 어댑터를 타므로 목록에 넣으면 양쪽 다 재고 0으로 보인다(의도 — 시연 구간을
+    # 자유롭게 설계하기 위함).
+    time_debug_empty_rental_ids: str = ""
+
+    # ── TIME 주변 대여소 탐색(203/302) ──
+    # StationIndex.nearby()에 쓰는 반경(m)·상한. **잠정값** — 실제 대여소 밀도 분포를 보지
+    # 못했다. 상한은 candidates.MAX_CANDIDATES(LLM 프롬프트 길이 보호)와 같은 값으로 맞춰둔다.
+    time_nearby_radius_m: int = 500
+    time_nearby_limit: int = 5
+
+    # ── TIME 규칙 기준선 점수식(203/302) ──
+    # ⚠️ 트리거 임계값과 같은 처지의 **잠정값**이다. 실제 후보 분포를 보지 못했다.
+    # score = 도보소요(분, distance_m/67 (station_index.WALK_SPEED_M_PER_MIN)) + p_empty × 고갈 페널티. 작을수록 좋다.
+    #
+    # 고갈 페널티 10분: p_empty가 1(=100% 확률로 빈다)이면 도보 10분 거리만큼 불리하게 본다 —
+    # "조금 더 걸어도 확실히 있는 대여소"를 "가깝지만 곧 빌 대여소"보다 우선하려는 의도일 뿐
+    # 측정값은 아니다.
+    time_score_empty_penalty_min: float = 10.0
+
     @property
     def grade_thresholds(self) -> list[float]:
         return [float(x) for x in self.crowd_grade_thresholds.split(",") if x.strip()]
+
+    @property
+    def events_paths(self) -> list[Path]:
+        crowd_processed = AI_ROOT / "data" / "CROWD" / "processed"
+        return [
+            crowd_processed / x.strip() for x in self.crowd_events_files.split(",") if x.strip()
+        ]
+
+    @property
+    def debug_empty_rental_ids(self) -> list[str]:
+        """`time_debug_empty_rental_ids`를 콤마 목록으로 파싱한다(`grade_thresholds`와 같은
+        패턴 — 공백 제거·빈 항목 제외). 게이트(`time_debug_force_trigger_enabled`) 판단은
+        여기서 하지 않는다 — 이 프로퍼티는 항상 파싱만 하고, 효력 여부는 호출자(어댑터 생성·
+        `GET /time/meta` 노출)가 게이트와 함께 판단한다."""
+        return [x.strip() for x in self.time_debug_empty_rental_ids.split(",") if x.strip()]
 
 
 @lru_cache

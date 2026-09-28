@@ -6,6 +6,7 @@ import json
 import os
 from collections import defaultdict
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,8 @@ import pandas as pd
 
 from DATA_ENGINE.collect.common import AI_ROOT, KST, save_latest_parquet
 from DATA_ENGINE.stream.kafka_events import KafkaEvent
+from DATA_ENGINE.stream.weather_bike_adapter import update_bike_weather
+from DATA_ENGINE.stream.weather_latest import update_weather_latest
 
 TOPIC_BASE_DIRS = {
     "bike.stock": AI_ROOT / "data" / "BIKE" / "raw" / "realtime",
@@ -21,7 +24,16 @@ TOPIC_BASE_DIRS = {
 }
 BIKE_STOCK_TOPIC = "bike.stock"
 BIKE_LATEST_STOCK_RELATIVE_PATH = Path("data/BIKE/raw/realtime/latest_stock.parquet")
-BIKE_LATEST_STOCK_COLUMNS = ["rental_id", "current_stock", "updated_at"]
+BIKE_LATEST_STOCK_COLUMNS = [
+    "rental_id",
+    "current_stock",
+    "updated_at",
+    "station_name",
+    "lat",
+    "lng",
+    "rack_count",
+]
+BIKE_LATEST_STOCK_TTL = pd.Timedelta(minutes=30)
 
 
 def base_dir_for_topic(topic: str, ai_root: Path = AI_ROOT) -> Path:
@@ -35,10 +47,12 @@ def base_dir_for_topic(topic: str, ai_root: Path = AI_ROOT) -> Path:
     return Path(ai_root) / relative
 
 
-def _snapshot_path(base_dir: Path, partition_time: datetime) -> Path:
+def _snapshot_path(base_dir: Path, partition_time: datetime, events: list[KafkaEvent]) -> Path:
     out_dir = base_dir / f"dt={partition_time:%Y-%m-%d}" / f"hh={partition_time:%H}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"snapshot_{partition_time:%Y%m%dT%H%M%S}_{os.getpid()}.parquet"
+    event_ids = "\n".join(sorted(event.event_id for event in events))
+    digest = sha256(event_ids.encode("utf-8")).hexdigest()[:16]
+    filename = f"snapshot_{partition_time:%Y%m%dT%H%M%S}_{digest}.parquet"
     return out_dir / filename
 
 
@@ -74,6 +88,37 @@ def _naive_kst(value: datetime) -> datetime:
     return value.astimezone(KST).replace(tzinfo=None)
 
 
+def _optional_str(value: Any) -> str | None:
+    """결측·빈 문자열은 None으로 정규화한다."""
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_float(value: Any) -> float | None:
+    """결측·빈 값·변환 실패는 None. 서울 좌표는 0.0이 될 수 없어 0.0도 결측으로 본다."""
+    if value in (None, ""):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result == 0.0:
+        return None
+    return result
+
+
+def _optional_int(value: Any) -> int | None:
+    """결측·빈 값·변환 실패는 None."""
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _bike_latest_stock_rows(events: list[KafkaEvent]) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for event in events:
@@ -97,6 +142,10 @@ def _bike_latest_stock_rows(events: list[KafkaEvent]) -> pd.DataFrame:
                 "rental_id": rental_id,
                 "current_stock": current_stock,
                 "updated_at": _naive_kst(event.freshness_time),
+                "station_name": _optional_str(payload.get("stationName")),
+                "lat": _optional_float(payload.get("stationLatitude")),
+                "lng": _optional_float(payload.get("stationLongitude")),
+                "rack_count": _optional_int(payload.get("rackTotCnt")),
             }
         )
 
@@ -117,9 +166,12 @@ def update_bike_latest_stock(events: list[KafkaEvent], *, ai_root: Path = AI_ROO
         combined = latest_rows
 
     combined["updated_at"] = pd.to_datetime(combined["updated_at"])
+    combined = combined.sort_values(["rental_id", "updated_at"]).drop_duplicates(
+        subset=["rental_id"], keep="last"
+    )
+    cutoff = combined["updated_at"].max() - BIKE_LATEST_STOCK_TTL
     combined = (
-        combined.sort_values(["rental_id", "updated_at"])
-        .drop_duplicates(subset=["rental_id"], keep="last")
+        combined.loc[combined["updated_at"] >= cutoff]
         .sort_values("rental_id")
         .reset_index(drop=True)
     )
@@ -140,11 +192,22 @@ def write_events(events: list[KafkaEvent], *, ai_root: Path = AI_ROOT) -> list[P
     paths: list[Path] = []
     for (topic, partition_time), batch in sorted(grouped.items(), key=lambda x: x[0]):
         base_dir = base_dir_for_topic(topic, ai_root=ai_root)
-        path = _snapshot_path(base_dir, partition_time)
+        path = _snapshot_path(base_dir, partition_time, batch)
         frame = pd.DataFrame([event.to_record() for event in batch])
-        frame.to_parquet(path, index=False)
+        tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            frame.to_parquet(tmp_path, index=False)
+            os.replace(tmp_path, path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
         paths.append(path)
     latest_path = update_bike_latest_stock(events, ai_root=ai_root)
     if latest_path is not None:
         paths.append(latest_path)
+    weather_path = update_weather_latest(events, ai_root=ai_root)
+    if weather_path is not None:
+        paths.append(weather_path)
+        bike_weather_path = update_bike_weather(ai_root=ai_root)
+        if bike_weather_path is not None:
+            paths.append(bike_weather_path)
     return paths

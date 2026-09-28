@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 TARGETS = ["boarding", "alighting"]
@@ -32,8 +33,36 @@ class DayTypeLookupBaseline:
         self.targets = list(targets or TARGETS)
         self.table_: pd.DataFrame | None = None
 
-    def fit(self, train: pd.DataFrame) -> DayTypeLookupBaseline:
-        self.table_ = train.groupby(self.keys, observed=True)[self.targets].mean().reset_index()
+    def fit(self, train: pd.DataFrame, weights: pd.Series | None = None) -> DayTypeLookupBaseline:
+        """`weights=None`이면 지금과 같은 단순 평균, 주면 타깃별 가중 평균(227 연도 표본 가중).
+
+        `weights`는 `train.index`에 맞춘 양수 Series로 본다. `.mean()`이 타깃별로 NaN을
+        건너뛰듯, 타깃이 NaN인 행은 그 타깃의 분모(가중 합)에서도 뺀다 — 타깃마다 결측
+        위치가 달라 가중을 한 번에 계산할 수 없다.
+        """
+        if weights is None:
+            self.table_ = train.groupby(self.keys, observed=True)[self.targets].mean().reset_index()
+            return self
+        if len(weights) != len(train):
+            raise ValueError(f"weights 길이({len(weights)})가 train 길이({len(train)})와 다르다.")
+        w = np.asarray(weights, dtype="float64")
+        if (w < 0).any():
+            raise ValueError("weights에 음수가 있다 — 가중치는 전부 0 이상이어야 한다.")
+
+        keys_frame = train[self.keys].reset_index(drop=True)
+        by = [keys_frame[k] for k in self.keys]
+        columns: dict[str, pd.Series] = {}
+        for target in self.targets:
+            values = train[target].to_numpy(dtype="float64")
+            valid = ~np.isnan(values)
+            wt = w * valid  # 타깃이 NaN인 행은 그 타깃 계산에서 가중을 0으로 뺀다
+            wx = wt * np.where(valid, values, 0.0)
+            numer = pd.Series(wx, index=keys_frame.index).groupby(by, observed=True).sum()
+            denom = pd.Series(wt, index=keys_frame.index).groupby(by, observed=True).sum()
+            with np.errstate(invalid="ignore", divide="ignore"):
+                columns[target] = numer / denom  # 분모 0(그 그룹 전부 NaN)이면 NaN — 채우지 않는다
+        table = pd.concat(columns, axis=1)
+        self.table_ = table.reset_index()[[*self.keys, *self.targets]]
         return self
 
     def predict(self, frame: pd.DataFrame) -> pd.DataFrame:
