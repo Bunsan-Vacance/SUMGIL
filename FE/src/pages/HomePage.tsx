@@ -1,13 +1,11 @@
-import { ArrowDownUp, ArrowLeft, ArrowRight, Pencil, Search } from 'lucide-react'
+import { ArrowDownUp, ArrowRight, Pencil, Search } from 'lucide-react'
 import type { Place } from '../features/route/types'
 interface Props {
   origin: Place
   destination: Place | null
   openSearch: (target: 'origin' | 'destination') => void
-  openBrowse: () => void
   routePanelOpen: boolean
   toggleRoutePanel: () => void
-  closeRoutePanel: () => void
   findRoutes: () => void
   swapPlaces: () => void
 }
@@ -15,25 +13,14 @@ export default function HomePage({
   origin,
   destination,
   openSearch,
-  openBrowse,
   routePanelOpen,
   toggleRoutePanel,
-  closeRoutePanel,
   findRoutes,
   swapPlaces,
 }: Props) {
   return (
     <>
       <div className="home-topbar" hidden={routePanelOpen}>
-        <button
-          type="button"
-          className="home-search-button"
-          aria-label="장소, 역, 주소 검색"
-          onClick={openBrowse}
-        >
-          <Search size={20} />
-          <span>장소, 역, 주소 검색</span>
-        </button>
         <button
           type="button"
           className="primary home-route-button"
@@ -52,14 +39,6 @@ export default function HomePage({
         hidden={!routePanelOpen}
       >
         <div className="home-panel-heading">
-          <button
-            type="button"
-            className="icon-button home-panel-back"
-            aria-label="홈으로 돌아가기"
-            onClick={closeRoutePanel}
-          >
-            <ArrowLeft size={19} />
-          </button>
           <h2>어디로 갈까요?</h2>
         </div>
         <div className="trip-fields">
@@ -67,7 +46,7 @@ export default function HomePage({
             type="button"
             className="swap-button"
             aria-label="출발지와 도착지 교환"
-            disabled={!destination}
+            disabled={!destination || !origin.name}
             onClick={swapPlaces}
           >
             <ArrowDownUp size={19} />
@@ -76,7 +55,9 @@ export default function HomePage({
             <button type="button" onClick={() => openSearch('origin')}>
               <span className="dot start" />
               <small>출발</small>
-              <strong>{origin.name}</strong>
+              <strong className={!origin.name ? 'muted' : ''}>
+                {origin.name || '출발지를 검색하세요'}
+              </strong>
               <Pencil size={16} />
             </button>
             <button type="button" onClick={() => openSearch('destination')}>

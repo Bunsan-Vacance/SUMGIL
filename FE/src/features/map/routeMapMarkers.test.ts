@@ -102,6 +102,80 @@ describe('경로 지도 선과 지점', () => {
     ])
   })
 
+  it('명시된 구간 전환 유형을 지도 지점 역할로 사용한다', () => {
+    const station = endpoint('station', '환승역', 37.51, 127.04)
+    const route: Route = {
+      id: 'route',
+      label: '경로',
+      minutes: 12,
+      transfers: 1,
+      modes: ['subway'],
+      legs: [
+        {
+          mode: 'walk',
+          title: '출발지에서 승차',
+          note: '승차',
+          minutes: 1,
+          transitionType: 'BOARDING',
+          from: endpoint('origin', '출발지', 37.5, 127.03),
+          to: station,
+        },
+        {
+          mode: 'walk',
+          title: '환승역에서 환승',
+          note: '환승',
+          minutes: 2,
+          transitionType: 'TRANSFER',
+          from: station,
+          to: station,
+        },
+        {
+          mode: 'walk',
+          title: '환승역에서 하차',
+          note: '하차',
+          minutes: 1,
+          transitionType: 'ALIGHTING',
+          from: station,
+          to: endpoint('destination', '도착지', 37.52, 127.05),
+        },
+      ],
+    }
+
+    const candidates = getRouteEndpointCandidates(route)
+    const stationCandidate = candidates.find(({ endpoint: value }) => value.id === 'station')
+    expect(stationCandidate?.roles).toEqual(['환승'])
+    expect(stationCandidate?.bikeRoles).toBeUndefined()
+    expect(candidates.find(({ endpoint: value }) => value.id === 'origin')?.roles).toEqual(['승차'])
+    expect(candidates.find(({ endpoint: value }) => value.id === 'destination')?.roles).toEqual([
+      '하차',
+    ])
+  })
+
+  it('명시된 대여·반납 ID를 따릉이 장소에 그대로 보존한다', () => {
+    const route: Route = {
+      id: 'bike-route',
+      label: '자전거 경로',
+      minutes: 8,
+      transfers: 0,
+      modes: ['bike'],
+      legs: [
+        {
+          mode: 'bike',
+          title: '자전거 이동',
+          note: '자전거',
+          minutes: 8,
+          from: { ...endpoint('node-a', '대여소', 37.5, 127.03), rentalId: 'rental-a' },
+          to: { ...endpoint('node-b', '반납소', 37.52, 127.05), rentalId: 'rental-b' },
+        },
+      ],
+    }
+
+    const candidate = getRouteEndpointCandidates(route).find(
+      ({ endpoint: value }) => value.id === 'node-a',
+    )
+    expect(routeEndpointPlace(candidate!).rentalId).toBe('rental-a')
+  })
+
   it('연속된 자전거 구간은 대여·반납 경계만 표시한다', () => {
     const rental = endpoint('bike-rental', '대여소', 37.5, 127.03)
     const middle = endpoint('bike-middle', '중간 지점', 37.51, 127.04)
@@ -191,24 +265,55 @@ describe('경로 지도 선과 지점', () => {
 
   it('이동수단별 선 스타일과 사용자 표시용 지점 정보를 제공한다', () => {
     expect(routeLineStyle({ mode: 'subway', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#6379bd',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(routeLineStyle({ mode: 'bus', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#2f80c0',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(routeLineStyle({ mode: 'bike', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#2f7a59',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(routeLineStyle({ mode: 'walk', title: '', note: '', minutes: 1 })).toEqual({
-      strokeColor: '#6379bd',
+      strokeColor: '#28323c',
       strokeStyle: 'solid',
     })
     expect(
       routeLineStyle({ mode: 'walk', transfer: true, title: '', note: '', minutes: 1 }),
-    ).toEqual({ strokeColor: '#5d6873', strokeStyle: 'dashed' })
+    ).toEqual({ strokeColor: '#28323c', strokeStyle: 'dashed' })
+    expect(
+      routeLineStyle({
+        mode: 'walk',
+        title: '',
+        note: '',
+        minutes: 1,
+        segmentCongestionLevel: 110,
+      }),
+    ).toEqual({ strokeColor: '#28323c', strokeStyle: 'solid' })
+    expect(
+      [20, 50, 80, 110].map(
+        (level) =>
+          routeLineStyle({
+            mode: 'subway',
+            title: '',
+            note: '',
+            minutes: 1,
+            segmentCongestionLevel: level,
+          }).strokeColor,
+      ),
+    ).toEqual(['#1d4ed8', '#15803d', '#b91c1c', '#7e22ce'])
+    expect(
+      routeLineStyle({
+        mode: 'subway',
+        title: '',
+        note: '',
+        minutes: 1,
+        segmentCongestionLevel: 80,
+        segmentCongestionGrade: 'NORMAL',
+      }).strokeColor,
+    ).toBe('#15803d')
 
     const place = routeEndpointPlace({
       endpoint: endpoint('raw-214', '강변', 37.5, 127.03),

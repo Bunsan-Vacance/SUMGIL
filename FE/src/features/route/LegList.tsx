@@ -2,17 +2,28 @@ import type { Leg, Route } from './types'
 import { modeIcons } from './ModeIcon'
 import { roundMinutes } from './selectors'
 import { lineColor } from './lineColor'
-import { useRouteCongestion } from './useCongestion'
+import { segmentCongestionGradeForLeg, segmentCongestionPresentation } from './segmentCongestion'
+import { isTransitLeg, transitionLabel } from './transitions'
 
 function formatDistance(distanceMeters?: number) {
-  if (distanceMeters === undefined) return '거리 준비중입니다'
+  if (distanceMeters === undefined) return '거리 정보 없음'
   if (distanceMeters < 1000) return `${Math.round(distanceMeters)}m`
   return `${(distanceMeters / 1000).toFixed(distanceMeters >= 10000 ? 0 : 1)}km`
 }
 
-function formatCongestion(level?: number) {
-  if (level === undefined) return '출발역 통계 혼잡도 준비중입니다'
-  return `출발역 통계 혼잡도 ${Number.isInteger(level) ? level : level.toFixed(1)}%`
+function formatCongestion(leg: Leg) {
+  return segmentCongestionPresentation(segmentCongestionGradeForLeg(leg))
+}
+
+function formatLegNote(leg: Leg) {
+  const busOptionCount = leg.mode === 'bus' ? leg.busRouteOptions?.length || 0 : 0
+  return busOptionCount > 1 ? `이용 가능한 버스 ${busOptionCount}개 노선` : leg.note
+}
+
+function sameBusOptions(left: Leg, right: Leg) {
+  if (left.busRouteOptions === undefined && right.busRouteOptions === undefined) return true
+  if (!left.busRouteOptions || !right.busRouteOptions) return false
+  return JSON.stringify(left.busRouteOptions) === JSON.stringify(right.busRouteOptions)
 }
 
 export function compactLegs(legs: Leg[]) {
@@ -23,8 +34,15 @@ export function compactLegs(legs: Leg[]) {
         previous &&
         !previous.leg.transfer &&
         !leg.transfer &&
+        !previous.leg.transitionType &&
+        !leg.transitionType &&
         previous.leg.mode === leg.mode &&
-        previous.leg.routeId === leg.routeId
+        previous.leg.routeId === leg.routeId &&
+        sameBusOptions(previous.leg, leg) &&
+        previous.leg.segmentCongestionLevel === undefined &&
+        leg.segmentCongestionLevel === undefined &&
+        previous.leg.segmentCongestionGrade === undefined &&
+        leg.segmentCongestionGrade === undefined
       ) {
         const from = previous.leg.from?.name || previous.leg.title.split(' → ')[0]
         const to = leg.to?.name || leg.title.split(' → ').at(-1)
@@ -46,24 +64,44 @@ export function compactLegs(legs: Leg[]) {
     .map(({ leg }) => leg)
 }
 
-export default function LegList({ route, compact = false }: { route: Route; compact?: boolean }) {
-  const legs = compact ? compactLegs(route.legs) : route.legs
-  const congestion = useRouteCongestion(legs, route.departedAt)
+export default function LegList({
+  route,
+  compact = false,
+  activeIndex,
+}: {
+  route: Route
+  compact?: boolean
+  /** Index in the original route.leg list, even when a compact list is rendered. */
+  activeIndex?: number
+}) {
+  const legs = compact && activeIndex === undefined ? compactLegs(route.legs) : route.legs
   return (
     <ol className="leg-list">
       {legs.map((leg, index) => {
         const Icon = modeIcons[leg.mode]
-        const legCongestion = leg.mode === 'subway' ? congestion[index] : undefined
+        const legCongestion = isTransitLeg(leg) ? formatCongestion(leg) : undefined
         return (
-          <li key={index}>
+          <li
+            key={index}
+            className={activeIndex === index ? 'is-active' : undefined}
+            aria-current={activeIndex === index ? 'step' : undefined}
+          >
             <span className={`leg-icon ${leg.mode}`} style={{ color: lineColor(leg) }}>
               <Icon size={18} />
             </span>
             <div>
-              <strong>{leg.title}</strong>
+              <strong>
+                {activeIndex === index && <span className="leg-current">현재 단계</span>}
+                {leg.title}
+              </strong>
               <p>
-                {leg.note} · {formatDistance(leg.distanceMeters)}
-                {legCongestion && <> · {formatCongestion(legCongestion.level)}</>}
+                {formatLegNote(leg)} · {formatDistance(leg.distanceMeters)}
+                {transitionLabel(leg.transitionType) && ` · ${transitionLabel(leg.transitionType)}`}
+                {legCongestion && (
+                  <span style={{ color: legCongestion.color, fontWeight: 700 }}>
+                    {' · '}구간 예상 혼잡도 {legCongestion.label}
+                  </span>
+                )}
               </p>
             </div>
             <span>{roundMinutes(leg.minutes)}분</span>

@@ -1,6 +1,10 @@
 import type { KakaoMapInstance, KakaoMaps, MapOverlay } from '../../lib/kakao/sdk'
 import type { GeometryLineString, Leg, Place, Route, RouteEndpoint } from '../route/types'
-import { lineColor } from '../route/lineColor'
+import {
+  segmentCongestionGradeForLeg,
+  segmentCongestionPresentation,
+} from '../route/segmentCongestion'
+import { isTransitLeg, isTransferLeg } from '../route/transitions'
 
 export type RouteEndpointRole = '승차' | '환승' | '하차'
 export type BikeEndpointRole = '대여' | '반납'
@@ -12,12 +16,14 @@ export interface RouteEndpointCandidate {
   bikeRoles?: BikeEndpointRole[]
 }
 
+export const ROUTE_LINE_COLOR = '#28323c'
+
 const ROUTE_LINE_STYLES = {
-  subway: { strokeColor: '#6379bd', strokeStyle: 'solid' },
-  bus: { strokeColor: '#2f80c0', strokeStyle: 'solid' },
-  bike: { strokeColor: '#2f7a59', strokeStyle: 'solid' },
-  walk: { strokeColor: '#6379bd', strokeStyle: 'solid' },
-  transfer: { strokeColor: '#5d6873', strokeStyle: 'dashed' },
+  subway: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  bus: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  bike: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  walk: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
+  transfer: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'dashed' },
 } as const
 
 export interface RouteLineEntry {
@@ -26,9 +32,15 @@ export interface RouteLineEntry {
 }
 
 export function routeLineStyle(leg: Leg) {
-  if (leg.transfer) return ROUTE_LINE_STYLES.transfer
-  const color = lineColor(leg)
-  if (color) return { strokeColor: color, strokeStyle: 'solid' as const }
+  const congestion = isTransitLeg(leg)
+    ? segmentCongestionPresentation(segmentCongestionGradeForLeg(leg))
+    : undefined
+  if (isTransferLeg(leg)) {
+    return congestion
+      ? { ...ROUTE_LINE_STYLES.transfer, strokeColor: congestion.color }
+      : ROUTE_LINE_STYLES.transfer
+  }
+  if (congestion) return { ...ROUTE_LINE_STYLES[leg.mode], strokeColor: congestion.color }
   return ROUTE_LINE_STYLES[leg.mode]
 }
 
@@ -89,18 +101,29 @@ export function createRouteSvgOverlay(
       entries.forEach(({ coordinates, style }) => {
         const path = validPath(maps, coordinates)
         if (path.length < 2) return
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
         const points = path
           .map((point) => {
             const pixel = projection.pointFromCoords(point)
             return `${pixel.x},${pixel.y}`
           })
           .join(' ')
+        const casing = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
+        casing.setAttribute('points', points)
+        casing.setAttribute('fill', 'none')
+        casing.setAttribute('stroke', '#fff')
+        casing.setAttribute('stroke-width', '12')
+        casing.setAttribute('stroke-opacity', '0.9')
+        casing.setAttribute('stroke-linecap', 'round')
+        casing.setAttribute('stroke-linejoin', 'round')
+        if (style.strokeStyle === 'dashed') casing.setAttribute('stroke-dasharray', '8 6')
+        this.element.appendChild(casing)
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
         line.setAttribute('points', points)
         line.setAttribute('fill', 'none')
         line.setAttribute('stroke', style.strokeColor)
-        line.setAttribute('stroke-width', '5')
-        line.setAttribute('stroke-opacity', '0.85')
+        line.setAttribute('stroke-width', '8')
+        line.setAttribute('stroke-opacity', '0.95')
         line.setAttribute('stroke-linecap', 'round')
         line.setAttribute('stroke-linejoin', 'round')
         if (style.strokeStyle === 'dashed') line.setAttribute('stroke-dasharray', '8 6')
@@ -174,17 +197,24 @@ export function getRouteEndpointCandidates(route: Route): RouteEndpointCandidate
     }
     candidates.set(key, { endpoint, roles: new Set(), bikeRoles: new Set([role]) })
   }
-  const transitLegs = route.legs.filter(
-    (leg) => (leg.mode === 'subway' || leg.mode === 'bus') && !leg.transfer,
-  )
-  add('승차', transitLegs[0]?.from)
-  add('하차', transitLegs.at(-1)?.to)
-  route.legs
-    .filter((leg) => leg.transfer)
-    .forEach((leg) => {
+  const transitLegs = route.legs.filter(isTransitLeg)
+  const hasBoarding = route.legs.some((leg) => leg.transitionType === 'BOARDING')
+  const hasAlighting = route.legs.some((leg) => leg.transitionType === 'ALIGHTING')
+  if (!hasBoarding) add('승차', transitLegs[0]?.from)
+  if (!hasAlighting) add('하차', transitLegs.at(-1)?.to)
+  route.legs.forEach((leg) => {
+    if (leg.transitionType === 'BOARDING') add('승차', leg.from)
+    if (leg.transitionType === 'ALIGHTING') add('하차', leg.to)
+    if (leg.transitionType === 'TRANSFER') {
       add('환승', leg.from)
       add('환승', leg.to)
-    })
+    } else if (leg.transfer && leg.transitionType === undefined) {
+      add('환승', leg.from)
+      add('환승', leg.to)
+    }
+    if (leg.transitionType === 'BIKE_RENTAL') addBike('대여', leg.from)
+    if (leg.transitionType === 'BIKE_RETURN') addBike('반납', leg.to)
+  })
   transitLegs.slice(1).forEach((leg, index) => {
     const previous = transitLegs[index]
     if (previous.routeId !== leg.routeId || previous.mode !== leg.mode) {
@@ -223,6 +253,7 @@ export function routeEndpointPlace(candidate: RouteEndpointCandidate): Place {
       kind: '따릉이 대여소',
       lat: candidate.endpoint.lat,
       lng: candidate.endpoint.lng,
+      ...(candidate.endpoint.rentalId ? { rentalId: candidate.endpoint.rentalId } : {}),
     }
   }
   const firstRole = candidate.roles[0] || '환승'

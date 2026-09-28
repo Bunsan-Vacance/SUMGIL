@@ -114,6 +114,12 @@ export default function BrowsePage({ onBack, onMessage, setOrigin, findRoutes }:
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.currentTarget.blur()
+              }
+            }}
+            enterKeyHint="done"
             placeholder="장소, 역, 주소 검색"
             aria-label="탐색할 장소 검색어"
           />

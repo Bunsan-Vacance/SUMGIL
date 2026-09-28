@@ -14,26 +14,37 @@ const origin = {
 afterEach(cleanup)
 
 describe('홈 길찾기 패널', () => {
-  it('검색 버튼을 열고 길찾기 패널을 열고 닫는다', () => {
-    const openBrowse = vi.fn()
-    const toggleRoutePanel = vi.fn()
-    const closeRoutePanel = vi.fn()
-    const { rerender } = render(
+  it('초기 출발지는 임의의 장소 대신 선택 안내를 표시한다', () => {
+    render(
       <HomePage
-        origin={origin}
+        origin={{ id: 'empty-origin', name: '', address: '', kind: '장소' }}
         destination={null}
         openSearch={vi.fn()}
-        openBrowse={openBrowse}
-        routePanelOpen={false}
-        toggleRoutePanel={toggleRoutePanel}
-        closeRoutePanel={closeRoutePanel}
+        routePanelOpen
+        toggleRoutePanel={vi.fn()}
         findRoutes={vi.fn()}
         swapPlaces={vi.fn()}
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '장소, 역, 주소 검색' }))
-    expect(openBrowse).toHaveBeenCalledOnce()
+    expect(screen.getByText('출발지를 검색하세요')).toBeTruthy()
+  })
+
+  it('단독 장소 검색 없이 길찾기 패널을 열고 닫는다', () => {
+    const toggleRoutePanel = vi.fn()
+    const { rerender } = render(
+      <HomePage
+        origin={origin}
+        destination={null}
+        openSearch={vi.fn()}
+        routePanelOpen={false}
+        toggleRoutePanel={toggleRoutePanel}
+        findRoutes={vi.fn()}
+        swapPlaces={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: '장소, 역, 주소 검색' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /길찾기/ }))
     expect(toggleRoutePanel).toHaveBeenCalledOnce()
@@ -44,16 +55,13 @@ describe('홈 길찾기 패널', () => {
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
-        openBrowse={openBrowse}
         routePanelOpen
         toggleRoutePanel={toggleRoutePanel}
-        closeRoutePanel={closeRoutePanel}
         findRoutes={vi.fn()}
         swapPlaces={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '홈으로 돌아가기' }))
-    expect(closeRoutePanel).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: '홈으로 돌아가기' })).toBeNull()
   })
 
   it('패널 안의 출발지·도착지 입력은 기존 검색 흐름을 호출한다', () => {
@@ -63,10 +71,8 @@ describe('홈 길찾기 패널', () => {
         origin={origin}
         destination={null}
         openSearch={openSearch}
-        openBrowse={vi.fn()}
         routePanelOpen
         toggleRoutePanel={vi.fn()}
-        closeRoutePanel={vi.fn()}
         findRoutes={vi.fn()}
         swapPlaces={vi.fn()}
       />,
@@ -85,10 +91,8 @@ describe('홈 길찾기 패널', () => {
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
-        openBrowse={vi.fn()}
         routePanelOpen
         toggleRoutePanel={vi.fn()}
-        closeRoutePanel={vi.fn()}
         findRoutes={vi.fn()}
         swapPlaces={swapPlaces}
       />,

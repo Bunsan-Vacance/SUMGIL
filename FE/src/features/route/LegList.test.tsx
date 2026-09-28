@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { Route } from './types'
-import LegList from './LegList'
+import LegList, { compactLegs } from './LegList'
+
+afterEach(cleanup)
 
 describe('구간 이동 안내', () => {
-  it('구간 거리와 혼잡도 미제공 상태를 함께 표시한다', () => {
+  it('실제 구간 혼잡도 등급 글자와 색을 거리와 함께 표시한다', () => {
     const route: Route = {
       id: 'route',
       label: '빠른 경로',
@@ -21,6 +23,7 @@ describe('구간 이동 안내', () => {
           note: '2호선',
           minutes: 6,
           distanceMeters: 1234,
+          segmentCongestionLevel: 20.26,
           from: { id: '221', name: '역삼역' },
         },
       ],
@@ -28,7 +31,145 @@ describe('구간 이동 안내', () => {
 
     render(<LegList route={route} />)
 
-    expect(screen.getByText('도보 · 거리 준비중입니다')).toBeTruthy()
-    expect(screen.getByText('2호선 · 1.2km · 출발역 통계 혼잡도 준비중입니다')).toBeTruthy()
+    expect(screen.getByText('도보 · 거리 정보 없음')).toBeTruthy()
+    const congestion = document.querySelector('.leg-list p span') as HTMLElement
+    expect(congestion.textContent).toContain('여유')
+    expect(congestion.style.color).toBe('rgb(29, 78, 216)')
+    expect(congestion.closest('p')?.textContent).toBe('2호선 · 1.2km · 구간 예상 혼잡도 여유')
+  })
+
+  it('구간 혼잡도 값이 없으면 혼잡도 숫자를 표시하지 않는다', () => {
+    const route: Route = {
+      id: 'route-without-congestion',
+      label: '빠른 경로',
+      minutes: 4,
+      transfers: 0,
+      modes: ['subway'],
+      legs: [{ mode: 'subway', title: '역삼역 → 선릉역', note: '2호선', minutes: 4 }],
+    }
+
+    render(<LegList route={route} />)
+
+    expect(screen.queryByText(/구간 예상 혼잡도/)).toBeNull()
+  })
+
+  it('같은 버스 구간의 여러 노선을 요약해 표시한다', () => {
+    const route: Route = {
+      id: 'bus-options',
+      label: '버스 경로',
+      minutes: 8,
+      transfers: 0,
+      modes: ['bus'],
+      legs: [
+        {
+          mode: 'bus',
+          title: '정류장 A → 정류장 B',
+          note: '108번 · 143번 · 420번 · N26',
+          minutes: 8,
+          busRouteOptions: [
+            { routeId: '108' },
+            { routeId: '143' },
+            { routeId: '420' },
+            { routeId: 'N26' },
+          ],
+        },
+      ],
+    }
+
+    render(<LegList route={route} />)
+
+    expect(screen.getByText('이용 가능한 버스 4개 노선 · 거리 정보 없음')).toBeTruthy()
+    expect(screen.queryByText(route.legs[0].note)).toBeNull()
+  })
+
+  it('구간 혼잡도 등급만 있으면 등급 라벨을 표시한다', () => {
+    const route: Route = {
+      id: 'route-with-grade',
+      label: '빠른 경로',
+      minutes: 4,
+      transfers: 0,
+      modes: ['bus'],
+      legs: [
+        {
+          mode: 'bus',
+          title: '정류장 A → 정류장 B',
+          note: '버스',
+          minutes: 4,
+          segmentCongestionGrade: 'SATURATED',
+        },
+      ],
+    }
+
+    render(<LegList route={route} />)
+
+    expect(document.querySelector('.leg-list p')?.textContent).toBe(
+      '버스 · 거리 정보 없음 · 구간 예상 혼잡도 포화',
+    )
+  })
+
+  it('원본 구간 인덱스의 현재 단계에 aria-current와 텍스트를 표시한다', () => {
+    const route: Route = {
+      id: 'route',
+      label: '빠른 경로',
+      minutes: 4,
+      transfers: 0,
+      modes: ['walk'],
+      legs: [
+        { mode: 'walk', title: '출발지 → 역', note: '도보', minutes: 2 },
+        { mode: 'walk', title: '역 → 도착지', note: '도보', minutes: 2 },
+      ],
+    }
+
+    render(<LegList route={route} activeIndex={1} />)
+
+    const activeItem = screen.getByText('현재 단계').parentElement?.parentElement?.parentElement
+    expect(activeItem?.getAttribute('aria-current')).toBe('step')
+    expect(activeItem?.classList.contains('is-active')).toBe(true)
+  })
+
+  it('선택 가능한 버스 노선 목록이 다른 연속 구간은 합치지 않는다', () => {
+    const legs = [
+      {
+        mode: 'bus' as const,
+        title: '정류장 A → 정류장 B',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 3,
+        busRouteOptions: [{ routeId: '108' }],
+      },
+      {
+        mode: 'bus' as const,
+        title: '정류장 B → 정류장 C',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 4,
+        busRouteOptions: [{ routeId: '143' }],
+      },
+    ]
+
+    expect(compactLegs(legs)).toHaveLength(2)
+  })
+
+  it('등급이 있는 연속 버스 구간은 합치지 않는다', () => {
+    const legs = [
+      {
+        mode: 'bus' as const,
+        title: '정류장 A → 정류장 B',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 3,
+        segmentCongestionGrade: 'NORMAL' as const,
+      },
+      {
+        mode: 'bus' as const,
+        title: '정류장 B → 정류장 C',
+        note: '버스',
+        routeId: 'BUS',
+        minutes: 4,
+        segmentCongestionGrade: 'CONGESTED' as const,
+      },
+    ]
+
+    expect(compactLegs(legs)).toHaveLength(2)
   })
 })

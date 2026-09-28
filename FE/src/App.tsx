@@ -1,7 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRoutePlanner } from './app/useRoutePlanner'
 import { screenTitles } from './app/useNavigation'
-import { previewProposal } from './app/preview'
 import PreviewToolbar from './app/PreviewToolbar'
 import KakaoMap from './features/map/KakaoMap'
 import FilterDialog from './features/route/FilterDialog'
@@ -11,32 +10,31 @@ import BrowsePage from './pages/BrowsePage'
 import SearchPage from './pages/SearchPage'
 import ResultsPage from './pages/ResultsPage'
 import DetailPage from './pages/DetailPage'
-import GuidePage from './pages/GuidePage'
 import ArrivalPage from './pages/ArrivalPage'
 import ActiveGuidanceBar from './features/guidance/ActiveGuidanceBar'
 import Modal from './components/Modal'
+import SplashScreen from './components/SplashScreen'
+import { isBackendConfigured, isRouteSearchMockEnabled } from './api/repositories'
+import { isGuidanceMockEnabled } from './api/guidance'
+import { remaining } from './features/route/selectors'
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true)
+  const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
   const { screen, go, trip, guidance, destinationName, modal, setModal } = planner
+  const routeView = screen === 'detail' || screen === 'guide'
+  const displayedRoute = screen === 'guide' ? guidance.route : trip.selected
   const title = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
-    if (screen !== 'search' && screen !== 'browse') title.current?.focus()
-  }, [screen])
+    if (!showSplash && screen !== 'search' && screen !== 'browse') title.current?.focus()
+  }, [screen, showSplash])
+  if (showSplash) return <SplashScreen onComplete={completeSplash} />
+
   return (
     <div className={`workspace workspace-${screen}`}>
       {screen !== 'results' && (
-        <PreviewToolbar
-          guiding={screen === 'guide'}
-          lastStep={guidance.step === (guidance.route?.legs.length ?? 0) - 1}
-          onProposal={() => setModal('proposal')}
-          onTrain={() => setModal('train')}
-          onNext={planner.advance}
-          onHome={() => {
-            setModal(null)
-            go('home')
-          }}
-        />
+        <PreviewToolbar guiding={screen === 'guide'} isLiveApi={!isGuidanceMockEnabled} />
       )}
       <main className={`app-shell screen-${screen}`}>
         <div className="page-viewport">
@@ -48,8 +46,14 @@ export default function App() {
             screen !== 'browse' &&
             screen !== 'results' && (
               <KakaoMap
-                key={screen}
-                origin={screen === 'guide' ? guidance.origin || trip.origin : trip.origin}
+                key={routeView ? 'route' : screen}
+                origin={
+                  screen === 'home'
+                    ? null
+                    : screen === 'guide'
+                      ? guidance.origin || trip.origin
+                      : trip.origin
+                }
                 destination={
                   screen === 'guide'
                     ? guidance.destination
@@ -60,6 +64,11 @@ export default function App() {
                 route={
                   screen === 'guide' ? guidance.route : screen === 'detail' ? trip.selected : null
                 }
+                autoLocate={screen === 'home'}
+                livePosition={screen === 'guide' ? guidance.position : undefined}
+                onCurrentLocation={
+                  screen === 'home' ? planner.setOriginFromCurrentLocation : undefined
+                }
                 onMessage={planner.setMessage}
               />
             )}
@@ -68,10 +77,8 @@ export default function App() {
               origin={trip.origin}
               destination={trip.destination}
               openSearch={planner.openSearch}
-              openBrowse={planner.openBrowse}
               routePanelOpen={planner.routePanelOpen}
               toggleRoutePanel={planner.toggleRoutePanel}
-              closeRoutePanel={planner.closeRoutePanel}
               findRoutes={planner.findRoutes}
               swapPlaces={planner.swapPlaces}
             />
@@ -102,6 +109,7 @@ export default function App() {
               status={trip.status}
               retry={() => planner.findRoutes()}
               error={trip.error}
+              errorCode={trip.errorCode}
               enabled={trip.enabled}
               priority={trip.priority}
               setPriority={trip.setPriority}
@@ -111,27 +119,41 @@ export default function App() {
               go={go}
               canSwap={!!trip.destination}
               swapPlaces={planner.swapPlaces}
+              isLiveApi={isBackendConfigured && !isRouteSearchMockEnabled}
               departureTime={trip.departureTime ?? undefined}
               onDepartureTimeChange={trip.setDepartureTime}
+              onResetModes={trip.resetModes}
+              onSearchWalk={trip.searchWalkOnly}
             />
           )}
-          {screen === 'detail' && trip.selected && (
+          {routeView && displayedRoute && (
             <DetailPage
-              origin={trip.origin}
-              destinationName={destinationName}
-              selected={trip.selected}
+              selected={displayedRoute}
+              alternatives={trip.visible}
+              setSelectedId={planner.selectRoute}
               go={go}
               startGuide={planner.startGuide}
-            />
-          )}
-          {screen === 'guide' && guidance.route && (
-            <GuidePage
-              selected={guidance.route}
-              step={guidance.step}
-              train={guidance.train}
+              originName={screen === 'guide' ? guidance.origin?.name : trip.origin.name}
               destinationName={destinationName}
-              go={go}
-              onExit={() => setModal('exit')}
+              guidance={
+                screen === 'guide'
+                  ? {
+                      step: guidance.step,
+                      boarded: Boolean(guidance.train),
+                      position: guidance.position,
+                      onConfirm: guidance.confirmStep,
+                      onExit: () => setModal('exit'),
+                      onPrevious: planner.previous,
+                      onNext: planner.advance,
+                      onTrain: planner.openTrain,
+                      onReplan: planner.openReplan,
+                      replanDisabled: Boolean(guidance.train),
+                      locationStatus: guidance.locationStatus,
+                      onRetryLocation: guidance.retryLocation,
+                      onStepChange: guidance.setStep,
+                    }
+                  : undefined
+              }
             />
           )}
           {screen === 'arrival' && (
@@ -184,14 +206,24 @@ export default function App() {
           <GuidanceDialogs
             dialog={modal}
             leg={guidance.route.legs[guidance.step]}
-            proposal={previewProposal}
-            onClose={() => setModal(null)}
+            arrivals={planner.arrivals}
+            arrivalStatus={planner.arrivalStatus}
+            proposals={planner.replan.proposals}
+            currentRemaining={guidance.route ? remaining(guidance.route, guidance.step) : 0}
+            replanStatus={planner.replan.status}
+            replanError={planner.replan.error}
+            rerouteProposal={planner.rerouteProposal?.proposal ?? null}
+            onClose={planner.closeGuidanceDialog}
             onExit={planner.exitGuide}
-            onTrain={(time) => {
-              guidance.setTrain(time)
-              setModal(null)
+            onTrain={(arrival) => {
+              guidance.setTrain(arrival ? arrival.arrivalTime : 'unknown', arrival)
+              planner.closeGuidanceDialog()
             }}
-            onProposal={planner.acceptProposal}
+            onLoadArrivals={planner.openTrain}
+            onLoadReplan={planner.requestReplan}
+            onAcceptReplan={planner.acceptReplan}
+            onAcceptReroute={planner.acceptReroute}
+            onDismissReroute={planner.dismissReroute}
           />
         )}
     </div>

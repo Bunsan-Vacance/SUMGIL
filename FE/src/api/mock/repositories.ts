@@ -1,5 +1,7 @@
 import type { PlaceRepository, RouteRepository } from '../contracts'
+import { mapRouteApiResponse } from '../routeMapper'
 import { places, routes } from './fixtures'
+import { routeSearchMockResponse } from './routeResponses'
 
 function delay(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
@@ -19,10 +21,22 @@ function delay(ms: number, signal: AbortSignal) {
   })
 }
 export const mockRouteRepository: RouteRepository = {
-  async search(_request, signal) {
+  async search(request, signal) {
     // Preview-only: arbitrary endpoints do not change the fixed sample route.
     await delay(450, signal)
-    return routes
+    return routes.map((route) => ({
+      ...route,
+      departedAt: request.departedAt || route.departedAt || new Date().toISOString(),
+    }))
+  },
+}
+export const routeSearchMockRepository: RouteRepository = {
+  async search(request, signal) {
+    await delay(450, signal)
+    return mapRouteApiResponse(
+      routeSearchMockResponse,
+      request.departedAt || new Date().toISOString(),
+    )
   },
 }
 export const mockPlaceRepository: PlaceRepository = {

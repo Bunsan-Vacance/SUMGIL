@@ -1,11 +1,35 @@
 import type { Place, Route } from '../route/types'
+import type { GuidanceConditions, TrainArrival } from '../../api/guidance'
+import { isTransitLeg } from '../route/transitions'
+import {
+  confirmationLabel,
+  distanceToEndpoint,
+  guidanceEndpoint,
+  validCoordinates,
+  GUIDANCE_MAX_ACCURACY_METERS,
+  WALKING_ENDPOINT_RADIUS_METERS,
+  TRANSIT_ENDPOINT_RADIUS_METERS,
+  type GuidancePosition,
+} from './locationProgress'
+
+export type GuidanceLocationStatus =
+  'idle' | 'waiting' | 'tracking' | 'denied' | 'no-position' | 'unsupported' | 'inaccurate'
+
 export interface GuidanceState {
   step: number
   train: string | null
   route: Route | null
   origin: Place | null
   destination: Place | null
+  conditions?: GuidanceConditions
+  selectedArrival?: TrainArrival | null
   completed: boolean
+  locationStatus: GuidanceLocationStatus
+  position?: GuidancePosition | null
+  /** Transient GPS confirmation state; callers must not persist these fields. */
+  locationCandidateStep?: number | null
+  locationCandidateCount?: number
+  transitAwayStep?: number | null
 }
 export const initialGuidance: GuidanceState = {
   step: 0,
@@ -13,13 +37,101 @@ export const initialGuidance: GuidanceState = {
   route: null,
   origin: null,
   destination: null,
+  conditions: { modes: [], priority: 'fast' },
+  selectedArrival: null,
   completed: false,
+  locationStatus: 'idle',
+  position: null,
+  locationCandidateStep: null,
+  locationCandidateCount: 0,
+  transitAwayStep: null,
 }
 export type GuidanceAction =
-  | { type: 'start'; route: Route; origin: Place | null; destination: Place | null }
+  | {
+      type: 'start'
+      route: Route
+      origin: Place | null
+      destination: Place | null
+      conditions?: GuidanceConditions
+    }
   | { type: 'stop' }
+  | { type: 'previous' }
   | { type: 'next' }
-  | { type: 'train'; time: string }
+  | { type: 'set-step'; step: number }
+  | { type: 'confirm-step' }
+  | { type: 'train'; time: string; arrival?: TrainArrival | null }
+  | { type: 'replan'; route: Route; keepLegs?: number }
+  | { type: 'location-status'; status: GuidanceLocationStatus }
+  | { type: 'location'; latitude: number; longitude: number; accuracy: number }
+
+const REQUIRED_ENDPOINT_FIXES = 2
+
+function clearLocationProgress(state: GuidanceState): GuidanceState {
+  return { ...state, locationCandidateStep: null, locationCandidateCount: 0, transitAwayStep: null }
+}
+
+function progressAtEndpoint(
+  state: GuidanceState,
+  latitude: number,
+  longitude: number,
+  accuracy: number,
+): GuidanceState {
+  const leg = state.route?.legs[state.step]
+  const endpoint = guidanceEndpoint(leg)
+  const transit = leg ? isTransitLeg(leg) : false
+  const radius = transit ? TRANSIT_ENDPOINT_RADIUS_METERS : WALKING_ENDPOINT_RADIUS_METERS
+  if (
+    state.completed ||
+    !leg ||
+    Boolean(confirmationLabel(leg)) ||
+    (leg.mode !== 'walk' && leg.mode !== 'bike' && !transit) ||
+    !endpoint ||
+    !Number.isFinite(endpoint.lat) ||
+    !Number.isFinite(endpoint.lng) ||
+    Math.abs(endpoint.lat as number) > 90 ||
+    Math.abs(endpoint.lng as number) > 180 ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    Math.abs(latitude) > 90 ||
+    Math.abs(longitude) > 180 ||
+    !Number.isFinite(accuracy) ||
+    accuracy < 0 ||
+    accuracy > GUIDANCE_MAX_ACCURACY_METERS
+  ) {
+    return clearLocationProgress(state)
+  }
+  const distance = distanceToEndpoint({ latitude, longitude, accuracy }, leg)!
+  if (transit && distance - accuracy > radius) {
+    return {
+      ...state,
+      locationCandidateStep: null,
+      locationCandidateCount: 0,
+      transitAwayStep: state.step,
+    }
+  }
+  if (transit && state.transitAwayStep !== state.step) return clearLocationProgress(state)
+  if (distance + accuracy > radius) {
+    return { ...state, locationCandidateStep: null, locationCandidateCount: 0 }
+  }
+  const count =
+    state.locationCandidateStep === state.step ? (state.locationCandidateCount || 0) + 1 : 1
+  if (count < REQUIRED_ENDPOINT_FIXES) {
+    return { ...state, locationCandidateStep: state.step, locationCandidateCount: count }
+  }
+  const nextStep = state.step + 1
+  const completed = nextStep >= (state.route?.legs.length || 0)
+  return {
+    ...state,
+    step: completed ? state.step : nextStep,
+    completed,
+    train: null,
+    selectedArrival: null,
+    locationCandidateStep: null,
+    locationCandidateCount: 0,
+    transitAwayStep: null,
+  }
+}
+
 export function guidanceReducer(state: GuidanceState, action: GuidanceAction): GuidanceState {
   switch (action.type) {
     case 'start': {
@@ -35,17 +147,163 @@ export function guidanceReducer(state: GuidanceState, action: GuidanceAction): G
             route: action.route,
             origin: action.origin,
             destination: action.destination,
+            conditions: action.conditions || initialGuidance.conditions,
           }
         : initialGuidance
     }
     case 'stop':
       return initialGuidance
+    case 'previous':
+      if (!state.route) return state
+      if (state.completed)
+        return clearLocationProgress({
+          ...state,
+          completed: false,
+          train: null,
+          selectedArrival: null,
+        })
+      return state.step > 0
+        ? clearLocationProgress({
+            ...state,
+            step: state.step - 1,
+            train: null,
+            selectedArrival: null,
+          })
+        : clearLocationProgress(state)
     case 'next':
       if (!state.route || state.completed) return state
       return state.step >= state.route.legs.length - 1
-        ? { ...state, completed: true }
-        : { ...state, step: state.step + 1 }
+        ? clearLocationProgress({ ...state, completed: true })
+        : clearLocationProgress({
+            ...state,
+            step: state.step + 1,
+            train: null,
+            selectedArrival: null,
+          })
+    case 'set-step':
+      return state.route && !state.completed && Number.isInteger(action.step)
+        ? action.step >= 0 && action.step < state.route.legs.length
+          ? clearLocationProgress({
+              ...state,
+              step: action.step,
+              train: null,
+              selectedArrival: null,
+            })
+          : state
+        : state
+    case 'confirm-step': {
+      const leg = state.route?.legs[state.step]
+      if (!leg || state.completed || !confirmationLabel(leg, Boolean(state.train))) return state
+      if (isTransitLeg(leg) && leg.mode === 'subway' && !state.train)
+        return clearLocationProgress({ ...state, train: 'confirmed' })
+      let next = guidanceReducer(state, { type: 'next' })
+      // A subway arrival confirmation also covers its explicit alighting action, not a transfer.
+      if (
+        leg.mode === 'subway' &&
+        isTransitLeg(leg) &&
+        next.route?.legs[next.step]?.transitionType === 'ALIGHTING' &&
+        !next.completed
+      )
+        next = guidanceReducer(next, { type: 'next' })
+      if (leg.transitionType === 'BOARDING' && next.route?.legs[next.step]?.mode === 'subway')
+        next = { ...next, train: 'confirmed' }
+      return next
+    }
     case 'train':
-      return state.route && !state.completed ? { ...state, train: action.time } : state
+      return state.route && !state.completed
+        ? { ...state, train: action.time, selectedArrival: action.arrival || null }
+        : state
+    case 'location-status':
+      return state.locationStatus === action.status
+        ? state
+        : action.status === 'tracking'
+          ? { ...state, locationStatus: action.status }
+          : clearLocationProgress({ ...state, locationStatus: action.status, position: null })
+    case 'location': {
+      if (!state.route || state.completed) return state
+      if (
+        !validCoordinates(action.latitude, action.longitude) ||
+        !Number.isFinite(action.accuracy) ||
+        action.accuracy < 0
+      )
+        return clearLocationProgress({ ...state, position: null, locationStatus: 'no-position' })
+      if (action.accuracy > GUIDANCE_MAX_ACCURACY_METERS)
+        return clearLocationProgress({ ...state, position: null, locationStatus: 'inaccurate' })
+      const position = {
+        latitude: action.latitude,
+        longitude: action.longitude,
+        accuracy: action.accuracy,
+      }
+      return progressAtEndpoint(
+        { ...state, position, locationStatus: 'tracking' },
+        action.latitude,
+        action.longitude,
+        action.accuracy,
+      )
+    }
+    case 'replan': {
+      if (!state.route || state.completed || !action.route.legs.length) return state
+      // 재안내(AI reroute)는 대여소 경계 leg까지 원본 구간을 보존해야 해서 step보다 뒤를 요구할
+      // 수 있다 — 범위를 벗어나면 기존 재탐색과 같은 step 기준으로 되돌린다(추측하지 않는다).
+      const keepLegs =
+        action.keepLegs !== undefined &&
+        Number.isInteger(action.keepLegs) &&
+        action.keepLegs >= state.step &&
+        action.keepLegs <= state.route.legs.length
+          ? action.keepLegs
+          : state.step
+      const completedLegs = state.route.legs.slice(0, keepLegs)
+      const legs = [...completedLegs, ...action.route.legs]
+      const completedMinutes = completedLegs.reduce((total, leg) => total + leg.minutes, 0)
+      const proposalAnchor = action.route.departedAt || state.route.departedAt
+      const anchorMs = proposalAnchor ? new Date(proposalAnchor).getTime() : NaN
+      const departedAt = Number.isFinite(anchorMs)
+        ? new Date(anchorMs - completedMinutes * 60_000).toISOString()
+        : undefined
+      const routeGeometry = legs.flatMap((leg) => leg.geometry?.coordinates || [])
+      const totalDistanceMeters = legs.every((leg) => leg.distanceMeters !== undefined)
+        ? legs.reduce((total, leg) => total + (leg.distanceMeters || 0), 0)
+        : undefined
+      const walkingLegs = legs.filter(
+        (leg) => leg.mode === 'walk' && !leg.transfer && !leg.transitionType,
+      )
+      const walk =
+        walkingLegs.length > 0 && walkingLegs.every((leg) => leg.distanceMeters !== undefined)
+          ? walkingLegs.reduce((total, leg) => total + (leg.distanceMeters || 0), 0)
+          : undefined
+      const transitRouteIds = legs
+        .filter((leg) => isTransitLeg(leg) && leg.routeId)
+        .map((leg) => leg.routeId as string)
+      const routeTransitions = transitRouteIds
+        .slice(1)
+        .reduce((count, id, index) => count + (id !== transitRouteIds[index] ? 1 : 0), 0)
+      const explicitTransfers = legs.filter(
+        (leg) => leg.transfer || leg.transitionType === 'TRANSFER',
+      ).length
+      const transfers = Math.max(explicitTransfers, routeTransitions)
+      return {
+        ...state,
+        route: {
+          ...action.route,
+          minutes: legs.reduce((total, leg) => total + leg.minutes, 0),
+          transfers,
+          modes: [...new Set(legs.filter((leg) => !leg.transfer).map((leg) => leg.mode))],
+          congestionPrediction: undefined,
+          legs,
+          totalDistanceMeters,
+          walk,
+          geometry: routeGeometry.length
+            ? { type: 'MultiLineString' as const, coordinates: routeGeometry }
+            : undefined,
+          departedAt,
+        },
+        train: null,
+        selectedArrival: null,
+        completed: false,
+        locationCandidateStep: null,
+        locationCandidateCount: 0,
+        transitAwayStep: null,
+      }
+    }
   }
 }

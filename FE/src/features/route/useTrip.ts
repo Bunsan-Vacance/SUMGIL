@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { routeRepository } from '../../api/repositories'
 import { RepositoryError } from '../../api/errors'
 import type { RouteRepository } from '../../api/contracts'
@@ -44,6 +44,12 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
   const [departureTime, setDeparture] = useState<string | null>(null)
   const request = useRef<AbortController | null>(null)
   const departureOverride = useRef<string | null>(null)
+  const priorityRef = useRef(initial.priority)
+  const lastDepartureAt = useRef(initial.candidates[0]?.departedAt)
+  const visible = useMemo(
+    () => getRoutes(state.candidates, state.enabled, state.priority),
+    [state.candidates, state.enabled, state.priority],
+  )
   useEffect(() => () => request.current?.abort(), [])
   const search = async (
     destination: Place,
@@ -59,10 +65,11 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
     const departedAt =
       requestedDepartureAt ||
       (selectedDeparture ? departureAt(selectedDeparture) : new Date().toISOString())
+    lastDepartureAt.current = departedAt
     dispatch({ type: 'search', origin, destination })
     try {
       const candidates = await repository.search(
-        { origin, destination, modes, priority: state.priority, departedAt },
+        { origin, destination, modes, priority: priorityRef.current, departedAt },
         pending.signal,
       )
       if (!pending.signal.aborted) dispatch({ type: 'loaded', routes: candidates })
@@ -71,6 +78,7 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
         dispatch({
           type: 'failed',
           error: error instanceof RepositoryError ? error.message : undefined,
+          code: error instanceof RepositoryError ? error.code : undefined,
         })
       }
     }
@@ -94,14 +102,27 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
     return true
   }
 
+  const searchWithModes = (selected: Mode[]) => {
+    const nextModes = withWalk(selected)
+    if (sameModes(state.enabled, nextModes)) {
+      if (state.destination) void search(state.destination, state.origin, nextModes)
+      return
+    }
+    setModes(nextModes)
+  }
+
   return {
     ...state,
     departureTime,
-    visible: getRoutes(state.candidates, state.enabled, state.priority),
+    visible,
     search,
     setOrigin: (place: Place) => {
       if (place.id !== state.origin.id) request.current?.abort()
       dispatch({ type: 'origin', place })
+    },
+    setDestination: (place: Place) => {
+      if (place.id !== state.destination?.id) request.current?.abort()
+      dispatch({ type: 'destination', place })
     },
     swap: () => {
       request.current?.abort()
@@ -109,9 +130,17 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
     },
     setModes,
     setDepartureTime,
-    setPriority: (priority: Priority) => dispatch({ type: 'priority', priority }),
+    setPriority: (priority: Priority) => {
+      if (priority === priorityRef.current) return
+      priorityRef.current = priority
+      dispatch({ type: 'priority', priority })
+      if (state.destination && state.status !== 'idle') {
+        void search(state.destination, state.origin, state.enabled, lastDepartureAt.current)
+      }
+    },
     select: (id: string) => dispatch({ type: 'select', id }),
     acceptProposal: (route: Route) => dispatch({ type: 'proposal', route }),
-    resetModes: () => setModes(modes.map((mode) => mode.id)),
+    resetModes: () => searchWithModes(modes.map((mode) => mode.id)),
+    searchWalkOnly: () => searchWithModes(['walk']),
   }
 }

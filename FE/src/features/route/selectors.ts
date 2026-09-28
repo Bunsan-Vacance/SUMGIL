@@ -1,24 +1,45 @@
-import type { Mode, Priority, Route } from './types'
+import type {
+  CongestionGrade,
+  CongestionPrediction,
+  CongestionPredictionBasis,
+  Mode,
+  Priority,
+  Route,
+  SegmentCongestionGrade,
+  WorstSegmentCongestion,
+} from './types'
+import {
+  segmentCongestionGradeForLeg,
+  segmentCongestionGradeForLevel,
+  segmentCongestionPresentation,
+} from './segmentCongestion'
+
+function predictionPercent(route: Route, now = new Date()) {
+  const prediction = congestionPredictionFor(route, now)
+  return prediction?.congestionPercent ?? undefined
+}
+
 export function getRoutes(routes: Route[], enabled: Mode[], priority: Priority) {
-  const compare = (a: Route, b: Route) =>
-    priority === 'calm'
-      ? a.congestionPercent !== undefined && b.congestionPercent !== undefined
-        ? a.congestionPercent - b.congestionPercent || a.minutes - b.minutes
-        : a.congestionPercent !== undefined
-          ? -1
-          : b.congestionPercent !== undefined
-            ? 1
-            : a.minutes - b.minutes
-      : a.minutes - b.minutes
+  const compare = (a: Route, b: Route) => {
+    if (priority === 'fast') return a.minutes - b.minutes
+    const aPercent = predictionPercent(a)
+    const bPercent = predictionPercent(b)
+    if (aPercent !== undefined && bPercent !== undefined) {
+      return aPercent - bPercent || a.minutes - b.minutes
+    }
+    if (aPercent !== undefined) return -1
+    if (bPercent !== undefined) return 1
+    if (a.routeType === 'LOW_CONGESTION') return -1
+    if (b.routeType === 'LOW_CONGESTION') return 1
+    return a.minutes - b.minutes
+  }
   const visible = routes.filter((route) =>
     route.modes.every((mode) => mode === 'walk' || enabled.includes(mode)),
   )
-  return [
-    ...visible.filter((r) => r.id === 'fast' || r.id === 'calm').sort(compare),
-    ...visible.filter((r) => r.id !== 'fast' && r.id !== 'calm').sort(compare),
-  ]
+  return [...visible].sort(compare)
 }
-function parseDeparture(value?: string) {
+
+export function parseDeparture(value?: string) {
   const trimmed = value?.trim()
   if (!trimmed) return null
   const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)
@@ -26,6 +47,122 @@ function parseDeparture(value?: string) {
     hasTimeZone ? trimmed : `${trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`}+09:00`,
   )
   return Number.isFinite(date.getTime()) ? date : null
+}
+
+function seoulDay(value: Date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value)
+  const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value
+  const year = valueOf('year')
+  const month = valueOf('month')
+  const day = valueOf('day')
+  return year && month && day ? Date.UTC(+year, +month - 1, +day) : NaN
+}
+
+export function isCongestionPredictionDate(value?: string, now = new Date()) {
+  const departure = parseDeparture(value)
+  if (!departure) return false
+  const difference = (seoulDay(departure) - seoulDay(now)) / (24 * 60 * 60 * 1000)
+  return Number.isInteger(difference) && difference >= 0 && difference <= 3
+}
+
+export function congestionPredictionFor(
+  route: Route,
+  now = new Date(),
+): (CongestionPrediction & { congestionPercent: number }) | undefined {
+  const prediction = route.congestionPrediction
+  return isCongestionPredictionDate(route.departedAt, now) &&
+    prediction &&
+    prediction.dataStatus === 'AVAILABLE' &&
+    typeof prediction.congestionPercent === 'number' &&
+    Number.isFinite(prediction.congestionPercent) &&
+    prediction.congestionPercent >= 0
+    ? (prediction as CongestionPrediction & { congestionPercent: number })
+    : undefined
+}
+
+const congestionPercentFormatter = new Intl.NumberFormat('ko-KR', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+})
+
+export function formatCongestionPercent(value: number) {
+  return congestionPercentFormatter.format(value)
+}
+
+export function congestionGradeForPercent(value?: number | null): CongestionGrade | undefined {
+  if (value === undefined || value === null || !Number.isFinite(value) || value < 0)
+    return undefined
+  if (value < 50) return 'LOW'
+  if (value < 100) return 'MEDIUM'
+  return 'HIGH'
+}
+
+export function congestionPredictionPresentation(
+  prediction?: Pick<
+    CongestionPrediction,
+    'congestionPercent' | 'congestionGrade' | 'worstSegment'
+  > | null,
+  legs?: Route['legs'],
+) {
+  const worstSegmentGrade = worstSegmentGradeFor(prediction?.worstSegment, legs)
+  if (worstSegmentGrade) return segmentCongestionPresentation(worstSegmentGrade)
+
+  const grade =
+    prediction?.congestionGrade ?? congestionGradeForPercent(prediction?.congestionPercent)
+  const segmentGrade: SegmentCongestionGrade | undefined =
+    grade === 'LOW'
+      ? 'RELAXED'
+      : grade === 'MEDIUM'
+        ? 'NORMAL'
+        : grade === 'HIGH'
+          ? 'CONGESTED'
+          : undefined
+  return segmentCongestionPresentation(segmentGrade)
+}
+
+function worstSegmentGradeFor(
+  worstSegment?: WorstSegmentCongestion | null,
+  legs?: Route['legs'],
+): SegmentCongestionGrade | undefined {
+  if (!worstSegment) return undefined
+  if (worstSegment.mode === 'BUS') {
+    const leg = legs?.find(
+      (leg) =>
+        leg.mode === 'bus' &&
+        !!worstSegment.fromNodeId &&
+        !!worstSegment.toNodeId &&
+        leg.from?.id === worstSegment.fromNodeId &&
+        leg.to?.id === worstSegment.toNodeId,
+    )
+    return leg ? segmentCongestionGradeForLeg(leg) : undefined
+  }
+  return segmentCongestionGradeForLevel(worstSegment.congestionPercent ?? undefined)
+}
+
+export function congestionGradeText(value: CongestionGrade | null) {
+  return value === 'LOW'
+    ? '여유'
+    : value === 'MEDIUM'
+      ? '보통'
+      : value === 'HIGH'
+        ? '혼잡'
+        : undefined
+}
+
+export function congestionBasisText(value: CongestionPredictionBasis | null) {
+  return value === 'RECENT_7D'
+    ? '최근 7일 데이터 기반'
+    : value === 'PARTIAL'
+      ? '일부 기간 데이터 기반'
+      : value === 'WEEKDAY_AVERAGE'
+        ? '요일 평균 기준'
+        : undefined
 }
 export function clockTime(value?: string) {
   const date = parseDeparture(value)
