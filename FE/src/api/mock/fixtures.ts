@@ -1,80 +1,176 @@
 import type { Place, Leg, Route } from '../../features/route/types'
+
+const departedAt = '2026-09-17T09:00:00+09:00'
+const prediction = (congestionPercent: number, congestionGrade: 'LOW' | 'MEDIUM' | 'HIGH') => ({
+  congestionPercent,
+  congestionGrade,
+  dataStatus: 'AVAILABLE' as const,
+  predictionBasis: 'RECENT_7D' as const,
+})
+
 export const places: Place[] = [
-  { id: 'origin', name: '멀티캠퍼스 역삼', address: '서울 강남구 테헤란로 212', kind: '장소' },
+  {
+    id: 'origin',
+    name: '멀티캠퍼스 역삼',
+    address: '서울 강남구 테헤란로 212',
+    kind: '장소',
+    lat: 37.50162,
+    lng: 127.03944,
+  },
   { id: 'dogok', name: '도곡역', address: '서울 강남구 남부순환로 지하 2814', kind: '역' },
   { id: 'exit', name: '도곡역 1번 출구', address: '서울 강남구 도곡동', kind: '출구' },
   { id: 'bike', name: '도곡역 대여소', address: '도곡역에서 150m', kind: '대여소' },
 ]
+const railEndpoints = {
+  origin: { id: 'origin', name: '멀티캠퍼스 역삼', lat: 37.50162, lng: 127.03944 },
+  yeoksam: { id: 'yeoksam', name: '역삼역', lat: 37.50065, lng: 127.03653 },
+  seolleung: { id: 'seolleung', name: '선릉역', lat: 37.5045, lng: 127.0489 },
+  dogok: { id: 'dogok', name: '도곡역', lat: 37.49096, lng: 127.05502 },
+  exit: { id: 'exit', name: '도곡역 1번 출구', lat: 37.4914, lng: 127.0554 },
+} as const
 const railLegs = (quiet: boolean): Leg[] => [
   {
     mode: 'walk',
     title: '역삼역까지 걸어요',
     note: '2호선 개찰구 · 약 260m',
     minutes: quiet ? 5 : 4,
+    from: railEndpoints.origin,
+    to: railEndpoints.yeoksam,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.03944, 37.50162],
+          [127.03653, 37.50065],
+        ],
+      ],
+    },
   },
   {
     mode: 'subway',
     title: '2호선 잠실·성수 방면',
     note: '역삼역 → 선릉역',
     minutes: quiet ? 3 : 2,
+    routeId: '1002',
+    segmentCongestionLevel: quiet ? 20 : 80,
+    from: railEndpoints.yeoksam,
+    to: railEndpoints.seolleung,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.03653, 37.50065],
+          [127.0489, 37.5045],
+        ],
+      ],
+    },
   },
   {
     mode: 'walk',
     title: quiet ? '선릉역의 덜 붐비는 통로로 환승' : '선릉역에서 환승',
     note: '수인분당선 수원 방면 승강장',
     minutes: quiet ? 3 : 2,
+    transfer: true,
+    from: railEndpoints.seolleung,
+    to: railEndpoints.seolleung,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.0489, 37.5045],
+          [127.0492, 37.5047],
+        ],
+      ],
+    },
   },
   {
     mode: 'subway',
     title: '수인분당선 수원 방면',
     note: '선릉역 → 한티역 → 도곡역',
     minutes: quiet ? 6 : 5,
+    routeId: '1075',
+    segmentCongestionLevel: quiet ? 50 : 110,
+    from: railEndpoints.seolleung,
+    to: railEndpoints.dogok,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.0489, 37.5045],
+          [127.05502, 37.49096],
+        ],
+      ],
+    },
   },
-  { mode: 'walk', title: '도곡역 출구로 이동', note: '도착 지점까지 걸어요', minutes: 2 },
+  {
+    mode: 'walk',
+    title: '도곡역 출구로 이동',
+    note: '도착 지점까지 걸어요',
+    minutes: 2,
+    from: railEndpoints.dogok,
+    to: railEndpoints.exit,
+    geometry: {
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [127.05502, 37.49096],
+          [127.0554, 37.4914],
+        ],
+      ],
+    },
+  },
 ]
 export const routes: Route[] = [
   {
     id: 'fast',
+    source: 'MOCK',
     label: '가장 빠른 길',
     minutes: 15,
     walk: 420,
     transfers: 1,
-    congestionPercent: 68,
+    congestionPrediction: prediction(68, 'MEDIUM'),
     modes: ['walk', 'subway'],
     line: '2호선 → 수인분당선',
     legs: railLegs(false),
+    departedAt,
   },
   {
     id: 'calm',
+    source: 'MOCK',
     label: '덜 붐비는 길',
     minutes: 19,
     walk: 520,
     transfers: 1,
-    congestionPercent: 42,
+    congestionPrediction: prediction(42, 'LOW'),
     modes: ['walk', 'subway'],
     line: '2호선 → 수인분당선',
     legs: railLegs(true),
+    departedAt,
   },
   {
     id: 'rail',
+    source: 'MOCK',
     label: '지하철 경로',
     minutes: 16,
     walk: 500,
     transfers: 1,
-    congestionPercent: 56,
+    congestionPrediction: prediction(56, 'MEDIUM'),
     modes: ['walk', 'subway'],
     line: '2호선 → 수인분당선',
     legs: railLegs(false).map((leg, i) => (i === 0 ? { ...leg, minutes: 5 } : leg)),
+    departedAt,
   },
   {
     id: 'bus',
+    source: 'MOCK',
     label: '버스 경로',
     minutes: 21,
     walk: 560,
     transfers: 0,
-    congestionPercent: 64,
+    congestionPrediction: prediction(64, 'MEDIUM'),
     modes: ['walk', 'bus'],
     line: '버스 · 도곡역 방면',
+    departedAt,
     legs: [
       { mode: 'walk', title: '테헤란로 정류장까지 걸어요', note: '약 300m', minutes: 5 },
       { mode: 'bus', title: '도곡역 방면 버스 탑승', note: '정류장 5곳 이동', minutes: 12 },
@@ -84,13 +180,15 @@ export const routes: Route[] = [
 ]
 export const bikeProposal: Route = {
   id: 'bike-proposal',
+  source: 'MOCK',
   label: '따릉이 경로',
   minutes: 11,
   walk: 220,
   transfers: 1,
-  congestionPercent: 35,
+  congestionPrediction: prediction(35, 'LOW'),
   modes: ['walk', 'bike', 'subway'],
   line: '따릉이 → 수인분당선',
+  departedAt,
   legs: [
     {
       mode: 'walk',

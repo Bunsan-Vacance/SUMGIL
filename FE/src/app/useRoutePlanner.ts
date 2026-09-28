@@ -1,14 +1,37 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigation } from './useNavigation'
 import { resolveScreen } from './resolveScreen'
-import { previewProposal, previewTrip } from './preview'
+import { previewTripFor } from './preview'
 import { useToast } from '../components/useToast'
 import { useTrip } from '../features/route/useTrip'
 import { useGuidance } from '../features/guidance/useGuidance'
-import type { GuidanceDialog } from '../features/guidance/GuidanceDialogs'
+import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
+import { useCurrentLocation } from '../features/map/useCurrentLocation'
+import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
 import type { RouteRepository } from '../api/contracts'
 import type { Mode, Place } from '../features/route/types'
-import { isBackendConfigured } from '../api/repositories'
+import { RepositoryError } from '../api/errors'
+import {
+  guidanceRepository as defaultGuidanceRepository,
+  type GuidanceRepository,
+  type ReplanProposal,
+  type TrainArrival,
+} from '../api/guidance'
+import {
+  rerouteRepository as defaultRerouteRepository,
+  isRerouteDebugForceEnabled,
+  proposalToRoute,
+  type RerouteCheckResponse,
+  type RerouteRepository,
+} from '../api/reroute'
+
+interface ReplanState {
+  status: GuidanceRequestStatus
+  proposals: ReplanProposal[]
+  error: string
+}
+
+const initialReplan: ReplanState = { status: 'idle', proposals: [], error: '' }
 
 function samePlace(first: Place, second: Place) {
   return (
@@ -22,24 +45,124 @@ function samePlace(first: Place, second: Place) {
   )
 }
 
-export function useRoutePlanner(repository?: RouteRepository) {
+function hasRouteLocation(place: Place) {
+  const hasCoordinates =
+    typeof place.lat === 'number' &&
+    typeof place.lng === 'number' &&
+    Number.isFinite(place.lat) &&
+    Number.isFinite(place.lng) &&
+    place.lat >= -90 &&
+    place.lat <= 90 &&
+    place.lng >= -180 &&
+    place.lng <= 180
+  return Boolean(place.stationId?.trim()) || hasCoordinates
+}
+
+export function useRoutePlanner(
+  repository?: RouteRepository,
+  guidanceApi: GuidanceRepository = defaultGuidanceRepository,
+  rerouteApi: RerouteRepository | null = defaultRerouteRepository,
+) {
   const navigation = useNavigation()
   const { go, replace } = navigation
-  const trip = useTrip(previewTrip, repository)
-  const guidance = useGuidance()
+  const trip = useTrip(previewTripFor(location.search), repository)
+  const guidance = useGuidance(navigation.screen === 'guide')
   const screen = resolveScreen(navigation.screen, trip, guidance)
   const { message, setMessage } = useToast()
   const [searchTarget, setSearchTarget] = useState<'origin' | 'destination'>('destination')
   const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
-  const [routePanelOpen, setRoutePanelOpen] = useState(false)
+  const [routePanelOpen, setRoutePanelOpen] = useState(true)
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
+  const [arrivals, setArrivals] = useState<TrainArrival[]>([])
+  const [arrivalStatus, setArrivalStatus] = useState<GuidanceRequestStatus>('idle')
+  const [replan, setReplan] = useState<ReplanState>(initialReplan)
+  const [rerouteProposal, setRerouteProposal] = useState<{
+    proposal: RerouteCheckResponse
+    legIndex: number
+  } | null>(null)
+  const arrivalRequest = useRef<AbortController | null>(null)
+  const replanRequest = useRef<AbortController | null>(null)
+  const requestSequence = useRef(0)
+  const replanContext = useRef<{
+    route: typeof guidance.route
+    step: number
+    sequence: number
+  } | null>(null)
+  const guidanceCursor = useRef<{ route: typeof guidance.route; step: number }>({
+    route: guidance.route,
+    step: guidance.step,
+  })
+  const originRef = useRef(trip.origin)
+  originRef.current = trip.origin
+  const setOriginFromCurrentLocation = (position: GeolocationPosition) => {
+    const { latitude, longitude } = position.coords
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      setMessage('현재 위치를 확인하지 못했어요. 다시 시도해 주세요.')
+      return
+    }
+    if (originRef.current.name.trim()) return
+    trip.setOrigin({
+      id: `current-location:${latitude}:${longitude}`,
+      name: '현재 위치',
+      address: `위도 ${latitude.toFixed(6)}, 경도 ${longitude.toFixed(6)}`,
+      kind: '현재 위치',
+      lat: latitude,
+      lng: longitude,
+    })
+  }
+  const { locate } = useCurrentLocation(setOriginFromCurrentLocation, setMessage, screen)
   useEffect(() => {
     if (screen !== navigation.screen) replace(screen)
   }, [screen, navigation.screen, replace])
   useEffect(() => {
     setModal(null)
     setMessage('')
+    arrivalRequest.current?.abort()
+    replanRequest.current?.abort()
+    setArrivals([])
+    setArrivalStatus('idle')
+    setReplan(initialReplan)
+    setRerouteProposal(null)
   }, [screen, setMessage])
+  useEffect(() => {
+    const previous = guidanceCursor.current
+    if (previous.route !== guidance.route || previous.step !== guidance.step) {
+      arrivalRequest.current?.abort()
+      replanRequest.current?.abort()
+      requestSequence.current += 1
+      replanContext.current = null
+      setArrivals([])
+      setArrivalStatus('idle')
+      setReplan(initialReplan)
+      setRerouteProposal(null)
+    }
+    guidanceCursor.current = { route: guidance.route, step: guidance.step }
+  }, [guidance.route, guidance.step])
+  useEffect(
+    () => () => {
+      arrivalRequest.current?.abort()
+      replanRequest.current?.abort()
+      requestSequence.current += 1
+    },
+    [],
+  )
+  useRerouteCheck({
+    state: guidance,
+    enabled: screen === 'guide' && rerouteApi !== null,
+    repository: rerouteApi,
+    debugForce: isRerouteDebugForceEnabled,
+    onProposal: (proposal, legIndex) => {
+      setRerouteProposal({ proposal, legIndex })
+      setModal((current) => (current === null ? 'reroute' : current))
+    },
+  })
   const openSearch = (target: 'origin' | 'destination') => {
     setSearchTarget(target)
     setSearchReturnScreen(screen === 'results' ? 'results' : 'home')
@@ -47,8 +170,14 @@ export function useRoutePlanner(repository?: RouteRepository) {
     go('search')
   }
   const openBrowse = () => go('browse')
-  const toggleRoutePanel = () => setRoutePanelOpen((open) => !open)
-  const closeRoutePanel = () => setRoutePanelOpen(false)
+  const toggleRoutePanel = () => {
+    if (routePanelOpen) {
+      setRoutePanelOpen(false)
+      return
+    }
+    setRoutePanelOpen(true)
+    if (!trip.origin.name.trim()) locate()
+  }
   const returnToRouteInput = () => {
     setRoutePanelOpen(true)
     go('home')
@@ -59,6 +188,11 @@ export function useRoutePlanner(repository?: RouteRepository) {
     if (!destination) {
       openSearch('destination')
       return false
+    }
+    if (!hasRouteLocation(trip.origin)) {
+      if (place) trip.setDestination(place)
+      openSearch('origin')
+      return Boolean(place)
     }
     if (samePlace(destination, trip.origin)) {
       setMessage('출발지와 다른 도착지를 선택해 주세요.')
@@ -74,7 +208,7 @@ export function useRoutePlanner(repository?: RouteRepository) {
         setMessage('출발지와 도착지는 다른 장소를 선택해 주세요.')
         return false
       }
-      if (searchReturnScreen === 'results' && trip.destination) {
+      if (trip.destination) {
         void trip.search(trip.destination, place)
         go('results')
         return true
@@ -96,7 +230,7 @@ export function useRoutePlanner(repository?: RouteRepository) {
     return true
   }
   const swapPlaces = () => {
-    if (!trip.destination) return false
+    if (!trip.destination || !hasRouteLocation(trip.origin)) return false
     if (screen === 'results') {
       void trip.search(trip.origin, trip.destination)
       go('results')
@@ -121,12 +255,20 @@ export function useRoutePlanner(repository?: RouteRepository) {
         return
       }
     }
-    guidance.start(trip.selected, trip.origin, trip.destination)
+    guidance.start(trip.selected, trip.origin, trip.destination, {
+      modes: trip.enabled,
+      priority: trip.priority,
+      departedAt: trip.selected.departedAt,
+    })
     go('guide')
   }
   const confirmReplacement = () => {
     if (trip.status !== 'success' || !trip.selected?.legs.length) return
-    guidance.start(trip.selected, trip.origin, trip.destination)
+    guidance.start(trip.selected, trip.origin, trip.destination, {
+      modes: trip.enabled,
+      priority: trip.priority,
+      departedAt: trip.selected.departedAt,
+    })
     setModal(null)
     go('guide')
   }
@@ -135,6 +277,10 @@ export function useRoutePlanner(repository?: RouteRepository) {
     if (!guidance.route) return
     guidance.next()
     if (guidance.step >= guidance.route.legs.length - 1) go('arrival')
+  }
+  const previous = () => {
+    if (!guidance.route || guidance.step <= 0) return
+    guidance.previous()
   }
   const exitGuide = () => {
     guidance.stop()
@@ -145,10 +291,150 @@ export function useRoutePlanner(repository?: RouteRepository) {
     trip.setModes(modes)
     setModal(null)
   }
-  const acceptProposal = () => {
-    if (isBackendConfigured || screen !== 'guide' || !guidance.route) return
-    guidance.start(previewProposal, guidance.origin, guidance.destination)
+  const openTrain = () => {
+    setModal('train')
+    const route = guidance.route
+    const leg = route?.legs[guidance.step]
+    if (!route || !leg || leg.mode !== 'subway') {
+      setArrivalStatus('unsupported')
+      return
+    }
+    const stationId = leg.from?.id
+    const routeId = leg.routeId
+    if (!stationId || !routeId) {
+      setArrivalStatus('error')
+      return
+    }
+    arrivalRequest.current?.abort()
+    const controller = new AbortController()
+    arrivalRequest.current = controller
+    setArrivalStatus('loading')
+    setArrivals([])
+    void guidanceApi
+      .arrivals(
+        {
+          stationId,
+          routeId,
+          stationName: leg.from?.name,
+          routeName: leg.title,
+        },
+        controller.signal,
+      )
+      .then((result) => {
+        if (controller.signal.aborted) return
+        setArrivals(result.trains)
+        setArrivalStatus(
+          result.status === 'LIVE'
+            ? 'success'
+            : result.status === 'NO_INFO'
+              ? 'no-info'
+              : result.status === 'OUTSIDE_WINDOW'
+                ? 'outside-window'
+                : 'stale',
+        )
+      })
+      .catch((error: unknown) => {
+        if (
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === 'AbortError')
+        )
+          return
+        setArrivalStatus('error')
+      })
+  }
+  const closeGuidanceDialog = () => {
+    arrivalRequest.current?.abort()
+    replanRequest.current?.abort()
+    requestSequence.current += 1
+    replanContext.current = null
+    setArrivals([])
+    setArrivalStatus('idle')
+    setReplan(initialReplan)
+    setRerouteProposal(null)
     setModal(null)
+  }
+  const openReplan = () => {
+    if (guidance.train) return
+    setReplan(initialReplan)
+    replanContext.current = null
+    setModal('replan')
+  }
+  const requestReplan = () => {
+    const route = guidance.route
+    const destination = guidance.destination
+    const step = guidance.step
+    const leg = route?.legs[step]
+    if (!route || !destination || !leg) return
+    replanRequest.current?.abort()
+    const controller = new AbortController()
+    replanRequest.current = controller
+    const sequence = ++requestSequence.current
+    replanContext.current = { route, step, sequence }
+    setReplan({ status: 'loading', proposals: [], error: '' })
+    if (guidance.train) return
+    const currentBoundary = leg.from
+    void guidanceApi
+      .replan(
+        {
+          currentRoute: route,
+          step,
+          currentBoundary: currentBoundary || { name: leg.title },
+          currentLeg: { mode: leg.mode, routeId: leg.routeId, from: leg.from, to: leg.to },
+          destination,
+          conditions: {
+            ...(guidance.conditions || { modes: [], priority: 'fast' as const }),
+            requestedAt: new Date().toISOString(),
+          },
+        },
+        controller.signal,
+      )
+      .then((proposals) => {
+        if (controller.signal.aborted || sequence !== requestSequence.current) return
+        setReplan({
+          status: proposals.length ? 'success' : 'empty',
+          proposals,
+          error: '',
+        })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || sequence !== requestSequence.current) return
+        setReplan({
+          status: 'error',
+          proposals: [],
+          error: error instanceof RepositoryError ? error.message : '경로를 다시 찾지 못했어요.',
+        })
+      })
+  }
+  const acceptReplan = (proposal: ReplanProposal) => {
+    const context = replanContext.current
+    if (
+      !context ||
+      context.sequence !== requestSequence.current ||
+      guidance.route !== context.route ||
+      guidance.step !== context.step ||
+      screen !== 'guide'
+    ) {
+      closeGuidanceDialog()
+      return
+    }
+    guidance.replan(proposal.route)
+    closeGuidanceDialog()
+  }
+  const acceptReroute = () => {
+    const current = rerouteProposal
+    if (!current) return
+    try {
+      const route = proposalToRoute(current.proposal, new Date().toISOString())
+      guidance.replan(route, current.legIndex)
+    } catch (error) {
+      setMessage(
+        error instanceof RepositoryError ? error.message : '재안내 경로를 적용하지 못했어요.',
+      )
+    }
+    closeGuidanceDialog()
+  }
+  const dismissReroute = () => {
+    closeGuidanceDialog()
   }
   return {
     screen,
@@ -165,11 +451,11 @@ export function useRoutePlanner(repository?: RouteRepository) {
     openBrowse,
     routePanelOpen,
     toggleRoutePanel,
-    closeRoutePanel,
     returnToRouteInput,
     findRoutes,
     choosePlace,
     setOriginFromBrowse,
+    setOriginFromCurrentLocation,
     swapPlaces,
     selectRoute,
     startGuide,
@@ -178,7 +464,18 @@ export function useRoutePlanner(repository?: RouteRepository) {
     advance,
     exitGuide,
     applyFilter,
-    acceptProposal,
+    previous,
+    openTrain,
+    openReplan,
+    requestReplan,
+    acceptReplan,
+    closeGuidanceDialog,
+    arrivals,
+    arrivalStatus,
+    replan,
+    rerouteProposal,
+    acceptReroute,
+    dismissReroute,
     destinationName:
       screen === 'guide' || screen === 'arrival'
         ? guidance.destination?.name || '도곡역'

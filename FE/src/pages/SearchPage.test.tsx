@@ -37,4 +37,17 @@ describe('장소 검색 화면', () => {
     )
     expect(localStorage.getItem(RECENT_PLACES_STORAGE_KEY)).toBeNull()
   })
+
+  it('확인 키로 검색 입력의 포커스를 닫되 한글 조합 중에는 유지한다', () => {
+    render(<SearchPage searchTarget="origin" cancelSearch={vi.fn()} choosePlace={vi.fn()} />)
+    const input = screen.getByRole('textbox', { name: '장소 검색어' })
+
+    input.focus()
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+    expect(document.activeElement).not.toBe(input)
+
+    input.focus()
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', isComposing: true })
+    expect(document.activeElement).toBe(input)
+  })
 })

@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { ArrowLeftRight, ChevronDown, Gauge, SlidersHorizontal, UsersRound, X } from 'lucide-react'
+import { ArrowLeftRight, ChevronDown, SlidersHorizontal, X } from 'lucide-react'
 import DepartureTimeDialog from '../features/route/DepartureTimeDialog'
 import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
-import { clockTime } from '../features/route/selectors'
-import { isBackendConfigured } from '../api/repositories'
+import { clockTime, congestionPredictionFor } from '../features/route/selectors'
+import { groupRoutes } from '../features/route/routeGrouping'
+import type { RepositoryErrorCode } from '../api/errors'
+import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
 
 interface Props {
   origin: Place
@@ -17,6 +19,7 @@ interface Props {
   status: TripState['status']
   retry: () => void
   error: string
+  errorCode?: RepositoryErrorCode | null
   enabled: Mode[]
   priority: Priority
   setPriority: (value: Priority) => void
@@ -30,19 +33,84 @@ interface Props {
   isLiveApi?: boolean
   departureTime?: string
   onDepartureTimeChange?: (time: string) => void
+  onResetModes?: () => void
+  onSearchWalk?: () => void
+}
+
+type Recommendation = 'fast' | 'calm'
+
+interface FeaturedRoute {
+  route: Route
+  recommendations: Recommendation[]
+}
+
+function compareByTime(a: Route, b: Route, aIndex: number, bIndex: number) {
+  return a.minutes - b.minutes || aIndex - bIndex
+}
+
+function sortRoutes(routes: Route[], priority: Priority) {
+  return routes
+    .map((route, index) => ({
+      route,
+      index,
+      prediction: congestionPredictionFor(route)?.congestionPercent,
+    }))
+    .sort((a, b) => {
+      if (priority === 'fast') return compareByTime(a.route, b.route, a.index, b.index)
+      if (a.prediction !== undefined && b.prediction !== undefined) {
+        return a.prediction - b.prediction || compareByTime(a.route, b.route, a.index, b.index)
+      }
+      if (a.prediction !== undefined) return -1
+      if (b.prediction !== undefined) return 1
+      return compareByTime(a.route, b.route, a.index, b.index)
+    })
+    .map(({ route }) => route)
+}
+
+function featuredRoutes(routes: Route[]): FeaturedRoute[] {
+  if (!routes.length) return []
+  const fastest = routes.reduce(
+    (best, route, index) =>
+      !best || compareByTime(route, best.route, index, best.index) < 0 ? { route, index } : best,
+    undefined as { route: Route; index: number } | undefined,
+  )
+  const taggedCalm = routes.filter((route) => route.routeType === 'LOW_CONGESTION')
+  const calmCandidates = taggedCalm.length
+    ? taggedCalm
+    : routes.filter((route) => congestionPredictionFor(route) !== undefined)
+  const calm = calmCandidates.reduce<Route | undefined>((best, route) => {
+    if (!best) return route
+    if (taggedCalm.length) return compareByTime(route, best, 0, 0) < 0 ? route : best
+    const routePercent = congestionPredictionFor(route)?.congestionPercent
+    const bestPercent = congestionPredictionFor(best)?.congestionPercent
+    if (routePercent === undefined || bestPercent === undefined) return best
+    return routePercent < bestPercent ||
+      (routePercent === bestPercent && route.minutes < best.minutes)
+      ? route
+      : best
+  }, undefined)
+  const result: FeaturedRoute[] = []
+  if (fastest) result.push({ route: fastest.route, recommendations: ['fast'] })
+  if (calm) {
+    const existing = result.find((entry) => entry.route.id === calm.id)
+    if (existing) existing.recommendations.push('calm')
+    else result.push({ route: calm, recommendations: ['calm'] })
+  }
+  return result
 }
 
 export default function ResultsPage({
   origin,
   destinationName,
   visible,
+  selectedId,
   setSelectedId,
   status,
   retry,
   error,
+  errorCode,
   enabled,
   priority,
-  setPriority,
   openFilter,
   openSearch,
   onBackToInput,
@@ -52,11 +120,29 @@ export default function ResultsPage({
   isLiveApi,
   departureTime,
   onDepartureTimeChange,
+  onResetModes,
+  onSearchWalk,
 }: Props) {
+  const resultsRef = useScrollbarVisibility<HTMLDivElement>()
   const [choosingTime, setChoosingTime] = useState(false)
-  const hasCongestion = visible.some((route) => route.congestionPercent !== undefined)
-  const liveApi = isLiveApi ?? isBackendConfigured
+  const [localPriority, setLocalPriority] = useState<Priority>(() => priority)
+  const liveApi = isLiveApi ?? false
+  const featured = featuredRoutes(visible)
+  const featuredIds = new Set(featured.map(({ route }) => route.id))
+  const remaining = visible.filter((route) => !featuredIds.has(route.id))
+  const remainingPredictions = remaining.filter((route) => congestionPredictionFor(route))
+  const canSortByCongestion = remaining.length > 1 && remainingPredictions.length > 0
+  const sortPriority = localPriority === 'calm' && !canSortByCongestion ? 'fast' : localPriority
+  const remainingGroups = groupRoutes(sortRoutes(remaining, sortPriority))
   const departure = departureTime || clockTime(visible[0]?.departedAt)
+  const errorTitle =
+    errorCode === 'access-candidate-not-found'
+      ? '출발지나 도착지 주변에 연결되는 경로가 없어요.'
+      : errorCode === 'out-of-service-area'
+        ? '서비스 지역 밖이라 경로를 찾지 못했어요.'
+        : errorCode === 'service-ended'
+          ? '선택한 출발 시간에는 이용할 수 없어요.'
+          : error || '경로를 불러오지 못했어요.'
 
   return (
     <section className="results-screen" aria-label="경로 검색 결과">
@@ -100,30 +186,9 @@ export default function ResultsPage({
             <X size={27} />
           </button>
         </div>
-        <div className="results-priority" role="group" aria-label="경로 우선순위">
-          <button
-            type="button"
-            aria-pressed={priority === 'fast'}
-            onClick={() => setPriority('fast')}
-          >
-            <Gauge size={20} aria-hidden="true" />
-            <span>속도</span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={priority === 'calm'}
-            aria-label="혼잡"
-            disabled={!hasCongestion}
-            onClick={() => setPriority('calm')}
-          >
-            <UsersRound size={20} aria-hidden="true" />
-            <span>혼잡</span>
-            {!hasCongestion && <small>준비중입니다</small>}
-          </button>
-        </div>
       </header>
 
-      <div className="results-scroll">
+      <div ref={resultsRef} className="results-scroll scrollbar-auto">
         <div className="results-sort-row">
           <button
             type="button"
@@ -145,9 +210,6 @@ export default function ResultsPage({
             이동수단
             <span className="sr-only">{enabled.length}/4 선택됨</span>
           </button>
-          <span className="results-sort" aria-label="정렬 기준">
-            {priority === 'calm' ? '혼잡도 낮은 순' : '빠른 순'}
-          </span>
         </div>
 
         {status === 'loading' ? (
@@ -157,29 +219,124 @@ export default function ResultsPage({
           </div>
         ) : status === 'error' ? (
           <div className="empty results-state" role="alert">
-            <h2>{error || '경로를 불러오지 못했어요.'}</h2>
-            <button className="primary" onClick={retry}>
-              다시 시도
-            </button>
+            <h2>{errorTitle}</h2>
+            {errorCode === 'access-candidate-not-found' && (
+              <p>출발지·도착지 주변에 연결되는 경로가 있는지 확인해 보세요.</p>
+            )}
+            {errorCode === 'out-of-service-area' && (
+              <p>출발지와 도착지를 서비스 지역 안에서 선택해 주세요.</p>
+            )}
+            {errorCode === 'service-ended' && (
+              <p>출발 시간을 바꾸거나 다른 이동수단을 선택해 보세요.</p>
+            )}
+            <div className="results-recovery-actions">
+              {errorCode === 'out-of-service-area' ? (
+                <button className="primary" onClick={onBackToInput}>
+                  출발·도착지 수정
+                </button>
+              ) : errorCode === 'access-candidate-not-found' ? (
+                <>
+                  <button className="primary" onClick={onBackToInput}>
+                    출발·도착지 수정
+                  </button>
+                  <button className="secondary" onClick={openFilter}>
+                    이동수단 변경
+                  </button>
+                </>
+              ) : errorCode === 'service-ended' ? (
+                <>
+                  <button className="primary" onClick={() => setChoosingTime(true)}>
+                    출발 시간 변경
+                  </button>
+                  <button className="secondary" onClick={openFilter}>
+                    이동수단 변경
+                  </button>
+                </>
+              ) : (
+                <button className="primary" onClick={retry}>
+                  다시 시도
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <>
             {!liveApi && <p className="results-sample">시안 · 예시 데이터</p>}
-            <div className="route-list">
-              {visible.map((route) => (
-                <RouteCard
-                  key={route.id}
-                  route={route}
-                  onDetail={() => {
-                    setSelectedId(route.id)
-                    go('detail')
-                  }}
-                />
-              ))}
-            </div>
+            {featured.length > 0 && (
+              <section className="route-section" aria-labelledby="recommended-routes-heading">
+                <div className="route-section-heading">
+                  <h2 id="recommended-routes-heading">추천 경로</h2>
+                </div>
+                <div className="route-list">
+                  {featured.map(({ route, recommendations }) => (
+                    <RouteCard
+                      key={route.id}
+                      route={route}
+                      selected={route.id === selectedId}
+                      recommendations={recommendations}
+                      onDetail={() => {
+                        setSelectedId(route.id)
+                        go('detail')
+                      }}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+            {remainingGroups.length > 0 && (
+              <section className="route-section" aria-labelledby="other-routes-heading">
+                <div className="route-section-heading route-section-heading-with-sort">
+                  <h2 id="other-routes-heading">다른 경로</h2>
+                  <div className="route-sort-segmented" role="group" aria-label="다른 경로 정렬">
+                    <button
+                      type="button"
+                      aria-pressed={sortPriority === 'fast'}
+                      onClick={() => setLocalPriority('fast')}
+                    >
+                      빠른 순
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={sortPriority === 'calm'}
+                      disabled={!canSortByCongestion}
+                      onClick={() => setLocalPriority('calm')}
+                    >
+                      덜 붐비는 순
+                    </button>
+                  </div>
+                </div>
+                <div className="route-list">
+                  {remainingGroups.map(({ representative, variants }) => {
+                    const route =
+                      variants.find((variant) => variant.id === selectedId) ?? representative
+                    return (
+                      <RouteCard
+                        key={route.id}
+                        route={route}
+                        selected={route.id === selectedId}
+                        onDetail={() => {
+                          setSelectedId(route.id)
+                          go('detail')
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              </section>
+            )}
             {!visible.length && (
               <div className="empty">
                 <h3>해당 수단으로는 경로가 없어요</h3>
+                {onResetModes && (
+                  <button className="primary" onClick={onResetModes}>
+                    전체 수단으로 다시 검색
+                  </button>
+                )}
+                {onSearchWalk && (
+                  <button className="secondary" onClick={onSearchWalk}>
+                    도보만 다시 검색
+                  </button>
+                )}
                 <button className="secondary" onClick={openFilter}>
                   조건 변경
                 </button>

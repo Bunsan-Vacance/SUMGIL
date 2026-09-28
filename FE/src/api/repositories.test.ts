@@ -382,6 +382,31 @@ describe('백엔드 repository', () => {
     })
   })
 
+  it.each([
+    [
+      'ACCESS_CANDIDATE_NOT_FOUND',
+      'access-candidate-not-found',
+      '출발지나 도착지 주변에 연결되는 경로가 없어요.',
+    ],
+    ['OUT_OF_SERVICE_AREA', 'out-of-service-area', '서비스 지역 밖이라 경로를 찾지 못했어요.'],
+    ['SERVICE_ENDED', 'service-ended', '선택한 출발 시간에는 이용할 수 없어요.'],
+  ] as const)('%s 오류를 복구 가능한 FE 코드로 보존한다', async (serverCode, code, message) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 422,
+        json: async () => ({ success: false, error: { code: serverCode } }),
+      })),
+    )
+    await expect(
+      createBackendRouteRepository('http://be.test').search(
+        { origin: station('역삼'), destination: station('강변') },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code, message })
+  })
+
   it('경로 응답을 화면 모델로 변환하고 geometry 선을 보존한다', async () => {
     const fetchMock = vi.fn(async () => ({
       status: 200,
@@ -557,6 +582,58 @@ describe('백엔드 repository', () => {
       ],
     ])
   })
+
+  it.each(['station', 'coordinate'] as const)(
+    '%s 검색의 COMFORT 요청과 LOW_CONGESTION 응답을 연결한다',
+    async (kind) => {
+      const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [
+            {
+              routeType: 'LOW_CONGESTION',
+              totalMinutes: 30,
+              source: 'ALGORITHM',
+              legs: [{ mode: 'SUBWAY', routeId: '1002', minutes: 30 }],
+            },
+            {
+              routeType: 'SHORTEST',
+              totalMinutes: 10,
+              source: 'ALGORITHM',
+              legs: [{ mode: 'SUBWAY', routeId: '1003', minutes: 10 }],
+            },
+          ],
+        }),
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      const result = await createBackendRouteRepository('http://be.test').search(
+        {
+          origin:
+            kind === 'station'
+              ? station('역삼')
+              : { id: 'place', name: '카페', address: '', kind: '장소', lat: 37.5, lng: 127.03 },
+          destination: { ...station('강변'), lat: 37.535, lng: 127.094 },
+          priority: 'calm',
+          modes: ['walk', 'subway'],
+          departedAt: '2026-09-16T00:30:00Z',
+        },
+        new AbortController().signal,
+      )
+      expect(result.map((route) => route.routeType)).toEqual(['LOW_CONGESTION', 'SHORTEST'])
+      expect(result[0]).toMatchObject({ label: '다른 경로', minutes: 30 })
+      expect(result[0].congestionPrediction).toBeUndefined()
+      if (kind === 'station') {
+        expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get('priority')).toBe('COMFORT')
+      } else {
+        expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string)).toMatchObject({
+          priority: 'COMFORT',
+          departureTime: '2026-09-16T09:30:00',
+        })
+      }
+    },
+  )
 
   it('알 수 없는 경로 유형은 성공 응답으로 숨기지 않는다', async () => {
     vi.stubGlobal(
@@ -859,6 +936,184 @@ describe('백엔드 repository', () => {
     ])
   })
 
+  it('대여소 단건 재고 응답을 상태별로 보존한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 0,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({
+      rentalId: 'ST-1',
+      availableBikes: 0,
+      status: 'AVAILABLE',
+    })
+  })
+
+  it('총 거치대 수를 optional 필드로 보존하고 기존 응답도 허용한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            rackCount: 6,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ rackCount: 6 })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.not.toHaveProperty('rackCount')
+  })
+
+  it('총 거치대 수가 음수나 소수면 응답을 거부한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            rackCount: -1,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: 4,
+            rackCount: 6.5,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'AVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+  })
+
+  it('대여소 단건 재고의 대여소 ID가 요청과 다르면 거부한다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-2',
+            availableBikes: 4,
+            stockUpdatedAt: '2026-09-17T10:00:00+09:00',
+            status: 'STALE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject<Partial<RepositoryError>>({ code: 'invalid-response' })
+  })
+
+  it('UNAVAILABLE 재고는 수량을 지어낸 응답으로 받지 않는다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            rentalId: 'ST-1',
+            availableBikes: null,
+            stockUpdatedAt: null,
+            status: 'UNAVAILABLE',
+          },
+        }),
+      })),
+    )
+    await expect(
+      createBackendBikeStationRepository('http://be.test').stock(
+        'ST-1',
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ availableBikes: null, stockUpdatedAt: null, status: 'UNAVAILABLE' })
+  })
+
   it('HTTP 오류와 취소를 빈 성공 결과로 숨기지 않는다', async () => {
     vi.stubGlobal(
       'fetch',
@@ -893,5 +1148,34 @@ describe('백엔드 repository', () => {
     )
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe('경로 검색 mock 선택', () => {
+  it('API base를 유지한 채 route search mock만 선택한다', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://be.test')
+    vi.stubEnv('VITE_ROUTE_SEARCH_MOCK', 'true')
+    vi.resetModules()
+
+    try {
+      const { isBackendConfigured, isRouteSearchMockEnabled, routeRepository } =
+        await import('./repositories')
+      expect(isBackendConfigured).toBe(true)
+      expect(isRouteSearchMockEnabled).toBe(true)
+      const result = await routeRepository.search(
+        {
+          origin: { id: '222', name: '강남', address: '서울', kind: '역', stationId: '222' },
+          destination: { id: '221', name: '역삼', address: '서울', kind: '역', stationId: '221' },
+          modes: ['walk', 'subway'],
+          priority: 'fast',
+          departedAt: '2026-09-15T08:30:00.000Z',
+        },
+        new AbortController().signal,
+      )
+      expect(result[0]).toMatchObject({ routeType: 'SHORTEST', minutes: 5 })
+    } finally {
+      vi.unstubAllEnvs()
+      vi.resetModules()
+    }
   })
 })

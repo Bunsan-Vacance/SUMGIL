@@ -25,6 +25,7 @@ import {
   getRouteEndpointCandidates,
   routeEndpointPlace,
   routeLineStyle,
+  ROUTE_LINE_COLOR,
   type RouteLineEntry,
   type RouteSvgOverlay,
   type RouteEndpointCandidate,
@@ -37,6 +38,21 @@ const NORMAL_MARKER_SRC = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent
 const SELECTED_MARKER_SRC = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46"><path fill="#a92a70" d="M18 0C8.1 0 0 7.8 0 17.3 0 30.1 18 46 18 46s18-15.9 18-28.7C36 7.8 27.9 0 18 0Z"/><circle cx="18" cy="16" r="6" fill="#fff"/></svg>',
 )}`
+export type LivePosition = { latitude: number; longitude: number; accuracy: number } | null
+
+function isValidLivePosition(position: LivePosition): position is NonNullable<LivePosition> {
+  return Boolean(
+    position &&
+    Number.isFinite(position.latitude) &&
+    position.latitude >= -90 &&
+    position.latitude <= 90 &&
+    Number.isFinite(position.longitude) &&
+    position.longitude >= -180 &&
+    position.longitude <= 180 &&
+    Number.isFinite(position.accuracy) &&
+    position.accuracy >= 0,
+  )
+}
 export function useKakaoMap(
   origin: Place | null,
   destination: Place | null,
@@ -46,12 +62,17 @@ export function useKakaoMap(
   focusedPlace?: Place | null,
   highlightedPlace?: Place | null,
   route?: Route | null,
+  bikeStationsVisible = true,
+  livePosition: LivePosition = null,
 ) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<KakaoMapInstance | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [attempt, setAttempt] = useState(0)
-  const ownMarker = useRef<MapOverlay | null>(null)
+  const ownMarker = useRef<KakaoMarker | null>(null)
+  const ownMarkerIsLive = useRef(false)
+  const livePositionRef = useRef<LivePosition>(livePosition)
+  const followLivePosition = useRef(false)
   const stationMarkers = useRef(new Map<string, BikeStationOverlay>())
   const stationClusterMarkers = useRef(new Map<string, BikeStationClusterOverlay>())
   const messageRef = useRef(onMessage)
@@ -59,6 +80,7 @@ export function useKakaoMap(
   const focusedRef = useRef(focusedPlace)
   const highlightedRef = useRef(highlightedPlace)
   const routeActiveRef = useRef(Boolean(route))
+  const bikeStationsVisibleRef = useRef(bikeStationsVisible)
   const markersRef = useRef(new Map<string, KakaoMarker>())
   const selectedMarkerRef = useRef<KakaoMarker | null>(null)
   const normalMarkerImageRef = useRef<MapMarkerImage | null>(null)
@@ -76,6 +98,8 @@ export function useKakaoMap(
   focusedRef.current = focusedPlace
   highlightedRef.current = highlightedPlace
   routeActiveRef.current = Boolean(route)
+  bikeStationsVisibleRef.current = bikeStationsVisible
+  livePositionRef.current = livePosition
 
   useEffect(() => {
     stationMarkers.current.forEach((marker, id) =>
@@ -113,10 +137,17 @@ export function useKakaoMap(
     const wrapper = container.current!.parentElement!
     const shell = wrapper.parentElement!
     const homePanel = shell.querySelector<HTMLElement>('.home-panel')
+    const homeTopbar = shell.querySelector<HTMLElement>('.home-topbar')
     const browseToolbar = shell.querySelector<HTMLElement>('.browse-toolbar')
+    const guideTop = shell.querySelector<HTMLElement>('.guide-top')
     const bottomSheet = shell.querySelector<HTMLElement>('.bottom-sheet')
     const resize = () => {
-      const topOffset = homePanel?.offsetHeight || browseToolbar?.offsetHeight || 0
+      const topOffset =
+        homePanel?.offsetHeight ||
+        homeTopbar?.offsetHeight ||
+        browseToolbar?.offsetHeight ||
+        guideTop?.offsetHeight ||
+        0
       const bottomOffset = bottomSheet?.offsetHeight || 0
       wrapper.style.top = `${topOffset}px`
       wrapper.style.height = `${Math.max(1, shell.clientHeight - topOffset - bottomOffset)}px`
@@ -124,7 +155,9 @@ export function useKakaoMap(
     const observer = new ResizeObserver(resize)
     observer.observe(shell)
     if (homePanel) observer.observe(homePanel)
+    if (homeTopbar) observer.observe(homeTopbar)
     if (browseToolbar) observer.observe(browseToolbar)
+    if (guideTop) observer.observe(guideTop)
     if (bottomSheet) observer.observe(bottomSheet)
     resize()
     return () => observer.disconnect()
@@ -135,6 +168,7 @@ export function useKakaoMap(
     let loadedMaps: Awaited<ReturnType<typeof loadKakaoMaps>> | null = null
     let observer: ResizeObserver | null = null
     let idleHandler: (() => void) | null = null
+    let dragHandler: (() => void) | null = null
     let nearbyAbort: AbortController | null = null
     let nearbyRequestId = 0
     const markers: MapOverlay[] = []
@@ -152,7 +186,18 @@ export function useKakaoMap(
           level: 5,
         })
         map.current = instance
+        dragHandler = () => {
+          followLivePosition.current = false
+        }
+        maps.event.addListener(instance, 'dragstart', dragHandler)
         const syncStationMarkers = () => {
+          if (!bikeStationsVisibleRef.current) {
+            stationMarkers.current.forEach((marker) => marker.destroy())
+            stationMarkers.current.clear()
+            stationClusterMarkers.current.forEach((marker) => marker.destroy())
+            stationClusterMarkers.current.clear()
+            return
+          }
           const routeBikeIds = new Set(
             routeBikeEndpointsRef.current
               .map((candidate) => candidate.endpoint.id?.trim())
@@ -304,7 +349,14 @@ export function useKakaoMap(
         observer = new ResizeObserver(() => {
           const center = instance.getCenter()
           instance.relayout()
-          if (routeBoundsRef.current) {
+          const livePosition = livePositionRef.current
+          if (isValidLivePosition(livePosition)) {
+            if (followLivePosition.current) {
+              instance.panTo(new maps.LatLng(livePosition.latitude, livePosition.longitude))
+            } else {
+              instance.setCenter(center)
+            }
+          } else if (routeBoundsRef.current) {
             instance.setBounds(routeBoundsRef.current, 40, 35, 35, 35)
           } else {
             const focused = focusedRef.current
@@ -346,12 +398,16 @@ export function useKakaoMap(
       mapsRef.current = null
       if (idleHandler && map.current && loadedMaps)
         loadedMaps.event.removeListener(map.current, 'idle', idleHandler)
+      if (dragHandler && map.current && loadedMaps)
+        loadedMaps.event.removeListener(map.current, 'dragstart', dragHandler)
       stationMarkers.current.forEach((marker) => marker.destroy())
       stationMarkers.current.clear()
       stationClusterMarkers.current.forEach((marker) => marker.destroy())
       stationClusterMarkers.current.clear()
       ownMarker.current?.setMap(null)
       ownMarker.current = null
+      ownMarkerIsLive.current = false
+      followLivePosition.current = false
       map.current = null
       routeLinesRef.current?.destroy()
       routeLinesRef.current = null
@@ -391,15 +447,17 @@ export function useKakaoMap(
     })
     const hasLegGeometry = route.legs.some((leg) => leg.geometry?.coordinates.length)
     const lineEntries: RouteLineEntry[] = hasLegGeometry
-      ? route.legs.flatMap((leg) =>
-          (leg.geometry?.coordinates || []).map((coordinates) => ({
-            coordinates,
-            style: routeLineStyle(leg),
-          })),
-        )
+      ? route.legs.flatMap((leg) => {
+          const coordinates = leg.geometry?.coordinates || []
+          const lineParts =
+            leg.mode === 'walk' || leg.mode === 'bike' ? [coordinates.flat()] : coordinates
+          return lineParts
+            .filter((part) => part.length)
+            .map((part) => ({ coordinates: part, style: routeLineStyle(leg) }))
+        })
       : (route.geometry?.coordinates || []).map((coordinates) => ({
           coordinates,
-          style: { strokeColor: '#6379bd', strokeStyle: 'solid' },
+          style: { strokeColor: ROUTE_LINE_COLOR, strokeStyle: 'solid' },
         }))
     let validLineCount = 0
     lineEntries.forEach(({ coordinates }) => {
@@ -419,34 +477,41 @@ export function useKakaoMap(
       pointCount += path.length
       validLineCount += 1
     })
+    if (pointCount > 1) {
+      routeBoundsRef.current = bounds
+      if (!followLivePosition.current) instance.setBounds(bounds, 40, 35, 35, 35)
+    } else if (pointCount === 1) {
+      routeBoundsRef.current = bounds
+    }
     if (validLineCount) routeLinesRef.current = createRouteSvgOverlay(maps, instance, lineEntries)
-    routeBikeStationOverlaysRef.current = bikeCandidates.map((candidate) =>
-      createBikeStationOverlay(
-        maps,
-        instance,
-        {
-          id: `route-bike-endpoint:${candidate.endpoint.id || `${candidate.endpoint.lat}:${candidate.endpoint.lng}`}`,
-          name: candidate.endpoint.name?.trim() || '따릉이 대여소',
-          address: candidate.bikeRoles!.map((role) => `따릉이 ${role}`).join(' · '),
-          lat: candidate.endpoint.lat,
-          lng: candidate.endpoint.lng,
-        },
-        false,
-        () => placeRef.current?.(routeEndpointPlace(candidate)),
-        false,
-        10,
-      ),
-    )
+    routeBikeStationOverlaysRef.current = bikeStationsVisible
+      ? bikeCandidates.map((candidate) =>
+          createBikeStationOverlay(
+            maps,
+            instance,
+            {
+              id: `route-bike-endpoint:${candidate.endpoint.id || `${candidate.endpoint.lat}:${candidate.endpoint.lng}`}`,
+              name: candidate.endpoint.name?.trim() || '따릉이 대여소',
+              address: candidate.bikeRoles!.map((role) => `따릉이 ${role}`).join(' · '),
+              lat: candidate.endpoint.lat,
+              lng: candidate.endpoint.lng,
+              ...(candidate.endpoint.rentalId ? { rentalId: candidate.endpoint.rentalId } : {}),
+            },
+            false,
+            () => placeRef.current?.(routeEndpointPlace(candidate)),
+            false,
+            10,
+          ),
+        )
+      : []
     routeEndpointOverlaysRef.current = endpointCandidates
       .filter((candidate) => !candidate.bikeRoles?.length)
       .map((candidate) =>
         createRouteEndpointOverlay(maps, instance, candidate, (place) => placeRef.current?.(place)),
       )
-    if (pointCount > 1) {
-      routeBoundsRef.current = bounds
-      instance.setBounds(bounds, 40, 35, 35, 35)
-    } else if (pointCount === 1) {
-      routeBoundsRef.current = bounds
+    const livePosition = livePositionRef.current
+    if (followLivePosition.current && isValidLivePosition(livePosition)) {
+      instance.panTo(new maps.LatLng(livePosition.latitude, livePosition.longitude))
     }
     return () => {
       routeLinesRef.current?.destroy()
@@ -459,7 +524,32 @@ export function useKakaoMap(
       syncStationMarkersRef.current?.()
       routeBoundsRef.current = null
     }
-  }, [route, status])
+  }, [bikeStationsVisible, route, status])
+
+  useEffect(() => {
+    if (!isValidLivePosition(livePosition)) {
+      if (ownMarkerIsLive.current) {
+        ownMarker.current?.setMap(null)
+        ownMarker.current = null
+        ownMarkerIsLive.current = false
+      }
+      followLivePosition.current = false
+      return
+    }
+    const maps = mapsRef.current
+    const instance = map.current
+    if (!maps || !instance || status !== 'ready') return
+    const point = new maps.LatLng(livePosition.latitude, livePosition.longitude)
+    if (!ownMarker.current || !ownMarkerIsLive.current) {
+      ownMarker.current?.setMap(null)
+      ownMarker.current = new maps.Marker({ map: instance, position: point, title: '현재 위치' })
+      followLivePosition.current = true
+    } else {
+      ownMarker.current.setPosition(point)
+    }
+    ownMarkerIsLive.current = true
+    if (followLivePosition.current) instance.panTo(point)
+  }, [livePosition, status])
 
   useEffect(() => {
     updateMarkerSelection()
@@ -483,13 +573,32 @@ export function useKakaoMap(
     const point = new maps.LatLng(position.coords.latitude, position.coords.longitude)
     ownMarker.current?.setMap(null)
     ownMarker.current = new maps.Marker({ map: map.current, position: point, title: '현재 위치' })
+    ownMarkerIsLive.current = false
+    followLivePosition.current = false
     map.current.panTo(point)
+  }
+  const resumeLivePosition = () => {
+    const position = livePositionRef.current
+    const maps = mapsRef.current
+    if (!isValidLivePosition(position) || !maps || !map.current) return false
+    const point = new maps.LatLng(position.latitude, position.longitude)
+    if (!ownMarker.current || !ownMarkerIsLive.current) {
+      ownMarker.current?.setMap(null)
+      ownMarker.current = new maps.Marker({ map: map.current, position: point, title: '현재 위치' })
+      ownMarkerIsLive.current = true
+    } else {
+      ownMarker.current.setPosition(point)
+    }
+    followLivePosition.current = true
+    map.current.panTo(point)
+    return true
   }
   return {
     container,
     status,
     retry: () => setAttempt((value) => value + 1),
     showPosition,
+    resumeLivePosition,
     locationScope: (origin?.id || 'browse') + '-' + destination?.id + '-' + attempt,
   }
 }

@@ -1,0 +1,250 @@
+.route-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: #26343e;
+  font-size: 13px;
+  line-height: 1.5;
+  letter-spacing: -0.2px;
+}
+.route-timeline > li {
+  position: relative;
+  margin: 0;
+  padding-left: 38px;
+}
+.route-timeline > li::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 10px;
+  width: 4px;
+  content: '';
+  background: radial-gradient(circle, #ccd2d8 1.5px, transparent 2px) center top / 4px 9px repeat-y;
+}
+.route-timeline > li:first-child::before {
+  top: 12px;
+}
+.route-timeline > li:last-child::before {
+  bottom: 12px;
+}
+.route-timeline-endpoint {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+}
+.route-timeline-origin {
+  padding-bottom: 14px;
+}
+.route-timeline-destination {
+  padding-top: 14px;
+}
+.route-timeline > .route-timeline-destination::before {
+  bottom: calc(100% - 14px);
+}
+.route-timeline-endpoint strong {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.route-timeline-endpoint-marker {
+  position: absolute;
+  left: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #15846c;
+  color: white;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  box-shadow: 0 0 0 3px white;
+}
+.route-timeline-destination .route-timeline-endpoint-marker {
+  background: #e36661;
+}
+.route-timeline-leg {
+  --route-timeline-line: #4277d9;
+}
+.route-timeline-leg.is-active > div {
+  background: #f1f9f6;
+  border-radius: 8px;
+  outline: 6px solid #f1f9f6;
+}
+.route-timeline-leg.is-walk.is-active {
+  padding-top: 6px;
+  padding-bottom: 12px;
+}
+.route-timeline-leg.is-active > .route-timeline-ordinary {
+  padding: 8px 10px;
+  outline: none;
+}
+.route-timeline-transit {
+  position: relative;
+  padding: 0;
+}
+.route-timeline-transit::before {
+  position: absolute;
+  left: -28px;
+  top: 12px;
+  bottom: 12px;
+  width: 4px;
+  border-radius: 3px;
+  background: var(--route-timeline-line);
+  content: '';
+}
+.route-timeline-stop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-height: 24px;
+}
+.route-timeline-stop strong {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.route-timeline-stop-marker {
+  position: absolute;
+  top: 2px;
+  left: -36px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--route-timeline-line);
+  border-radius: 50%;
+  background: white;
+  color: var(--route-timeline-line);
+}
+.is-alighting .route-timeline-stop-marker {
+  color: #7a8790;
+  border-color: #a2adb5;
+}
+.route-timeline-stop-kind {
+  font-size: 12px;
+  color: #68757e;
+}
+.route-timeline-end-tag {
+  margin-left: auto;
+  color: #128067;
+  font-size: 10px;
+}
+.route-timeline-end-tag.is-destination {
+  color: #cb514e;
+}
+.route-timeline-service {
+  padding: 10px 0 16px;
+}
+.route-timeline-service-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.route-timeline-service-label {
+  color: var(--route-timeline-line);
+  font-size: 12px;
+  font-weight: 600;
+}
+.route-timeline-congestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.route-timeline-congestion > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.route-timeline-direction {
+  margin: 4px 0 0;
+  color: #6b7780;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.route-timeline-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: #74808a;
+  font-size: 12px;
+}
+.route-timeline-meta strong {
+  color: #45535d;
+  font-size: 12px;
+  font-weight: 600;
+}
+.route-timeline-meta strong::before {
+  content: '·';
+  margin: 0 5px 0 1px;
+  color: #a4aeb6;
+}
+.route-timeline-service > .route-timeline-meta {
+  margin-top: 15px;
+  padding-top: 10px;
+  border-top: 1px solid #edf0f2;
+}
+.route-timeline-ordinary {
+  padding: 16px 0;
+}
+.route-timeline-walk-title {
+  color: #65737d;
+  font-size: 12px;
+  font-weight: 400;
+}
+.route-timeline-ordinary .route-timeline-meta {
+  margin-top: 4px;
+}
+.route-timeline-bus-options {
+  margin-top: 8px;
+  color: #5b6b78;
+  font-size: 12px;
+}
+.route-timeline-bus-options summary {
+  cursor: pointer;
+  padding-block: 5px;
+}
+.route-timeline-bus-options ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.route-timeline-bus-options li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+.route-timeline-bus-options li > span + span {
+  color: #76818b;
+}
+.route-timeline-leg.is-riding + .route-timeline-leg.is-riding {
+  padding-top: 22px;
+}
+.route-timeline-confirm {
+  margin: 10px 0 4px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  color: #08715f;
+}
