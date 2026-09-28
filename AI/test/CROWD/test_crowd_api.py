@@ -38,6 +38,7 @@ def _table() -> pd.DataFrame:
                     "data_status": "no_calibration" if np.isnan(pct) else "ok",
                     "boarding_pred": 1000.0,
                     "alighting_pred": 900.0,
+                    "pred_source": "model",
                     "boarding_lookup": 950.0,
                     "alighting_lookup": 880.0,
                     "actual_boarding": np.nan,
@@ -78,6 +79,45 @@ def test_meta_lists_dates_and_predictor(serving_dir):
     assert body["available_dates"] == [DAY]
     assert body["predictor_version"] == "lookup:test"
     assert body["grade_thresholds"] == [50.0, 100.0]
+
+
+def test_meta_events_coverage_fields_default_to_none_for_old_meta(serving_dir):
+    """200: 이전 meta.json(키 없음)이어도 `.get`으로 안전하게 `None`이 내려가야 한다."""
+    r = client.get("/crowd/meta")
+    assert r.status_code == 200
+    body = r.json()
+    assert "events_coverage_end" in body and body["events_coverage_end"] is None
+    assert "events_available" in body and body["events_available"] is None
+
+
+def test_meta_events_coverage_fields_pass_through_when_present(tmp_path, monkeypatch):
+    """200: meta.json에 값이 있으면 `/crowd/meta`가 그대로 내려야 한다."""
+    path = tmp_path / f"predictions_{DAY}.parquet"
+    _table().to_parquet(path, index=False)
+    path.with_suffix(".meta.json").write_text(
+        json.dumps(
+            {
+                "predictor": "lookup",
+                "predictor_version": "lookup:test",
+                "lag1d_available": False,
+                "grade_thresholds": [50.0, 100.0],
+                "generated_at": "2026-01-05T04:00:00+09:00",
+                "status_counts": {"ok": 4, "no_calibration": 2},
+                "topology_gaps": [],
+                "events_coverage_end": "2026-12-31",
+                "events_available": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "_store", service.PredictionStore(tmp_path))
+    monkeypatch.setattr(service, "get_store", lambda settings=None: service._store)
+
+    r = client.get("/crowd/meta")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["events_coverage_end"] == "2026-12-31"
+    assert body["events_available"] is True
 
 
 def test_station_congestion_exposes_missing_as_status_not_zero(serving_dir):

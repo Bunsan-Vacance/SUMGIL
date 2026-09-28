@@ -103,12 +103,12 @@ anchor = 직전 슬롯의 avg(train) 값, horizon_min=30으로 LightGBM(v3) 호�
 
 A1의 실패 원인이 "anchor(avg 8개월 전 평균)가 이미 틀려서"였다면, **진짜 실시간 anchor**를 쓰면
 LightGBM(v3)이 이미 검증된 성능(MAE 1.6대, `target_net_flow` 기준)을 낼 수 있다는 가설이
-있다 — `DATA_ENGINE/collect/bike_realtime.py`가 5분마다 `data/BIKE/raw/realtime/latest.parquet`을
-갱신하므로 AI가 BE 없이도 신선한 현재 재고를 직접 읽을 수 있음(BE Redis는 VPN 미구성으로
-아직 접근 불가, `-131` 문서 참고).
+있다 — Kafka consumer가 `bike.stock`을 받아
+`data/BIKE/raw/realtime/latest_stock.parquet`을 갱신하므로 AI가 신선한 현재 재고를
+직접 읽을 수 있음(BE Redis는 VPN 미구성으로 아직 접근 불가, `-131` 문서 참고).
 
 **중요한 caveat**: 학습에 쓴 `stock_anchor_hour`는 `station_stock_hourly`(1시간 단위) 기반이고,
-`minutes_since_stock_anchor`도 "1시간 읽기 후 경과 시간" 분포로 학습됐다. `latest.parquet`은
+`minutes_since_stock_anchor`도 "1시간 읽기 후 경과 시간" 분포로 학습됐다. `latest_stock.parquet`은
 5분 단위로 훨씬 신선해서, 모델이 학습 때 본 적 없는 입력 분포(항상 매우 작은
 minutes_since_anchor)를 받게 된다. **MAE 1.6대가 이 조건에서도 재현되는지는 별도 소규모
 검증이 반드시 필요하다 — 단정 금지.**

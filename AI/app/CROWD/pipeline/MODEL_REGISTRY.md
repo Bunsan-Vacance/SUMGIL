@@ -6,7 +6,7 @@
 | 층 | 코드 예 | 정의 위치 |
 | --- | --- | --- |
 | 피처 세트 | `festival_selflag_d1sd_d7_resid` | `features.py: FEATURE_SETS` |
-| 아티팩트 | `models/CROWD/festival_selflag_d1sd_d7_resid_20260913-0340/` | `train.py`가 저장, `meta.json` 동봉 |
+| 아티팩트 | `models/CROWD/festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025/` | `train.py`가 저장, `meta.json` 동봉 |
 | 예측기 | `lookup` / `lightgbm:<폴더명>` / `dl:<폴더명>` / `llm` | `predictor.py: build_predictor`, 배치 meta `predictor_version` |
 
 ## 1. 모델 구조(모든 세트 공통)
@@ -74,6 +74,26 @@ LightGBM 쪽 이벤트 5열은 재점검하지 않았다 — 트리는 값 분�
 93의 분할 실험(호선별 8모델 +0.11, 6호선 분리 +0.21, 군집 4모델 +0.47, 6호선은 단독 fit 시 −2.98)은 세트 코드가 아니라 `--group-col`
 옵션이고 모두 기각 → 전역 단일 모델.
 
+### 마스킹 학습 LightGBM(145 후속, masking-check)
+
+**마스킹은 새 피처 세트도 새 `model_kind`도 아니다** — 학습 옵션이다(`train.py --mask-mode
+{stack,replace}`). 세트는 그대로 `festival_selflag_d1sd_d7_resid`고, 아티팩트 `meta.json`에
+`training.masking` 블록이 추가될 뿐이다(`model_kind` 키 없음 → `artifact_kind`가 기존과 똑같이
+`lightgbm`으로 읽는다). 학습 구간(2024)의 원본 표본에 결측 시나리오(`masking.SCENARIOS`)를 흉내 낸
+사본을 날짜 단위로 섞어 학습 때부터 결측을 보여준다 — 사본 비중은 `d7_only .5 / no_lag .3 /
+d1_only .2`(날짜 기준 185/113/68일).
+
+2025 평가, lookup 대비 RMSE 개선율 %(승/하, w2024 = 2024 학습 / 2025 평가):
+
+| 아티팩트 코드 | 학습 방식 | `full` | `d7_only` | `d1_only` | `no_lag` | 판정 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **`lgbm_masked_stack`** | 원본 + 마스크 사본 추가(표본 2배, 3,988,200행) | +23.42 / +25.73 | +16.66 / +19.37 | +11.49 / +11.39 | +1.71 / +1.60 | **배포**(`crowd_lgbm_artifact`) |
+| `lgbm_masked_replace` | 원본을 날짜별로 마스크 사본으로 덮어씀(표본 그대로, 1,994,100행) | +22.99 / +25.61 | +16.85 / +19.54 | +11.86 / +11.21 | +1.19 / +1.30 | 탈락 — `no_lag` MAE가 lookup 아래(−0.40/−0.18), `full` 휴일 슬라이스 −4.63%p(원본 표본이 절반이 된 대가) |
+| `lgbm_masked_stack_d1` | `stack`의 `d1_only` 사본 비중만 .2→.3(146/115/105일) | +23.36 / +25.79 | +16.21 / +18.81 | +11.70 / +11.91 | +1.61 / +1.53 | 기각 — GRU와의 `d1_only` 격차 5.4~6.9%p 중 0.2~0.5%p만 닫히고 `d7_only`가 대신 내려가 "노출 부족" 가설을 기각한다(5b절) |
+
+하이퍼파라미터는 배포와 동일(`DEFAULT_PARAMS`) — 바꾸면 마스킹 효과와 용량 효과가 섞인다. 수치
+원본·재현 조건(패널 버전·분할·시드·명령)은 `validation/CROWD/masking-check/RESULTS.md`.
+
 ## 3. 아티팩트
 
 `python -m app.CROWD.pipeline.train [--feature-set …] [--group-col …] [--params JSON]` → `models/CROWD/<feature_set>_<YYYYMMDD-HHMM>/`
@@ -85,8 +105,9 @@ LightGBM 쪽 이벤트 5열은 재점검하지 않았다 — 트리는 값 분�
 | `meta.json` | `feature_set, feature_columns, categorical_columns, targets, lookup_keys, group_col, derived_version, train_start/end, split_date, n_train_rows, params, created_at, model_files` |
 
 `models/`는 커밋되지 않는다(재생성 가능, 학습 20초). 폴더는 세트별·시각별로 갈리므로 **옛 아티팩트는 지워지지 않고 남는다.**
-배치의 `--predictor auto`는 `latest_artifact(kind="lightgbm")`(그 계열 중 폴더명 정렬 최신)을 잡는다 — 특정 아티팩트를
-고정하려면 `CROWD_MODELS_DIR`로 폴더를 좁히거나 옛 폴더를 옮긴다. 계열 필터는 4절 `model_kind` 규칙 참고.
+배치의 `--predictor auto`는 `crowd_lgbm_artifact`가 고정한 폴더(145 후속, 없으면
+`latest_artifact(kind="lightgbm")` — 그 계열 중 폴더명 정렬 최신)를 잡는다 — 특정 아티팩트를
+고정하려면 그 설정값을 바꾸거나 `CROWD_MODELS_DIR`로 폴더를 좁힌다. 계열 필터는 4절 `model_kind` 규칙 참고.
 
 현재 로컬 아티팩트(2026-09-14):
 
@@ -94,10 +115,14 @@ LightGBM 쪽 이벤트 5열은 재점검하지 않았다 — 트리는 값 분�
 | --- | --- | --- |
 | `festival_all_derived_resid_20260911-1518` | 실시간 상한 세트 | 90 비교용 보존 |
 | `festival_selflag_d1d7_resid_20260911-1533` | 90 배포 세트 | 93까지 배치가 쓴 모델. 보존 |
-| **`festival_selflag_d1sd_d7_resid_20260913-0340`** | **현재 배포 세트** | 147에서 학습. `batch_predict --today` meta `predictor_version`으로 확인 |
+| `festival_selflag_d1sd_d7_resid_20260913-0340` | 이전 배포 세트 | 이전 배포(197까지). 보존 |
+| `festival_selflag_d1sd_d7_resid_masked-stack_20260917-1113` | 이전 배포(145 후속, 2024 단독 마스킹 학습). 롤백용 보존 | `crowd_lgbm_artifact`로 고정. 세트·`model_kind`는 동일(`lightgbm`), `meta.json`에 `training.masking` 블록만 추가. `batch_predict --today` meta `predictor_version`으로 확인 |
+| **`festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025`** | **현재 배포**(200, 2024+2025 최종 fit) | `crowd_lgbm_artifact`로 고정. 마스킹 stack, 학습 2024-01-01~2025-12-31(7,974,000행). 보유 평가 연도 없음 — 2026 실측 누적 시 `compare.py`로 사후 검증(4b절). **학습 입력 이벤트 표는 318 수정 전 판**(`crowd_station_events_2024_2025_PRE318.parquet`, 축제 중복으로 `festival_count` 합 +16%) — 318에서 중복 제거 표로 재학습해도 `full` −0.07/−0.12%로 이득이 없고 서빙(2026 표, 불변)에 영향이 없어 재승격하지 않았다(`validation/CROWD/events-dedup-check/RESULTS.md`). 다음 재적합부터는 수정된 표가 입력이다 |
+| `_experiments/events318/w2024c_masked-stack` | 318 — 중복 제거 이벤트 표로 2024 학습한 마스킹 stack | 영향 측정용. 승격 안 함 |
 | `dl_gru_s14_20260914-0949` | 144 GRU = 198 V0(시드 42) | `model_kind="dl"` — `auto`가 고르지 않는다 |
 | `dl_gru_s14_s43_…`, `dl_gru_s14_s44_…` | V0 시드 43·44 | 198 시드 분산 측정 |
-| **`dl_gru_s14_noev_s42_20260914-1358`** | **198 채택 구성(V3)** | 시드 43·44도 같이 있다(`_noev_s43`, `_noev_s44`) |
+| `dl_gru_s14_noev_s42_20260914-1358` | 198 채택 구성(V3), 이전 DL 배포(2024 단독). 롤백용 보존 | 시드 43·44도 같이 있다(`_noev_s43`, `_noev_s44`) |
+| **`dl_gru_s14_noev_s42_train2024-2025`** | **현재 DL 배포**(200, 2024+2025 최종 fit) | `crowd_dl_artifact`로 고정. V3 구성, 학습 2024-01-01~2025-10-31·검증 2025-11~12(`train_dl --splits`), 평가 구간 0표본. 라우팅상 `d1_only`만 맡는다 |
 | `dl_gru_s14_neighbor_s42_…`, `dl_gru_s14_neighbor_noev_s42_…` | 198 V1 · V1+V3 | 비교 보존 |
 | `dl_gru_s14_events_hist_s42_…`, `dl_gru_s14_hd3_s42_…` | 198 V2 · δ=3 | 기각 기록 보존 |
 | `dl_lstm_s14_20260914-1236` | 144 LSTM 1회 실험 | 계열 확정 근거. 보존 |
@@ -122,9 +147,9 @@ device, truncation, p_full, determinism`이 들어간다. `event_stats.parquet`�
 
 | kind | 뜻 | 언제 쓰이나 |
 | --- | --- | --- |
-| `lookup` | 평균만. 네이버·카카오 수준의 정직한 기준선 | 아티팩트가 없을 때의 `auto`, 그리고 **이력 창(직전 7일)에 실측이 하나도 없을 때의 대체**(143) |
-| `lightgbm:<폴더>` | lookup + 잔차 모델 | `auto` 기본. 배치 meta `predictor_version`에 폴더명이 남아 어느 모델이 예측했는지 추적 |
-| `dl:<폴더>` | lookup + GRU 시퀀스 잔차(144·198) | 명시 지정(`--predictor dl`)일 때만. `auto`는 고르지 않는다 |
+| `lookup` | 평균만. 네이버·카카오 수준의 정직한 기준선 | 아티팩트가 없을 때의 `auto`, 그리고 `--predictor lookup` 명시(197부터 "이력 전무 시 자동 대체"는 없어지고 라우팅이 `dl`을 쓴다) |
+| `lightgbm:<폴더>` | lookup + 잔차 모델(마스킹 학습 포함) | `auto` 기본, 그리고 라우팅의 `full`·`d7_only`·`no_lag`(145 후속, 197 당시는 `full`만). `crowd_lgbm_artifact`로 폴더명을 고정한다(아래 "LightGBM 배포판") |
+| `dl:<폴더>` | lookup + GRU 시퀀스 잔차(144·198) | 명시 지정(`--predictor dl`), 그리고 라우팅의 `d1_only`(145 후속, 197 당시는 `d1_only`·`d7_only`·`no_lag` 전부). `auto`는 여전히 고르지 않는다 — `crowd_dl_artifact`로 폴더명을 고정한다(아래 "DL 배포판") |
 | `llm` | 시차·이벤트를 프롬프트로 주고 수치를 받는 실험 축 | 145 비교 실험 전용. 프로덕션 기본값 아님 |
 
 **`model_kind` 규칙(144).** 모든 아티팩트 `meta.json`은 계열을 `model_kind`로 밝힌다 — `lightgbm`(기본,
@@ -136,13 +161,26 @@ device, truncation, p_full, determinism`이 들어간다. `event_stats.parquet`�
 DL은 `seq_days`=14). 배치는 `max(HISTORY_DAYS, predictor.required_history_days)`로 이력 창을 잡고
 `meta.history_window_days`에 남긴다. DL은 창이 그보다 짧게 와도 앞쪽이 마스크 0으로 그대로 동작한다.
 
-**결측 내성(143에서 확인, 미해결).** 배포 세트 모델에 시차 컬럼을 전부 NaN으로 넣으면 lookup 대비 RMSE **−36.6 / −40.7%**,
+**결측 내성(143에서 확인).** 배포 세트 모델에 시차 컬럼을 전부 NaN으로 넣으면 lookup 대비 RMSE **−36.6 / −40.7%**,
 1주 전만 있으면 −20.8 / −14.9%(`validation/CROWD/recent-source-check/RESULTS.md` 4절). 학습 때 결측을 본 적이 없기 때문이다.
-그래서 이력이 전혀 없으면 lookup으로 대체하고, D−1 하루만 빠진 경우(`lag1d_available=false`)는 아직 노출만 한다.
+**197부터는 이 붕괴를 lookup 대체가 아니라 라우팅(아래)으로 피한다** — 이력 상태에 따라 처음부터 다른 예측기를 쓴다.
 학습 시 시차 마스킹은 144가 다뤘고 198이 입력을 고쳤다 — 채택 구성(V3)은 같은 상황에서 **+1.05 / +1.92%**다
 (144 V0은 −7.9 / −3.9였다).
 
-**가용성별 예측기 선택 — 145에서 쌍 부트스트랩으로 판정**(`validation/CROWD/family-check/RESULTS.md`).
+**가용성별 예측기 선택 — 145 후속이 갱신**(`validation/CROWD/masking-check/RESULTS.md` 14절, 결정
+"(나) 혼합 유지, 표 수정"). 배포 LightGBM에 결측 시나리오를 학습 때부터 보여주는 마스킹 학습이
+`d7_only`·`no_lag`의 붕괴를 없애 아래로 바뀌었다:
+
+| 이력 상태 | 예측기 | masked LightGBM − GRU RMSE 쌍 차이 %p [CI] 승/하(w2024, 2024 학습/2025 평가) |
+| --- | --- | --- |
+| `full` | **LightGBM(마스킹 학습)** | +2.96 [+1.19, +4.42] / +2.41 [+0.43, +4.08] — 배포 대비도 무손실(+0.04/+0.38, 등급 97.012 vs 97.025) |
+| **`d7_only`** | **LightGBM(마스킹 학습)** | **+11.95 [+9.60, +14.08] / +13.78 [+11.13, +16.18]**(w2023 +14.93/+15.69도 같은 방향). 등급 96.706 vs GRU 96.205 — 197 당시 GRU를 택한 근거(배포 LightGBM −20.8%p 붕괴)가 마스킹으로 사라졌다 |
+| `d1_only` | **GRU(dl)** | **−5.59 [−7.28, −4.15] / −7.43 [−9.28, −5.66]**(w2023 −7.22/−8.97) — 4단 중 유일하게 라우팅이 그대로다 |
+| `no_lag` | **LightGBM(마스킹 학습)** | −0.52 [−2.47, +1.44] / −1.84 [−3.99, +0.44] — CI가 0을 포함해 동등, 정확도 우위가 아니라 모델 하나로 합친다 |
+
+**197 당시 판정**(2026-09-16 확정, `validation/CROWD/family-check/RESULTS.md` 8절 — 위 표로 대체됨.
+숫자는 지우지 않고 남긴다):
+
 같은 시나리오 안에서 계열을 쌍 비교한 결과(날짜 블록 1,000회, 2025 전체 1,992,900행):
 
 | 이력 상태 | 예측기 | GRU − LightGBM RMSE %p [CI 하한] 승/하 |
@@ -153,9 +191,104 @@ DL은 `seq_days`=14). 배치는 `max(HISTORY_DAYS, predictor.required_history_da
 
 **단 `no_lag`에서 GRU가 lookup을 "넘는다"고 쓰지 않는다** — 날짜 CI로 보면 시드 3개 중 하나만 하한이 0 위
 (+0.35/+1.22)이고 나머지는 0을 포함한다(198의 시드 표준편차 ±1.02보다 날짜 CI 폭 ±1.9%p가 넓다).
-채택 근거는 정확도 우위가 아니라 **LightGBM의 −36.6/−40.7%p 붕괴를 피한다**는 것이다.
+당시 채택 근거는 정확도 우위가 아니라 **LightGBM의 −36.6/−40.7%p 붕괴를 피한다**는 것이었다 — 145
+후속에서 그 붕괴 자체가 마스킹 학습으로 없어졌다(위 표).
 하루치 CPU 추론은 GRU 0.23초 / LightGBM 0.03초(5,460행)로 운영 기준(10분)에 무관하다.
-운영 코드 반영(3단 선택)은 **197**이다 — 이 문서의 `auto` 규칙은 아직 `lightgbm`만 고른다.
+
+### LightGBM 배포판 — `crowd_lgbm_artifact`로 고정(145 후속)
+
+LightGBM도 이름 정렬(`latest_artifact`)에만 기대지 않는다 — 지금은 마스킹 학습 아티팩트가 이름
+정렬에서도 우연히 최신이지만, 실험 아티팩트(`_experiments/masking/`)나 차기 학습이 이름이 더 앞서는
+폴더를 만들면 `auto`가 조용히 다른 계열로 넘어갈 수 있다. 대신
+`Settings.crowd_lgbm_artifact`(`app/core/config.py`)로 폴더명을 고정한다.
+
+| 항목 | 값 |
+| --- | --- |
+| 설정값 | `crowd_lgbm_artifact: str \| None = "festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025"` (200에서 1113 → 2024-25 판으로 교체) |
+| 가리키는 아티팩트 | `festival_selflag_d1sd_d7_resid_masked-stack_train2024-2025` — 세트는 `festival_selflag_d1sd_d7_resid` 그대로, `train.py --mask-mode stack`으로 학습(`meta.json`에 `training.masking` 블록, `model_kind` 키는 없어 기존과 같이 `lightgbm`으로 읽힌다) |
+| 판정 근거 | 145 후속 `masking-check/RESULTS.md` 6·7·13·14절(위 표) |
+| 실패 동작 | 폴더가 없으면 `FileNotFoundError`(설정값 이름·기대 경로를 메시지에 남김), 폴더는 있는데 `meta.json`의 `model_kind`가 `lightgbm`이 아니면 `ValueError`(DL과 같은 패턴, `resolve_predictor._lightgbm_artifact`) |
+| `None`일 때 | 예전처럼 `latest_artifact(kind="lightgbm")`(이름 정렬 최신)로 떨어진다 |
+
+### DL 배포판 — 이름 정렬로 고르지 않는다(197 B-3)
+
+`--predictor dl`(과 라우팅이 `dl`을 고르는 모든 경우)은 `latest_artifact(kind="dl")`(폴더명 정렬 최신)을
+쓰지 않는다. DL 변형이 18개라 이름 정렬 최신은 채택 구성이 아니라 우연히 이름이 뒤에 오는 다른 변형
+(`dl_lstm_s14_noev_s44_…` 등)을 고른다. 대신 `Settings.crowd_dl_artifact`(`app/core/config.py`)로
+폴더명을 고정한다.
+
+| 항목 | 값 |
+| --- | --- |
+| 설정값 | `crowd_dl_artifact: str = "dl_gru_s14_noev_s42_train2024-2025"` (200에서 1358 → 2024-25 판으로 교체) |
+| 가리키는 아티팩트 | `dl_gru_s14_noev_s42_train2024-2025` — 198 V3 구성(2024+2025 재적합, 200)(7채널, **정적 이벤트 없음**), 시드 42 |
+| 판정 근거 | 198 판정 1·4(이벤트 5열 제거가 `full`·`no_lag` 동시 개선) + 145 family-check(위 표) |
+| 실패 동작 | 폴더가 없으면 `FileNotFoundError`(설정값 이름·기대 경로를 메시지에 남김), 폴더는 있는데 `meta.json`의 `model_kind`가 `dl`이 아니면 `ValueError`(설정값이 잘못된 폴더를 가리키는 경우를 잡는다) |
+
+### 가용성별 라우팅 정책 — `app/CROWD/pipeline/routing.py`
+
+운영 코드 반영(197 B부, 145 후속이 갱신. `predict_day`가 매 날짜 `routing.availability()` →
+`routing.select()`로 kind를 정한다). 활성 정책은 가용성 축만이라 오늘 한 표는 예측기가 하나로
+배정된다(`routing.POLICY`).
+
+| 가용성(`avail`) | 뜻 | 예측기(`pred`) |
+| --- | --- | --- |
+| `full` | 전날·1주 전 실측 모두 있음 | `lightgbm`(`crowd_lgbm_artifact` 고정 아티팩트, 마스킹 학습) |
+| `d1_only` | 전날만 있음 | `dl`(`crowd_dl_artifact` 고정 아티팩트) |
+| `d7_only` | 1주 전만 있음 | `lightgbm`(145 후속 — 197 당시는 `dl`) |
+| `no_lag` | 둘 다 없음 | `lightgbm`(145 후속 — 197 당시는 `dl`) |
+
+부원(비활성) 규칙 2개(1호선 전용 선형 회귀, 모양 군집 LightGBM)는 `routing.py`의 `POLICY` 목록에 **주석**으로만
+남아 있다 — 근거는 있으나 미검증이라 논의 I-1(원인 규명)이 선행돼야 켤 수 있다. `Rule`이 `avail` 외에
+`line`·`day_type`·`group`도 받을 수 있어 그 규칙을 켜도 구조를 다시 잡지 않는다(명시 조건이 많은 규칙이 우선).
+
+## 4b. 아티팩트 승격 절차(200)
+
+145 후속까지 배포 교체는 손으로 했다(학습 → 비교 → 폴더 복사 → 설정값 고정 → 서빙 표 재생성 →
+`SERVING_CONTRACT.md` 갱신 → BE 통지). 200 B부는 그 절차를 코드로 못박는다 — **재학습 주기는
+정하지 않는다**(아래 마지막 문단). 절차 자체만 고정한다.
+
+### 순서
+
+1. `_experiments/`(`models/CROWD/_experiments/<실험명>/<아티팩트명>/`)에서 학습하고
+   `validation/CROWD/*/RESULTS.md`에 비교 결과를 남긴다(비교 원칙은 `AI/CLAUDE.md` "모델 비교는
+   동등 조건에서만 한다"). 채택 판정이 서면 다음 단계로 넘어간다.
+2. **한 명령으로 복사한다**:
+
+   ```
+   python -m app.CROWD.pipeline.promote_artifact --src models/CROWD/_experiments/<실험명>/<아티팩트명>
+   ```
+
+   (`app/CROWD/pipeline/promote_artifact.py`, 200 B부 신설.) `src`의 `meta.json`을 읽어 kind
+   (`lightgbm`/`dl`)를 판정하고, kind별로 있어야 할 파일(`lightgbm`은 `lookup.parquet` +
+   `meta.json["model_files"]`의 모든 부스터 파일, `dl`은 `model.pt`·`scale.parquet`·`event_stats.parquet`·`lookup.parquet`)이 다 있는지 확인한 뒤 한 화면
+   요약(세트/모델, 학습 구간 또는 `splits`, 학습 표본 수, 마스킹 모드, `created_at`)을 찍고
+   `models/CROWD/<이름>/`로 `shutil.copytree`한다. 대상 폴더가 이미 있으면 `--force` 없이는
+   거부하고, **`--force`를 줘도 대상 이름이 현재 배포 중인 아티팩트**(`crowd_lgbm_artifact`/
+   `crowd_dl_artifact`)면 거부한다 — 운영 폴더를 승격 스크립트가 지우는 사고를 막기 위해서다.
+3. 이 스크립트는 **`app/core/config.py`를 편집하지 않는다** — 바꿀 줄(`crowd_lgbm_artifact: str |
+   None = "<이름>"` 또는 `crowd_dl_artifact: str = "<이름>"`)만 출력한다. 그 줄을 사람이 직접
+   `app/core/config.py`에 반영한다(설정값 고정, 운영 기본값을 스크립트가 조용히 바꾸지 않기 위해서).
+4. **확인**(순서대로):
+   - `pytest -q test/CROWD/` 통과.
+   - `batch_predict --date <최근 2일>`로 서빙 표를 재생성해 새 아티팩트로 도는지 확인
+     (`meta`의 `predictor_version`으로 확인).
+   - `SERVING_CONTRACT.md` 1·3·4절의 예시 값을 갱신한다 — 계약 테스트는 **값 자체는 보지 않는다**
+     (스키마만 검증), 예시가 실제 값과 어긋나면 사람이 보는 문서만 낡는다.
+   - 이 문서(`MODEL_REGISTRY.md`) 3절 아티팩트 표를 갱신한다(새 폴더 추가, 상태 갱신).
+   - BE 통지문을 `.claude/handoff/TO_BE-crowd-….md`로 남긴다(새 아티팩트 이름·변경 사항 요약).
+5. **롤백**은 설정값을 이전 폴더명으로 되돌리는 것뿐이다 — `promote_artifact`는 옛 아티팩트를
+   지우지 않으므로(3절 "폴더는 세트별·시각별로 갈리므로 옛 아티팩트는 지워지지 않고 남는다") 이전
+   폴더가 여전히 `models/CROWD/`에 있다.
+
+### 재학습 주기 · 데이터 창
+
+**재학습 주기는 프로젝트 기간 안에 정의하지 않는다**(사용자 결정 2026-09-17, 프로젝트가 몇 달
+안에 끝나 주기를 둘 이유가 없다) — 여기서 고정하는 것은 승격 **절차**뿐이다. 다음 프로덕션
+아티팩트는 2024·2025를 **둘 다 학습(+검증) 구간**으로 재적합하고 평가는 아직 데이터가 없는
+미래(예: 2026, `train_dl --splits`로 비워 둠 — 위 "학습 창 확장" Task 2)로 둔다. **2023은
+뺀다** — `validation/CROWD/masking-check/RESULTS.md` 13·17절이 학습 창을 2023까지 넓히면(2025를
+평가로 둔 비교에서) LightGBM이 손해(`full` −0.8~1.3%p, `no_lag` −4.5~4.0%p)를 본다고 판정했다
+(2023이 회복기라 분포가 이동하는 것이 원인, GRU만 이득이 있었으나 `d1_only` 구간에 한정된다).
 
 ## 5. 변환 층 산출물 — 배율표도 아티팩트처럼 추적한다
 
@@ -186,6 +319,20 @@ diagnostics, previous_sha256, previous_archived_as, generated_at, sha256`.
 out-of-sample 성능(연도 홀드아웃)은 셀 MAE 2.147(2023→2024) / 1.428(2024→2025)%p, 등급 일치율
 96.776 / 97.965%다 — 수치 원본은 `validation/CROWD/calibration-refit/RESULTS.md`(199)와
 `calibration-holdout/RESULTS.md`(142).
+
+**열차·노드 표(239)는 이 배율표 위의 분해이지 새 모델이 아니다.** 슬롯 표(L3)의 30분 보정
+혼잡도를 시각표(`timetable.py`)로 나눠 열차 단위로 만들고(`disaggregate.allocate_to_trains`, L4),
+열차 궤적을 역(노드) 관점으로 재색인한다(`disaggregate.node_states`·`allocate_flows_to_trains`,
+L5) — 새 정보를 만들지 않으므로 정확도 판정·아티팩트 추적 대상이 아니다. 옵션
+`settings.crowd_train_table`(기본 `false`)로 켜고, 설계·근거·검증 가능성은
+`app/CROWD/pipeline/RESOLUTION_LADDER.md`(§1.1·§3 L4·L5), 산출물 계약은 `SERVING_CONTRACT.md`
+7절에 있다.
+
+**링크(from/to) 표(244)도 같은 이유로 분해 뷰이지 새 모델이 아니다.** 세그먼트 위상에서 만든
+`(line, segment, station_no, direction) -> to_station_no` 대응표를 슬롯 표(L3)에 이너 조인해
+링크 단위로 다시 보여줄 뿐, 값을 새로 만들거나 추정하지 않는다 — 그래서 정확도 판정·아티팩트
+추적 대상이 아닌 것도 열차·노드 표와 같다. 옵션 `settings.crowd_link_table`(기본 `false`)로
+켜고, 설계 근거는 `SERVING_CONTRACT.md` 8절·`app/CROWD/pipeline/RESOLUTION_LADDER.md`(§1.1·§4).
 
 ## 6. 이 코드들이 바뀌는 경우
 

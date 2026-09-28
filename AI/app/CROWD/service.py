@@ -99,6 +99,7 @@ def station_congestion(
                 "congestion_pct": _num(r["congestion_pct"]),
                 "grade": _int(r["grade"]),
                 "data_status": r["data_status"],
+                "pred_source": r["pred_source"],
             }
             for _, r in rows.iterrows()
         ],
@@ -124,6 +125,7 @@ def line_congestion(day: date_type, line: str, time_slot_30min: str) -> dict | N
                 "congestion_pct": _num(r["congestion_pct"]),
                 "grade": _int(r["grade"]),
                 "data_status": r["data_status"],
+                "pred_source": r["pred_source"],
             }
             for _, r in rows.iterrows()
         ],
@@ -143,4 +145,6 @@ def crowd_meta() -> dict:
         "generated_at": latest.get("generated_at"),
         "status_counts": latest.get("status_counts"),
         "topology_gaps": latest.get("topology_gaps"),
+        "events_coverage_end": latest.get("events_coverage_end"),
+        "events_available": latest.get("events_available"),
     }

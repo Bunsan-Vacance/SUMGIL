@@ -2,13 +2,16 @@
 # 원천(getStnPsgr)은 어제치를 오전 중에 올린다(정확한 시각 미확정 — 143 RESULTS.md). 09:00에 받고,
 # 그때 아직 없었으면 13:00에 다시 받는다(이미 있으면 호출 0회). Persistent=true 라 서버가 꺼져 있던 회차도
 # 켜지면 바로 실행한다 — 원천 보존 창이 7일이라 하루라도 놓치면 영구 결손이다.
+#
+# Asia/Seoul을 반드시 명시한다: 서버 TZ가 UTC라 생략하면 18:00·22:00 KST에 돌아, 09:30 KST의
+# crowd-batch-predict.timer가 D−1 실측을 보지 못한다(2026-09-22 서버 점검에서 확인).
 
 [Unit]
 Description=Run subway-ridership-daily twice a day
 
 [Timer]
-OnCalendar=*-*-* 09:00:00
-OnCalendar=*-*-* 13:00:00
+OnCalendar=*-*-* 09:00:00 Asia/Seoul
+OnCalendar=*-*-* 13:00:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=300
 

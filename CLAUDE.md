@@ -60,6 +60,8 @@ Docs/
 
 **커밋 전 해당 파트의 lint·테스트를 로컬에서 통과시킨다.** AI는 `ruff check .` / `black --check .` / `pytest -q`(`AI/CLAUDE.md` 참고), BE/FE는 초기화 후 각 파트 README의 검증 명령을 따른다.
 
+**파트 간 협의는 `.claude/handoff/`에 기록한다.** 보낸 요청은 `TO_<파트>-<주제>-<NN>.md`, 받은 회신은 같은 슬러그·번호의 `FROM_<파트>-<주제>-<NN>.md`로 짝을 맞춘다. 처리가 끝나면 **요청·회신을 함께** `done/`으로 옮긴다 — 루트에 남은 파일이 미결 목록이다. `TO_` 문서에는 회신 형식·채널을 반드시 적는다. 규약 원문은 [.claude/handoff/README.md](./.claude/handoff/README.md). 이 폴더는 `.gitignore` 대상이라 내 쪽 기록일 뿐이고, 실제 전달은 Notion·Discord·JIRA 코멘트로 한다 — 상대가 봐야 하는 계약 본문은 해당 파트 폴더에 커밋한다(`AI/app/CROWD/SERVING_CONTRACT.md`처럼).
+
 **`AI/` 안에서 작업할 때는 `AI/CLAUDE.md`(실행·CI·모듈 규약)를 추가로 참고한다.**
 
 ## 기획 배경

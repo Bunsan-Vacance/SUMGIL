@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,9 @@ from DATA_ENGINE.archive.manifest import (
     ArchiveManifestRecord,
     append_manifest_record,
     has_successful_archive,
+    load_manifest_records,
 )
+from DATA_ENGINE.archive.storage.drive_client import match_local_file
 from DATA_ENGINE.archive.targets import (
     ArchiveTarget,
     build_archive_datasets,
@@ -25,6 +28,10 @@ from DATA_ENGINE.archive.targets import (
     filter_datasets,
 )
 from DATA_ENGINE.collect.common import AI_ROOT, KST
+from DATA_ENGINE.monitor.notify_discord import notify_failure
+
+ARCHIVE_ALERT_TITLE = "[DATA_ENGINE] Drive archive 업로드 실패"
+MAX_ALERT_LINES = 10
 
 DATASET_ROOT_ENV_KEYS = {
     "bike": "GOOGLE_DRIVE_BIKE_ARCHIVE_ROOT_FOLDER_ID",
@@ -61,6 +68,24 @@ DATASET_ROOT_LEVEL_PREFIXES = {
         "arrival": "SUBWAY/raw/arrival/",
     },
 }
+
+
+@dataclass(frozen=True)
+class PlannedTarget:
+    target: ArchiveTarget
+    is_backfill: bool
+
+
+@dataclass
+class PartitionSyncOutcome:
+    uploaded: list[str] = field(default_factory=list)
+    verified: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.conflicts and not self.failures
 
 
 def format_bytes(size_bytes: int) -> str:
@@ -114,23 +139,36 @@ def build_manifest_record(
 
 
 def print_targets(
-    targets: Sequence[ArchiveTarget],
+    new_targets: Sequence[ArchiveTarget],
+    backfill_candidates: Sequence[ArchiveTarget],
     *,
     dry_run: bool,
     backend: str,
-    skipped_success: int,
     drive_root_folder_ids: dict[str, str],
 ) -> None:
     print(
         "DATA_ENGINE archive upload "
         f"dry_run={str(dry_run).lower()} "
         f"backend={backend} "
-        f"targets={len(targets)} "
-        f"skipped_success={skipped_success}"
+        f"targets={len(new_targets)} "
+        f"backfill_candidates={len(backfill_candidates)}"
     )
-    for target in targets:
+    for target in new_targets:
         _, archive_path = drive_destination_for_target(target, drive_root_folder_ids)
         prefix = "DRY_RUN" if dry_run else "UPLOAD"
+        print(
+            f"{prefix} {target.dataset} "
+            f"dt={target.dt} hh={target.hh} "
+            f"files={target.file_count} "
+            f"size={format_bytes(target.total_bytes)} "
+            f"local={target.local_path} "
+            f"archive={archive_path}"
+        )
+    for target in backfill_candidates:
+        _, archive_path = drive_destination_for_target(target, drive_root_folder_ids)
+        # 이미 success로 기록된 파티션이라 여기서는 Drive를 조회하지 않는다(드라이런은
+        # 자격 증명 없이도 동작해야 함) — 실제 누락 파일 여부는 --yes 실행에서만 확인한다.
+        prefix = "BACKFILL_DRY_RUN" if dry_run else "BACKFILL_CHECK"
         print(
             f"{prefix} {target.dataset} "
             f"dt={target.dt} hh={target.hh} "
@@ -165,11 +203,21 @@ def drive_destination_for_target(
     target: ArchiveTarget,
     drive_root_folder_ids: dict[str, str],
 ) -> tuple[str, str]:
-    dataset_root = drive_root_folder_ids.get(target.dataset, "")
+    return drive_destination_for_partition(
+        target.dataset, target.archive_path, drive_root_folder_ids
+    )
+
+
+def drive_destination_for_partition(
+    dataset: str,
+    archive_path: str,
+    drive_root_folder_ids: dict[str, str],
+) -> tuple[str, str]:
+    dataset_root = drive_root_folder_ids.get(dataset, "")
     if dataset_root:
-        prefix = dataset_archive_prefix(target.dataset)
-        return dataset_root, strip_archive_prefix(target.archive_path, prefix)
-    return drive_root_folder_ids.get("default", ""), target.archive_path
+        prefix = dataset_archive_prefix(dataset)
+        return dataset_root, strip_archive_prefix(archive_path, prefix)
+    return drive_root_folder_ids.get("default", ""), archive_path
 
 
 def build_drive_root_folder_ids() -> dict[str, str]:
@@ -181,8 +229,55 @@ def build_drive_root_folder_ids() -> dict[str, str]:
     return root_ids
 
 
+def sync_partition_to_drive(
+    service,
+    target: ArchiveTarget,
+    drive_root_folder_ids: dict[str, str],
+) -> PartitionSyncOutcome:
+    """로컬 파티션의 파일들을 Drive와 대조해 누락된 파일만 올린다.
+
+    이름이 같지만 크기·체크섬이 다른 파일은 정상 백업으로 보지 않고 conflicts에 남긴다
+    (동일 이름으로 다시 올리면 Drive에 중복 객체가 생기므로 자동 업로드하지 않는다).
+    """
+    from DATA_ENGINE.archive.storage.drive_client import (
+        ensure_folder_path,
+        find_folder_path,
+        list_folder_files,
+        upload_file,
+    )
+
+    drive_root_folder_id, archive_path = drive_destination_for_target(target, drive_root_folder_ids)
+    if not drive_root_folder_id:
+        raise RuntimeError(f"Drive root folder id is empty for dataset={target.dataset}")
+
+    existing_folder_id = find_folder_path(service, drive_root_folder_id, archive_path)
+    remote_files = list_folder_files(service, existing_folder_id) if existing_folder_id else []
+
+    outcome = PartitionSyncOutcome()
+    to_upload: list[Path] = []
+    for local_file in snapshot_files(target):
+        status = match_local_file(local_file, remote_files)
+        if status == "missing":
+            to_upload.append(local_file)
+        elif status == "verified":
+            outcome.verified.append(local_file.name)
+        else:
+            outcome.conflicts.append(f"{local_file.name}:{status}")
+
+    if to_upload:
+        folder_id = ensure_folder_path(service, drive_root_folder_id, archive_path)
+        for local_file in to_upload:
+            try:
+                upload_file(service, folder_id, local_file)
+                outcome.uploaded.append(local_file.name)
+            except Exception as exc:  # noqa: BLE001
+                outcome.failures.append(f"{local_file.name}: {exc}")
+
+    return outcome
+
+
 def upload_targets(
-    targets: Sequence[ArchiveTarget],
+    planned_targets: Sequence[PlannedTarget],
     *,
     ai_root: Path,
     manifest_path: Path,
@@ -192,11 +287,7 @@ def upload_targets(
     drive_root_folder_ids: dict[str, str],
     backend: str,
 ) -> int:
-    from DATA_ENGINE.archive.storage.drive_client import (
-        build_drive_service,
-        ensure_folder_path,
-        upload_file,
-    )
+    from DATA_ENGINE.archive.storage.drive_client import build_drive_service
 
     service = build_drive_service(
         auth_mode=drive_auth_mode,
@@ -204,26 +295,12 @@ def upload_targets(
         oauth_token_file=oauth_token_file,
     )
     failures = 0
-    for target in targets:
-        drive_root_folder_id, archive_path = drive_destination_for_target(
-            target, drive_root_folder_ids
-        )
+    for planned in planned_targets:
+        target = planned.target
+        label = "BACKFILL" if planned.is_backfill else "UPLOAD"
+        _, archive_path = drive_destination_for_target(target, drive_root_folder_ids)
         try:
-            if not drive_root_folder_id:
-                raise RuntimeError(f"Drive root folder id is empty for dataset={target.dataset}")
-            folder_id = ensure_folder_path(service, drive_root_folder_id, archive_path)
-            for file_path in snapshot_files(target):
-                upload_file(service, folder_id, file_path)
-            append_manifest_record(
-                manifest_path,
-                build_manifest_record(
-                    target,
-                    ai_root=ai_root,
-                    backend=backend,
-                    archive_path=archive_path,
-                    status="success",
-                ),
-            )
+            outcome = sync_partition_to_drive(service, target, drive_root_folder_ids)
         except Exception as exc:  # noqa: BLE001
             # One failed partition should be recorded and let the remaining partitions continue.
             failures += 1
@@ -239,11 +316,63 @@ def upload_targets(
                 ),
             )
             print(
-                f"FAIL {target.dataset} dt={target.dt} hh={target.hh} "
-                f"archive={archive_path} error={exc}",
+                f"FAIL {target.dataset} dt={target.dt} hh={target.hh} error={exc}",
                 file=sys.stderr,
             )
+            continue
+
+        # 이미 success로 기록된 파티션인데 새로 올린 파일도, 새로 발견된 충돌도 없으면
+        # manifest에 다시 쓰지 않는다 — 매번 같은 기록을 반복해 manifest가 불어나는 것을 막는다.
+        if (
+            planned.is_backfill
+            and not outcome.uploaded
+            and not outcome.conflicts
+            and not outcome.failures
+        ):
+            print(
+                f"{label}_SKIP {target.dataset} dt={target.dt} hh={target.hh} "
+                f"already_verified={len(outcome.verified)}"
+            )
+            continue
+
+        status = "success" if outcome.ok else "failed"
+        if status == "failed":
+            failures += 1
+        append_manifest_record(
+            manifest_path,
+            build_manifest_record(
+                target,
+                ai_root=ai_root,
+                backend=backend,
+                archive_path=archive_path,
+                status=status,
+                error="; ".join(outcome.conflicts + outcome.failures) or None,
+            ),
+        )
+        print(
+            f"{label} {target.dataset} dt={target.dt} hh={target.hh} "
+            f"uploaded={len(outcome.uploaded)} verified={len(outcome.verified)} "
+            f"conflicts={len(outcome.conflicts)} failures={len(outcome.failures)}"
+        )
     return failures
+
+
+def build_failure_alert(manifest_path: Path, run_started: datetime, failures: int) -> str:
+    """List the partitions this run recorded as failed (read back from the manifest)."""
+    started = run_started.isoformat()
+    lines = [
+        f"{record.dataset} dt={record.dt} hh={record.hh} archive={record.archive_path} "
+        f"error={record.error}"
+        for record in load_manifest_records(manifest_path)
+        if record.status == "failed" and record.uploaded_at >= started
+    ]
+    shown = lines[:MAX_ALERT_LINES]
+    if len(lines) > len(shown):
+        shown.append(f"... 외 {len(lines) - len(shown)}개 파티션")
+    return (
+        f"Drive archive 업로드 실패 {failures}건 (manifest에 failed 기록, 다음 실행에서 재시도)\n"
+        + "\n".join(shown)
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -260,11 +389,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Actually upload to Drive and append manifest records. Omitted by default for dry-run.",
     )
+    parser.add_argument(
+        "--notify-discord",
+        action="store_true",
+        help="Send a Discord alert when a partition fails to upload. Silent when all succeed.",
+    )
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def run(args: argparse.Namespace) -> int:
     if args.max_partitions <= 0:
         raise ValueError("max_partitions must be positive")
 
@@ -283,25 +416,25 @@ def main(argv: list[str] | None = None) -> int:
     datasets = filter_datasets(build_archive_datasets(ai_root), args.dataset)
     discovered = discover_archive_targets(datasets, older_than_hours=args.older_than_hours)
 
-    skipped_success = 0
-    targets: list[ArchiveTarget] = []
+    new_targets: list[ArchiveTarget] = []
+    backfill_candidates: list[ArchiveTarget] = []
     for target in discovered:
         if has_successful_archive(
             manifest_path, target.dataset, target.dt, target.hh, backend=backend
         ):
-            skipped_success += 1
-            continue
-        targets.append(target)
-        if len(targets) >= args.max_partitions:
-            break
+            backfill_candidates.append(target)
+        else:
+            new_targets.append(target)
+    new_targets = new_targets[: args.max_partitions]
+    backfill_candidates = backfill_candidates[: args.max_partitions]
 
     drive_root_folder_ids = build_drive_root_folder_ids()
 
     print_targets(
-        targets,
+        new_targets,
+        backfill_candidates,
         dry_run=not args.yes,
         backend=backend,
-        skipped_success=skipped_success,
         drive_root_folder_ids=drive_root_folder_ids,
     )
     if not args.yes:
@@ -317,8 +450,12 @@ def main(argv: list[str] | None = None) -> int:
     if not any(drive_root_folder_ids.values()):
         raise RuntimeError("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID is empty")
 
+    planned_targets = [PlannedTarget(target, is_backfill=False) for target in new_targets] + [
+        PlannedTarget(target, is_backfill=True) for target in backfill_candidates
+    ]
+    run_started = datetime.now(KST)
     failures = upload_targets(
-        targets,
+        planned_targets,
         ai_root=ai_root,
         manifest_path=manifest_path,
         drive_auth_mode=drive_auth_mode,
@@ -327,7 +464,25 @@ def main(argv: list[str] | None = None) -> int:
         drive_root_folder_ids=drive_root_folder_ids,
         backend=backend,
     )
+    if failures and args.notify_discord:
+        notify_failure(
+            build_failure_alert(manifest_path, run_started, failures),
+            title=ARCHIVE_ALERT_TITLE,
+        )
     return 1 if failures else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        return run(args)
+    except Exception as exc:  # 설정 누락·인증 실패 등 전체 중단도 알린 뒤 그대로 올린다.
+        if args.notify_discord and args.yes:
+            notify_failure(
+                f"Drive archive 업로드 중단: {type(exc).__name__}: {exc}",
+                title=ARCHIVE_ALERT_TITLE,
+            )
+        raise
 
 
 if __name__ == "__main__":

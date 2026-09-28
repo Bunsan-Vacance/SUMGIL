@@ -6,10 +6,13 @@ import pytest
 
 from DATA_ENGINE.archive.manifest import ArchiveManifestRecord, append_manifest_record
 from DATA_ENGINE.monitor.cleanup_retention import (
+    ArchiveFileVerification,
     CleanupCandidate,
+    DriveArchiveVerifier,
     RetentionTarget,
     build_retention_targets,
     cleanup_candidates,
+    file_md5,
     find_cleanup_candidates,
     format_bytes,
     is_safe_snapshot_path,
@@ -262,6 +265,7 @@ def test_find_cleanup_candidates_includes_archived_success_partition(tmp_path):
         manifest_path=manifest_path,
         now_ts=now_ts,
         current_slot=("2026-09-13", "04"),
+        verify_archive_file=lambda *_: ArchiveFileVerification(None, file_md5(old_path)),
     )
 
     assert [candidate.path for candidate in candidates] == [old_path]
@@ -337,10 +341,140 @@ def test_find_cleanup_candidates_includes_partition_when_latest_manifest_success
         manifest_path=manifest_path,
         now_ts=now_ts,
         current_slot=("2026-09-13", "04"),
+        verify_archive_file=lambda *_: ArchiveFileVerification(None, file_md5(old_path)),
     )
 
     assert [candidate.path for candidate in candidates] == [old_path]
     assert skips == []
+
+
+def test_success_partition_only_deletes_files_verified_on_drive(tmp_path, monkeypatch):
+    now_ts = time.time()
+    bike_base = tmp_path / "data/BIKE/raw/realtime"
+    backed_up = snapshot_path(bike_base)
+    missing = backed_up.with_name("snapshot_late.parquet")
+    touch_snapshot(backed_up, age_hours=49, now_ts=now_ts)
+    touch_snapshot(missing, age_hours=49, now_ts=now_ts)
+    manifest_path = tmp_path / "archive.jsonl"
+    append_archive_record(manifest_path)
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID", "root")
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.cleanup_retention.build_drive_service",
+        lambda **_: object(),
+    )
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.cleanup_retention.find_folder_path",
+        lambda *_: "partition-folder",
+    )
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.cleanup_retention.list_folder_files",
+        lambda *_: [
+            {
+                "name": backed_up.name,
+                "size": str(backed_up.stat().st_size),
+                "md5Checksum": file_md5(backed_up),
+            }
+        ],
+    )
+
+    result = run_cleanup(
+        [RetentionTarget("bike", bike_base)],
+        retention_hours=48,
+        yes=True,
+        require_archive_success=True,
+        manifest_path=manifest_path,
+        ai_root=tmp_path,
+        now_ts=now_ts,
+        current_slot=("2026-09-13", "04"),
+    )
+
+    assert result.deleted_count == 1
+    assert not backed_up.exists()
+    assert missing.exists()
+    assert [(skip.path, skip.reason) for skip in result.skips] == [
+        (missing, "archive_file_missing")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("remote", "reason"),
+    [
+        ({"size": "5", "md5Checksum": "unused"}, "archive_size_mismatch"),
+        ({"size": "4"}, "archive_checksum_missing"),
+        ({"size": "4", "md5Checksum": "wrong"}, "archive_checksum_mismatch"),
+    ],
+)
+def test_drive_verifier_rejects_unproven_file(tmp_path, monkeypatch, remote, reason):
+    path = snapshot_path(tmp_path / "data/BIKE/raw/realtime")
+    touch_snapshot(path, age_hours=49, now_ts=time.time())
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID", "root")
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.cleanup_retention.build_drive_service",
+        lambda **_: object(),
+    )
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.cleanup_retention.find_folder_path",
+        lambda *_: "partition-folder",
+    )
+    monkeypatch.setattr(
+        "DATA_ENGINE.monitor.cleanup_retention.list_folder_files",
+        lambda *_: [{"name": path.name, **remote}],
+    )
+
+    verification = DriveArchiveVerifier(tmp_path)("bike", "2026-09-11", "03", path)
+
+    assert verification.reason == reason
+
+
+def test_drive_lookup_error_preserves_file(tmp_path):
+    now_ts = time.time()
+    bike_base = tmp_path / "data/BIKE/raw/realtime"
+    path = snapshot_path(bike_base)
+    touch_snapshot(path, age_hours=49, now_ts=now_ts)
+    manifest_path = tmp_path / "archive.jsonl"
+    append_archive_record(manifest_path)
+
+    def fail_lookup(*_):
+        raise RuntimeError("Drive unavailable")
+
+    result = run_cleanup(
+        [RetentionTarget("bike", bike_base)],
+        retention_hours=48,
+        yes=True,
+        require_archive_success=True,
+        manifest_path=manifest_path,
+        verify_archive_file=fail_lookup,
+        now_ts=now_ts,
+        current_slot=("2026-09-13", "04"),
+    )
+
+    assert result.deleted_count == 0
+    assert result.skips[0].reason == "archive_verification_error"
+    assert path.exists()
+
+
+def test_cleanup_rechecks_file_after_verification(tmp_path):
+    now_ts = time.time()
+    bike_base = tmp_path / "data/BIKE/raw/realtime"
+    path = snapshot_path(bike_base)
+    touch_snapshot(path, age_hours=49, now_ts=now_ts)
+    manifest_path = tmp_path / "archive.jsonl"
+    append_archive_record(manifest_path)
+    candidates, _ = find_cleanup_candidates(
+        [RetentionTarget("bike", bike_base)],
+        retention_hours=48,
+        require_archive_success=True,
+        manifest_path=manifest_path,
+        verify_archive_file=lambda *_: ArchiveFileVerification(None, file_md5(path)),
+        now_ts=now_ts,
+        current_slot=("2026-09-13", "04"),
+    )
+    path.write_bytes(b"new!")
+
+    deleted_count, _ = cleanup_candidates(candidates, yes=True)
+
+    assert deleted_count == 0
+    assert path.exists()
 
 
 def test_find_cleanup_candidates_ignores_other_manifest_partition(tmp_path):

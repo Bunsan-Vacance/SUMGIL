@@ -2,8 +2,10 @@
 
 0단계에서 net_flow 평균만으로는 놓쳤다가, 활동량·미래 empty/full 발생률까지 같이 보고서야
 효과를 확인한 세 피처만 채택했다(`validation/BYC/lightgbm-stock-conversion-check/RESULTS.md`).
-공휴일 세분화(명절/연휴전후)는 원본에 그 구분이 없어서 binary만 쓴다. 유동인구는 raw
-데이터 시기(2026년)가 학습·평가 기간(2024~2025)과 안 맞아 제외했다.
+공휴일 세분화(명절/연휴전후)는 원본에 그 구분이 없어서 binary만 쓴다. 유동인구는 처음
+확보한 raw 데이터 시기(2026년)가 학습·평가 기간(2024~2025)과 안 맞아 한 번 보류됐다가,
+2024-01~2024-12·2025-07~2025-09 전체를 새로 확보해 `v4_floating` 세트로 재개했다
+(아래 `attach_floating_population` 참고).
 
 **학습/서빙 값 출처가 다르다**(계획서 3단계):
 
@@ -115,3 +117,90 @@ def attach_external(
         jamsil_dates
     )
     return df
+
+
+def attach_kbo(
+    df: pd.DataFrame,
+    jamsil_dates: set,
+    jamsil_stations: set,
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """`is_kbo_game_jamsil`만 붙인다(날씨 없이) — v4 anchor+horizon 피처셋(S15P21A104-160)용.
+
+    `attach_external()`과 판정 로직은 같지만 날씨 병합이 빠져 있다 — 실시간 날씨 소스가
+    없어도(Phase D 갭) 그대로 쓸 수 있게 하려고 분리했다.
+    """
+    df = df.copy()
+    df["is_kbo_game_jamsil"] = (
+        df["od_station_id"].isin(jamsil_stations) & df[date_col].isin(jamsil_dates)
+    ).astype("int8")
+    return df
+
+
+def attach_weather(
+    df: pd.DataFrame,
+    weather: pd.DataFrame,
+    date_col: str = "date",
+    hour_col: str = "hour",
+) -> pd.DataFrame:
+    """`is_rain`/`temp`만 붙인다(KBO·공휴일 없이) — v4_weather 피처셋(S15P21A104-160)용.
+
+    `attach_external()`과 병합 로직은 같다(anchor 기준, 30분 이내 근사 허용). ASOS는
+    2024~2025 학습·평가 기간을 이미 커버하므로 오프라인 학습/검증엔 그대로 쓸 수 있다 —
+    다만 실시간 서빙에 쓰려면 `weather.nowcast` Kafka 토픽을 `bike.stock`처럼 최신
+    스냅샷화하는 별도 작업이 먼저 필요하다(효과 검증되면 착수).
+    """
+    df = df.merge(weather, left_on=[date_col, hour_col], right_on=["date", "hour"], how="left")
+    # ASOS 실측 범위 밖 날짜는 매칭이 안 돼 NaN이 섞이는데, bool 컬럼에 NaN이 들어가면
+    # dtype이 object로 깨져서 LightGBM이 거부한다 — fillna 뒤 명시 캐스팅한다.
+    df["is_rain"] = df["is_rain"].fillna(False).astype("int8")
+    return df
+
+
+# ── v4_floating: 유동인구(서울 생활인구, 행정동 단위) ──
+# 산출 스크립트: validation/BYC/floating-population-check/src/
+#   build_station_dong_mapping.py  대여소 위경도 -> 행정동코드(point-in-polygon)
+#   build_dong_hour_population.py  생활인구 원본(27GB, 일별 CSV) -> 행정동x일x시간대 합계
+POPULATION_DIR = AI_ROOT / "data" / "EXTERNAL" / "population" / "processed"
+STATION_DONG_MAP_PATH = POPULATION_DIR / "station_dong_mapping.parquet"
+DONG_HOUR_POPULATION_PATH = POPULATION_DIR / "dong_hour_population.parquet"
+
+
+def load_station_dong_map() -> pd.DataFrame:
+    """대여소 -> 행정동코드 매핑. 컬럼: od_station_id, dong_code, dong_name, match_method."""
+    if not STATION_DONG_MAP_PATH.exists():
+        raise FileNotFoundError(
+            f"{STATION_DONG_MAP_PATH} 없음 — build_station_dong_mapping.py 먼저 실행"
+        )
+    return pd.read_parquet(STATION_DONG_MAP_PATH)
+
+
+def load_dong_hour_population() -> pd.DataFrame:
+    """행정동x일x시간대 생활인구 합계. 컬럼: date, hour, dong_code, population_total."""
+    if not DONG_HOUR_POPULATION_PATH.exists():
+        raise FileNotFoundError(
+            f"{DONG_HOUR_POPULATION_PATH} 없음 — build_dong_hour_population.py 먼저 실행"
+        )
+    out = pd.read_parquet(DONG_HOUR_POPULATION_PATH)
+    out["date"] = pd.to_datetime(out["date"]).dt.normalize()
+    return out
+
+
+def attach_floating_population(
+    df: pd.DataFrame,
+    population: pd.DataFrame,
+    station_dong_map: pd.DataFrame,
+    date_col: str = "date",
+    hour_col: str = "hour",
+) -> pd.DataFrame:
+    """`floating_population`(anchor 시각 기준 행정동 생활인구 합계) 부착 — v4_floating 세트용.
+
+    대여소 -> 행정동 매핑이 안 되는 역(2,583개 중 극소수)이나 원본 데이터가 없는 날짜는
+    NaN으로 남긴다(원칙 8: 표본 부족 구간에 값을 채우지 않는다) — LightGBM이 결측을
+    분할 정보로 받아들인다.
+    """
+    df = df.merge(station_dong_map[["od_station_id", "dong_code"]], on="od_station_id", how="left")
+    pop = population.rename(columns={"date": date_col, "hour": hour_col})
+    df = df.merge(pop, on=["dong_code", date_col, hour_col], how="left")
+    df = df.rename(columns={"population_total": "floating_population"})
+    return df.drop(columns=["dong_code"])

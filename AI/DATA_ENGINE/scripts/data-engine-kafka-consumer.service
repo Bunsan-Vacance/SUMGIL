@@ -1,0 +1,19 @@
+[Unit]
+Description=DATA_ENGINE Kafka raw parquet consumer
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=<REPO_ROOT>/AI
+ExecStartPre=<VENV_PATH>/bin/python -m DATA_ENGINE.stream.kafka_consumer --check-config
+ExecStart=<VENV_PATH>/bin/python -m DATA_ENGINE.stream.kafka_consumer
+Restart=always
+RestartSec=10
+StandardOutput=append:<REPO_ROOT>/AI/logs/data_engine_kafka_consumer.log
+StandardError=append:<REPO_ROOT>/AI/logs/data_engine_kafka_consumer.log
+
+[Install]
+WantedBy=multi-user.target

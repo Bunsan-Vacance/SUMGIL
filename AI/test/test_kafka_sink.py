@@ -7,12 +7,14 @@ from test_kafka_event_parser import BE_SAMPLE_EVENTS
 
 from DATA_ENGINE.stream.kafka_events import parse_kafka_event
 from DATA_ENGINE.stream.kafka_sink import (
+    BIKE_LATEST_STOCK_COLUMNS,
     base_dir_for_topic,
     dedupe_events,
     latest_stock_path,
     update_bike_latest_stock,
     write_events,
 )
+from DATA_ENGINE.stream.weather_latest import latest_weather_path
 
 
 def _event(
@@ -72,6 +74,43 @@ def test_write_events_partitions_by_poll_run_at(tmp_path):
     assert paths[1] == latest_stock_path(ai_root=tmp_path)
 
 
+def test_write_events_preserves_bike_stock_raw_contract(tmp_path):
+    sample = BE_SAMPLE_EVENTS["bike.stock"]
+    event = parse_kafka_event(sample, topic="bike.stock", partition=1, offset=10)
+
+    snapshot_path = write_events([event], ai_root=tmp_path)[0]
+
+    frame = pd.read_parquet(snapshot_path)
+    assert list(frame.columns) == [
+        "event_id",
+        "source",
+        "entity_id",
+        "source_generated_at",
+        "ingested_at",
+        "poll_run_at",
+        "freshness_at",
+        "payload_json",
+        "kafka_topic",
+        "kafka_partition",
+        "kafka_offset",
+    ]
+    row = frame.iloc[0]
+    payload = json.loads(row["payload_json"])
+    assert set(payload) >= {
+        "stationId",
+        "stationName",
+        "rackTotCnt",
+        "parkingBikeTotCnt",
+        "shared",
+        "stationLatitude",
+        "stationLongitude",
+    }
+    assert row["entity_id"] == payload["stationId"] == "ST-4"
+    assert pd.isna(row["source_generated_at"])
+    assert row["freshness_at"] == row["ingested_at"]
+    assert snapshot_path.parent.name == "hh=09"
+
+
 def test_write_events_groups_by_topic(tmp_path):
     paths = write_events(
         [
@@ -105,11 +144,12 @@ def test_write_be_sample_events_to_topic_partitions(tmp_path):
         tmp_path / "data/EXTERNAL/weather/raw/nowcast/dt=2026-09-14/hh=12",
         tmp_path / "data/BIKE/raw/realtime/dt=2026-09-14/hh=09",
         tmp_path / "data/BIKE/raw/realtime",
+        tmp_path / "data/EXTERNAL/weather/raw/nowcast",
     }
 
     rows = []
     for path in paths:
-        if path.name == "latest_stock.parquet":
+        if path.name in {"latest_stock.parquet", "latest_by_grid.parquet"}:
             continue
         rows.extend(pd.read_parquet(path).to_dict("records"))
 
@@ -118,6 +158,9 @@ def test_write_be_sample_events_to_topic_partitions(tmp_path):
     assert by_source["weather.nowcast"]["entity_id"] == "60:127:PTY"
     assert by_source["subway.arrival"]["entity_id"] == "1009000937"
     assert json.loads(by_source["subway.arrival"]["payload_json"])["statnNm"] == "둔촌오륜"
+    weather = pd.read_parquet(latest_weather_path(ai_root=tmp_path))
+    assert weather.loc[0, "weather_source"] == "observed"
+    assert weather.loc[0, "category"] == "PTY"
 
 
 def test_dedupe_events_keeps_first_event_id():
@@ -140,6 +183,21 @@ def test_write_events_dedupes_event_id_within_batch(tmp_path):
     assert df.loc[0, "event_id"] == first.event_id
 
 
+def test_write_events_keeps_distinct_flushes_in_same_partition(tmp_path):
+    first = _event("subway.arrival", "1009000937")
+    second = _event("subway.arrival", "1009000938")
+
+    first_path = write_events([first], ai_root=tmp_path)[0]
+    second_path = write_events([second], ai_root=tmp_path)[0]
+
+    assert first_path != second_path
+    assert first_path.name.startswith("snapshot_20260914T090000_")
+    assert pd.read_parquet(first_path)["event_id"].tolist() == [first.event_id]
+    assert pd.read_parquet(second_path)["event_id"].tolist() == [second.event_id]
+    assert write_events([first], ai_root=tmp_path)[0] == first_path
+    assert not list(first_path.parent.glob("*.tmp"))
+
+
 def test_update_bike_latest_stock_writes_station_snapshot(tmp_path):
     event = _event(
         "bike.stock",
@@ -151,13 +209,15 @@ def test_update_bike_latest_stock_writes_station_snapshot(tmp_path):
 
     assert path == latest_stock_path(ai_root=tmp_path)
     df = pd.read_parquet(path)
-    assert df.to_dict("records") == [
-        {
-            "rental_id": "ST-4",
-            "current_stock": 5,
-            "updated_at": pd.Timestamp("2026-09-14T09:00:03"),
-        }
-    ]
+    assert list(df.columns) == BIKE_LATEST_STOCK_COLUMNS
+    record = df.to_dict("records")[0]
+    assert record["rental_id"] == "ST-4"
+    assert record["current_stock"] == 5
+    assert record["updated_at"] == pd.Timestamp("2026-09-14T09:00:03")
+    assert pd.isna(record["station_name"])
+    assert pd.isna(record["lat"])
+    assert pd.isna(record["lng"])
+    assert pd.isna(record["rack_count"])
 
 
 def test_update_bike_latest_stock_upserts_newer_station_value(tmp_path):
@@ -210,6 +270,50 @@ def test_update_bike_latest_stock_keeps_newer_value_when_old_event_arrives(tmp_p
     assert df.loc[0, "updated_at"] == pd.Timestamp("2026-09-14T09:05:03")
 
 
+def test_update_bike_latest_stock_prunes_stations_older_than_30_minutes(tmp_path):
+    first_cycle = [
+        _event(
+            "bike.stock",
+            station_id,
+            event_id=f"bike.stock+{station_id}+first",
+            ingested_at="2026-09-14T09:00:03+09:00",
+            payload={"stationId": station_id, "parkingBikeTotCnt": stock},
+        )
+        for station_id, stock in [("ST-4", "5"), ("ST-5", "6")]
+    ]
+    update_bike_latest_stock(first_cycle, ai_root=tmp_path)
+
+    update_bike_latest_stock(
+        [
+            _event(
+                "bike.stock",
+                "ST-4",
+                event_id="bike.stock+ST-4+partial",
+                ingested_at="2026-09-14T09:20:03+09:00",
+                payload={"stationId": "ST-4", "parkingBikeTotCnt": "7"},
+            )
+        ],
+        ai_root=tmp_path,
+    )
+    within_ttl = pd.read_parquet(latest_stock_path(ai_root=tmp_path))
+    assert set(within_ttl["rental_id"]) == {"ST-4", "ST-5"}
+
+    update_bike_latest_stock(
+        [
+            _event(
+                "bike.stock",
+                "ST-4",
+                event_id="bike.stock+ST-4+next",
+                ingested_at="2026-09-14T09:31:03+09:00",
+                payload={"stationId": "ST-4", "parkingBikeTotCnt": "8"},
+            )
+        ],
+        ai_root=tmp_path,
+    )
+    pruned = pd.read_parquet(latest_stock_path(ai_root=tmp_path))
+    assert pruned["rental_id"].tolist() == ["ST-4"]
+
+
 def test_update_bike_latest_stock_ignores_non_bike_events(tmp_path):
     path = update_bike_latest_stock(
         [_event("weather.nowcast", "weather-seoul")],
@@ -234,3 +338,112 @@ def test_update_bike_latest_stock_skips_invalid_stock_payload(tmp_path):
 
     assert path is None
     assert not latest_stock_path(ai_root=tmp_path).exists()
+
+
+def test_update_bike_latest_stock_populates_extra_columns_from_sample_event(tmp_path):
+    sample = BE_SAMPLE_EVENTS["bike.stock"]
+    event = parse_kafka_event(sample, topic="bike.stock", partition=0, offset=1)
+
+    path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(path)
+    assert list(df.columns) == BIKE_LATEST_STOCK_COLUMNS
+    row = df.iloc[0]
+    assert row["rental_id"] == "ST-4"
+    assert row["current_stock"] == 5
+    assert row["station_name"] == "102. 망원역 1번출구 앞"
+    assert row["lat"] == 37.55564880
+    assert row["lng"] == 126.91062927
+    assert row["rack_count"] == 15
+
+
+def test_update_bike_latest_stock_keeps_row_when_coordinates_missing_or_invalid(tmp_path):
+    event = _event(
+        "bike.stock",
+        "ST-9",
+        payload={
+            "stationId": "ST-9",
+            "parkingBikeTotCnt": "3",
+            "stationLatitude": "",
+            "stationLongitude": "not-a-number",
+            "rackTotCnt": "not-an-int",
+        },
+    )
+
+    path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(path)
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["rental_id"] == "ST-9"
+    assert row["current_stock"] == 3
+    assert pd.isna(row["station_name"])
+    assert pd.isna(row["lat"])
+    assert pd.isna(row["lng"])
+    assert pd.isna(row["rack_count"])
+
+
+def test_update_bike_latest_stock_treats_zero_coordinates_as_missing(tmp_path):
+    event = _event(
+        "bike.stock",
+        "ST-9",
+        payload={
+            "stationId": "ST-9",
+            "parkingBikeTotCnt": "3",
+            "stationLatitude": "0",
+            "stationLongitude": "0.0",
+        },
+    )
+
+    path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(path)
+    assert pd.isna(df.loc[0, "lat"])
+    assert pd.isna(df.loc[0, "lng"])
+
+
+def test_update_bike_latest_stock_upserts_over_legacy_three_column_file(tmp_path):
+    path = latest_stock_path(ai_root=tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = pd.DataFrame(
+        [
+            {
+                "rental_id": "ST-1",
+                "current_stock": 2,
+                "updated_at": pd.Timestamp("2026-09-14T08:55:00"),
+            }
+        ]
+    )
+    legacy.to_parquet(path, index=False)
+
+    event = _event(
+        "bike.stock",
+        "ST-4",
+        payload={
+            "stationId": "ST-4",
+            "parkingBikeTotCnt": "5",
+            "stationName": "102. 망원역 1번출구 앞",
+            "stationLatitude": "37.55564880",
+            "stationLongitude": "126.91062927",
+            "rackTotCnt": "15",
+        },
+    )
+
+    result_path = update_bike_latest_stock([event], ai_root=tmp_path)
+
+    df = pd.read_parquet(result_path)
+    assert list(df.columns) == BIKE_LATEST_STOCK_COLUMNS
+    assert set(df["rental_id"]) == {"ST-1", "ST-4"}
+
+    legacy_row = df.loc[df["rental_id"] == "ST-1"].iloc[0]
+    assert legacy_row["current_stock"] == 2
+    assert pd.isna(legacy_row["station_name"])
+    assert pd.isna(legacy_row["lat"])
+    assert pd.isna(legacy_row["lng"])
+    assert pd.isna(legacy_row["rack_count"])
+
+    new_row = df.loc[df["rental_id"] == "ST-4"].iloc[0]
+    assert new_row["station_name"] == "102. 망원역 1번출구 앞"
+    assert new_row["lat"] == 37.55564880
+    assert new_row["lng"] == 126.91062927
+    assert new_row["rack_count"] == 15

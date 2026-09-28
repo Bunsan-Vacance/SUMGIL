@@ -72,6 +72,78 @@ class StockProfileBaseline:
         self.table_ = total.reset_index()[[*STOCK_KEYS, "exp_bikes", "p_empty", "p_full"]]
         return self
 
+    def fit_streaming_spark(
+        self, paths: list[Path], holidays: pd.DataFrame | None = None
+    ) -> StockProfileBaseline:
+        """`fit_streaming()`과 같은 계산을 Spark로 한다(274 B안 — `train.py --engine spark`).
+
+        `DATA_ENGINE/spark/jobs/bike_avg_baseline.py`에서 만들고 11개월 250.7M행 실측으로
+        검증한 로직(pandas와 완전 일치, 오차 0.0)을 그대로 옮겼다 — 새로 설계하지 않았다.
+        저장소 계층 규칙(`AI/CLAUDE.md`: `app/`은 `DATA_ENGINE/`을 import하지 않는다)을 지키려고
+        `DATA_ENGINE.spark`를 가져다 쓰는 대신 `app/BIKE/pipeline/` 안에 직접 재구현했다 — 두
+        구현이 갈라지지 않도록 로직을 바꿀 땐 두 곳(`DATA_ENGINE/spark/jobs/bike_avg_baseline.py`,
+        여기)을 같이 바꿔야 한다.
+
+        pyspark는 여기서만 지연 import한다 — `avg` 서빙 경로(`predictor.py`가 이 클래스를
+        직접 쓴다)가 이 메서드를 안 부르므로 서빙에 무거운 의존성이 안 번진다.
+        """
+        from pyspark.sql import SparkSession
+        from pyspark.sql import functions as F
+
+        if holidays is None:
+            holidays = load_holidays()
+
+        spark = (
+            SparkSession.builder.appName("bike-avg-baseline-train")
+            .master("local[3]")
+            .config("spark.driver.memory", "3g")
+            .config("spark.sql.shuffle.partitions", "32")
+            .config("spark.sql.session.timeZone", "Asia/Seoul")
+            .config("spark.ui.showConsoleProgress", "false")
+            .getOrCreate()
+        )
+        try:
+            raw = spark.read.parquet(*[str(p) for p in paths]).select(
+                *STOCK_NEEDED_COLS, "horizon_min"
+            )
+            raw = raw.where((F.col("horizon_min") == 5) & F.col("stock_anchor_hour").isNotNull())
+
+            holidays_sdf = spark.createDataFrame(holidays).withColumnRenamed("date", "holiday_date")
+            joined = raw.join(
+                holidays_sdf, raw["date"] == holidays_sdf["holiday_date"], how="left"
+            ).drop("holiday_date")
+            is_holiday = F.coalesce(F.col("is_holiday"), F.lit(False))
+
+            # Spark dayofweek: 일=1..토=7. calendar.attach_dow_type과 같은 우선순위
+            # (토요일(1) → 일요일 또는 공휴일(2) → 평일(0))를 지킨다.
+            spark_dow = F.dayofweek(F.col("date"))
+            is_saturday = spark_dow == 7
+            is_sunday = spark_dow == 1
+            dow_type = F.when(is_saturday, 1).when(is_sunday | is_holiday, 2).otherwise(0)
+
+            df = joined.withColumn("dow_type", dow_type).withColumn(
+                "time_slot", (F.col("slot_5m") / 6).cast("int")
+            )
+
+            agg = df.groupBy("od_station_id", "dow_type", "time_slot").agg(
+                F.sum("stock_anchor_hour").alias("exp_bikes_sum"),
+                F.count("stock_anchor_hour").alias("n"),
+                F.sum(F.col("is_empty_anchor").cast("int")).alias("empty_sum"),
+                F.sum(F.col("is_full_anchor").cast("int")).alias("full_sum"),
+            )
+            result = agg.select(
+                "od_station_id",
+                "dow_type",
+                "time_slot",
+                (F.col("exp_bikes_sum") / F.col("n")).alias("exp_bikes"),
+                (F.col("empty_sum") / F.col("n")).alias("p_empty"),
+                (F.col("full_sum") / F.col("n")).alias("p_full"),
+            )
+            self.table_ = result.toPandas()[[*STOCK_KEYS, "exp_bikes", "p_empty", "p_full"]]
+        finally:
+            spark.stop()
+        return self
+
     def predict(self) -> pd.DataFrame:
         """전체 (station, dow_type, time_slot) 조합의 표를 그대로 돌려준다(표본 있는 것만)."""
         if self.table_ is None:

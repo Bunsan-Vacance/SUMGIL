@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DATA_ENGINE 실시간 수집기 systemd 서비스를 설치한다.
+# DATA_ENGINE 상시 consumer, 일 배치, 예측 배치의 systemd 유닛을 설치한다.
 #
 # 기본 동작은 서비스 파일 설치 + daemon-reload까지만 수행한다.
 # 실제 자동 실행까지 한 번에 진행하려면 --enable-now를 명시한다.
@@ -93,32 +93,49 @@ install_service() {
   echo "installed: /etc/systemd/system/${service_name}"
 }
 
-install_service "bike-realtime-poller.service" "bike-realtime-poller.service"
-install_service "weather-nowcast-poller.service" "weather-nowcast-poller.service"
-# 143: D−1 승하차 수집은 폴러가 아니라 하루 두 번 oneshot — timer 로 띄운다.
+# 143: D−1 승하차 수집은 하루 두 번 oneshot — timer 로 띄운다.
 install_service "subway-ridership-daily.service" "subway-ridership-daily.service"
 install_service "subway-ridership-daily.timer" "subway-ridership-daily.timer"
+install_service "data-engine-kafka-consumer.service" "data-engine-kafka-consumer.service"
+install_service "bike-avg-batch.service" "bike-avg-batch.service"
+install_service "bike-avg-batch.timer" "bike-avg-batch.timer"
+# 245: CROWD 혼잡도 예측 배치 — crowd-batch-predict.timer 가 매일 09:30(Asia/Seoul)에 띄운다.
+install_service "crowd-batch-predict.service" "crowd-batch-predict.service"
+install_service "crowd-batch-predict.timer" "crowd-batch-predict.timer"
+# 274: 따릉이 재고 raw 누적 재집계(Spark, 품질 리포트) — 매주 일 04:00(Asia/Seoul).
+# Java(default-jdk-headless)가 서버에 없으면 실행이 실패한다 — 설치 안내는
+# DATA_ENGINE/README.md "따릉이 재고 raw 누적 재집계" 절 참고.
+install_service "bike-realtime-reprocess.service" "bike-realtime-reprocess.service"
+install_service "bike-realtime-reprocess.timer" "bike-realtime-reprocess.timer"
 
 sudo systemctl daemon-reload
 
 if [[ "${ENABLE_NOW}" -eq 1 ]]; then
-  sudo systemctl enable --now bike-realtime-poller.service
-  sudo systemctl enable --now weather-nowcast-poller.service
+  sudo systemctl enable --now data-engine-kafka-consumer.service
   sudo systemctl enable --now subway-ridership-daily.timer
-  sudo systemctl status --no-pager bike-realtime-poller.service
-  sudo systemctl status --no-pager weather-nowcast-poller.service
+  sudo systemctl enable --now bike-avg-batch.timer
+  sudo systemctl enable --now crowd-batch-predict.timer
+  sudo systemctl enable --now bike-realtime-reprocess.timer
+  sudo systemctl status data-engine-kafka-consumer.service --no-pager
   sudo systemctl list-timers --no-pager subway-ridership-daily.timer
+  sudo systemctl list-timers --no-pager bike-avg-batch.timer
+  sudo systemctl list-timers --no-pager crowd-batch-predict.timer
+  sudo systemctl list-timers --no-pager bike-realtime-reprocess.timer
 else
   cat <<'EOF'
 
 서비스 파일 설치와 daemon-reload가 끝났습니다.
 실제 시작은 아래 명령으로 진행하세요.
 
-  sudo systemctl enable --now bike-realtime-poller.service
-  sudo systemctl enable --now weather-nowcast-poller.service
+  sudo systemctl enable --now data-engine-kafka-consumer.service
   sudo systemctl enable --now subway-ridership-daily.timer
-  sudo systemctl status bike-realtime-poller.service
-  sudo systemctl status weather-nowcast-poller.service
+  sudo systemctl enable --now bike-avg-batch.timer
+  sudo systemctl enable --now crowd-batch-predict.timer
+  sudo systemctl enable --now bike-realtime-reprocess.timer
+  sudo systemctl status data-engine-kafka-consumer.service --no-pager
   sudo systemctl list-timers subway-ridership-daily.timer
+  sudo systemctl list-timers bike-avg-batch.timer
+  sudo systemctl list-timers crowd-batch-predict.timer
+  sudo systemctl list-timers bike-realtime-reprocess.timer
 EOF
 fi

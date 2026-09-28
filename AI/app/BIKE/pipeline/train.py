@@ -23,6 +23,37 @@ LightGBM은 `target_net_flow`를 예측하는 모델이고, **avg 소스(exp_bik
 
 전체 실행 (11개월 train, 45% 샘플링 — 메모리 실측 근거는 RESULTS.md):
     python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v3
+
+v4(KBO·D-1/D-7 lag 추가, S15P21A104-160) 스모크:
+    python -m app.BIKE.pipeline.train --train-months 202401 202402 --valid-months 202412 \
+        --test-months 202507 --tag smoke-v4 --feature-set v4_kbo_lag
+
+v4_weather(날씨 추가, S15P21A104-160) 스모크:
+    python -m app.BIKE.pipeline.train --train-months 202401 202402 --valid-months 202412 \
+        --test-months 202507 --tag smoke-v4-weather --feature-set v4_weather
+
+v4_distance(역 거리 추가, S15P21A104-160) 스모크:
+    python -m app.BIKE.pipeline.train --train-months 202401 202402 --valid-months 202412 \
+        --test-months 202507 --tag smoke-v4-distance --feature-set v4_distance
+
+빈 재고/만차 확률 분류기(`--train-empty-full`, S15P21A104-160 Phase 6, v4_weather 전용):
+    이미 로드·프로파일링된 train/valid/test 프레임을 재사용해 `model_is_empty.txt`/
+    `model_is_full.txt`를 같은 아티팩트 디렉터리에 같이 저장한다(회귀와 별개 학습,
+    피처는 동일). 검증 결과는 `validation/BYC/eta-empty-full-check/RESULTS.md` 참고.
+
+    python -m app.BIKE.pipeline.train --train-months 202401 ... 202411 --valid-months 202412 \
+        --test-months 202507 202508 202509 --tag v4-weather-full --feature-set v4_weather \
+        --train-empty-full
+
+avg 소스(StockProfileBaseline) 집계 엔진(`--engine {pandas,spark}`, 기본 pandas, S15P21A104-274):
+    작은 규모(스모크, `--train-months` 1~2개)에서는 pandas가 더 빠르다 — Spark는 세션 기동
+    비용(JVM warm-up) 때문에 그렇다. **11개월 전체 규모로 실제 재학습할 때만** `--engine spark`를
+    붙인다 — 그 규모에서 pandas 대비 약 26% 빠르고(24.8초→18.3초), 산출물은 완전히 동일함을
+    실측 확인했다(`validation/INFRA/spark-bike-candidates-check/RESULTS.md` §8·§11). 기본값을
+    spark로 바꾸지 않은 이유도 이 소규모 역전 때문 — 매 스모크 테스트마다 JVM 기동 비용을 물게
+    된다. Spark 실행에는 로컬에 Java(JDK)가 있어야 한다.
+
+    python -m app.BIKE.pipeline.train --sample-frac 0.45 --tag v3 --engine spark
 """
 
 from __future__ import annotations
@@ -31,7 +62,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -39,18 +70,46 @@ from sklearn.metrics import mean_absolute_error, r2_score
 
 from app.BIKE.pipeline.calendar import load_holidays
 from app.BIKE.pipeline.dataset import load_paths, monthly_paths, scan_station_ids
+from app.BIKE.pipeline.external_features import (
+    attach_floating_population,
+    attach_kbo,
+    attach_weather,
+    jamsil_nearby_stations,
+    load_dong_hour_population,
+    load_jamsil_game_dates,
+    load_station_dong_map,
+    load_weather,
+)
 from app.BIKE.pipeline.features import (
     BASE_FEATURE_COLS,
+    FEATURE_SETS,
+    MODEL_FEATURE_COLS_V4_WEATHER,
     TARGET_COL,
     HistoricalProfileBuilder,
     apply_station_code,
+    attach_anchor_time_slot,
+    attach_distance,
     build_station_dtype,
     make_xy,
 )
+from app.BIKE.pipeline.lag_features import attach_lag, build_lag_lookup
 from app.BIKE.pipeline.lookup import StockProfileBaseline
 
 AI_ROOT = Path(__file__).resolve().parents[3]
+STATION_DISTANCE_PATH = (
+    AI_ROOT
+    / "data"
+    / "EXTERNAL"
+    / "station"
+    / "processed"
+    / "station_distance_features_full_haversine.csv"
+)
 MODELS_DIR = AI_ROOT / "models" / "BIKE"
+# LightGBMEtaPredictor·anchor-horizon-feature-check/src/build_station_master.py와 같은 파일 —
+# is_full 타깃(도착 시점 재고 >= rack_count) 유도에 쓴다.
+STATION_MASTER_PATH = (
+    AI_ROOT / "data" / "EXTERNAL" / "station" / "processed" / "station_master.parquet"
+)
 
 BASE_READ_COLS = ["od_station_id", "date", *BASE_FEATURE_COLS, TARGET_COL]
 TRAIN_READ_COLS = [*BASE_READ_COLS, "target_rent_count", "target_return_count"]
@@ -89,11 +148,13 @@ def fit_lightgbm(
     valid_df: pd.DataFrame,
     random_state: int = 42,
     params: dict | None = None,
+    feature_cols: list[str] | None = None,
 ):
     from lightgbm import LGBMRegressor, early_stopping, log_evaluation
 
-    x_train, y_train = make_xy(train_df)
-    x_valid, y_valid = make_xy(valid_df)
+    kwargs = {"feature_cols": feature_cols} if feature_cols is not None else {}
+    x_train, y_train = make_xy(train_df, **kwargs)
+    x_valid, y_valid = make_xy(valid_df, **kwargs)
     model = LGBMRegressor(**{**DEFAULT_PARAMS, **(params or {})}, random_state=random_state)
     t0 = time.time()
     model.fit(
@@ -105,8 +166,11 @@ def fit_lightgbm(
     return model, time.time() - t0
 
 
-def evaluate_lightgbm(model, df: pd.DataFrame, label: str) -> dict:
-    x, y = make_xy(df)
+def evaluate_lightgbm(
+    model, df: pd.DataFrame, label: str, feature_cols: list[str] | None = None
+) -> dict:
+    kwargs = {"feature_cols": feature_cols} if feature_cols is not None else {}
+    x, y = make_xy(df, **kwargs)
     pred = model.predict(x)
     acc, macro_f1 = _direction_metrics(y.to_numpy(), pred)
     return {
@@ -120,6 +184,118 @@ def evaluate_lightgbm(model, df: pd.DataFrame, label: str) -> dict:
     }
 
 
+def attach_rack_count(df: pd.DataFrame, station_static: pd.DataFrame) -> pd.DataFrame:
+    """is_full 타깃 유도용 rack_count 조인. 결측 역은 is_full을 NaN으로 남긴다."""
+    merged = df.merge(
+        station_static[["od_station_id", "rack_count"]], on="od_station_id", how="left"
+    )
+    missing = int(merged["rack_count"].isna().sum())
+    if missing:
+        print(f"  rack_count 결측 {missing:,}행 — is_full 계산에서 제외(NaN 유지)")
+    return merged
+
+
+def attach_empty_full_targets(df: pd.DataFrame) -> pd.DataFrame:
+    """`arrival_stock = stock_anchor_hour + target_net_flow`에서 이진 타깃을 유도한다.
+
+    회귀 타깃(target_net_flow)과 같은 패널에서 바로 유도되므로 새 데이터가 필요 없다
+    (`validation/BYC/eta-empty-full-check/RESULTS.md` 검증 근거).
+    """
+    df = df.copy()
+    arrival_stock = df["stock_anchor_hour"] + df[TARGET_COL]
+    df["is_empty"] = (arrival_stock <= 0).astype(int)
+    df["is_full"] = (arrival_stock >= df["rack_count"]).astype(int)
+    df.loc[df["rack_count"].isna(), "is_full"] = float("nan")
+    return df
+
+
+def _make_xy_binary(df: pd.DataFrame, target_col: str) -> tuple[pd.DataFrame, pd.Series]:
+    rows = df.dropna(subset=[target_col])
+    return rows[MODEL_FEATURE_COLS_V4_WEATHER].fillna(0), rows[target_col].astype(int)
+
+
+def fit_binary(
+    train_df: pd.DataFrame, valid_df: pd.DataFrame, target_col: str, random_state: int = 42
+):
+    from lightgbm import LGBMClassifier, early_stopping, log_evaluation
+
+    x_train, y_train = _make_xy_binary(train_df, target_col)
+    x_valid, y_valid = _make_xy_binary(valid_df, target_col)
+    print(
+        f"  [{target_col}] train 양성비율 {y_train.mean():.4%} ({int(y_train.sum()):,}/{len(y_train):,})"
+    )
+
+    model = LGBMClassifier(
+        objective="binary",
+        n_estimators=1500,
+        learning_rate=0.02,
+        num_leaves=127,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        is_unbalance=True,
+        n_jobs=-1,
+        random_state=random_state,
+    )
+    t0 = time.time()
+    model.fit(
+        x_train,
+        y_train,
+        eval_set=[(x_valid, y_valid)],
+        eval_metric="binary_logloss",
+        callbacks=[early_stopping(60), log_evaluation(0)],
+    )
+    return model, time.time() - t0
+
+
+def evaluate_binary(model, df: pd.DataFrame, label: str, target_col: str) -> dict:
+    from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+
+    x, y = _make_xy_binary(df, target_col)
+    proba = model.predict_proba(x)[:, 1]
+    result = {
+        "split": label,
+        "target": target_col,
+        "rows": len(df),
+        "pos_rate": float(y.mean()),
+        "logloss": float(log_loss(y, proba, labels=[0, 1])),
+        "brier": float(brier_score_loss(y, proba)),
+    }
+    result["auc"] = float(roc_auc_score(y, proba)) if y.nunique() == 2 else None
+    return result
+
+
+def _attach_v4_features(
+    df: pd.DataFrame,
+    feature_set: str,
+    jamsil_dates: set | None,
+    jamsil_stations: set | None,
+    lag_lookup: pd.DataFrame | None,
+    weather: pd.DataFrame | None,
+    distance: pd.DataFrame | None,
+    population: pd.DataFrame | None = None,
+    station_dong_map: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """feature_set에 맞는 v4 계열 피처만 붙인다. v3는 그대로 통과.
+
+    v4 계열끼리는 서로 독립적으로 검증한다(S15P21A104-160) — 한 번에 묶으면 어느 피처가
+    원인인지 구분이 안 된다(KBO_LAG 세트가 그 실수였다, features.py 주석 참고).
+    """
+    if feature_set == "v4_kbo_lag":
+        df = attach_kbo(df, jamsil_dates, jamsil_stations, date_col="date")
+        df = attach_anchor_time_slot(df)
+        df = attach_lag(df, lag_lookup, 1, "lag1d_stock")
+        df = attach_lag(df, lag_lookup, 7, "lag7d_stock")
+    elif feature_set == "v4_weather":
+        df = attach_weather(df, weather, date_col="date", hour_col="hour")
+    elif feature_set == "v4_distance":
+        df = attach_distance(df, distance)
+    elif feature_set == "v4_floating":
+        df = attach_floating_population(
+            df, population, station_dong_map, date_col="date", hour_col="hour"
+        )
+    return df
+
+
 def run(
     train_months: list[str] | None = None,
     valid_months: list[str] | None = None,
@@ -127,19 +303,75 @@ def run(
     sample_frac: float | None = None,
     random_state: int = 42,
     tag: str = "v3",
+    feature_set: str = "v3",
     out_root: Path = MODELS_DIR,
+    train_empty_full: bool = False,
+    avg_engine: str = "pandas",
 ) -> Path:
+    if feature_set not in FEATURE_SETS:
+        raise ValueError(f"알 수 없는 feature_set: {feature_set} (가능: {list(FEATURE_SETS)})")
+    if train_empty_full and feature_set != "v4_weather":
+        raise ValueError(
+            "--train-empty-full은 v4_weather에서만 검증됐다 (validation/BYC/eta-empty-full-check)"
+        )
+    feature_cols = FEATURE_SETS[feature_set]
+    station_static = pd.read_parquet(STATION_MASTER_PATH) if train_empty_full else None
+
     train_paths = monthly_paths("train", train_months)
     valid_paths = monthly_paths("valid", valid_months)
     test_paths = monthly_paths("test", test_months)
     holidays = load_holidays()
 
     # ── avg 소스: StockProfileBaseline(재고·확률) — train만으로 fit ──
-    print(f"[avg] train {len(train_paths)}개 파일 스트리밍 집계...")
-    avg_baseline = StockProfileBaseline().fit_streaming(train_paths, holidays)
+    if avg_engine not in ("pandas", "spark"):
+        raise ValueError(f"알 수 없는 avg_engine: {avg_engine} (가능: pandas, spark)")
+    print(f"[avg] train {len(train_paths)}개 파일 {avg_engine} 집계...")
+    if avg_engine == "spark":
+        # 274 B안 — DATA_ENGINE/spark/jobs/bike_avg_baseline.py에서 11개월 250.7M행으로
+        # pandas와 값 일치를 확인한 로직(app/BIKE/pipeline/lookup.py에 재구현). 기본값이
+        # 아니라 옵트인이다 — avg는 "정직한 baseline"이라 검증 없이 기본 경로를 바꾸지 않는다.
+        avg_baseline = StockProfileBaseline().fit_streaming_spark(train_paths, holidays)
+    else:
+        avg_baseline = StockProfileBaseline().fit_streaming(train_paths, holidays)
     print(f"[avg] station×dow_type×time_slot {len(avg_baseline.table_):,}행")
 
-    # ── LightGBM: target_net_flow (historical profile + 공휴일 feature) ──
+    # ── v4 전용 재료(KBO 일정, jamsil 인근역, D-1/D-7 lag lookup, 날씨, 역 거리, 유동인구) — v3면 전부 None ──
+    jamsil_dates = jamsil_stations = lag_lookup = weather = distance = None
+    population = station_dong_map = None
+    if feature_set == "v4_kbo_lag":
+        jamsil_dates = load_jamsil_game_dates()
+        coords = pd.read_parquet(
+            train_paths[0], columns=["od_station_id", "lat_stock", "lon_stock"]
+        )
+        jamsil_stations = jamsil_nearby_stations(coords)
+        lag_months = None
+        if train_months or valid_months or test_months:
+            lag_months = sorted(
+                {*(train_months or []), *(valid_months or []), *(test_months or [])}
+            )
+        print("[v4] D-1/D-7 lag lookup 생성...")
+        t0 = time.time()
+        lag_lookup = build_lag_lookup(lag_months)
+        print(f"[v4] lag lookup {len(lag_lookup):,}행, {time.time() - t0:.1f}초")
+    elif feature_set == "v4_weather":
+        print("[v4_weather] ASOS 로딩...")
+        weather = load_weather()
+        print(f"[v4_weather] 날씨 {len(weather):,}행")
+    elif feature_set == "v4_distance":
+        print("[v4_distance] 역 거리 로딩...")
+        distance = pd.read_csv(STATION_DISTANCE_PATH)[
+            ["od_station_id", "dist_subway_m", "dist_bus_m"]
+        ]
+        print(f"[v4_distance] 역 거리 {len(distance):,}행")
+    elif feature_set == "v4_floating":
+        print("[v4_floating] 유동인구·역-행정동 매핑 로딩...")
+        population = load_dong_hour_population()
+        station_dong_map = load_station_dong_map()
+        print(
+            f"[v4_floating] 유동인구 {len(population):,}행, 역-행정동 매핑 {len(station_dong_map):,}행"
+        )
+
+    # ── LightGBM: target_net_flow (historical profile + 공휴일 feature [+ v4 피처]) ──
     station_ids = (
         scan_station_ids(train_paths) | scan_station_ids(valid_paths) | scan_station_ids(test_paths)
     )
@@ -147,46 +379,119 @@ def run(
 
     train_df = load_paths(train_paths, TRAIN_READ_COLS, TARGET_COL, sample_frac, random_state)
     train_df = _attach_holiday_flag(train_df, holidays)
+    train_df = _attach_v4_features(
+        train_df,
+        feature_set,
+        jamsil_dates,
+        jamsil_stations,
+        lag_lookup,
+        weather,
+        distance,
+        population,
+        station_dong_map,
+    )
     profile = HistoricalProfileBuilder().fit(train_df)
     train_df = profile.transform(train_df)
     apply_station_code(train_df, station_dtype, "train")
 
     valid_df = load_paths(valid_paths, BASE_READ_COLS, TARGET_COL)
     valid_df = _attach_holiday_flag(valid_df, holidays)
+    valid_df = _attach_v4_features(
+        valid_df,
+        feature_set,
+        jamsil_dates,
+        jamsil_stations,
+        lag_lookup,
+        weather,
+        distance,
+        population,
+        station_dong_map,
+    )
     valid_df = profile.transform(valid_df)
     apply_station_code(valid_df, station_dtype, "valid")
 
-    model, train_time_sec = fit_lightgbm(train_df, valid_df, random_state)
-    reports = [evaluate_lightgbm(model, valid_df, "valid")]
+    model, train_time_sec = fit_lightgbm(
+        train_df, valid_df, random_state, feature_cols=feature_cols
+    )
+    reports = [evaluate_lightgbm(model, valid_df, "valid", feature_cols=feature_cols)]
+
+    empty_full_models: dict = {}
+    empty_full_reports: list = []
+    if train_empty_full:
+        train_ef = attach_empty_full_targets(attach_rack_count(train_df, station_static))
+        valid_ef = attach_empty_full_targets(attach_rack_count(valid_df, station_static))
+        for target_col in ("is_empty", "is_full"):
+            print(f"[{target_col}] 학습...")
+            ef_model, ef_time = fit_binary(train_ef, valid_ef, target_col, random_state)
+            empty_full_models[target_col] = ef_model
+            r = evaluate_binary(ef_model, valid_ef, "valid", target_col)
+            r["train_time_sec"] = ef_time
+            empty_full_reports.append(r)
+            print(f"  valid: {r}")
+        del train_ef, valid_ef
+
     del train_df, valid_df
 
     for p in test_paths:
         test_df = load_paths([p], BASE_READ_COLS, TARGET_COL)
         test_df = _attach_holiday_flag(test_df, holidays)
+        test_df = _attach_v4_features(
+            test_df,
+            feature_set,
+            jamsil_dates,
+            jamsil_stations,
+            lag_lookup,
+            weather,
+            distance,
+            population,
+            station_dong_map,
+        )
         test_df = profile.transform(test_df)
         apply_station_code(test_df, station_dtype, f"test:{p.stem}")
-        reports.append(evaluate_lightgbm(model, test_df, f"test:{p.stem[-6:]}"))
+        reports.append(
+            evaluate_lightgbm(model, test_df, f"test:{p.stem[-6:]}", feature_cols=feature_cols)
+        )
+        if train_empty_full:
+            test_ef = attach_empty_full_targets(attach_rack_count(test_df, station_static))
+            for target_col in ("is_empty", "is_full"):
+                r = evaluate_binary(
+                    empty_full_models[target_col], test_ef, f"test:{p.stem[-6:]}", target_col
+                )
+                empty_full_reports.append(r)
+                print(f"  {r['split']}: {r}")
+            del test_ef
         del test_df
 
     # ── 아티팩트 저장 ──
-    stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M")
+    stamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M")
     out_dir = Path(out_root) / f"{tag}_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     avg_baseline.save(out_dir / "stock_profile_avg.parquet")
     profile.save(out_dir)
     model.booster_.save_model(str(out_dir / "model.txt"))
+    # station_code 복원용 — predictor.py의 LightGBMPredictor(날짜축 모델)와 같은 패턴.
+    # 서빙이 학습 때와 같은 station_id -> code 매핑을 재현하려면 이 목록이 반드시 필요하다.
+    (out_dir / "station_categories.json").write_text(
+        json.dumps(list(station_dtype.categories), ensure_ascii=False), encoding="utf-8"
+    )
+    if train_empty_full:
+        for target_col, ef_model in empty_full_models.items():
+            ef_model.booster_.save_model(str(out_dir / f"model_{target_col}.txt"))
     meta = {
         "tag": tag,
+        "feature_set": feature_set,
         "train_months": [p.stem[-6:] for p in train_paths],
         "valid_months": [p.stem[-6:] for p in valid_paths],
         "test_months": [p.stem[-6:] for p in test_paths],
-        "model_feature_cols": [*BASE_FEATURE_COLS, "station_code"],
+        "model_feature_cols": feature_cols,
         "station_categories": len(station_dtype.categories),
         "sample_frac": sample_frac,
         "train_time_sec": train_time_sec,
         "lightgbm_eval": reports,
+        "empty_full_feature_cols": MODEL_FEATURE_COLS_V4_WEATHER if train_empty_full else None,
+        "empty_full_eval": empty_full_reports if train_empty_full else None,
         "avg_profile_rows": len(avg_baseline.table_),
-        "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+        "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
     }
     (out_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=1, default=str), encoding="utf-8"
@@ -213,6 +518,27 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--sample-frac", type=float, default=None)
     ap.add_argument("--random-state", type=int, default=42)
     ap.add_argument("--tag", default="v3")
+    ap.add_argument(
+        "--feature-set",
+        default="v3",
+        choices=list(FEATURE_SETS),
+        help="v3(기본) | v4_kbo_lag(KBO·D-1/D-7 lag 추가, S15P21A104-160)",
+    )
+    ap.add_argument(
+        "--train-empty-full",
+        action="store_true",
+        help="빈 재고(is_empty)/만차(is_full) 확률 분류기도 같이 학습·저장한다 "
+        "(v4_weather 전용, S15P21A104-160 Phase 6)",
+    )
+    ap.add_argument(
+        "--engine",
+        dest="avg_engine",
+        default="pandas",
+        choices=["pandas", "spark"],
+        help="avg baseline(StockProfileBaseline) 집계 엔진. spark는 274 B안 — "
+        "pandas와 값 일치 검증됨(RESULTS.md), 로컬에 Java·pyspark 필요. "
+        "11개월 전체 규모 재학습에서만 권장(소규모는 JVM 기동비용 때문에 pandas가 더 빠름)",
+    )
     args = ap.parse_args(argv)
     run(
         args.train_months,
@@ -221,6 +547,9 @@ def main(argv: list[str] | None = None) -> None:
         args.sample_frac,
         args.random_state,
         args.tag,
+        args.feature_set,
+        train_empty_full=args.train_empty_full,
+        avg_engine=args.avg_engine,
     )
 
 

@@ -8,9 +8,14 @@
 ## 중복 등록을 여기서 걸러낸다
 
 원본은 같은 축제를 연도 파일마다, 때로는 같은 파일 안에서도 **다른 ID로 반복 등록한다**
-(수도권 802행 중 50행이 23개 축제의 중복). `map_events_to_stations.py`가 `festival_id`의
-nunique로 역·날짜별 축제 수를 세기 때문에, 중복을 남기면 그 축제가 열린 날의 개수가
-2~4배로 잡힌다 — 피처가 조용히 과대계상된다.
+(수도권 802행 중 50행이 23개 축제의 중복; 2024~2025 구간만 보면 437건 중 113건이 이런
+중복이다 — 227/318에서 확인). 이때 좌표도 소수점 4~6번째 자리에서 파일마다 달라진다
+(189개 중복 그룹 중 34개는 최대 위도 0.064도까지 드리프트한다). 그래서 식별 키에 `lat`·
+`lon`을 넣으면 바로 이 중복을 못 잡는다 — `name`·`start_date`·`end_date`만으로 동일
+축제를 판단한다. 남길 행은 좌표가 있는 쪽을 우선하고, 좌표 유무가 같으면 `source_year`가
+가장 최신인 쪽을 남긴다(나중 등록이 더 정정된 값일 가능성이 높다고 본다).
+`map_events_to_stations.py`가 `festival_id`의 nunique로 역·날짜별 축제 수를 세기 때문에,
+중복을 남기면 그 축제가 열린 날의 개수가 2~4배로 잡힌다 — 피처가 조용히 과대계상된다.
 
 ## 축제 "규모"를 이 원천에서 만들 수 없다
 
@@ -75,9 +80,11 @@ _COLUMN_MAP = {
     "MNNST_NM": "host",
 }
 
-# 이름·기간·좌표가 모두 같으면 같은 축제로 본다. ID는 원본이 중복 발급하므로 판단 근거로
-# 쓸 수 없다.
-_DEDUPE_KEYS = ["name", "start_date", "end_date", "lat", "lon"]
+# 이름·기간이 같으면 같은 축제로 본다. ID는 원본이 중복 발급하므로 판단 근거로 쓸 수
+# 없고, 좌표도 같은 축제인데 파일마다 소수점 4~6번째 자리가 달라져(227/318에서 확인) 키에
+# 넣으면 중복을 놓친다 — 그래서 좌표는 식별 키가 아니라 아래 `drop_duplicate_festivals`의
+# 타이브레이커로만 쓴다.
+_DEDUPE_KEYS = ["name", "start_date", "end_date"]
 
 # 이 일수까지를 "인원이 몰리는 단기 축제"로 본다. 개최 일수의 중위가 2일, 75분위가 3일이라
 # 여기서 끊었다. 임의 경계라서 소비하는 쪽(`map_events_to_stations.py`)이 연속값
@@ -113,13 +120,27 @@ def filter_capital_area(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def drop_duplicate_festivals(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """이름·기간·좌표가 같은 중복 등록을 하나로 합치고, 제거한 행 수를 함께 돌려준다.
+    """이름·기간이 같은 중복 등록을 하나로 합치고, 제거한 행 수를 함께 돌려준다.
+
+    좌표는 식별 키가 아니라 어느 행을 남길지 정하는 타이브레이커다 — 정렬로 우선순위를
+    만든 뒤 `drop_duplicates(keep="first")`로 그 순서의 맨 앞 행을 남긴다: ① 좌표가 있는
+    행을 없는 행보다 우선하고, ② 그다음은 `source_year`가 최신인 행을 우선한다(나중
+    등록일수록 좌표가 더 정정됐을 가능성이 높다고 본다). 정렬은 남길 행을 고르는 데만
+    쓰고, 최종 반환 순서는 원본 순서를 그대로 유지한다.
 
     제거 건수를 같이 돌려주는 이유는 `main()`이 그 수를 출력해야 하기 때문이다 — 중복이
     조용히 사라지면 원본이 몇 건이었는지 추적할 수 없다.
     """
     before = len(df)
-    deduped = df.drop_duplicates(_DEDUPE_KEYS).reset_index(drop=True)
+    ranked = df.assign(_has_coords=df["lat"].notna() & df["lon"].notna()).sort_values(
+        by=["_has_coords", "source_year"], ascending=[False, False]
+    )
+    deduped = (
+        ranked.drop_duplicates(_DEDUPE_KEYS)
+        .drop(columns="_has_coords")
+        .sort_index()
+        .reset_index(drop=True)
+    )
     return deduped, before - len(deduped)
 
 
@@ -180,7 +201,7 @@ def main() -> None:
     deduped, removed = drop_duplicate_festivals(capital)
     if removed:
         print(
-            f"[안내] 이름·기간·좌표가 같은 중복 등록 {removed}행을 제거했다 (수도권 {len(capital):,}행 → {len(deduped):,}행)."
+            f"[안내] 이름·기간이 같은 중복 등록 {removed}행을 제거했다 (수도권 {len(capital):,}행 → {len(deduped):,}행)."
         )
 
     df = add_duration_days(deduped)

@@ -12,6 +12,8 @@ The script is dry-run by default. Pass --yes to write the output file.
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import os
 import sys
 from datetime import datetime
@@ -23,6 +25,7 @@ import pandas as pd
 from DATA_ENGINE.collect.common import AI_ROOT
 
 KST = ZoneInfo("Asia/Seoul")
+logger = logging.getLogger(__name__)
 DEFAULT_INPUT_ROOT = AI_ROOT / "data" / "EXTERNAL" / "weather" / "raw" / "nowcast"
 DEFAULT_OUTPUT_ROOT = AI_ROOT / "data" / "EXTERNAL" / "weather" / "interim" / "nowcast_features"
 
@@ -53,7 +56,68 @@ def snapshot_files(input_root: Path, dt: str) -> list[Path]:
 def read_raw_snapshots(paths: list[Path]) -> pd.DataFrame:
     if not paths:
         return pd.DataFrame()
-    return pd.concat((pd.read_parquet(path) for path in paths), ignore_index=True)
+    frames = []
+    for path in paths:
+        frame = pd.read_parquet(path)
+        if "payload_json" in frame.columns:
+            frame = flatten_kafka_weather(frame, path)
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
+def flatten_kafka_weather(frame: pd.DataFrame, path: Path) -> pd.DataFrame:
+    rows = []
+    invalid = 0
+    for record in frame.to_dict("records"):
+        try:
+            payload = json.loads(record["payload_json"])
+        except (TypeError, ValueError):
+            invalid += 1
+            continue
+        if not isinstance(payload, dict):
+            invalid += 1
+            continue
+        if "obsrValue" in payload and "fcstValue" not in payload:
+            source = "observed"
+        elif "fcstValue" in payload and "obsrValue" not in payload:
+            source = "forecast"
+        else:
+            invalid += 1
+            continue
+        if not {"baseDate", "baseTime", "category", "nx", "ny"}.issubset(payload):
+            invalid += 1
+            continue
+        if source == "forecast" and not {"fcstDate", "fcstTime"}.issubset(payload):
+            invalid += 1
+            continue
+        collected_at = record.get("poll_run_at")
+        if pd.isna(collected_at):
+            collected_at = record.get("ingested_at")
+        rows.append(
+            {
+                **payload,
+                "source": source,
+                "collected_at": collected_at,
+            }
+        )
+    if invalid:
+        logger.warning("Skipped %d invalid Kafka weather rows in %s", invalid, path)
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "baseDate",
+            "baseTime",
+            "fcstDate",
+            "fcstTime",
+            "category",
+            "nx",
+            "ny",
+            "obsrValue",
+            "fcstValue",
+            "source",
+            "collected_at",
+        ],
+    )
 
 
 def parse_kma_datetime(date_series: pd.Series, time_series: pd.Series) -> pd.Series:
@@ -91,7 +155,9 @@ def normalize_weather_nowcast(raw: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=INTERIM_COLUMNS)
 
     df["weather_source"] = df["source"].astype("string")
-    df["collected_at"] = pd.to_datetime(df["collected_at"], errors="coerce")
+    df["collected_at"] = pd.to_datetime(
+        df["collected_at"], errors="coerce", utc=True
+    ).dt.tz_convert(KST)
     df["base_datetime"] = parse_kma_datetime(df["baseDate"], df["baseTime"])
     if {"fcstDate", "fcstTime"}.issubset(df.columns):
         df["forecast_datetime"] = parse_kma_datetime(
@@ -113,17 +179,23 @@ def normalize_weather_nowcast(raw: pd.DataFrame) -> pd.DataFrame:
     df["nx"] = pd.to_numeric(df["nx"], errors="coerce")
     df["ny"] = pd.to_numeric(df["ny"], errors="coerce")
     df = df.dropna(
-        subset=["collected_at", "base_datetime", "forecast_datetime", "weather_source"]
+        subset=["collected_at", "base_datetime", "forecast_datetime", "weather_source", "nx", "ny"]
     ).copy()
 
+    # Poller and Kafka may report the same observation more than once.
+    df = df.sort_values("collected_at").drop_duplicates(
+        subset=["weather_source", "base_datetime", "forecast_datetime", "nx", "ny", "category"],
+        keep="last",
+    )
+
     index_cols = [
-        "collected_at",
         "weather_source",
         "base_datetime",
         "forecast_datetime",
         "nx",
         "ny",
     ]
+    collected_at = df.groupby(index_cols, dropna=False)["collected_at"].max()
     pivot = (
         df.pivot_table(
             index=index_cols,
@@ -134,6 +206,7 @@ def normalize_weather_nowcast(raw: pd.DataFrame) -> pd.DataFrame:
         .rename(columns=str.lower)
         .reset_index()
     )
+    pivot = pivot.merge(collected_at.rename("collected_at").reset_index(), on=index_cols)
 
     for col in WEATHER_FEATURE_COLUMNS:
         if col not in pivot.columns:

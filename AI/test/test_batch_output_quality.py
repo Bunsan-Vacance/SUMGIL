@@ -67,6 +67,18 @@ def weather_frame() -> pd.DataFrame:
     )
 
 
+def crowd_frame() -> pd.DataFrame:
+    """197 점검용 최소 CROWD 서빙 표 — 음수 인원이 없는 정상 판."""
+    return pd.DataFrame(
+        {
+            "station_no": [150, 150],
+            "boarding_pred": [676.4, 0.0],
+            "alighting_pred": [2258.5, 12.3],
+            "pred_source": ["model", "lookup_negative"],
+        }
+    )
+
+
 def write_output(root, relative_path: str, df: pd.DataFrame) -> None:
     path = root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,7 +86,9 @@ def write_output(root, relative_path: str, df: pd.DataFrame) -> None:
 
 
 def test_build_checks_uses_expected_batch_output_paths(tmp_path):
-    checks = build_checks(tmp_path, "2026-09-13", bike_min_rows=10, weather_min_rows=5)
+    checks = build_checks(
+        tmp_path, "2026-09-13", bike_min_rows=10, weather_min_rows=5, crowd_min_rows=7
+    )
 
     assert checks == [
         BatchOutputCheck(
@@ -87,6 +101,11 @@ def test_build_checks_uses_expected_batch_output_paths(tmp_path):
             path=tmp_path
             / "data/EXTERNAL/weather/interim/nowcast_features/dt=2026-09-13/part.parquet",
             min_rows=5,
+        ),
+        BatchOutputCheck(
+            name="crowd",
+            path=tmp_path / "data/CROWD/serving/predictions_2026-09-13.parquet",
+            min_rows=7,
         ),
     ]
 
@@ -248,6 +267,7 @@ def test_main_returns_zero_when_all_outputs_are_ok(tmp_path, capsys):
         "data/EXTERNAL/weather/interim/nowcast_features/dt=2026-09-13/part.parquet",
         weather_frame(),
     )
+    write_output(tmp_path, "data/CROWD/serving/predictions_2026-09-13.parquet", crowd_frame())
 
     code = main(
         [
@@ -258,6 +278,8 @@ def test_main_returns_zero_when_all_outputs_are_ok(tmp_path, capsys):
             "--bike-min-rows",
             "2",
             "--weather-min-rows",
+            "2",
+            "--crowd-min-rows",
             "2",
         ]
     )
