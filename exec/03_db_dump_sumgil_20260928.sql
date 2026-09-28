@@ -1,0 +1,15 @@
+-- ⚠️ 플레이스홀더 — 실제 DB 덤프로 교체 필요
+--
+-- 이 파일은 자동으로 생성할 수 없다(운영 DB 접속 권한이 필요). 아래 명령으로
+-- 실제 덤프를 떠서 이 파일을 교체한다.
+--
+--   pg_dump -h <DB_HOST> -U sumgil -d sumgil -f 03_db_dump_sumgil_$(date +%Y%m%d).sql
+--
+-- 복원:
+--
+--   psql -h <DB_HOST> -U sumgil -d sumgil -f 03_db_dump_sumgil_YYYYMMDD.sql
+--
+-- 스키마 자체는 Flyway 마이그레이션(BE/src/main/resources/db/migration/)이 애플리케이션
+-- 기동 시 자동 생성하므로, 이 덤프는 마스터 데이터(역·노선·정류소·대여소 등)와 적재된
+-- 예측·이력 데이터를 재현하기 위한 것이다. 정적 데이터만 별도로 적재하는 절차는
+-- BE/docs/db/load-*.md(역·버스·따릉이·혼잡도 예측별로 분리) 문서에 정리되어 있다.
