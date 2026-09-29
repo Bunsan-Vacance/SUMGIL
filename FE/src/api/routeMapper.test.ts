@@ -71,6 +71,31 @@ describe('경로 응답 확장 필드', () => {
     expect(route.legs[0].segmentCongestionLevel).toBe(120.5)
   })
 
+  it('leg의 탑승 대기(waitMinutes)를 표시 모델에 보존한다', () => {
+    const route = mapBackendRoute(
+      response({
+        legs: [{ mode: 'SUBWAY', minutes: 10, waitMinutes: 3.5 }],
+      }),
+      0,
+      '2026-09-17T00:00:00.000Z',
+    )
+
+    expect(route.legs[0].waitMinutes).toBe(3.5)
+    expect(route.legs[0].minutes).toBe(10)
+  })
+
+  it('waitMinutes가 null이면(구형 응답) 필드를 만들지 않는다', () => {
+    const route = mapBackendRoute(
+      response({
+        legs: [{ mode: 'SUBWAY', minutes: 10, waitMinutes: null }],
+      }),
+      0,
+      '2026-09-17T00:00:00.000Z',
+    )
+
+    expect(route.legs[0]).not.toHaveProperty('waitMinutes')
+  })
+
   it('서버 구간 등급을 보존하고 숫자 기반 등급보다 우선하도록 함께 매핑한다', () => {
     const route = mapBackendRoute(
       response({

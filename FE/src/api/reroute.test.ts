@@ -90,6 +90,17 @@ describe('buildRerouteRequest — 호출 조건', () => {
     })
   })
 
+  it('지하철 탑승 대기(waitMinutes)를 etaToRentalMinutes에 더한다', () => {
+    const waitRoute: Route = {
+      ...baseRoute,
+      legs: baseRoute.legs.map((leg) => (leg.mode === 'subway' ? { ...leg, waitMinutes: 3 } : leg)),
+    }
+    const result = buildRerouteRequest({ ...baseState, route: waitRoute }, 'sess-1', {
+      debugForce: false,
+    })
+    expect(result?.request.etaToRentalMinutes).toBe(10)
+  })
+
   it('debugForce가 true면 요청에 debugForceTrigger를 싣는다', () => {
     const result = buildRerouteRequest(baseState, 'sess-1', { debugForce: true })
     expect(result?.request.debugForceTrigger).toBe(true)

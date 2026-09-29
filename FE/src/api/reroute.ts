@@ -289,8 +289,11 @@ export function buildRerouteRequest(
   const destStationId = state.destination?.stationId?.trim() || lastSubwayStationId(route)
   if (!destStationId) return null
   // 현재 leg는 전체 시간으로 근사하고, 그 뒤 boundary까지의 leg 시간을 더해 반올림한다.
+  // 대여소 도착 예상 분이므로 탑승 대기(waitMinutes, BE 217 이후 minutes와 분리)도 포함한다.
   const etaToRentalMinutes = Math.round(
-    route.legs.slice(state.step, boundary.legIndex + 1).reduce((sum, leg) => sum + leg.minutes, 0),
+    route.legs
+      .slice(state.step, boundary.legIndex + 1)
+      .reduce((sum, leg) => sum + leg.minutes + (leg.waitMinutes ?? 0), 0),
   )
   const request: RerouteCheckRequest = {
     sessionId,
