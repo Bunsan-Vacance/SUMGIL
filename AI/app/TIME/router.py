@@ -21,6 +21,7 @@ FE→BE→AI인지가 아직 결정 대기라(`FROM_BE-time-reroute-contract-01`
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -168,6 +169,7 @@ def check_reroute(req: RerouteCheckRequest) -> RerouteCheckResponse:
 
 
 def _check_reroute(req: RerouteCheckRequest) -> RerouteCheckResponse:
+    started = time.perf_counter()
     settings = get_settings()
     now = _now()
     store = _session_store()
@@ -204,16 +206,23 @@ def _check_reroute(req: RerouteCheckRequest) -> RerouteCheckResponse:
         valid_until = now + timedelta(seconds=settings.time_recommendation_ttl_sec)
         store.mark_fired(req.session_id, recommendation_id, valid_until, now=now)
 
-    # 좌표를 남기지 않는다 — status·reason·session_id만으로도 폴링 흐름을 추적하기엔 충분하고,
-    # 좌표를 남기기 시작하면 로그가 사실상 위치 추적 기록이 된다(guard.py arg_keys_of와 같은 원칙).
+    response = from_outcome(outcome, recommendation_id=recommendation_id, valid_until=valid_until)
+
+    # 운영에서 status 분포·지연을 보려는 한 줄(키=값, 공백 구분). 좌표를 남기지 않는다 —
+    # status·reason·session_id만으로도 폴링 흐름을 추적하기엔 충분하고, 좌표를 남기기 시작하면
+    # 로그가 사실상 위치 추적 기록이 된다(guard.py arg_keys_of와 같은 원칙). session은 앞 8자만.
     _log.info(
-        "reroute check session=%s status=%s reason=%s",
-        req.session_id,
-        outcome.status.value,
-        outcome.reason,
+        "reroute_check status=%s reason=%s rental=%s session=%s step=%s eta=%s ms=%d",
+        response.status,
+        response.reason or "-",
+        req.rental_id,
+        req.session_id[:8],
+        req.step,
+        req.eta_to_rental_minutes,
+        (time.perf_counter() - started) * 1000,
     )
 
-    return from_outcome(outcome, recommendation_id=recommendation_id, valid_until=valid_until)
+    return response
 
 
 @router.get("/meta", response_model=TimeMetaResponse)
@@ -278,4 +287,12 @@ def _safe_snapshot_age_sec(settings: object) -> float | None:
         return None
 
 
-__all__ = ["router"]
+def snapshot_age_sec() -> float | None:
+    """`/health`가 부르는 공개 래퍼 — 스냅샷 나이(초). 예외·파일 없음이면 `None`."""
+    try:
+        return _safe_snapshot_age_sec(get_settings())
+    except Exception:  # noqa: BLE001 - 헬스체크가 이 값 때문에 실패하면 안 된다
+        return None
+
+
+__all__ = ["router", "snapshot_age_sec"]

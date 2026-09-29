@@ -21,6 +21,7 @@ monkeypatch로 갈아끼운다 — `app.BIKE.router` 테스트가 `service._stor
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
@@ -226,6 +227,17 @@ def test_트리거가_안_서면_status만_온다(monkeypatch: pytest.MonkeyPatc
     assert body["status"] == "no_trigger"
     assert body["recommendationId"] is None
     assert body["target"] is None
+
+
+def test_확인_결과가_키_값_한_줄로_로그에_남는다(caplog: pytest.LogCaptureFixture):
+    with caplog.at_level(logging.INFO, logger="app.TIME.router"):
+        r = client.post("/time/reroute/check", json=_payload())
+
+    assert r.status_code == 200
+    lines = [m for m in caplog.messages if m.startswith("reroute_check ")]
+    assert len(lines) == 1
+    assert f"status={r.json()['status']}" in lines[0]
+    assert "rental=" in lines[0] and "session=" in lines[0] and " ms=" in lines[0]
 
 
 # ── proposal ──
