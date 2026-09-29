@@ -21,6 +21,11 @@ lightgbm_global_fallback`). 503은 모델 아티팩트 파일 자체가 망가�
 도착 시점 라벨(`arrival_dow_type`/`arrival_time_slot`)은 근사 없이 요청받은 `eta_minutes` 그대로
 계산된다 — 근사되는 건 재고 예측치뿐이다. 상한 1440분(24시간)은 명백히 잘못된 입력만 걸러내는
 용도다.
+
+시연용 override: `time_debug_force_trigger_enabled`가 켜져 있고 `debug_empty_rental_ids`에
+든 대여소는 정상 결과를 `service.apply_debug_override`가 고갈(`predicted_stock=0.0`,
+`p_empty=1.0`, `source=debug_override`)로 덮어쓴다 — TIME 재안내 판단과 같은 게이트라 경로
+카드와 팝업 숫자가 어긋나지 않는다. 운영(기본값)에서는 타지 않고, 404/503 예외 경로는 덮지 않는다.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.BIKE import service
 from app.BIKE.schemas import BikeMetaResponse, EtaStockResponse, StationStockResponse
+from app.core.config import get_settings
 
 router = APIRouter(prefix="/bike", tags=["bike"])
 
@@ -70,8 +76,9 @@ def get_station_stock(rental_id: str, dow_type: DowTypeQ = None) -> dict:
 @router.get("/stations/{rental_id}/eta-stock", response_model=EtaStockResponse)
 def get_eta_stock(rental_id: str, eta_minutes: EtaMinutesQ) -> dict:
     try:
-        return service.predict_eta_stock(rental_id, eta_minutes)
+        result = service.predict_eta_stock(rental_id, eta_minutes)
     except service.LiveStockMissing as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except service.ModelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return service.apply_debug_override(result, get_settings())

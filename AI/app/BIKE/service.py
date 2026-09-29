@@ -382,3 +382,26 @@ def predict_eta_stock(rental_id: str, eta_minutes: int, now: datetime | None = N
         "source": source,
         "model_horizon_min": result["horizon_min_used"],
     }
+
+
+def apply_debug_override(result: dict, settings: Settings) -> dict:
+    """시연용 예측 override — `predict_eta_stock` 결과를 지정 대여소만 고갈로 덮어쓴다.
+
+    TIME 재안내 판단(`TIME/adapters.DebugEmptyStockAdapter`)과 **같은 게이트**다 —
+    `time_debug_force_trigger_enabled` AND `rental_id in debug_empty_rental_ids`. BE가 경로
+    카드용으로 이 API를 직접 부를 때도 재안내 판단과 숫자가 어긋나지 않게 하려는 것이다.
+    운영은 둘 다 기본값(False/빈 문자열)이라 이 경로를 절대 안 탄다.
+
+    `current_stock`·`p_full`·`arrival_*`·`model_horizon_min`은 실값을 유지한다 — 어댑터와
+    같은 원칙으로, 시연이 재현하려는 것은 "곧 빌 것"이지 "지금도 비어 있다"가 아니다.
+    게이트에 안 걸리면 입력을 그대로 돌려주고, 걸리면 복사본만 바꾼다.
+    """
+    if not settings.time_debug_force_trigger_enabled:
+        return result
+    if result["rental_id"] not in settings.debug_empty_rental_ids:
+        return result
+    overridden = dict(result)
+    overridden["predicted_stock"] = 0.0
+    overridden["p_empty"] = 1.0
+    overridden["source"] = "debug_override"
+    return overridden

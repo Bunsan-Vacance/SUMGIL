@@ -14,9 +14,10 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app.BIKE import service
+from app.BIKE import router, service
 from app.BIKE.pipeline import calendar
 from app.BIKE.pipeline.predictor_eta import ModelUnavailable, UnknownStation, round_horizon
+from app.core.config import Settings
 from app.main import app
 
 client = TestClient(app)
@@ -411,3 +412,54 @@ def test_model_horizon_min_passes_through_predictor_value(fake_predictor, live_d
     result = service.predict_eta_stock("ST-1", eta_minutes=17, now=NOW)
 
     assert result["model_horizon_min"] == 15
+
+
+def _override_settings(**overrides) -> Settings:
+    base = {"time_debug_force_trigger_enabled": True, "time_debug_empty_rental_ids": "ST-1"}
+    base.update(overrides)
+    return Settings(**base)
+
+
+def test_http_시연_override_게이트_꺼짐이면_실예측_그대로(fake_predictor, live_dir, monkeypatch):
+    fake_predictor(net_flow=3.0)
+    live_dir(current_stock=5, updated_at=NOW)
+    monkeypatch.setattr(calendar, "now_kst", lambda: NOW)
+    monkeypatch.setattr(router, "get_settings", lambda: Settings())
+
+    body = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15}).json()
+
+    assert body["predicted_stock"] == 8.0
+    assert body["source"] == "lightgbm"
+
+
+def test_http_시연_override_게이트_켜져도_목록_밖_ID는_그대로(
+    fake_predictor, live_dir, monkeypatch
+):
+    fake_predictor(net_flow=3.0)
+    live_dir(current_stock=5, updated_at=NOW)
+    monkeypatch.setattr(calendar, "now_kst", lambda: NOW)
+    monkeypatch.setattr(
+        router, "get_settings", lambda: _override_settings(time_debug_empty_rental_ids="ST-9")
+    )
+
+    body = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15}).json()
+
+    assert body["predicted_stock"] == 8.0
+    assert body["source"] == "lightgbm"
+
+
+def test_http_시연_override_목록_안_ID는_고갈로_덮되_현재고와_p_full은_유지(
+    fake_predictor, live_dir, monkeypatch
+):
+    fake_predictor(net_flow=3.0, p_full=0.25)
+    live_dir(current_stock=5, updated_at=NOW)
+    monkeypatch.setattr(calendar, "now_kst", lambda: NOW)
+    monkeypatch.setattr(router, "get_settings", lambda: _override_settings())
+
+    body = client.get("/bike/stations/ST-1/eta-stock", params={"eta_minutes": 15}).json()
+
+    assert body["predicted_stock"] == 0.0
+    assert body["p_empty"] == 1.0
+    assert body["source"] == "debug_override"
+    assert body["current_stock"] == 5
+    assert body["p_full"] == 0.25

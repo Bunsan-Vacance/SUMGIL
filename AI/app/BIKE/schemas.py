@@ -49,7 +49,8 @@ class EtaStockResponse(BaseModel):
     arrival_time_slot: int = Field(description="도착 시점 30분 슬롯(0~47)")
     source: str = Field(
         description="델타 계산에 쓴 예측기. lightgbm(정상) | "
-        "lightgbm_global_fallback(학습 시점에 없던 역 — station 무관 전역 평균)"
+        "lightgbm_global_fallback(학습 시점에 없던 역 — station 무관 전역 평균) | "
+        "debug_override(시연용 강제 고갈 — TIME_DEBUG_* 게이트)"
     )
     model_horizon_min: int = Field(
         description="예측에 실제로 쓰인 horizon(분). eta_minutes가 학습 구간(5·10·15·30)을 "
