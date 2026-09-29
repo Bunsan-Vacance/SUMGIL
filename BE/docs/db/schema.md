@@ -4,6 +4,8 @@
 
 마이그레이션은 `src/main/resources/db/migration/V1__init.sql`에 있다.
 **V2 `widen_source_columns`**: `source` 열(edge_time·congestion·bike_stock_pred·transfer_meta)을 VARCHAR(16)으로 확대 — V1의 VARCHAR(8)에는 값 규약의 `timetable`(9자)이 들어가지 않았다 (S15P21A104-69).
+**V5 `bike_stock_pred_prediction_source`**: `bike_stock_pred.prediction_source VARCHAR(32) NULL` 추가 — 예측값이 실제 관측인지(`observed_avg`) 같은 대여소 안의 평균으로 메운 값인지(`station_time_fallback`·`station_global_fallback`)를 행마다 표시한다. `source`(어떤 예측기인가)와 축이 달라 열을 따로 둔다 (S15P21A104-172, [load-bikepred.md](./load-bikepred.md)).
+**V6 `bus_route_headway`**: `bus_route.headway_min INTEGER NULL` 추가 — 노선별 배차간격(분). 노선 속성이고 시간대별로 갈리지 않아 `edge_time` 이 아니라 마스터에 둔다(600만 행 복제 회피). NULL 은 도착정보 API 가 값을 주지 않는 노선 (S15P21A104-228, [load-bus-bike.md](./load-bus-bike.md) "배차간격").
 테이블 9종 (마스터 5종, 산출 4종)이며 파일 내 순서는 의존성 순이다.
 
 > **이미 적용된 마이그레이션 파일은 고치지 않는다 — 주석 한 글자도.**

@@ -88,17 +88,17 @@ class RoutingTypeMatrixTest {
                 .search("A", "C", null, null, null);
 
         // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다.
+        // 213 T1: 접근 경계는 TRANSFER가 아니다.
         assertTrue(r.size() >= 1);
-        assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
-                TravelMode.TRANSFER, TravelMode.WALK), modes(r));
+        assertEquals(List.of(TravelMode.WALK, TravelMode.BIKE, TravelMode.WALK), modes(r));
         assertEquals("A", r.get(0).legs().get(0).fromNodeId());
         assertEquals("R1", r.get(0).legs().get(0).toNodeId());
-        assertEquals("R2", r.get(0).legs().get(2).toNodeId());
+        assertEquals("R2", r.get(0).legs().get(1).toNodeId());
     }
 
     @Test
-    @DisplayName("t_역대역_자전거복수hop_중간대여소노출")
-    void t_역대역_자전거복수hop_중간대여소노출() {
+    @DisplayName("t_역대역_자전거복수hop_대여소합침")
+    void t_역대역_자전거복수hop_대여소합침() {
         List<RouteSearchResponse> r = serviceWith(
                 graphOf(subway("A", "C", "L1", 1500),
                         walk("A", "R1", 120), bike("R1", "R2", 100),
@@ -107,11 +107,11 @@ class RoutingTypeMatrixTest {
                 .search("A", "C", null, null, null);
 
         // 185: SUBWAY 전용 조합으로도 (더 느린) 대체 후보가 따로 나온다.
+        // 로드맵 1단계(2026-09-22): 경유 대여소(R2)는 leg로 노출하지 않는다 — 대여~반납 1 leg.
         assertTrue(r.size() >= 1);
-        assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
-                TravelMode.BIKE, TravelMode.TRANSFER, TravelMode.WALK), modes(r));
-        assertEquals("R2", r.get(0).legs().get(2).toNodeId());
-        assertEquals("R2", r.get(0).legs().get(3).fromNodeId());
+        assertEquals(List.of(TravelMode.WALK, TravelMode.BIKE, TravelMode.WALK), modes(r));
+        assertEquals("R1", r.get(0).legs().get(1).fromNodeId());
+        assertEquals("R3", r.get(0).legs().get(1).toNodeId());
     }
 
     private List<TravelMode> modes(List<RouteSearchResponse> responses) {

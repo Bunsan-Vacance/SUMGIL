@@ -3,7 +3,9 @@ package com.ssafy.s15p21a104.domain.route.finder;
 import com.ssafy.s15p21a104.domain.route.bike.BikeEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bike.BikeRentalEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.bus.BusRouteStopsReader;
+import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
@@ -49,6 +51,19 @@ public class RouteGraphRegistry {
     private Map<String, RouteMapper.StationInfo> stationInfos = Map.of();
     private Map<TransferRule.TransferKey, Integer> transferTimes = Map.of();
     private java.util.Set<String> rentalIds = java.util.Set.of();
+    private java.util.Set<String> stationIds = java.util.Set.of();
+    private BusRouteIndex busRouteIndex = BusRouteIndex.build(Map.of());
+    private final java.util.concurrent.ConcurrentMap<String, RouteGraph> slotGraphs =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** RAPTOR 노선·연결(217). 버스·도보·자전거는 슬롯 무관, 지하철만 슬롯 edge_time. */
+    private List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route> raptorBusRoutes =
+            List.of();
+    private List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Connection>
+            raptorConnections = List.of();
+    private final java.util.concurrent.ConcurrentMap<String,
+            com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet> raptorSets =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public RouteGraphRegistry(RouteEdgeTimeRepository edgeTimeRepository,
                               StationRepository stationRepository,
@@ -62,16 +77,45 @@ public class RouteGraphRegistry {
         this.bikeStationRepository = bikeStationRepository;
     }
 
+    /** 버스 배차간격(RAPTOR 승차 대기, 218). 선택 주입 — 없으면 전 노선 기본 배차로 조립. */
+    private com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository busRouteRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setBusRouteRepository(com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository busRouteRepository) {
+        this.busRouteRepository = busRouteRepository;
+    }
+
+    /** 노선 ID → 배차간격(분). 조회 실패·미적재는 빈 맵(기본 배차) — 그래프 적재를 막지 않는다. */
+    private Map<String, Integer> busHeadways() {
+        if (busRouteRepository == null) {
+            return Map.of();
+        }
+        try {
+            Map<String, Integer> headways = new HashMap<>();
+            for (com.ssafy.s15p21a104.domain.bus.entity.BusRoute route : busRouteRepository.findAll()) {
+                if (route.getHeadwayMin() != null) {
+                    headways.put(route.getRouteId(), route.getHeadwayMin());
+                }
+            }
+            return headways;
+        } catch (RuntimeException e) {
+            log.warn("버스 배차간격 조회 실패 — 기본 배차로 조립: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
     @PostConstruct
     void load() {
         try {
             List<RouteEdgeRow> rows = edgeTimeRepository.findSubwayEdgesForDefaultSlot();
             Map<String, String> stationNames = new HashMap<>();
             Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+            java.util.Set<String> stationIdSet = new java.util.HashSet<>();
             for (Station station : stationRepository.findAll()) {
                 stationNames.put(station.getStationId(), station.getName());
                 infos.put(station.getStationId(), new RouteMapper.StationInfo(
                         station.getStationId(), station.getName(), station.getLat(), station.getLng()));
+                stationIdSet.add(station.getStationId());
             }
             Map<String, String> lineNames = new HashMap<>();
             for (Line line : lineRepository.findAll()) {
@@ -93,7 +137,7 @@ public class RouteGraphRegistry {
             }
             List<Edge> rentalEdges = BikeRentalEdgeBuilder.build(rentals);
             Map<String, List<BusEdgeBuilder.RouteStop>> busRoutes = BusRouteStopsReader.read();
-            List<Edge> busEdges = BusEdgeBuilder.build(busRoutes);
+            List<Edge> busEdges = BusEdgeBuilder.buildCorridors(busRoutes);
             Map<String, BikeEdgeBuilder.Stop> busStops = new HashMap<>();
             for (List<BusEdgeBuilder.RouteStop> routeStops : busRoutes.values()) {
                 for (BusEdgeBuilder.RouteStop routeStop : routeStops) {
@@ -107,6 +151,11 @@ public class RouteGraphRegistry {
             }
             // 역↔정류장·대여소↔정류장 보행 연결(S15P21A104-188). 정류장↔정류장은 그대로 BUS 엣지 몫이다.
             List<Edge> walkEdges = WalkEdgeBuilder.build(stops, rentals, busStops);
+            // RAPTOR 노선·연결(217) — 슬롯 무관분을 여기서 한 번 만들어 캐시한다.
+            this.raptorBusRoutes = com.ssafy.s15p21a104.domain.route.finder.raptor
+                    .RaptorRouteSetBuilder.busRoutes(busRoutes, busHeadways());
+            this.raptorConnections = com.ssafy.s15p21a104.domain.route.finder.raptor
+                    .RaptorRouteSetBuilder.connections(stops, rentals, busStops);
             List<Edge> extraEdges = new java.util.ArrayList<>(walkEdges);
             extraEdges.addAll(rentalEdges);
             extraEdges.addAll(busEdges);
@@ -115,6 +164,8 @@ public class RouteGraphRegistry {
             this.graph = result.graph();
             this.stationInfos = Map.copyOf(infos);
             this.rentalIds = java.util.Set.copyOf(rentals.keySet());
+            this.busRouteIndex = BusRouteIndex.build(busRoutes);
+            this.stationIds = java.util.Set.copyOf(stationIdSet);
             Map<TransferRule.TransferKey, Integer> times = new HashMap<>();
             for (TransferMeta meta : transferMetaRepository.findAll()) {
                 times.put(new TransferRule.TransferKey(
@@ -140,6 +191,71 @@ public class RouteGraphRegistry {
     }
 
     /**
+     * 요청 슬롯에 맞는 그래프를 돌려준다(S15P21A104-190).
+     *
+     * <p>슬롯별 SUBWAY 행으로 그래프를 조립해 캐시한다. 해당 슬롯 행이 DB에
+     * 없으면(빈 목록) default 그래프로 폴백한다 — 값을 지어내지 않는다.
+     * WALK·BIKE·BUS 연결은 default 로드 시 것과 같다(슬롯 의존 없음).
+     *
+     * @param dowType 요일 구분
+     * @param timeSlot 시간 슬롯
+     * @return 슬롯 그래프 또는 default 그래프. 미적재 시 null
+     */
+    public RouteGraph graphFor(int dowType, int timeSlot) {
+        if (graph == null) {
+            return null;
+        }
+        if (dowType == 0 && timeSlot == 0) {
+            return graph;
+        }
+        String key = dowType + ":" + timeSlot;
+        RouteGraph cached = slotGraphs.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        List<RouteEdgeRow> rows;
+        try {
+            rows = edgeTimeRepository.findSubwayEdgesBySlot(dowType, timeSlot);
+        } catch (RuntimeException e) {
+            log.warn("슬롯 그래프 조회 실패, default 폴백 ({}:{}): {}", dowType, timeSlot, e.getMessage());
+            return graph;
+        }
+        if (rows == null || rows.isEmpty()) {
+            return graph;
+        }
+        List<Edge> subwayEdges = new java.util.ArrayList<>();
+        for (RouteEdgeRow row : rows) {
+            subwayEdges.add(new Edge(row.fromNode(), row.toNode(), row.routeId(),
+                    row.travelSec(), row.waitSec(),
+                    com.ssafy.s15p21a104.domain.route.entity.TravelMode.SUBWAY));
+        }
+        // default 그래프에서 SUBWAY 엣지만 갈아끼운다 — 비-SUBWAY 연결은 그대로.
+        java.util.Set<String> nodes = new java.util.LinkedHashSet<>();
+        java.util.Map<String, List<Edge>> adjacency = new java.util.LinkedHashMap<>();
+        java.util.Map<String, java.util.Set<String>> stationLines = new java.util.LinkedHashMap<>();
+        for (Edge edge : subwayEdges) {
+            nodes.add(edge.fromNode());
+            nodes.add(edge.toNode());
+            adjacency.computeIfAbsent(edge.fromNode(), k -> new java.util.ArrayList<>()).add(edge);
+            stationLines.computeIfAbsent(edge.fromNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+            stationLines.computeIfAbsent(edge.toNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+        }
+        for (Edge edge : graph.edges()) {
+            if (edge.mode() == com.ssafy.s15p21a104.domain.route.entity.TravelMode.SUBWAY) {
+                continue;
+            }
+            nodes.add(edge.fromNode());
+            nodes.add(edge.toNode());
+            adjacency.computeIfAbsent(edge.fromNode(), k -> new java.util.ArrayList<>()).add(edge);
+            stationLines.computeIfAbsent(edge.fromNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+            stationLines.computeIfAbsent(edge.toNode(), k -> new java.util.LinkedHashSet<>()).add(edge.routeId());
+        }
+        RouteGraph slotGraph = RouteGraph.of(nodes, adjacency, stationLines);
+        slotGraphs.putIfAbsent(key, slotGraph);
+        return slotGraphs.getOrDefault(key, slotGraph);
+    }
+
+    /**
      * @return 역 표시 정보(역 ID 기준). 미적재 시 빈 맵
      */
     public Map<String, RouteMapper.StationInfo> stationInfos() {
@@ -161,10 +277,114 @@ public class RouteGraphRegistry {
     }
 
     /**
+     * @return 역 ID 집합(좌표 접근 후보 유형 구분용, S15P21A104-231). 미적재 시 빈 집합
+     */
+    public java.util.Set<String> stationIds() {
+        return stationIds;
+    }
+
+    /**
+     * @return 정류장 쌍별 운행 노선 인덱스(S15P21A104-234). 미적재 시 빈 인덱스
+     */
+    public BusRouteIndex busRouteIndex() {
+        return busRouteIndex;
+    }
+
+    /**
      * @return 대여소별 예상 재고. 원천 없음으로 항상 빈 맵(게이트 기본 허용).
      * AI 산출물 연동 시 bike_stock_pred 조회로 교체한다.
      */
     public Map<String, Integer> bikeStock() {
         return Map.of();
+    }
+
+    /** 재고 예측 조회(선택 주입). 없으면 게이트 기본 허용. */
+    private com.ssafy.s15p21a104.domain.route.repository.RouteBikeStockPredRepository bikeStockPredRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setBikeStockPredRepository(
+            com.ssafy.s15p21a104.domain.route.repository.RouteBikeStockPredRepository bikeStockPredRepository) {
+        this.bikeStockPredRepository = bikeStockPredRepository;
+    }
+
+    private record StockSnapshot(long loadedAtMillis, Map<String, Integer> bikes) {
+    }
+
+    // ponytail: 슬롯별 1시간 캐시 — 예측 적재(매일 10:00 CronJob) 직후 최대 1시간 이전 값. 적재 이벤트 무효화가 생기면 교체.
+    private static final long STOCK_TTL_MILLIS = 60 * 60 * 1000L;
+    private final java.util.concurrent.ConcurrentMap<String, StockSnapshot> stockBySlot =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 슬롯의 대여소별 예상 재고(bike_stock_pred.exp_bikes 반올림). 재고 게이트가 0대 이하를 막는다.
+     * 원천 없음·조회 실패는 빈 맵(기본 허용) — 탐색을 막지 않는다.
+     *
+     * @param dowType 요일 구분
+     * @param timeSlot 30분 슬롯
+     * @return 대여소 ID → 예상 재고(대)
+     */
+    public Map<String, Integer> bikeStock(int dowType, int timeSlot) {
+        if (bikeStockPredRepository == null) {
+            return Map.of();
+        }
+        long now = System.currentTimeMillis();
+        StockSnapshot snapshot = stockBySlot.compute(dowType + ":" + timeSlot, (key, cached) -> {
+            if (cached != null && now - cached.loadedAtMillis() < STOCK_TTL_MILLIS) {
+                return cached;
+            }
+            try {
+                Map<String, Integer> bikes = new HashMap<>();
+                for (com.ssafy.s15p21a104.domain.bike.entity.BikeStockPred pred
+                        : bikeStockPredRepository.findAllById_DowTypeAndId_TimeSlot(dowType, timeSlot)) {
+                    bikes.put(pred.getId().getRentalId(),
+                            pred.getExpBikes().setScale(0, java.math.RoundingMode.HALF_UP).intValue());
+                }
+                return new StockSnapshot(now, Map.copyOf(bikes));
+            } catch (RuntimeException e) {
+                log.warn("따릉이 재고 예측 조회 실패 — 게이트 기본 허용: {}", e.getMessage());
+                return cached != null ? cached : new StockSnapshot(now, Map.of());
+            }
+        });
+        return snapshot.bikes();
+    }
+
+    /**
+     * 슬롯별 RAPTOR 노선·연결 묶음(217). 지하철만 슬롯 {@code edge_time}으로 조립한다.
+     *
+     * <p>슬롯 행이 없거나 로드 실패면 null — 호출 측은 레거시 엔진으로 폴백한다(값을 지어내지 않음).
+     *
+     * @param dowType 요일 구분
+     * @param timeSlot 시간 슬롯
+     * @return 슬롯 RAPTOR 입력 또는 null(폴백)
+     */
+    public com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet raptorRouteSetFor(
+            int dowType, int timeSlot) {
+        if (graph == null) {
+            return null;
+        }
+        String key = dowType + ":" + timeSlot;
+        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet cached = raptorSets.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        List<RouteEdgeRow> rows;
+        try {
+            rows = edgeTimeRepository.findSubwayEdgesBySlot(dowType, timeSlot);
+        } catch (RuntimeException e) {
+            log.warn("RAPTOR 슬롯 조회 실패, 레거시 폴백 ({}:{}): {}", dowType, timeSlot, e.getMessage());
+            return null;
+        }
+        if (rows == null || rows.isEmpty()) {
+            return null;
+        }
+        List<com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorFinder.Route> routes =
+                new java.util.ArrayList<>(raptorBusRoutes);
+        routes.addAll(com.ssafy.s15p21a104.domain.route.finder.raptor
+                .RaptorRouteSetBuilder.subwayRoutes(rows));
+        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet set =
+                new com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet(
+                        List.copyOf(routes), raptorConnections);
+        raptorSets.putIfAbsent(key, set);
+        return raptorSets.getOrDefault(key, set);
     }
 }

@@ -4,6 +4,7 @@ import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -17,8 +18,16 @@ import java.util.Objects;
  */
 public final class BusEdgeBuilder {
 
-    /** 버스 속도(m/s). 20km/h 보수치 (후속 정교화). */
-    public static final double METERS_PER_SEC = 20_000.0 / 3600.0;
+    /**
+     * 버스 실효 속도(m/s). 14km/h (S15P21A104-216 배치).
+     * 직선 거리/20km/h는 실측보다 ~1.5배 짧게 나온다(동일 노선·정류장 네이버 12분
+     * 대비 8분 표본). 도로 우회·신호·정차가 합쳐진 값이므로 단일 노브로 두고,
+     * 시간표 기반 구간 시각(원빈 트랙)이 들어오면 이 상수는 폐기한다.
+     */
+    public static final double METERS_PER_SEC = 14_000.0 / 3600.0;
+
+    /** 정규 BUS 엣지의 routeId. 노선 구분 없는 구간 단위 엣지 표시(S15P21A104-234). */
+    public static final String BUS_CORRIDOR_ROUTE_ID = "BUS";
 
     /** 지구 반경(m). 하버사인용. */
     private static final double EARTH_R = 6_371_000.0;
@@ -70,11 +79,30 @@ public final class BusEdgeBuilder {
         return edges;
     }
 
+    /**
+     * 정류장 쌍당 BUS 엣지 1개로 정규화한다. 소요는 기존 `build`와 같은 산식(버스 속도·직선거리,
+     * 최소 1초), `waitSec`은 0으로 둔다 — headway는 응답 시점에 붙인다.
+     */
+    public static List<Edge> buildCorridors(Map<String, List<RouteStop>> routes) {
+        List<Edge> perRoute = build(routes);
+        Map<String, Edge> firstByPair = new LinkedHashMap<>();
+        for (Edge edge : perRoute) {
+            String key = edge.fromNode() + "->" + edge.toNode();
+            firstByPair.putIfAbsent(key, edge);
+        }
+        List<Edge> corridors = new ArrayList<>();
+        for (Edge edge : firstByPair.values()) {
+            corridors.add(new Edge(edge.fromNode(), edge.toNode(), BUS_CORRIDOR_ROUTE_ID,
+                    edge.travelSec(), 0, TravelMode.BUS));
+        }
+        return corridors;
+    }
+
     static boolean hasCoord(RouteStop stop) {
         return stop.lat() != null && stop.lng() != null;
     }
 
-    static double distanceM(RouteStop a, RouteStop b) {
+    public static double distanceM(RouteStop a, RouteStop b) {
         double dLat = Math.toRadians(b.lat() - a.lat());
         double dLng = Math.toRadians(b.lng() - a.lng());
         double h = Math.sin(dLat / 2) * Math.sin(dLat / 2)

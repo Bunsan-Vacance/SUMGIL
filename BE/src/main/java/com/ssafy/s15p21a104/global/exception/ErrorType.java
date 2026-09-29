@@ -18,8 +18,10 @@ public enum ErrorType {
     STATION_NOT_FOUND(404, "STATION_NOT_FOUND", "역을 찾을 수 없습니다."),
     ROUTE_NOT_FOUND(404, "ROUTE_NOT_FOUND", "경로를 찾을 수 없습니다."),
     INVALID_COORDINATE(400, "INVALID_COORDINATE", "좌표가 유효하지 않습니다."),
-    ACCESS_CANDIDATE_NOT_READY(501, "ACCESS_CANDIDATE_NOT_READY", "좌표-교통망 연결은 아직 지원하지 않습니다."),
-    ROUTE_DATA_NOT_READY(503, "ROUTE_DATA_NOT_READY", "교통망 데이터가 아직 준비되지 않았습니다.");
+    ACCESS_CANDIDATE_NOT_FOUND(404, "ACCESS_CANDIDATE_NOT_FOUND", "좌표 주변 보행 접근 가능한 교통망 후보를 찾을 수 없습니다."),
+    ROUTE_DATA_NOT_READY(503, "ROUTE_DATA_NOT_READY", "교통망 데이터가 아직 준비되지 않았습니다."),
+    BIKE_STATION_NOT_FOUND(404, "BIKE_STATION_NOT_FOUND", "대여소를 찾을 수 없습니다."),
+    ROUTE_SEARCH_BUSY(503, "ROUTE_SEARCH_BUSY", "지금 경로 검색 요청이 많아 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.");
 
     private final int status;
     private final String code;

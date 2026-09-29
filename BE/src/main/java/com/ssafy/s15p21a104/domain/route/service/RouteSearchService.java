@@ -2,30 +2,45 @@ package com.ssafy.s15p21a104.domain.route.service;
 
 import com.ssafy.s15p21a104.domain.bus.entity.BusRoute;
 import com.ssafy.s15p21a104.domain.bus.repository.BusRouteRepository;
+import com.ssafy.s15p21a104.domain.buscongestion.BusArrival;
+import com.ssafy.s15p21a104.domain.buscongestion.BusCongestionProperties;
+import com.ssafy.s15p21a104.domain.buscongestion.BusCongestionReader;
+import com.ssafy.s15p21a104.domain.buscongestion.BusCongestionWindow;
 import com.ssafy.s15p21a104.domain.congestion.entity.CongestionTarget;
+import com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository;
 import com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository;
 import com.ssafy.s15p21a104.domain.congestion.scoring.CongestionScorer;
-import com.ssafy.s15p21a104.domain.route.bike.BikeStockGate;
+import com.ssafy.s15p21a104.domain.congestion.scoring.LinkCongestionScorer;
+import com.ssafy.s15p21a104.domain.congestion.scoring.SubwayDirectionResolver;
 import com.ssafy.s15p21a104.domain.route.bike.geometry.BikeGeometryRegistry;
+import com.ssafy.s15p21a104.domain.route.bus.geometry.BusGeometryRegistry;
 import com.ssafy.s15p21a104.domain.route.dto.request.CoordinateRouteSearchRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.DepartureSlot;
+import com.ssafy.s15p21a104.domain.route.dto.request.RequestedDeparture;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePlaceRequest;
 import com.ssafy.s15p21a104.domain.route.dto.request.RoutePriority;
-import com.ssafy.s15p21a104.domain.route.dto.response.MultiLineStringResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
-import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
+import com.ssafy.s15p21a104.domain.route.dto.response.CongestionPrediction;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
 import com.ssafy.s15p21a104.domain.route.entity.TravelMode;
-import com.ssafy.s15p21a104.domain.route.finder.FoundPath;
+import com.ssafy.s15p21a104.domain.route.finder.RouteCandidateFinder;
 import com.ssafy.s15p21a104.domain.route.finder.RouteGraphRegistry;
-import com.ssafy.s15p21a104.domain.route.finder.ShortestPathFinder;
+import com.ssafy.s15p21a104.domain.route.finder.ScoredCandidate;
 import com.ssafy.s15p21a104.domain.route.geometry.RailGeometryRegistry;
+import com.ssafy.s15p21a104.domain.route.geometry.RouteGeometryEnhancer;
 import com.ssafy.s15p21a104.domain.route.graph.Edge;
 import com.ssafy.s15p21a104.domain.route.graph.RouteGraph;
+import com.ssafy.s15p21a104.domain.route.mapper.LegContract;
 import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
 import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
+import com.ssafy.s15p21a104.domain.route.scoring.BusCrowdingScale;
+import com.ssafy.s15p21a104.domain.route.scoring.CongestionCostModel;
+import com.ssafy.s15p21a104.domain.route.scoring.CongestionPredictionResolver;
+import com.ssafy.s15p21a104.domain.route.scoring.RouteScoreRanker;
+import com.ssafy.s15p21a104.domain.route.scoring.WorstCongestionPicker;
 import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import com.ssafy.s15p21a104.domain.route.walk.WalkEdgeBuilder;
 import com.ssafy.s15p21a104.domain.route.walk.geometry.WalkGeometryRegistry;
 import com.ssafy.s15p21a104.domain.station.entity.Line;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
@@ -34,25 +49,39 @@ import com.ssafy.s15p21a104.global.exception.DomainException;
 import com.ssafy.s15p21a104.global.exception.ErrorType;
 import com.ssafy.s15p21a104.global.geo.GeoDistance;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * 경로 검색. 그래프 미적재 시 빈 배열(경로 없음)로 응답한다. 가짜 후보를 만들지 않는다.
  */
 @Service
-@RequiredArgsConstructor
+// 생성자가 둘이라(아래 10인자 편의 생성자) Spring 이 어느 쪽을 쓸지 스스로 못 고른다 —
+// Lombok 이 만드는 전체 생성자에 @Autowired 를 붙여 주입 대상을 명시한다.
+// 없으면 기동 때 "No default constructor found" 로 죽는다(단위 테스트로는 안 잡힌다).
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 @Transactional(readOnly = true)
 public class RouteSearchService {
 
@@ -60,20 +89,19 @@ public class RouteSearchService {
     private static final int MAX_CANDIDATES = 10;
 
     /**
-     * 허용 수단 조합별 대체 후보 탐색에 쓰는 "핵심 수단" 집합들. WALK는 접근·연결용이라 모든 조합에
-     * 항상 포함한다({@link #withWalk}). 최단경로 알고리즘({@link ShortestPathFinder})은 그대로 두고,
-     * 이 조합 수만큼 하위 그래프({@link RouteGraph#filterByModes})를 만들어 반복 탐색한다 —
-     * 반드시 "최단"일 필요는 없는, 수단이 다른 대안 경로를 얻는 게 목적이다.
+     * 동시에 돌 수 있는 경로 탐색(그래프 탐색+geometry 후처리) 개수 상한(2026-09-23 CPU 포화
+     * 트러블슈팅, {@code troubleshooting-2026-09-22-notion.md} 13절). 스레드 풀 상한(291)을
+     * 걸어도 30 VU 부하테스트에서 파드 CPU 2코어가 그대로 꽉 차 헬스체크 응답까지 늦어지며
+     * 재시작됐다 — 이번엔 스레드가 아니라 CPU 자체가 부족했던 것. 요청을 무조건 받아 CPU를
+     * 계속 나눠주면 전부 느려지다 다 죽으므로, 초과분은 짧게 대기시키고 그래도 못 들어가면
+     * 503으로 빨리 돌려보낸다.
      */
-    private static final List<Set<TravelMode>> CANDIDATE_CORE_MODE_SETS = List.of(
-            Set.of(TravelMode.SUBWAY, TravelMode.BUS, TravelMode.BIKE),
-            Set.of(TravelMode.SUBWAY),
-            Set.of(TravelMode.BUS),
-            Set.of(TravelMode.BIKE),
-            Set.of(TravelMode.SUBWAY, TravelMode.BUS),
-            Set.of(TravelMode.SUBWAY, TravelMode.BIKE),
-            Set.of(TravelMode.BUS, TravelMode.BIKE)
-    );
+    private static final int MAX_CONCURRENT_SEARCHES = 4;
+
+    /** 위 상한에 걸렸을 때 대기하는 최대 시간 — 이보다 오래 걸리면 어차피 클라이언트가 포기한다. */
+    private static final Duration SEARCH_ACQUIRE_TIMEOUT = Duration.ofSeconds(3);
+
+    private final Semaphore searchSemaphore = new Semaphore(MAX_CONCURRENT_SEARCHES);
 
     private final StationRepository stationRepository;
     private final RouteGraphRegistry graphRegistry;
@@ -81,9 +109,64 @@ public class RouteSearchService {
     private final RailGeometryRegistry railGeometryRegistry;
     private final WalkGeometryRegistry walkGeometryRegistry;
     private final BikeGeometryRegistry bikeGeometryRegistry;
+    private final BusGeometryRegistry busGeometryRegistry;
     private final RouteLineRepository routeLineRepository;
     private final BusRouteRepository busRouteRepository;
     private final CongestionRepository congestionRepository;
+    private final CongestionPredRepository congestionPredRepository;
+    private final BusCongestionReader busCongestionReader;
+    private final BusCongestionProperties busCongestionProperties;
+    private final Clock clock;
+
+    /**
+     * 버스 실시간 혼잡도(297) 없이 만드는 기존 형태. 혼잡도는 응답에 등급만 얹는 곁가지라 탐색
+     * 동작을 검증하는 테스트가 이 의존을 몰라도 되게 남겨 둔다 — 이 경로에서는 항상 null 등급이다.
+     */
+    public RouteSearchService(
+            StationRepository stationRepository,
+            RouteGraphRegistry graphRegistry,
+            TransferRule transferRule,
+            RailGeometryRegistry railGeometryRegistry,
+            WalkGeometryRegistry walkGeometryRegistry,
+            BikeGeometryRegistry bikeGeometryRegistry,
+            RouteLineRepository routeLineRepository,
+            BusRouteRepository busRouteRepository,
+            CongestionRepository congestionRepository,
+            CongestionPredRepository congestionPredRepository) {
+        this(stationRepository, graphRegistry, transferRule, railGeometryRegistry, walkGeometryRegistry,
+                bikeGeometryRegistry, null, routeLineRepository, busRouteRepository, congestionRepository,
+                congestionPredRepository);
+    }
+
+    public RouteSearchService(
+            StationRepository stationRepository,
+            RouteGraphRegistry graphRegistry,
+            TransferRule transferRule,
+            RailGeometryRegistry railGeometryRegistry,
+            WalkGeometryRegistry walkGeometryRegistry,
+            BikeGeometryRegistry bikeGeometryRegistry,
+            BusGeometryRegistry busGeometryRegistry,
+            RouteLineRepository routeLineRepository,
+            BusRouteRepository busRouteRepository,
+            CongestionRepository congestionRepository,
+            CongestionPredRepository congestionPredRepository) {
+        this(stationRepository, graphRegistry, transferRule, railGeometryRegistry, walkGeometryRegistry,
+                bikeGeometryRegistry, busGeometryRegistry, routeLineRepository, busRouteRepository, congestionRepository,
+                congestionPredRepository,
+                BusCongestionReader.disabled(),
+                new BusCongestionProperties(false, null, 0, null, null, null, null),
+                Clock.systemDefaultZone());
+    }
+
+    /** 6경로 응답 상한: 속도 3 + 혼잡 3(S15P21A104-214, 배포 문서 순서표). */
+    private static final int SPEED_ROUTES = 3;
+
+    /** 6경로 응답 상한: 속도 3 + 혼잡 3(S15P21A104-214, 배포 문서 순서표). */
+    private static final int CALM_ROUTES = 3;
+
+    /** 혼잡 가중치 λ (S15P21A104-216, 기본 0.5). transfer.default-sec 노브와 같은 패턴. */
+    @Value("${route.congestion-lambda:0.5}")
+    private double congestionLambda;
 
     public List<RouteSearchResponse> search(
             String originStationId,
@@ -105,417 +188,616 @@ public class RouteSearchService {
 
         findStation(originStationId);
         findStation(destStationId);
-        // 생략 시 현재 시각 기준. dow_type·time_slot 조회 키로 바꿔 대기시간 반영(96/104 후속, 전우석)에 넘긴다.
-        DepartureSlot departureSlot = DepartureSlot.of(departureTime != null ? departureTime : LocalDateTime.now());
-        List<RouteSearchResponse> candidates = algorithmCandidates(
-                graph, originStationId, destStationId, departureSlot);
-        // FE 175 지적사항: modes 필터는 routeType을 매긴 "뒤"에 걸리므로, 필터로 SHORTEST가
-        // 빠지면 남은 후보 중 가장 빠른 게 ALTERNATIVE인 채로 나갈 수 있었다. 필터링 다음에
-        // 다시 매겨 첫 번째가 항상 SHORTEST가 되도록 한다. routeName은 DB 조회가 필요해
-        // 후보 수가 줄어든 다음(필터+재라벨링 이후)에 배치로 붙인다(FE-175 항목8).
-        List<RouteSearchResponse> ranked = relabelByRank(filterByModes(candidates, modes));
-        // priority=COMFORT가 아니면 순서·라벨을 전혀 건드리지 않는다(S15P21A104-157 AC2, 회귀 없음).
-        if (priority == RoutePriority.COMFORT) {
-            ranked = applyComfortPriority(ranked, departureSlot);
+        // 생략 시 현재 시각 기준. 슬롯은 탐색 그래프 선택에도 쓴다(190).
+        LocalDateTime effectiveDepartureTime = RequestedDeparture.resolve(departureTime, clock);
+        DepartureSlot departureSlot = DepartureSlot.of(effectiveDepartureTime);
+        RouteGraph slotGraph = graphRegistry.graphFor(departureSlot.dowType(), departureSlot.timeSlot());
+        if (slotGraph == null) {
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
         }
-        return withRouteNames(ranked);
+        // 214·216: 속도 3(시간 탐색) + 혼잡 3(혼잡 가중 탐색). modes 필터는 라벨 전에 건다.
+        // 217: RAPTOR 입력이 있으면 노선 스캔으로, 없으면 레거시로(어댑터가 계약 보존).
+        return withSearchPermit(() -> {
+            SixResult assembled = sixRoutes(
+                    candidateFinder(raptorInputFor(departureSlot.dowType(), departureSlot.timeSlot(), null)),
+                    slotGraph, originStationId, destStationId, modes,
+                    effectiveDepartureTime);
+            // geometry·routeName은 후보 확정 후(6개 이하)에 배치로 붙인다(FE-175 항목8).
+            // 출발시각을 넘겨 live window일 때만 BUS 실시간 등급을 prefetch한다(297).
+            List<RouteSearchResponse> named =
+                    withGeometryAll(withRouteNames(assembled.six(), effectiveDepartureTime));
+            // 계약 필드(236)는 맨 마지막에 붙인다 — geometry·이름 단계는 필드를 그대로 둔다.
+            return withContractFields(named, assembled, effectiveDepartureTime);
+        });
+    }
+
+    /** 탐색 결과 묶음 — 최종 6건과 점수 계산에 쓴 원본 후보(주입 후보 포함). */
+    private record SixResult(List<RouteSearchResponse> six,
+                             List<ScoredCandidate> timeScored,
+                             List<ScoredCandidate> calmScored,
+                             List<ScoredCandidate> injected) {
     }
 
     /**
-     * priority=COMFORT일 때 혼잡도가 가장 낮은 후보를 맨 앞으로 재정렬하고
-     * {@link RouteType#LOW_CONGESTION}으로 표시한다(S15P21A104-157).
-     *
-     * <p>이미 나온 후보들을 재정렬만 할 뿐, 탐색 알고리즘·그래프는 건드리지 않는다.
-     * 혼잡도 데이터가 하나도 없으면(노선 정보 자체가 없거나 congestion 테이블에 값이 없으면)
-     * 아무것도 바꾸지 않는다 — 혼잡도를 반영한 척하지 않는다(값을 지어내지 않는다는 원칙).
+     * 시간 탐색 1회 + 혼잡 가중 탐색 1회로 속도 3 + 혼잡 3을 뽑는다(S15P21A104-216).
+     * 역 검색·좌표 검색이 같은 파이프를 쓴다.
      */
-    private List<RouteSearchResponse> applyComfortPriority(
-            List<RouteSearchResponse> candidates, DepartureSlot departureSlot) {
+    private SixResult sixRoutes(RouteCandidateFinder finder, RouteGraph graph,
+            String originStationId, String destStationId, List<TravelMode> modes,
+            LocalDateTime departureTime) {
+        DepartureSlot slot = DepartureSlot.of(departureTime);
+        // 재고 게이트: 대여 시점(출발 + 누적 소요)의 슬롯 예측 재고로 본다(SPEC 0.8).
+        finder = finder.withBikeStockAt(elapsedSec -> {
+            DepartureSlot at = DepartureSlot.of(departureTime.plusSeconds(elapsedSec));
+            return graphRegistry.bikeStock(at.dowType(), at.timeSlot());
+        });
+        List<ScoredCandidate> timeScored = RouteCandidateFinder.filterScoredByModes(
+                finder.findCandidatesWithPaths(
+                        graph, originStationId, destStationId, MAX_CANDIDATES, modes),
+                modes);
+        List<ScoredCandidate> calmScored;
+        if (!calmSearchCanDiffer(slot)) {
+            // 슬롯의 LINE·ROUTE 혼잡도가 전부 가중 임계(100) 이하 → 혼잡 가중 탐색이 시간
+            // 탐색과 같은 비용·같은 경로를 낸다. 2배 비용을 피하고 시간 후보로 정제한다(216 후속).
+            calmScored = List.of();
+        } else {
+            try {
+                calmScored = RouteCandidateFinder.filterScoredByModes(
+                        finder.findCandidatesWithPaths(graph, originStationId, destStationId,
+                                MAX_CANDIDATES, modes,
+                                CongestionCostModel.of(congestionLambda,
+                                        congestionLevels(slot.dowType(), slot.timeSlot()),
+                                        graphRegistry.busRouteIndex())),
+                        modes);
+            } catch (RuntimeException e) {
+                calmScored = List.of();
+            }
+        }
+        List<RouteSearchResponse> filtered =
+                timeScored.stream().map(ScoredCandidate::response).toList();
+        List<RouteSearchResponse> ranked = RouteCandidateFinder.relabelByRank(filtered);
+        List<RouteSearchResponse> speed = ranked.stream()
+                .limit(SPEED_ROUTES)
+                .toList();
+        List<ScoredCandidate> calmPool = calmScored.isEmpty() ? timeScored : calmScored;
+        // BUS 실시간 등급(297)을 calm 랭킹 이전에 받아 둔다(5부 C1) — 지하철 링크 점수와 같은
+        // 축(BusCrowdingScale)에서 비교하기 위해서다. 지금 출발 + BUS 구간일 때만 외부 호출이고,
+        // 이후 withRouteNames의 prefetch는 같은 캐시를 읽는다(중복 호출 없음).
+        Function<String, Map<String, BusArrival>> busCongestion = stopId -> Map.of();
+        if (BusCongestionWindow.isLive(departureTime, clock, busCongestionProperties.nowWindow())) {
+            Set<String> stops = RouteNameResolver.busBoardingStops(
+                    calmPool.stream().map(ScoredCandidate::response).toList());
+            if (!stops.isEmpty()) {
+                busCongestionReader.prefetch(stops);
+                busCongestion = busCongestionReader::forStop;
+            }
+        }
+        // 158(통지 05 S-1): 링크 단위·통과 시각 슬롯으로 정제. 혼잡 탐색이 비면 시간 후보에서 고른다.
+        List<RouteSearchResponse> calm = scoreRanker().topCalmByLink(
+                calmPool, departureTime, congestionPredLookup(), CALM_ROUTES,
+                busLevelLookup(busCongestion));
+        // 부족분 채움 풀은 두 탐색 합본(시간순).
+        List<RouteSearchResponse> pool = new ArrayList<>(ranked);
+        for (ScoredCandidate calmCandidate : calmScored) {
+            pool.add(calmCandidate.response());
+        }
+        pool.sort(Comparator.comparingDouble(RouteSearchResponse::totalMinutes));
+        // 완전 중복(속도∩혼잡)·유사경로(탄 것만 비교) 제거 후 부족분은 전체 후보에서 채운다.
+        List<RouteSearchResponse> six = RouteCandidateFinder.diversify(
+                speed, calm, pool, SPEED_ROUTES + CALM_ROUTES);
+        Injection injection = ensureBikeFreeCandidate(
+                six, finder, graph, originStationId, destStationId, modes);
+        return new SixResult(injection.six(), timeScored, calmScored, injection.injected());
+    }
+
+    /**
+     * "지하철만" 후보 최소 1개 보장(2026-09-22) — 자전거·버스 혼합 후보가 슬롯을 채우면
+     * 전 구간 지하철 후보가 6건 밖으로 밀려날 수 있다(예: 역삼→한티, prod: 분당선 승차 대기로
+     * 지하철만 11.8분이 혼합 후보들 뒤로, 게다가 자전거/버스 라벨이 지하철 라벨을 가림).
+     * 6건에 없으면 허용 수단 안에서 {WALK,SUBWAY}로 1회 더 탐색해 마지막 대안 슬롯에 넣고,
+     * 지하철이 아예 없으면 {WALK,SUBWAY,BUS}(자전거 없는 대중교통)로 한 번 더 시도한다.
+     *
+     * <p>주입한 후보는 응답만이 아니라 원본 경로({@link ScoredCandidate})까지 돌려준다 —
+     * 계약 채점(링크 혼잡)이 이 후보만 원본 엣지를 못 찾아 노선 통계로 폴백하던 결함을 막는다.
+     *
+     * @return 6건과 주입 후보(없으면 빈 목록)
+     */
+    static Injection ensureBikeFreeCandidate(List<RouteSearchResponse> six,
+            RouteCandidateFinder finder, RouteGraph graph, String originStationId,
+            String destStationId, List<TravelMode> modes) {
+        if (six.stream().anyMatch(RouteSearchService::isSubwayOnly)) {
+            return new Injection(six, List.of());
+        }
+        if (allows(modes, TravelMode.SUBWAY)) {
+            ScoredCandidate subway = bestWithModes(finder, graph, originStationId, destStationId,
+                    allowedModes(modes, List.of(TravelMode.WALK, TravelMode.SUBWAY)),
+                    RouteSearchService::isSubwayOnly);
+            if (subway != null) {
+                return new Injection(
+                        replaceLastAlternative(six, subway.response()), List.of(subway));
+            }
+        }
+        if (six.stream().anyMatch(RouteSearchService::isBikeFreeTransit)) {
+            return new Injection(six, List.of());
+        }
+        if (allows(modes, TravelMode.SUBWAY) || allows(modes, TravelMode.BUS)) {
+            ScoredCandidate transit = bestWithModes(finder, graph, originStationId, destStationId,
+                    allowedModes(modes, List.of(TravelMode.WALK, TravelMode.SUBWAY, TravelMode.BUS)),
+                    RouteSearchService::isBikeFreeTransit);
+            if (transit != null) {
+                return new Injection(
+                        replaceLastAlternative(six, transit.response()), List.of(transit));
+            }
+        }
+        return new Injection(six, List.of());
+    }
+
+    /**
+     * @param six 최종 후보 목록
+     * @param injected 보장용으로 주입한 후보의 원본 경로(없으면 빈 목록)
+     */
+    record Injection(List<RouteSearchResponse> six, List<ScoredCandidate> injected) {
+    }
+
+    /** 요청이 해당 수단을 허용하는가(요청 수단이 비면 전체 허용). */
+    private static boolean allows(List<TravelMode> modes, TravelMode mode) {
+        return modes == null || modes.isEmpty() || modes.contains(mode);
+    }
+
+    /** 보장 조건을 만족하는 최선 후보 탐색 1회 — 검증을 통과하는 후보가 없으면 null. */
+    private static ScoredCandidate bestWithModes(RouteCandidateFinder finder, RouteGraph graph,
+            String originStationId, String destStationId, List<TravelMode> allowedModes,
+            java.util.function.Predicate<RouteSearchResponse> valid) {
+        if (allowedModes.isEmpty()) {
+            return null;
+        }
+        List<ScoredCandidate> extra = finder.findCandidatesWithPaths(
+                graph, originStationId, destStationId, 3, allowedModes);
+        for (ScoredCandidate candidate : extra) {
+            if (valid.test(candidate.response())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** 마지막 ALTERNATIVE 자리를 대체(없으면 6 미만일 때만 덧붙인다). */
+    private static List<RouteSearchResponse> replaceLastAlternative(List<RouteSearchResponse> six,
+            RouteSearchResponse candidate) {
+        RouteSearchResponse alternative = new RouteSearchResponse(
+                RouteType.ALTERNATIVE, candidate.totalMinutes(), candidate.legs(),
+                candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount(),
+                candidate.congestionPrediction());
+        List<RouteSearchResponse> out = new ArrayList<>(six);
+        for (int i = out.size() - 1; i >= 0; i--) {
+            if (out.get(i).routeType() == RouteType.ALTERNATIVE) {
+                out.set(i, alternative);
+                return List.copyOf(out);
+            }
+        }
+        if (out.size() < SPEED_ROUTES + CALM_ROUTES) {
+            out.add(alternative);
+        }
+        return List.copyOf(out);
+    }
+
+    /** 지하철 leg 포함 + 자전거·버스 leg 없음. */
+    private static boolean isSubwayOnly(RouteSearchResponse response) {
+        boolean subway = false;
+        for (RouteLegResponse leg : response.legs()) {
+            if (leg.mode() == TravelMode.BIKE || leg.mode() == TravelMode.BUS) {
+                return false;
+            }
+            if (leg.mode() == TravelMode.SUBWAY) {
+                subway = true;
+            }
+        }
+        return subway;
+    }
+
+    /** 자전거 leg 없이 대중교통(SUBWAY·BUS) leg를 포함한 후보인가. */
+    private static boolean isBikeFreeTransit(RouteSearchResponse response) {
+        boolean transit = false;
+        for (RouteLegResponse leg : response.legs()) {
+            if (leg.mode() == TravelMode.BIKE) {
+                return false;
+            }
+            if (leg.mode() == TravelMode.SUBWAY || leg.mode() == TravelMode.BUS) {
+                transit = true;
+            }
+        }
+        return transit;
+    }
+
+    /** 요청 허용 수단과 후보 모드의 교집합. 요청이 비면 후보 모드 그대로. */
+    private static List<TravelMode> allowedModes(List<TravelMode> modes, List<TravelMode> candidates) {
+        if (modes == null || modes.isEmpty()) {
+            return candidates;
+        }
+        return candidates.stream().filter(modes::contains).toList();
+    }
+
+    /**
+     * 해당 슬롯에서 혼잡 가중이 탐색 비용을 바꿀 수 있는가(S15P21A104-216 후속).
+     * 가중은 LINE·ROUTE의 임계(100) 초과분만 반영되므로, 초과 값이 하나도 없으면
+     * 혼잡 가중 탐색이 시간 탐색과 동일 경로를 낸다 — 그때는 2회 탐색을 생략한다.
+     * 판정 실패 시에는 기존 동작(혼잡 탐색 수행)을 유지한다.
+     */
+    private boolean calmSearchCanDiffer(DepartureSlot slot) {
+        try {
+            return congestionRepository
+                    .existsById_TargetTypeInAndId_DowTypeAndId_TimeSlotAndLevelGreaterThan(
+                            List.of(CongestionTarget.LINE, CongestionTarget.ROUTE),
+                            slot.dowType(), slot.timeSlot(),
+                            BigDecimal.valueOf(CongestionCostModel.WEIGHT_MIN_LEVEL));
+        } catch (RuntimeException e) {
+            return true;
+        }
+    }
+
+    /**
+     * 계약 필드 부착(S15P21A104-236 혼잡 예측 · 237 구간 구분은 legs 변환 포함).
+     * 최종 후보(6개 이하)에만 계산한다 — 조회는 PK 단건이라 상한이 걸린다.
+     */
+    private List<RouteSearchResponse> withContractFields(List<RouteSearchResponse> six,
+            SixResult assembled, LocalDateTime departureTime) {
+        DepartureSlot slot = DepartureSlot.of(departureTime);
+        Map<String, List<Edge>> edgesBySignature = edgesBySignature(
+                assembled.timeScored(), assembled.calmScored(), assembled.injected());
+        // stat 폴백용 LINE 레벨 — 최종 후보의 SUBWAY 노선만 묶어 조회한다.
         Set<String> subwayRouteIds = new HashSet<>();
-        for (RouteSearchResponse candidate : candidates) {
-            for (RouteLegResponse leg : candidate.legs()) {
+        for (RouteSearchResponse response : six) {
+            for (RouteLegResponse leg : response.legs()) {
                 if (leg.mode() == TravelMode.SUBWAY && leg.routeId() != null) {
                     subwayRouteIds.add(leg.routeId());
                 }
             }
         }
-        if (subwayRouteIds.isEmpty()) {
-            return candidates;
-        }
         Map<String, Double> levelByRouteId = new HashMap<>();
+        CongestionCostModel.LevelSource levels =
+                congestionLevels(slot.dowType(), slot.timeSlot());
         for (String routeId : subwayRouteIds) {
-            congestionRepository.findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
-                            CongestionTarget.LINE, routeId, departureSlot.dowType(), departureSlot.timeSlot())
-                    .ifPresent(c -> levelByRouteId.put(routeId, c.getLevel().doubleValue()));
-        }
-        if (levelByRouteId.isEmpty()) {
-            return candidates;
-        }
-
-        Map<RouteSearchResponse, Double> scoreByCandidate = new HashMap<>();
-        for (RouteSearchResponse candidate : candidates) {
-            CongestionScorer.score(candidate.legs(), levelByRouteId)
-                    .ifPresent(score -> scoreByCandidate.put(candidate, score));
-        }
-        if (scoreByCandidate.isEmpty()) {
-            return candidates;
-        }
-
-        List<RouteSearchResponse> sorted = new ArrayList<>(candidates);
-        sorted.sort(Comparator.comparingDouble(
-                candidate -> scoreByCandidate.getOrDefault(candidate, Double.MAX_VALUE)));
-
-        List<RouteSearchResponse> relabeled = new ArrayList<>();
-        boolean lowestTagged = false;
-        for (RouteSearchResponse candidate : sorted) {
-            if (!lowestTagged && scoreByCandidate.containsKey(candidate)) {
-                relabeled.add(new RouteSearchResponse(
-                        RouteType.LOW_CONGESTION, candidate.totalMinutes(), candidate.legs(),
-                        candidate.source(), candidate.totalDistanceMeters(), candidate.transferCount()));
-                lowestTagged = true;
-            } else {
-                relabeled.add(candidate);
+            Double level = levels.levelOf("LINE", routeId);
+            if (level != null) {
+                levelByRouteId.put(routeId, level);
             }
         }
-        return relabeled;
-    }
-
-    /**
-     * 허용 수단 조합별로 반복 탐색해 여러 경로 후보를 모은다(S15P21A104-185).
-     *
-     * <p>같은 최단경로 알고리즘을 조합 수만큼 서로 다른 하위 그래프에 적용할 뿐,
-     * 알고리즘 자체는 그대로다. 조합마다 나온 후보 중 leg 구성이 같은 것은 중복 제거하고,
-     * 소요시간이 가장 짧은 것부터 정렬해 최대 {@value #MAX_CANDIDATES}개까지만 담는다.
-     * routeType 배정({@link RouteType#SHORTEST}/{@link RouteType#ALTERNATIVE})은 여기서
-     * 하지 않는다 — {@code modes} 필터가 아직 안 걸린 시점이라 "가장 빠른 것"이 필터 후에도
-     * 그대로 유지된다는 보장이 없다({@link #relabelByRank} 참고).
-     */
-    private List<RouteSearchResponse> algorithmCandidates(
-            RouteGraph graph, String originStationId, String destStationId, DepartureSlot departureSlot) {
-        // departureSlot은 이번 커밋(API 파라미터, S15P21A104-63)에서는 아직 안 쓴다 — 그래프 슬롯 선택과
-        // 탑승 시 wait_sec 가산(96/104 후속, 전우석)이 붙으면 graph()/ShortestPathFinder 호출에 넘긴다.
-        TransferRule rule = transferRule.withTable(graphRegistry.transferTimes());
-
-        Map<String, RouteSearchResponse> byLegSignature = new LinkedHashMap<>();
-        for (Set<TravelMode> coreModes : CANDIDATE_CORE_MODE_SETS) {
-            RouteGraph subgraph = graph.filterByModes(withWalk(coreModes));
-            searchOne(subgraph, rule, originStationId, destStationId)
-                    .ifPresent(candidate -> byLegSignature.putIfAbsent(legSignature(candidate), candidate));
-        }
-
-        return byLegSignature.values().stream()
-                .sorted(Comparator.comparingDouble(RouteSearchResponse::totalMinutes))
-                .limit(MAX_CANDIDATES)
-                .map(this::withGeometry)
-                .toList();
-    }
-
-    /**
-     * 소요시간순으로 이미 정렬된 후보 목록의 첫 번째를 {@link RouteType#SHORTEST}로,
-     * 나머지를 {@link RouteType#ALTERNATIVE}로 다시 매긴다. {@code modes} 필터 "다음"에
-     * 호출해야 한다 — 필터로 원래 최단 후보가 빠져도 남은 것 중 첫 번째가 SHORTEST가 된다.
-     *
-     * <p>geometry·거리는 {@link #algorithmCandidates}에서 이미 붙어 있으므로 여기서 다시
-     * 계산하지 않는다 — 다시 부르면 카카오 도보 API를 후보마다 한 번 더 호출하게 된다.
-     */
-    private List<RouteSearchResponse> relabelByRank(List<RouteSearchResponse> candidates) {
-        List<RouteSearchResponse> ranked = new ArrayList<>();
-        for (int i = 0; i < candidates.size(); i++) {
-            RouteSearchResponse candidate = candidates.get(i);
-            RouteType routeType = i == 0 ? RouteType.SHORTEST : RouteType.ALTERNATIVE;
-            ranked.add(new RouteSearchResponse(
-                    routeType, candidate.totalMinutes(), candidate.legs(), candidate.source(),
-                    candidate.totalDistanceMeters(), candidate.transferCount()));
-        }
-        return ranked;
-    }
-
-    /** 하위 그래프 하나에 최단경로 알고리즘을 1회 적용한다. 경로 없음·재고 게이트 탈락이면 빈 값. */
-    private Optional<RouteSearchResponse> searchOne(
-            RouteGraph subgraph, TransferRule rule, String originStationId, String destStationId) {
-        try {
-            FoundPath found = new ShortestPathFinder(rule).find(subgraph, originStationId, destStationId);
-            List<RouteMapper.EngineSegment> segments = found.edges().stream()
-                    .map(edge -> new RouteMapper.EngineSegment(
-                            edge.fromNode(), edge.toNode(), edge.routeId(), edge.travelSec(),
-                            edge.mode()))
-                    .toList();
-            // 노선 전환 경계마다 환승 소요를 같은 규칙으로 매긴다.
-            List<Long> transferSecs = new ArrayList<>();
-            String currentLine = null;
-            for (Edge edge : found.edges()) {
-                if (currentLine != null && !currentLine.equals(edge.routeId())) {
-                    transferSecs.add(rule.costWithStation(
-                            0, edge.fromNode(), currentLine, edge.routeId()));
-                }
-                currentLine = edge.routeId();
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        // BUS 실시간 등급(297) — 정렬과 같은 축·같은 캐시. 지금 출발일 때만 채워진다.
+        Function<String, Map<String, BusArrival>> busCongestion = stopId -> Map.of();
+        if (BusCongestionWindow.isLive(departureTime, clock, busCongestionProperties.nowWindow())) {
+            Set<String> stops = RouteNameResolver.busBoardingStops(six);
+            if (!stops.isEmpty()) {
+                busCongestionReader.prefetch(stops);
+                busCongestion = busCongestionReader::forStop;
             }
-            // routeType은 여기서 임의로 SHORTEST를 넣어두고, 전체 후보를 모은 뒤(algorithmCandidates)
-            // 소요시간 기준으로 다시 매긴다 — 이 시점엔 다른 후보와 비교할 수 없다.
-            Optional<RouteSearchResponse> response = RouteMapper.toResponseWithTransfers(
-                    new RouteMapper.EnginePath(segments, found.totalSec(), found.transferCount()),
-                    graphRegistry.stationInfos(), RouteType.SHORTEST, RouteSource.ALGORITHM,
-                    transferSecs, graphRegistry.rentalIds());
-            return response.filter(r -> BikeStockGate.passesEdges(
-                    found.edges().stream().map(Edge::fromNode).toList(),
-                    found.edges().stream().map(Edge::mode).toList(),
-                    graphRegistry.bikeStock()));
-        } catch (DomainException exception) {
-            if (exception.getErrorType() == ErrorType.ROUTE_NOT_FOUND
-                    || exception.getErrorType() == ErrorType.STATION_NOT_FOUND) {
-                // 이 수단 조합으로는 출발·도착이 아예 연결되지 않거나 하위 그래프에 없는 역이다.
-                // 후보 하나가 없을 뿐이므로 건너뛴다(전체 탐색을 실패시키지 않는다).
-                return Optional.empty();
-            }
-            throw exception;
         }
-    }
-
-    /** WALK는 접근·연결용이라 모든 수단 조합에 항상 포함한다. */
-    private Set<TravelMode> withWalk(Set<TravelMode> coreModes) {
-        Set<TravelMode> modes = new HashSet<>(coreModes);
-        modes.add(TravelMode.WALK);
-        return modes;
-    }
-
-    /** leg의 (수단·출발·도착·노선) 순서로 만든 서명. 같으면 사실상 같은 경로로 보고 중복 제거한다. */
-    private String legSignature(RouteSearchResponse response) {
-        StringBuilder signature = new StringBuilder();
-        for (RouteLegResponse leg : response.legs()) {
-            signature.append(leg.mode()).append(':')
-                    .append(leg.fromNodeId()).append("->").append(leg.toNodeId()).append(':')
-                    .append(leg.routeId()).append('|');
+        RouteScoreRanker.BusLevelLookup busLevels = busLevelLookup(busCongestion);
+        Map<String, RouteMapper.StationInfo> stationInfos = graphRegistry.stationInfos();
+        List<RouteSearchResponse> out = new ArrayList<>();
+        for (RouteSearchResponse response : six) {
+            List<RouteLegResponse> legs = LegContract.withContractFields(
+                    response.legs(), graphRegistry.rentalIds());
+            List<Edge> edges = edgesBySignature.getOrDefault(
+                    RouteCandidateFinder.exactSignature(response), List.of());
+            AtomicBoolean truncated = new AtomicBoolean(false);
+            LinkCongestionScorer.LinkLevelLookup levelLookup = congestionPredLookup(truncated);
+            Optional<LinkCongestionScorer.Result> linkResult = edges.isEmpty() ? Optional.empty()
+                    : LinkCongestionScorer.score(edges, departureTime, levelLookup);
+            // 265 후속(TO_BE-crowd-grade-scheme-02): leg별 최댓값을 SUBWAY leg 등장 순서에 맞춰 붙인다.
+            List<Double> perSubwayLegLevels = edges.isEmpty() ? List.of()
+                    : LinkCongestionScorer.scorePerSubwayLeg(edges, departureTime, levelLookup);
+            legs = attachSubwayCongestionLevels(legs, perSubwayLegLevels);
+            Optional<CongestionPredictionResolver.Worst> worst = WorstCongestionPicker.pick(
+                    linkResult,
+                    id -> {
+                        RouteMapper.StationInfo info = stationInfos.get(id);
+                        return info == null ? id : info.name();
+                    },
+                    worstBusLeg(legs, busLevels),
+                    CongestionScorer.worst(legs, levelByRouteId));
+            CongestionPrediction prediction = CongestionPredictionResolver.resolve(
+                    worst, truncated.get(), departureTime.toLocalDate(), today);
+            int transferCount = LegContract.userTransferCount(legs);
+            out.add(new RouteSearchResponse(response.routeType(), response.totalMinutes(),
+                    legs, response.source(), response.totalDistanceMeters(),
+                    transferCount, prediction));
         }
-        return signature.toString();
+        return out;
     }
 
     /**
-     * KTDB 실선로 geometry를 구간(leg)마다 붙인다. RouteMapper는 DB에 의존하지 않으므로
-     * (순수 함수 유지) geometry 부착은 여기서 후처리로 한다 — 미승인 필드, README 참고.
+     * SUBWAY leg마다 {@link LinkCongestionScorer#scorePerSubwayLeg}가 낸 값을 등장 순서대로
+     * 하나씩 물린다(265 후속). 개수가 안 맞으면(있을 수 없지만 방어적으로) 남는 leg는
+     * 원래 값(null)을 유지한다 — 억지로 짝짓지 않는다.
      */
-    private RouteSearchResponse withGeometry(RouteSearchResponse response) {
-        List<RouteLegResponse> legs = withGeometry(response.legs());
-        return new RouteSearchResponse(
-                response.routeType(), response.totalMinutes(), legs, response.source(),
-                totalDistanceOf(legs), response.transferCount());
-    }
-
-    /**
-     * leg 목록 전체에 geometry를 붙인다. 연속된 BIKE leg(사이에 WALK·TRANSFER 없이 대여소
-     * 경계로만 나뉜 구간, {@link RouteMapper} rentalSplit 참고)는 하나의 실제 이동으로 묶어
-     * {@link #withBikeRunGeometry}로 처리한다 — leg마다 독립 호출하면 같은 대여소인데도
-     * 카카오 자전거 API의 도로 스냅 진입·이탈점이 달라져 경계가 끊겨 보인다(S15P21A104-153).
-     */
-    private List<RouteLegResponse> withGeometry(List<RouteLegResponse> legs) {
-        List<RouteLegResponse> result = new ArrayList<>();
+    private static List<RouteLegResponse> attachSubwayCongestionLevels(
+            List<RouteLegResponse> legs, List<Double> perSubwayLegLevels) {
+        List<RouteLegResponse> out = new ArrayList<>(legs.size());
         int i = 0;
-        while (i < legs.size()) {
-            if (legs.get(i).mode() != TravelMode.BIKE) {
-                result.add(withGeometry(legs.get(i)));
+        for (RouteLegResponse leg : legs) {
+            if (leg.mode() == TravelMode.SUBWAY && i < perSubwayLegLevels.size()) {
+                out.add(leg.withCongestionLevel(perSubwayLegLevels.get(i)));
                 i++;
+            } else {
+                out.add(leg);
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /** BUS leg 중 가장 혼잡한 leg(공통 축 수치). 아는 값이 없으면 빈 값. */
+    private static Optional<CongestionScorer.Worst> worstBusLeg(
+            List<RouteLegResponse> legs, RouteScoreRanker.BusLevelLookup busLevels) {
+        CongestionScorer.Worst worst = null;
+        for (RouteLegResponse leg : legs) {
+            if (leg.mode() != TravelMode.BUS) {
                 continue;
             }
-            int end = i;
-            while (end + 1 < legs.size() && legs.get(end + 1).mode() == TravelMode.BIKE) {
-                end++;
+            Double level = busLevels.levelOf(leg);
+            if (level == null) {
+                continue;
             }
-            result.addAll(withBikeRunGeometry(legs.subList(i, end + 1)));
-            i = end + 1;
+            if (worst == null || level > worst.level()) {
+                worst = new CongestionScorer.Worst(level, leg);
+            }
         }
-        return result;
-    }
-
-    private RouteLegResponse withGeometry(RouteLegResponse leg) {
-        if (leg.fromLat() == null || leg.fromLng() == null || leg.toLat() == null || leg.toLng() == null) {
-            return leg;
-        }
-        Optional<MultiLineStringResponse> geometry = leg.mode() == TravelMode.WALK
-                ? walkGeometryRegistry.geometryFor(leg.fromNodeId(), leg.toNodeId(),
-                        leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng())
-                : railGeometryRegistry.geometryForLeg(
-                        leg.routeId(), leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
-        if (geometry.isEmpty()) {
-            return leg;
-        }
-        return withGeometry(leg, geometry.get());
+        return Optional.ofNullable(worst);
     }
 
     /**
-     * 연속 BIKE leg 묶음을 전체 구간(첫 leg 출발→마지막 leg 도착) 1회 조회로 처리한다
-     * (S15P21A104-153). 조회 결과 좌표열을 이어붙인 뒤, 각 leg의 실제 도착 좌표에 가장 가까운
-     * 지점을 경계로 잘라 나눈다 — 인접 leg가 같은 지점(좌표열의 같은 인덱스)을 공유하므로
-     * 끊김이 생기지 않는다. 좌표열이 실제 도착점과 너무 동떨어져 순서를 신뢰할 수 없으면
-     * (경계가 뒤로 가지 않으면) 원본을 그대로 두고 값을 지어내지 않는다.
+     * 후보 서명 → 원본 엣지 맵(2026-09-22). 보장용 주입 후보까지 포함해야 링크 혼잡 채점이
+     * 이 후보만 노선 통계로 폴백하지 않는다. 같은 서명이 여러 번이면 첫 엣지를 유지한다.
      */
-    private List<RouteLegResponse> withBikeRunGeometry(List<RouteLegResponse> run) {
-        RouteLegResponse first = run.get(0);
-        RouteLegResponse last = run.get(run.size() - 1);
-        if (first.fromLat() == null || first.fromLng() == null
-                || last.toLat() == null || last.toLng() == null) {
-            return run;
-        }
-        Optional<MultiLineStringResponse> geometry = bikeGeometryRegistry.geometryFor(
-                first.fromNodeId(), last.toNodeId(),
-                first.fromLat(), first.fromLng(), last.toLat(), last.toLng());
-        if (geometry.isEmpty()) {
-            return run;
-        }
-        List<List<Double>> points = flatten(geometry.get());
-        if (points.size() < run.size() + 1) {
-            return run;
-        }
-        List<RouteLegResponse> result = new ArrayList<>();
-        int cursor = 0;
-        for (int k = 0; k < run.size(); k++) {
-            RouteLegResponse leg = run.get(k);
-            int endIdx = k == run.size() - 1
-                    ? points.size() - 1
-                    : nearestIndex(points, cursor, leg.toLat(), leg.toLng());
-            if (endIdx <= cursor) {
-                return run;
-            }
-            MultiLineStringResponse legGeometry =
-                    MultiLineStringResponse.of(List.of(new ArrayList<>(points.subList(cursor, endIdx + 1))));
-            result.add(withGeometry(leg, legGeometry));
-            cursor = endIdx;
-        }
-        return result;
-    }
-
-    private RouteLegResponse withGeometry(RouteLegResponse leg, MultiLineStringResponse geometry) {
-        return new RouteLegResponse(
-                leg.mode(),
-                leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
-                leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), leg.minutes(),
-                geometry, "available",
-                distanceOf(geometry), leg.routeName()
-        );
-    }
-
-    /** MultiLineString의 모든 LineString 좌표를 순서대로 이어붙인다. */
-    private List<List<Double>> flatten(MultiLineStringResponse geometry) {
-        List<List<Double>> points = new ArrayList<>();
-        for (List<List<Double>> line : geometry.coordinates()) {
-            points.addAll(line);
-        }
-        return points;
-    }
-
-    /** {@code fromIdx} 이후 지점 중 목표 좌표에 가장 가까운 인덱스. 역행하지 않도록 이후 구간만 본다. */
-    private int nearestIndex(List<List<Double>> points, int fromIdx, double targetLat, double targetLng) {
-        int best = fromIdx;
-        double bestDist = Double.MAX_VALUE;
-        for (int idx = fromIdx; idx < points.size(); idx++) {
-            List<Double> point = points.get(idx);
-            double dist = GeoDistance.haversineMeters(point.get(1), point.get(0), targetLat, targetLng);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = idx;
+    static Map<String, List<Edge>> edgesBySignature(List<ScoredCandidate> timeScored,
+            List<ScoredCandidate> calmScored, List<ScoredCandidate> injected) {
+        Map<String, List<Edge>> bySignature = new HashMap<>();
+        for (List<ScoredCandidate> group : List.of(timeScored, calmScored, injected)) {
+            for (ScoredCandidate scored : group) {
+                bySignature.putIfAbsent(
+                        RouteCandidateFinder.exactSignature(scored.response()), scored.path().edges());
             }
         }
-        return best;
+        return bySignature;
     }
 
-    /**
-     * geometry 좌표를 따라 실제 이동 거리를 더한다(FE-175 항목8). geometry가 없으면(직선거리로
-     * 대체하지 않고) 호출하지 않는다 — {@link #withGeometry(RouteLegResponse)}에서만 쓴다.
-     */
-    private double distanceOf(MultiLineStringResponse geometry) {
-        double total = 0;
-        for (List<List<Double>> line : geometry.coordinates()) {
-            for (int i = 0; i + 1 < line.size(); i++) {
-                List<Double> from = line.get(i);
-                List<Double> to = line.get(i + 1);
-                total += GeoDistance.haversineMeters(from.get(1), from.get(0), to.get(1), to.get(0));
-            }
-        }
-        return total;
-    }
-
-    /** legs 전부가 distanceMeters를 확보한 경우에만 합을 낸다. 하나라도 없으면 null(FE-175 항목8). */
-    private Double totalDistanceOf(List<RouteLegResponse> legs) {
-        double sum = 0;
-        for (RouteLegResponse leg : legs) {
-            if (leg.distanceMeters() == null) {
+    /** 슬롯 고정 혼잡도 조회 — 탐색 비용 모델에 넘긴다(216). */
+    private CongestionCostModel.LevelSource congestionLevels(int dowType, int timeSlot) {
+        return (targetType, targetId) -> {
+            CongestionTarget target = "LINE".equals(targetType) ? CongestionTarget.LINE
+                    : "ROUTE".equals(targetType) ? CongestionTarget.ROUTE : null;
+            if (target == null || targetId == null) {
                 return null;
             }
-            sum += leg.distanceMeters();
-        }
-        return sum;
+            return congestionRepository
+                    .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                            target, targetId, dowType, timeSlot)
+                    .map(c -> c.getLevel().doubleValue())
+                    .orElse(null);
+        };
+    }
+
+    /** 탐색→매핑 조립기. 레지스트리 값을 주입해 만든다. */
+    private RouteCandidateFinder candidateFinder() {
+        return candidateFinder(null);
+    }
+
+    /** RAPTOR 입력까지 주입하는 판(217 ③). 입력이 null이면 레거시 엔진만. */
+    private RouteCandidateFinder candidateFinder(RouteCandidateFinder.RaptorInput raptorInput) {
+        return new RouteCandidateFinder(
+                transferRule,
+                graphRegistry.transferTimes(),
+                graphRegistry.rentalIds(),
+                graphRegistry.stationInfos(),
+                graphRegistry::bikeStock,
+                graphRegistry.busRouteIndex(),
+                raptorInput);
+    }
+
+    /** 슬롯의 RAPTOR 입력. 슬롯 노선이 없으면 null(레거시 폴백). */
+    private RouteCandidateFinder.RaptorInput raptorInputFor(int dowType, int timeSlot,
+                                                            java.util.List<Edge> accessEdges) {
+        com.ssafy.s15p21a104.domain.route.finder.raptor.RaptorRouteSet routeSet =
+                graphRegistry.raptorRouteSetFor(dowType, timeSlot);
+        return routeSet == null ? null : new RouteCandidateFinder.RaptorInput(routeSet, accessEdges);
+    }
+
+    /** 쾌적 순위기. 혼잡도 조회 함수를 주입해 만든다. */
+    private RouteScoreRanker scoreRanker() {
+        return new RouteScoreRanker(
+                (targetType, targetId, dowType, timeSlot) -> congestionRepository
+                        .findById_TargetTypeAndId_TargetIdAndId_DowTypeAndId_TimeSlot(
+                                CongestionTarget.LINE, targetId, dowType, timeSlot)
+                        .map(c -> c.getLevel().doubleValue())
+                        .orElse(null));
     }
 
     /**
-     * 사람이 읽는 노선 이름을 배치로 붙인다(FE-175 항목8). SUBWAY는 {@code line.name},
-     * BUS는 {@code bus_route.name} — 그 외 수단은 의미 있는 노선명이 없어 null로 둔다.
+     * BUS leg → 공통 수치 혼잡(5부 C1). 표시(297)와 같은 규칙(후보 노선 중 가장 먼저 오는
+     * 버스의 등급)을 쓰고, 등급→수치는 {@link BusCrowdingScale} 한 곳에서 옮긴다. 모르면 중립(null).
      */
-    private List<RouteSearchResponse> withRouteNames(List<RouteSearchResponse> responses) {
-        Set<String> subwayLineIds = new HashSet<>();
-        Set<String> busRouteIds = new HashSet<>();
-        for (RouteSearchResponse response : responses) {
-            for (RouteLegResponse leg : response.legs()) {
-                if (leg.routeId() == null) {
-                    continue;
+    private RouteScoreRanker.BusLevelLookup busLevelLookup(
+            Function<String, Map<String, BusArrival>> busCongestion) {
+        return leg -> {
+            if (leg.fromNodeId() == null || leg.fromNodeId().isBlank()) {
+                return null;
+            }
+            Set<String> options = leg.routeOptions() != null && !leg.routeOptions().isEmpty()
+                    ? leg.routeOptions().stream()
+                            .map(com.ssafy.s15p21a104.domain.route.dto.response
+                                    .RouteOptionResponse::routeId)
+                            .collect(java.util.stream.Collectors.toCollection(
+                                    java.util.LinkedHashSet::new))
+                    : (leg.routeId() == null ? Set.of() : Set.of(leg.routeId()));
+            if (options.isEmpty()) {
+                return null;
+            }
+            try {
+                return BusCrowdingScale.levelOfName(
+                                RouteNameResolver.gradeName(
+                                        busCongestion.apply(leg.fromNodeId()), options))
+                        .orElse(null);
+            } catch (RuntimeException e) {
+                return null;
+            }
+        };
+    }
+
+    /**
+     * 링크 단위 혼잡도 예측 조회 함수(S15P21A104-158, 통지 05 S-1). 방향을 모르면
+     * (2호선 지선 등, {@link SubwayDirectionResolver} 참고) 조회 자체를 안 하고 null —
+     * 결측과 동일하게 다룬다.
+     */
+    private LinkCongestionScorer.LinkLevelLookup congestionPredLookup() {
+        return congestionPredLookup(new AtomicBoolean());
+    }
+
+    /**
+     * 방향 미판정을 기록하는 판(S15P21A104-236 LINE1_TRUNCATED).
+     *
+     * @param directionUnresolved SUBWAY 엣지의 방향을 못 정할 때 true로 세운다
+     */
+    private LinkCongestionScorer.LinkLevelLookup congestionPredLookup(
+            AtomicBoolean directionUnresolved) {
+        return (edge, passThroughTime) -> {
+            var direction =
+                    SubwayDirectionResolver.resolve(edge.fromNode(), edge.toNode(), edge.routeId());
+            if (direction.isEmpty()) {
+                if (edge.mode() == TravelMode.SUBWAY) {
+                    directionUnresolved.set(true);
                 }
-                if (leg.mode() == TravelMode.SUBWAY) {
-                    subwayLineIds.add(leg.routeId());
-                } else if (leg.mode() == TravelMode.BUS) {
-                    busRouteIds.add(leg.routeId());
-                }
+                return null;
+            }
+            return direction
+                    .flatMap(resolved -> congestionPredRepository
+                            .findById_PredDateAndId_FromStationIdAndId_ToStationIdAndId_LineIdAndId_DirectionAndId_TimeSlot(
+                                    passThroughTime.toLocalDate(), edge.fromNode(), edge.toNode(),
+                                    edge.routeId(), resolved,
+                                    DepartureSlot.of(passThroughTime).timeSlot())
+                            .map(com.ssafy.s15p21a104.domain.congestion.entity.CongestionPred::getLevel))
+                    .map(java.math.BigDecimal::doubleValue)
+                    .orElse(null);
+        };
+    }
+
+    /**
+     * 후보 목록에 geometry를 붙인다(213 T3). {@link RouteGeometryEnhancer}가 후보별
+     * 병렬 후처리 + 순서 보장 + 실패 격리를 맡는다. 서비스는 레지스트리 조회 함수만 넘긴다.
+     * 도보 표시 시간 정정으로 총시간이 바뀌므로 속도 그룹 순서·SHORTEST를 다시 맞춘다(268).
+     */
+    private List<RouteSearchResponse> withGeometryAll(List<RouteSearchResponse> candidates) {
+        return RouteCandidateFinder.reorderSpeedByTotalMinutes(enhanceGeometry(candidates));
+    }
+
+    /**
+     * 검색 밖(재안내 replan)에서 만든 후보에 검색 응답과 같은 표시 단계(노선 이름 → geometry)를 붙인다.
+     * 순서는 그대로 둔다 — 속도 그룹 재정렬(268)은 검색 6경로 전용이다.
+     *
+     * @param routes 후보(순서 유지)
+     * @param departureTime 출발 시각(버스 실시간 등급 prefetch 판정, null이면 지금)
+     * @return 이름·geometry가 붙은 후보
+     */
+    public List<RouteSearchResponse> withDisplayFields(List<RouteSearchResponse> routes, LocalDateTime departureTime) {
+        return enhanceGeometry(withRouteNames(routes, departureTime));
+    }
+
+    private List<RouteSearchResponse> enhanceGeometry(List<RouteSearchResponse> candidates) {
+        return new RouteGeometryEnhancer(
+                (routeId, fromLat, fromLng, toLat, toLng) -> railGeometryRegistry.geometryForLeg(
+                        routeId, fromLat, fromLng, toLat, toLng),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> walkGeometryRegistry.geometryFor(
+                        fromId, toId, fromLat, fromLng, toLat, toLng),
+                (fromId, toId, fromLat, fromLng, toLat, toLng) -> bikeGeometryRegistry.geometryFor(
+                        fromId, toId, fromLat, fromLng, toLat, toLng),
+                leg -> {
+                    if (busGeometryRegistry == null) {
+                        return Optional.empty();
+                    }
+                    String routeName = leg.routeName();
+                    if (routeName == null && leg.routeOptions() != null) {
+                        // ponytail: 정규 버스 구간은 첫 노선의 경로만 표시한다. 노선별 지도 선택이 생기면 후보별 geometry 계약으로 확장한다.
+                        routeName = leg.routeOptions().stream()
+                                .map(option -> option.routeName())
+                                .filter(name -> name != null && !name.isBlank())
+                                .findFirst().orElse(null);
+                    }
+                    return busGeometryRegistry.geometryFor(
+                            leg.routeId(), leg.fromNodeId(), leg.toNodeId(), routeName,
+                            leg.fromNodeName(), leg.toNodeName(),
+                            leg.fromLat(), leg.fromLng(), leg.toLat(), leg.toLng());
+                })
+                .enhanceAll(candidates);
+    }
+
+    /**
+     * 사람이 읽는 노선 이름을 배치로 붙인다(213 T4). {@link RouteNameResolver}에
+     * 위임하고 서비스는 DB 조회 함수만 넘긴다.
+     *
+     * <p>버스 실시간 혼잡도(297)도 여기서 붙는다. <b>지금 출발 검색이고 버스 구간이 있을 때만</b>
+     * 그 승차 정류소를 한 번에 받아 온다 — 지하철만 나온 검색은 외부 호출이 아예 없다.
+     *
+     * @param departureTime 요청한 출발 시각(없으면 null = 지금). 실시간 값을 붙일지 가른다
+     */
+    private List<RouteSearchResponse> withRouteNames(
+            List<RouteSearchResponse> responses, LocalDateTime departureTime) {
+        Function<String, Map<String, BusArrival>> congestion = stopId -> Map.of();
+        if (BusCongestionWindow.isLive(departureTime, clock, busCongestionProperties.nowWindow())) {
+            Set<String> stops = RouteNameResolver.busBoardingStops(responses);
+            if (!stops.isEmpty()) {
+                busCongestionReader.prefetch(stops);
+                congestion = busCongestionReader::forStop;
             }
         }
-        Map<String, String> lineNames = new HashMap<>();
-        for (Line line : routeLineRepository.findAllById(subwayLineIds)) {
-            lineNames.put(line.getLineId(), line.getName());
-        }
-        Map<String, String> busNames = new HashMap<>();
-        for (BusRoute busRoute : busRouteRepository.findAllById(busRouteIds)) {
-            busNames.put(busRoute.getRouteId(), busRoute.getName());
-        }
-
-        List<RouteSearchResponse> named = new ArrayList<>();
-        for (RouteSearchResponse response : responses) {
-            List<RouteLegResponse> legs = response.legs().stream()
-                    .map(leg -> withRouteName(leg, lineNames, busNames))
-                    .toList();
-            named.add(new RouteSearchResponse(
-                    response.routeType(), response.totalMinutes(), legs, response.source(),
-                    response.totalDistanceMeters(), response.transferCount()));
-        }
-        return named;
+        return withRouteNames(responses, congestion);
     }
 
-    private RouteLegResponse withRouteName(
-            RouteLegResponse leg, Map<String, String> lineNames, Map<String, String> busNames) {
-        String routeName = switch (leg.mode()) {
-            case SUBWAY -> lineNames.get(leg.routeId());
-            case BUS -> busNames.get(leg.routeId());
-            default -> null;
-        };
-        if (routeName == null) {
-            return leg;
-        }
-        return new RouteLegResponse(
-                leg.mode(),
-                leg.fromNodeId(), leg.fromNodeName(), leg.fromLat(), leg.fromLng(),
-                leg.toNodeId(), leg.toNodeName(), leg.toLat(), leg.toLng(),
-                leg.routeId(), leg.minutes(),
-                leg.geometry(), leg.geometryStatus(),
-                leg.distanceMeters(), routeName
-        );
+    private List<RouteSearchResponse> withRouteNames(
+            List<RouteSearchResponse> responses, Function<String, Map<String, BusArrival>> busCongestion) {
+        return new RouteNameResolver(
+                ids -> {
+                    Map<String, String> names = new HashMap<>();
+                    for (Line line : routeLineRepository.findAllById(ids)) {
+                        names.put(line.getLineId(), line.getName());
+                    }
+                    return names;
+                },
+                ids -> {
+                    Map<String, String> names = new HashMap<>();
+                    for (BusRoute busRoute : busRouteRepository.findAllById(ids)) {
+                        names.put(busRoute.getRouteId(), busRoute.getName());
+                    }
+                    return names;
+                },
+                graphRegistry.busRouteIndex(),
+                ids -> {
+                    Map<String, Integer> headways = new HashMap<>();
+                    for (BusRoute busRoute : busRouteRepository.findAllById(ids)) {
+                        headways.put(busRoute.getRouteId(), busRoute.getHeadwayMin());
+                    }
+                    return headways;
+                },
+                busCongestion).withRouteNames(responses);
     }
+
+    /** 좌표 검색 전용 임시 노드 ID(S15P21A104-187). 요청 하나 안에서만 쓰고 그래프에 남기지 않는다. */
+    private static final String PLACE_ORIGIN_ID = "PLACE-ORIGIN";
+
+    private static final String PLACE_DEST_ID = "PLACE-DEST";
 
     /**
-     * 좌표 기반 통합 길찾기 진입점(S15P21A104-185). 이 티켓 범위는 요청 계약과 입력 검증까지다.
+     * 좌표 기반 통합 길찾기 진입점(S15P21A104-185/187).
      *
-     * <p>좌표를 실제 교통망(역·정류장·대여소)에 연결하는 접근 후보 탐색과 보행 계산은
-     * 후속 작업의 책임이다(FE-좌표기반-통합길찾기-API-협의요청.md 6·7절). 유효한 요청이어도
-     * 아직 {@link ErrorType#ACCESS_CANDIDATE_NOT_READY}를 반환한다 — 빈 배열로 조용히
-     * "경로 없음"인 척하지 않고, 미구현 상태임을 명시적으로 알린다.
+     * <p>일반 장소(건물 등)는 역 DB에 없으므로, 좌표 주변 보행 접근 가능한 역·정류장·대여소를
+     * 찾아 임시 WALK 간선으로 이어 붙인 뒤(요청마다 새로 만들고 버리는 그래프라 공유 그래프를
+     * 오염시키지 않는다, {@link RouteGraph#withExtraEdges}) 같은 탐색·후보 파이프라인
+     * ({@link #algorithmCandidates})을 그대로 태운다. 최단경로 알고리즘·기존 역 검색 경로는
+     * 건드리지 않는다.
      *
      * @throws DomainException 좌표가 비어있거나 유효 범위를 벗어나면 {@link ErrorType#INVALID_COORDINATE},
      *         출발·도착 좌표가 완전히 같으면 {@link ErrorType#SAME_ORIGIN_DEST},
-     *         입력이 유효하면 {@link ErrorType#ACCESS_CANDIDATE_NOT_READY}
+     *         그래프 미적재면 {@link ErrorType#ROUTE_DATA_NOT_READY},
+     *         출발·도착 어느 한쪽이라도 반경 안에 접근 가능한 후보가 없으면
+     *         {@link ErrorType#ACCESS_CANDIDATE_NOT_FOUND}
      */
     public List<RouteSearchResponse> searchByCoordinate(CoordinateRouteSearchRequest request) {
         RoutePlaceRequest origin = requireValidPlace(request == null ? null : request.origin());
@@ -523,7 +805,58 @@ public class RouteSearchService {
         if (origin.lat().equals(destination.lat()) && origin.lng().equals(destination.lng())) {
             throw new DomainException(ErrorType.SAME_ORIGIN_DEST);
         }
-        throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_READY);
+
+        RouteGraph graph = graphRegistry == null ? null : graphRegistry.graph();
+        if (graph == null) {
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
+        }
+
+        DepartureSlot coordSlot = DepartureSlot.of(RequestedDeparture.resolve(request.departureTime(), clock));
+        RouteGraph slotGraph = graphRegistry.graphFor(coordSlot.dowType(), coordSlot.timeSlot());
+        if (slotGraph == null) {
+            throw new DomainException(ErrorType.ROUTE_DATA_NOT_READY);
+        }
+
+        Map<String, RouteMapper.StationInfo> baseInfos = graphRegistry.stationInfos();
+        List<Edge> originAccessEdges = CoordinateAccessEdges.accessEdges(
+                PLACE_ORIGIN_ID, origin.lat(), origin.lng(), baseInfos, slotGraph, true,
+                graphRegistry.stationIds());
+        List<Edge> destAccessEdges = CoordinateAccessEdges.accessEdges(
+                PLACE_DEST_ID, destination.lat(), destination.lng(), baseInfos, slotGraph, false,
+                graphRegistry.stationIds());
+        if (originAccessEdges.isEmpty() || destAccessEdges.isEmpty()) {
+            throw new DomainException(ErrorType.ACCESS_CANDIDATE_NOT_FOUND);
+        }
+
+        List<Edge> accessEdges = new ArrayList<>(originAccessEdges);
+        accessEdges.addAll(destAccessEdges);
+        // 슬롯 그래프에 접근 임시 엣지만 얹는다 (190: 슬롯 반영 + 213 T2 1회 탐색).
+        // withExtraEdges 자체도 얕은 복사라 안 건드리는 노드는 복사하지 않는다.
+        RouteGraph augmentedGraph = slotGraph.withExtraEdges(accessEdges);
+
+        Map<String, RouteMapper.StationInfo> stationInfos = new HashMap<>(baseInfos);
+        stationInfos.put(PLACE_ORIGIN_ID, new RouteMapper.StationInfo(
+                PLACE_ORIGIN_ID, origin.name(), origin.lat(), origin.lng()));
+        stationInfos.put(PLACE_DEST_ID, new RouteMapper.StationInfo(
+                PLACE_DEST_ID, destination.name(), destination.lat(), destination.lng()));
+
+        RouteCandidateFinder coordFinder = new RouteCandidateFinder(
+                transferRule,
+                graphRegistry.transferTimes(),
+                graphRegistry.rentalIds(),
+                stationInfos,
+                graphRegistry::bikeStock,
+                graphRegistry.busRouteIndex(),
+                raptorInputFor(coordSlot.dowType(), coordSlot.timeSlot(), accessEdges));
+        // 214·216: 역 검색과 같은 6경로 파이프 (속도 3 + 혼잡 3).
+        LocalDateTime coordDeparture = RequestedDeparture.resolve(request.departureTime(), clock);
+        return withSearchPermit(() -> {
+            SixResult coordAssembled = sixRoutes(coordFinder, augmentedGraph,
+                    PLACE_ORIGIN_ID, PLACE_DEST_ID, request.modes(), coordDeparture);
+            List<RouteSearchResponse> coordNamed =
+                    withGeometryAll(withRouteNames(coordAssembled.six(), coordDeparture));
+            return withContractFields(coordNamed, coordAssembled, coordDeparture);
+        });
     }
 
     private RoutePlaceRequest requireValidPlace(RoutePlaceRequest place) {
@@ -541,17 +874,26 @@ public class RouteSearchService {
                 .orElseThrow(() -> new DomainException(ErrorType.STATION_NOT_FOUND));
     }
 
-    private List<RouteSearchResponse> filterByModes(List<RouteSearchResponse> candidates, List<TravelMode> modes) {
-        if (modes == null || modes.isEmpty()) {
-            return candidates;
+    /**
+     * CPU를 많이 쓰는 탐색 구간(그래프 탐색+geometry 후처리)을 상한 걸린 세마포어로 감싼다.
+     * 입력 검증·그래프 로드 확인은 이 밖에서 이미 끝난 뒤라, 여기서 대기하는 요청은 전부
+     * "처리는 가능하지만 지금은 자리가 없는" 요청이다.
+     */
+    private <T> T withSearchPermit(Supplier<T> work) {
+        boolean acquired;
+        try {
+            acquired = searchSemaphore.tryAcquire(SEARCH_ACQUIRE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new DomainException(ErrorType.ROUTE_SEARCH_BUSY);
         }
-        return candidates.stream()
-                .filter(candidate -> candidate.legs().stream()
-                        .allMatch(leg -> isAlwaysAllowed(leg.mode()) || modes.contains(leg.mode())))
-                .toList();
-    }
-
-    private boolean isAlwaysAllowed(TravelMode mode) {
-        return mode == TravelMode.WALK || mode == TravelMode.TRANSFER;
+        if (!acquired) {
+            throw new DomainException(ErrorType.ROUTE_SEARCH_BUSY);
+        }
+        try {
+            return work.get();
+        } finally {
+            searchSemaphore.release();
+        }
     }
 }

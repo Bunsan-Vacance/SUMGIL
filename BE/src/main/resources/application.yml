@@ -30,6 +30,25 @@ app:
     # 자전거 경로 조회(S15P21A104-222). 도보와 같은 카카오 앱·키를 그대로 쓴다(엔드포인트만 다름).
     rest-api-key: ${KAKAO_REST_API_KEY:}
 
+# 버스 실시간 혼잡도(S15P21A104-297). 경로 검색 응답의 BUS 구간에 등급만 붙인다 — 탐색 비용엔 안 들어간다.
+# 키가 비면 자동으로 꺼지고 congestionGrade 는 null 로 나간다(FE 는 "정보 없음").
+bus-congestion:
+  enabled: ${BUS_CONGESTION_ENABLED:true}
+  # 공공데이터포털 디코딩 키. TAGO(15098554)와 같은 키지만 활용신청이 달라 예산은 별개다.
+  key: ${DATA_GO_KR_KEY:}
+  daily-calls: 1000      # 개발계정 한도. 운영계정 전환 시 상향 가능
+  cache-ttl: 30s         # 근거는 CacheKeys.BUS_CONGESTION_TTL 주석
+  read-timeout: 3s       # 2026-09-21 실측 1.5~1.9초
+  batch-timeout: 1500ms  # 경로 검색 응답이 이만큼보다 더 늦어지지 않는다
+  now-window: 10m        # 이 밖의 출발 시각을 지정한 검색에는 붙이지 않는다
+
+# 따릉이 도착 예측의 AI 실시간 모델(eta-stock, S15P21A104-309). 주소가 없으면 꺼지고 평균표로 나간다.
+bike-eta:
+  enabled: ${BIKE_ETA_ENABLED:true}
+  base-url: ${AI_API_BASE_URL:}    # prod: be-config 의 워커 Tailscale 주소
+  read-timeout: 1s                 # 2026-09-23 BE 파드 실측 0.34~0.39초
+  max-minutes: 30                  # 모델 학습 horizon 상한. 이보다 먼 도착은 평균표
+
 management:
   endpoints:
     web:

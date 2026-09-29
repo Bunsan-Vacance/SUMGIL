@@ -2,8 +2,12 @@ package com.ssafy.s15p21a104.load;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
+import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
+import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
@@ -57,6 +61,7 @@ class UpsertWriterIT {
     void cleanUp() {
         jdbc.update("DELETE FROM bus_stop WHERE stop_id IN (?, ?)", STOP, STOP + "2");
         jdbc.update("DELETE FROM bus_route WHERE route_id = ?", ROUTE);
+        jdbc.update("DELETE FROM bike_stock_pred WHERE rental_id = ?", RENT);
         jdbc.update("DELETE FROM bike_station WHERE rental_id IN (?, ?)", RENT, RENT + "2");
         jdbc.update("DELETE FROM edge_time WHERE route_id = ?", L);
         jdbc.update("DELETE FROM transfer_meta WHERE station_id IN (?, ?, ?, ?, ?)", A, B, C, D, E);
@@ -237,6 +242,89 @@ class UpsertWriterIT {
         assertEquals("live",
                 jdbc.queryForObject("SELECT source FROM congestion WHERE target_id = ? AND time_slot = 17", String.class, A));
         assertEquals(3, count("congestion", "target_id IN (?, ?)", A, L));
+    }
+
+    @Test
+    @DisplayName("bike_stock_pred 를 넣고 다시 넣어도 건수가 같고, 같은 키의 값은 새 값으로 덮어쓴다")
+    void bikeStockPredUpsertIsIdempotent() {
+        List<BikeStockPredRow> rows = List.of(
+                pred(RENT, 0, 36, "4.4", "0.273", "0.138", "observed_avg"),
+                pred(RENT, 0, 37, "3.1", "0.400", "0.100", "station_time_fallback"),
+                pred(RENT, 2, 47, "0.0", "1.000", "0.000", "station_global_fallback"));
+
+        assertEquals(3, writer.upsertBikeStockPred(rows));
+        assertEquals(3, writer.upsertBikeStockPred(rows));
+        assertEquals(3, count("bike_stock_pred", "rental_id = ?", RENT));
+
+        writer.upsertBikeStockPred(List.of(pred(RENT, 0, 36, "9.9", "0.010", "0.900", "observed_avg")));
+
+        assertEquals(new BigDecimal("9.9"), jdbc.queryForObject(
+                "SELECT exp_bikes FROM bike_stock_pred WHERE rental_id = ? AND dow_type = 0 AND time_slot = 36",
+                BigDecimal.class, RENT));
+        assertEquals(3, count("bike_stock_pred", "rental_id = ?", RENT));
+    }
+
+    @Test
+    @DisplayName("prediction_source 는 그대로 저장되고, 없으면 null 로 들어간다 — 대체값을 관측값처럼 보이게 하지 않는다")
+    void bikeStockPredKeepsPredictionSource() {
+        writer.upsertBikeStockPred(List.of(
+                pred(RENT, 0, 36, "4.4", "0.273", "0.138", "station_global_fallback"),
+                pred(RENT, 0, 37, "4.4", "0.273", "0.138", null)));
+
+        assertEquals("station_global_fallback", jdbc.queryForObject(
+                "SELECT prediction_source FROM bike_stock_pred WHERE rental_id = ? AND time_slot = 36",
+                String.class, RENT));
+        assertNull(jdbc.queryForObject(
+                "SELECT prediction_source FROM bike_stock_pred WHERE rental_id = ? AND time_slot = 37",
+                String.class, RENT));
+    }
+
+    @Test
+    @DisplayName("existingRentalIds 는 적재된 대여소를 돌려준다 — 예측 적재가 마스터 대조에 쓴다")
+    void existingRentalIdsReturnsLoadedStations() {
+        writer.upsertBikeStations(List.of(new BikeStationRow(RENT, "IT 대여소", 37.5, 127.0, 10)));
+
+        assertTrue(writer.existingRentalIds().contains(RENT));
+    }
+
+    @Test
+    @DisplayName("배차간격은 기존 bus_route 행만 갱신하고, 모르는 노선은 행을 만들지 않는다")
+    void busHeadwayUpdatesOnly() {
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "IT노선")));
+
+        int updated = writer.updateBusHeadway(List.of(
+                new BusHeadwayRow(ROUTE, 12),
+                new BusHeadwayRow("IT_UNKNOWN", 99)));
+
+        assertEquals(1, updated);
+        assertEquals(12, jdbc.queryForObject(
+                "SELECT headway_min FROM bus_route WHERE route_id = ?", Integer.class, ROUTE));
+        assertEquals(0, count("bus_route", "route_id = ?", "IT_UNKNOWN"));
+    }
+
+    @Test
+    @DisplayName("배차간격 NULL 도 저장된다 — 원천이 값을 주지 않은 노선이다")
+    void busHeadwayNullIsStored() {
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "IT노선")));
+        writer.updateBusHeadway(List.of(new BusHeadwayRow(ROUTE, 12)));
+
+        writer.updateBusHeadway(List.of(new BusHeadwayRow(ROUTE, null)));
+
+        assertNull(jdbc.queryForObject("SELECT headway_min FROM bus_route WHERE route_id = ?", Integer.class, ROUTE));
+    }
+
+    @Test
+    @DisplayName("existingRouteIds 는 적재된 노선을 돌려준다 — 배차간격 적재가 대조에 쓴다")
+    void existingRouteIdsReturnsLoadedRoutes() {
+        writer.upsertBusRoutes(List.of(new BusRouteRow(ROUTE, "IT노선")));
+
+        assertTrue(writer.existingRouteIds().contains(ROUTE));
+    }
+
+    private static BikeStockPredRow pred(String rentalId, int dow, int slot,
+                                         String expBikes, String pEmpty, String pFull, String predictionSource) {
+        return new BikeStockPredRow(rentalId, dow, slot, new BigDecimal(expBikes),
+                new BigDecimal(pEmpty), new BigDecimal(pFull), "avg", predictionSource);
     }
 
     private int count(String table, String where, Object... args) {

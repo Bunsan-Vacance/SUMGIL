@@ -3,6 +3,7 @@ package com.ssafy.s15p21a104.domain.route.service;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bike;
 import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -36,11 +37,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * S15P21A104-153: 연속 BIKE leg 경계 연결 검증(FE-자전거-연속구간-경로선-연결-수정요청.md).
+ * S15P21A104-153: 자전거 구간 지오메트리 조회 검증(FE-자전거-연속구간-경로선-연결-수정요청.md).
  *
- * <p>대여소를 경유하는 연속 BIKE 구간(B→R1→C)에서, 전체 구간(B→C) 1회 조회 결과를 경계로
- * 잘라 붙이므로 두 leg가 정확히 같은 경계 좌표를 공유해야 한다 — leg마다 독립 호출해
- * 도로 스냅 지점이 달라지던 문제(약 27m 불연속)의 회귀 테스트다.
+ * <p>로드맵 1단계(2026-09-22)로 BIKE는 <b>대여~반납 1 leg</b>다 — 전체 구간(B→C)을 1회 조회해
+ * 그 leg에 싣는다(대여소 단위 분할 호출 없음). 조회 실패 시 임의 직선을 만들지 않는다.
  */
 @ExtendWith(MockitoExtension.class)
 class RouteSearchBikeGeometryContinuityTest {
@@ -74,6 +74,9 @@ class RouteSearchBikeGeometryContinuityTest {
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 bike("B", "R1", 120),
                 bike("R1", "C", 120)));
+        lenient().when(graphRegistry.graphFor(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(invocation -> graphRegistry.graph());
 
         // B→C 전체 구간 1회 조회 결과: 중간점이 R1 좌표와 정확히 일치하는 연속 좌표열.
         MultiLineStringResponse wholeRun = MultiLineStringResponse.of(List.of(List.of(
@@ -89,27 +92,26 @@ class RouteSearchBikeGeometryContinuityTest {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 bikeGeometryRegistry,
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
     }
 
     @Test
-    @DisplayName("153-T1: 연속 BIKE leg는 전체 구간 1회 조회로 경계 좌표를 공유한다")
-    void t153_연속_BIKE_경계_공유() {
+    @DisplayName("153-T1: BIKE는 대여~반납 1 leg — 전체 구간 1회 조회 결과를 싣는다")
+    void t153_연속_BIKE_전체구간_1leg() {
         List<RouteSearchResponse> result = routeSearchService.search("B", "C", null, null, null);
 
         RouteSearchResponse candidate = result.stream()
-                .filter(r -> r.legs().size() == 2)
+                .filter(r -> r.legs().size() == 1)
                 .findFirst().orElseThrow();
-        RouteLegResponse leg1 = candidate.legs().get(0);
-        RouteLegResponse leg2 = candidate.legs().get(1);
+        RouteLegResponse leg = candidate.legs().get(0);
 
-        assertEquals(TravelMode.BIKE, leg1.mode());
-        assertEquals(TravelMode.BIKE, leg2.mode());
-        List<Double> leg1End = lastPoint(leg1);
-        List<Double> leg2Start = firstPoint(leg2);
-        assertEquals(leg1End, leg2Start, "인접 leg의 경계 좌표가 같은 지점을 공유해야 한다");
+        assertEquals(TravelMode.BIKE, leg.mode());
+        assertEquals("B", leg.fromNodeId());
+        assertEquals("C", leg.toNodeId());
+        assertTrue(leg.geometry() != null, "전체 구간 지오메트리가 실려야 한다");
 
-        // B→C 전체 구간은 1회만 조회한다(leg마다 독립 호출하지 않는다).
+        // B→C 전체 구간은 1회만 조회한다(대여소 단위 분할 호출 없음).
         verify(bikeGeometryRegistry, never()).geometryFor(
                 eq("B"), eq("R1"), anyDouble(), anyDouble(), anyDouble(), anyDouble());
         verify(bikeGeometryRegistry, never()).geometryFor(
@@ -127,12 +129,13 @@ class RouteSearchBikeGeometryContinuityTest {
                 new RailGeometryRegistry(null, null), RouteTestFixtures.noopWalkGeometryRegistry(),
                 failingRegistry,
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
 
         List<RouteSearchResponse> result = service.search("B", "C", null, null, null);
 
         RouteSearchResponse candidate = result.stream()
-                .filter(r -> r.legs().size() == 2)
+                .filter(r -> r.legs().size() == 1)
                 .findFirst().orElseThrow();
         candidate.legs().forEach(leg -> assertEquals("unavailable", leg.geometryStatus()));
     }

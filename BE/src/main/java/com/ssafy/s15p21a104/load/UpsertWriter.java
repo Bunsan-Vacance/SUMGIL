@@ -1,9 +1,12 @@
 package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
+import com.ssafy.s15p21a104.load.bikepred.BikeStockPredRow;
+import com.ssafy.s15p21a104.load.bus.BusHeadwayRow;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
 import com.ssafy.s15p21a104.load.crowd.CongestionRow;
+import com.ssafy.s15p21a104.load.crowdpred.CongestionPredRow;
 import com.ssafy.s15p21a104.load.railgeometry.RailLinkGeometryRow;
 import com.ssafy.s15p21a104.load.railgeometry.RailNodeRow;
 import com.ssafy.s15p21a104.load.subway.EdgeTimeRow;
@@ -11,6 +14,7 @@ import com.ssafy.s15p21a104.load.subway.LineRow;
 import com.ssafy.s15p21a104.load.subway.StationRow;
 import com.ssafy.s15p21a104.load.subway.TransferMetaRow;
 import java.sql.Types;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -92,6 +96,35 @@ public class UpsertWriter {
             SET level = EXCLUDED.level, source = EXCLUDED.source, updated_at = now()
             """;
 
+    private static final String UPSERT_BIKE_STOCK_PRED = """
+            INSERT INTO bike_stock_pred
+              (rental_id, dow_type, time_slot, exp_bikes, p_empty, p_full, source, prediction_source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, now())
+            ON CONFLICT (rental_id, dow_type, time_slot) DO UPDATE
+              SET exp_bikes = EXCLUDED.exp_bikes, p_empty = EXCLUDED.p_empty, p_full = EXCLUDED.p_full,
+                  source = EXCLUDED.source, prediction_source = EXCLUDED.prediction_source, updated_at = now()
+            """;
+
+    private static final String UPDATE_BUS_HEADWAY = """
+            UPDATE bus_route SET headway_min = ?, updated_at = now() WHERE route_id = ?
+            """;
+
+    /**
+     * 혼잡도 예측 (S15P21A104-305). 키에 {@code to_station_id} 가 있어 강동처럼 한 역에서 여러 링크가
+     * 나가도 유일하다. {@code generated_at} 은 산출물 사이드카 값을 그대로 넣는다 — 재적재 판정 근거라
+     * 적재 시각({@code updated_at})과 구분해야 한다.
+     */
+    private static final String UPSERT_CONGESTION_PRED = """
+            INSERT INTO congestion_pred
+              (pred_date, from_station_id, to_station_id, line_id, direction, time_slot,
+               level, data_status, pred_source, predictor_version, generated_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+            ON CONFLICT (pred_date, from_station_id, to_station_id, line_id, direction, time_slot) DO UPDATE
+              SET level = EXCLUDED.level, data_status = EXCLUDED.data_status,
+                  pred_source = EXCLUDED.pred_source, predictor_version = EXCLUDED.predictor_version,
+                  generated_at = EXCLUDED.generated_at, updated_at = now()
+            """;
+
     private final JdbcTemplate jdbc;
 
     public UpsertWriter(JdbcTemplate jdbc) {
@@ -108,6 +141,80 @@ public class UpsertWriter {
             ps.setString(6, r.source());
         });
         return rows.size();
+    }
+
+    /**
+     * 재고 예측. 대여소 약 2,800 × 요일 3 × 슬롯 48 = 40만 행이라 배치로 쓴다.
+     * {@code prediction_source} 는 null 이 올 수 있어 {@code setObject} 로 넣는다 — 그 열이 없던 시절의 산출물이다.
+     */
+    public int upsertBikeStockPred(List<BikeStockPredRow> rows) {
+        jdbc.batchUpdate(UPSERT_BIKE_STOCK_PRED, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setString(1, r.rentalId());
+            ps.setInt(2, r.dowType());
+            ps.setInt(3, r.timeSlot());
+            ps.setBigDecimal(4, r.expBikes());
+            ps.setBigDecimal(5, r.pEmpty());
+            ps.setBigDecimal(6, r.pFull());
+            ps.setString(7, r.source());
+            ps.setObject(8, r.predictionSource(), Types.VARCHAR);
+        });
+        return rows.size();
+    }
+
+    /**
+     * 혼잡도 예측 적재 (S15P21A104-305). upsert 라 멱등이다 — 같은 날짜 표를 다시 받아 넣어도
+     * 행 수가 늘지 않고 값만 갱신된다.
+     *
+     * @param generatedAt 산출물 사이드카의 {@code generated_at}. 모든 행이 같은 값을 갖는다
+     */
+    public int upsertCongestionPred(List<CongestionPredRow> rows, OffsetDateTime generatedAt) {
+        jdbc.batchUpdate(UPSERT_CONGESTION_PRED, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setObject(1, r.predDate());
+            ps.setString(2, r.fromStationId());
+            ps.setString(3, r.toStationId());
+            ps.setString(4, r.lineId());
+            ps.setString(5, r.direction());
+            ps.setInt(6, r.timeSlot());
+            ps.setBigDecimal(7, r.level());          // null 이면 그대로 NULL — 결측을 0 으로 채우지 않는다
+            ps.setString(8, r.dataStatus());
+            ps.setString(9, r.predSource());
+            ps.setString(10, r.predictorVersion());
+            ps.setObject(11, generatedAt);
+        });
+        return rows.size();
+    }
+
+    /**
+     * 배차간격 갱신. <b>INSERT 하지 않고 기존 행만 UPDATE 한다</b> — 도착정보 응답에는 우리 마스터(OA-1095 718 노선)에
+     * 없는 경기 노선이 섞여 오는데, upsert 로 넣으면 bus_route 마스터가 두 원천으로 갈라진다.
+     * 모르는 노선은 갱신 건수에 잡히지 않아 호출한 쪽이 차이를 알 수 있다.
+     *
+     * @return 실제로 갱신된 행 수 (마스터에 없는 노선은 0)
+     */
+    public int updateBusHeadway(List<BusHeadwayRow> rows) {
+        int[][] counts = jdbc.batchUpdate(UPDATE_BUS_HEADWAY, rows, BATCH_SIZE, (ps, r) -> {
+            ps.setObject(1, r.headwayMin(), Types.INTEGER);
+            ps.setString(2, r.routeId());
+        });
+        int updated = 0;
+        for (int[] batch : counts) {
+            for (int n : batch) {
+                if (n > 0) {
+                    updated += n;
+                }
+            }
+        }
+        return updated;
+    }
+
+    /** 적재된 노선 ID. 배차간격 적재가 갱신 대상 존재 검증에 쓴다. */
+    public Set<String> existingRouteIds() {
+        return Set.copyOf(jdbc.queryForList("SELECT route_id FROM bus_route", String.class));
+    }
+
+    /** 적재된 대여소 ID. 재고 예측 적재가 마스터 대조(없는 대여소는 경고)에 쓴다. */
+    public Set<String> existingRentalIds() {
+        return Set.copyOf(jdbc.queryForList("SELECT rental_id FROM bike_station", String.class));
     }
 
     /** 적재된 역 ID. 혼잡도처럼 다른 테이블을 참조하는 적재가 대상 존재를 검증하는 데 쓴다. */

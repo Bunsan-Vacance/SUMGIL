@@ -4,12 +4,13 @@
 > 열린데이터광장 최신 배포분이 **xlsx 로만 제공**되어 `BE/scripts/data/xlsx-to-csv.mjs` 로 CSV(UTF-8, LF)로 바꿨다.
 > 값은 건드리지 않았다 — 열 이름·순서·셀 값 모두 원본 그대로다. 파일명 뒤 날짜는 제공처의 배포 기준일이다.
 
-## 원천 2종
+## 원천 3종
 
 | 파일 | 제공처 · 데이터셋 | 배포일 | 행 | 채우는 것 |
 | --- | --- | --- | --- | --- |
 | `seoul-bus-stops_20260902.csv` | 서울 열린데이터광장 [OA-15067 서울시 버스정류소 위치정보](https://data.seoul.go.kr/dataList/OA-15067/S/1/datasetView.do) (원본 `서울시버스정류소위치정보(20260902).xlsx`) | 2026-09-02 | 11,236 | 서울 시내 정류소 → `bus_stop` (정본). `NODE_ID` → `stop_id`, `X좌표` → `lng`, `Y좌표` → `lat` |
 | `seoul-bus-route-stops_20260902.csv` | 서울 열린데이터광장 [OA-1095 서울시 버스 노선 정보 조회](https://data.seoul.go.kr/dataList/OA-1095/F/1/datasetView.do) (원본 `서울시버스노선별정류소정보(20260902).xlsx`) | 2026-09-02 | 41,688 | 노선 × 경유 정류소. `ROUTE_ID` distinct 718 → `bus_route`. 위치정보 파일에 없는 경유 정류소 1,863개(서울 밖 경기 구간) → `bus_stop` 좌표 보충 |
+| `seoul-bus-headway_20260917.csv` | 공공데이터포털 [15000314 서울특별시 버스도착정보조회](https://www.data.go.kr/data/15000314/openapi.do) 의 `term` 을 `BE/scripts/data/bus-headway-fetch.mjs` 로 수집 | 2026-09-17 수집 | 451 | 노선별 배차간격 → `bus_route.headway_min` (UPDATE). 718 중 451 만 받힌다 — 나머지는 API 가 다루지 않는다([load-bus-bike.md](../../../../docs/db/load-bus-bike.md) "배차간격") |
 
 ## 열
 
@@ -20,6 +21,14 @@
 - 노선별: `ROUTE_ID · 노선명 · 순번 · NODE_ID · ARS_ID · 정류소명 · X좌표 · Y좌표`
   - `ROUTE_ID`(9자리)는 도착정보 API 의 `busRouteId` 와 같은 체계다. 노선명은 최대 11자, 같은 이름의 다른 ID 는 없다.
   - `순번`(경유 순서)은 V1 에 테이블이 없어 적재하지 않는다. 후속 BUS 엣지 작업이 이 파일을 다시 읽는다.
+
+## 배차간격 CSV 열
+
+`busRouteId · rtNm · term · firstTm · lastTm · routeType · observedStId · mkTm` 8개. 로더는 `busRouteId`·`term` 만 쓴다.
+
+- `term` 0 은 그대로 둔다 — 결측(빈 칸)과 구분해야 한다. 0 → NULL 변환은 자바 로더가 한다.
+- `firstTm`·`lastTm` 은 **적재하지 않는다.** 9일 사이 12/14 노선이 몇 분씩 달라져 정적 표에 넣으면 낡는다. 나중에 쓸 수 있게 열만 남긴다.
+- `observedStId` 는 그 값을 받은 정류소다 — 어디서 왔는지 추적한다.
 
 ## 다시 받는 법
 
