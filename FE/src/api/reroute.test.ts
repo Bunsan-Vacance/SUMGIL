@@ -107,12 +107,26 @@ describe('buildRerouteRequest — 호출 조건', () => {
     ).toBeNull()
   })
 
-  it('목적지 역 ID가 없으면 좌표가 있어도 호출하지 않는다', () => {
+  it('목적지 역 ID가 없으면 마지막 지하철 구간의 도착역 ID로 대신한다', () => {
     const noStationId = { ...destination, stationId: undefined, lat: 37.49, lng: 127.03 }
+    const built = buildRerouteRequest({ ...baseState, destination: noStationId }, 'sess-1', {
+      debugForce: false,
+    })
+    expect(built?.request.destStationId).toBe('seolleung')
+  })
+
+  it('목적지 역 ID도 지하철 구간도 없으면 호출하지 않는다', () => {
+    const noStationId = { ...destination, stationId: undefined }
+    const bikeOnly: Route = {
+      ...baseRoute,
+      legs: baseRoute.legs.filter((leg) => leg.mode !== 'subway'),
+    }
     expect(
-      buildRerouteRequest({ ...baseState, destination: noStationId }, 'sess-1', {
-        debugForce: false,
-      }),
+      buildRerouteRequest(
+        { ...baseState, route: bikeOnly, step: 1, destination: noStationId },
+        'sess-1',
+        { debugForce: false },
+      ),
     ).toBeNull()
   })
 
@@ -144,9 +158,46 @@ describe('buildRerouteRequest — 호출 조건', () => {
     ).toBeNull()
   })
 
-  it('이미 경계 구간을 지났으면(step >= legIndex) 호출하지 않는다', () => {
+  it('대여소로 걷는 경계 구간(step === legIndex)에서도 호출한다', () => {
+    const built = buildRerouteRequest({ ...baseState, step: 2 }, 'sess-1', { debugForce: false })
+    expect(built).toMatchObject({
+      legIndex: 2,
+      request: { step: 2, rentalId: 'ST-1', etaToRentalMinutes: 2 },
+    })
+  })
+
+  it('출발 직후 대여소로 걷는 경로(첫 WALK→BIKE)도 호출한다', () => {
+    const firstLegBike: Route = {
+      ...baseRoute,
+      legs: [
+        {
+          mode: 'walk',
+          title: '대여소로 이동',
+          note: '',
+          minutes: 4,
+          from: { id: 'PLACE-ORIGIN', lat: 37.501, lng: 127.039 },
+          to: { id: 'ST-959', rentalId: 'ST-959', lat: 37.5015, lng: 127.0385 },
+        },
+        ...baseRoute.legs.slice(3),
+        ...baseRoute.legs.slice(1, 2),
+      ],
+    }
+    const built = buildRerouteRequest({ ...baseState, route: firstLegBike, step: 0 }, 'sess-1', {
+      debugForce: false,
+    })
+    expect(built).toMatchObject({
+      legIndex: 0,
+      request: {
+        rentalId: 'ST-959',
+        etaToRentalMinutes: 4,
+        boundary: { legIndex: 0, nodeId: 'PLACE-ORIGIN', lat: 37.501, lng: 127.039 },
+      },
+    })
+  })
+
+  it('이미 경계 구간을 지났으면(step > legIndex) 호출하지 않는다', () => {
     expect(
-      buildRerouteRequest({ ...baseState, step: 2 }, 'sess-1', { debugForce: false }),
+      buildRerouteRequest({ ...baseState, step: 3 }, 'sess-1', { debugForce: false }),
     ).toBeNull()
   })
 })
