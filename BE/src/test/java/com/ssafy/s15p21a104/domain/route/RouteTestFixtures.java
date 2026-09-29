@@ -213,14 +213,14 @@ public final class RouteTestFixtures {
     public static RouteLegResponse bikeLeg(String from) {
         return new RouteLegResponse(TravelMode.BIKE,
                 from, "출발", LAT, LNG, "C", "도착", LAT, LNG,
-                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable", null, null);
+                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable", null, null, null);
     }
 
     /** SUBWAY leg 응답 (게이트 판정용). */
     public static RouteLegResponse subwayLeg() {
         return new RouteLegResponse(TravelMode.SUBWAY,
                 "A", "출발", LAT, LNG, "C", "도착", LAT, LNG,
-                "L1", 15.0, null, "unavailable", null, null);
+                "L1", 15.0, null, "unavailable", null, null, null);
     }
 
     // 경계·혼합 OD 세트
@@ -260,6 +260,9 @@ public final class RouteTestFixtures {
         });
         RouteGraphRegistry registry = mock(RouteGraphRegistry.class);
         lenient().when(registry.graph()).thenReturn(graph);
+        lenient().when(registry.graphFor(
+                        org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(graph);
         lenient().when(registry.rentalIds()).thenReturn(rentalIds == null ? Set.of() : rentalIds);
         lenient().when(registry.bikeStock()).thenReturn(Map.of());
         lenient().when(registry.transferTimes()).thenReturn(Map.of());
@@ -270,7 +273,8 @@ public final class RouteTestFixtures {
         lenient().when(registry.stationInfos()).thenReturn(infos);
         return new RouteSearchService(stationRepository, registry, new TransferRule(180),
                 new RailGeometryRegistry(null, null), noopWalkGeometryRegistry(), noopBikeGeometryRegistry(),
-                noopRouteLineRepository(), noopBusRouteRepository(), noopCongestionRepository());
+                noopRouteLineRepository(), noopBusRouteRepository(), noopCongestionRepository(),
+                noopCongestionPredRepository());
     }
 
     /**
@@ -307,5 +311,10 @@ public final class RouteTestFixtures {
      */
     public static com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository noopCongestionRepository() {
         return mock(com.ssafy.s15p21a104.domain.congestion.repository.CongestionRepository.class);
+    }
+
+    /** 링크 단위 혼잡도 예측 조회 목(S15P21A104-158) — 항상 빈 값(결측 취급). */
+    public static com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository noopCongestionPredRepository() {
+        return mock(com.ssafy.s15p21a104.domain.congestion.repository.CongestionPredRepository.class);
     }
 }

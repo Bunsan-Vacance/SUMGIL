@@ -24,10 +24,31 @@ public final class CacheKeys {
      */
     public static final Duration BIKE_STOCK_TTL = Duration.ofSeconds(300);
 
+    /**
+     * 실시간 재고를 "최신(AVAILABLE)"으로 볼 신선도 기준(BIKE-001 156). 수집 주기 120초의 1.5배 —
+     * 정상 회차 하나를 놓쳐도 바로 STALE로 떨어뜨리지 않되, TTL(300초)보다는 짧게 잡아 STALE 구간이 존재하게 한다.
+     * 이 창을 넘기면(그러나 아직 TTL 안이면) STALE, TTL까지 넘기면(키 자체가 없음) UNAVAILABLE이다.
+     */
+    public static final Duration BIKE_STOCK_FRESH_WINDOW = Duration.ofSeconds(180);
+
     /** 실시간 도착. 수집 주기 60초 기준, 위와 같은 규칙으로 한 회차 + 서킷 브레이커를 버티는 180초 (171). */
     public static final Duration SUBWAY_ARRIVAL_TTL = Duration.ofSeconds(180);
 
+    /**
+     * 버스 정류소별 실시간 혼잡 등급 (S15P21A104-297). 위 둘과 달리 <b>수집기가 채우지 않는다</b> —
+     * 경로 검색이 버스 구간을 돌려줄 때 그 승차 정류소만 그 자리에서 불러 채운다.
+     *
+     * <p>30초인 이유는 두 가지다. 원천이 실시간 도착정보라 그보다 오래 들고 있으면 이미 지나간 버스를
+     * 보여주게 되고, 반대로 더 짧으면 같은 경로를 연달아 검색할 때마다 하루 1,000회 예산을 깎는다.
+     */
+    public static final Duration BUS_CONGESTION_TTL = Duration.ofSeconds(30);
+
     private CacheKeys() {
+    }
+
+    /** @param stopId 승차 정류소 ID. 원천의 {@code stId}·우리 {@code bus_stop.stop_id} 와 같은 값이다 */
+    public static String busCongestion(String stopId) {
+        return "bus:congestion:%s".formatted(stopId);
     }
 
     public static String reversal(String originStationId, String destStationId, int dowType, int timeSlot) {

@@ -33,8 +33,21 @@ public class WalkGeometryRegistry {
     public Optional<MultiLineStringResponse> geometryFor(
             String fromNodeId, String toNodeId,
             double fromLat, double fromLng, double toLat, double toLng) {
-        String key = fromNodeId + "->" + toNodeId;
-        return cache.computeIfAbsent(key,
+        return cache.computeIfAbsent(
+                keyOf(fromNodeId, toNodeId, fromLat, fromLng, toLat, toLng),
                 k -> client.fetchGeometry(fromLat, fromLng, toLat, toLng));
+    }
+
+    /**
+     * 캐시 키에 좌표를 포함한다 — 노드 ID만 쓰면 임시 장소 노드(PLACE-ORIGIN/PLACE-DEST)처럼
+     * ID가 고정이고 좌표가 요청마다 바뀌는 노드에서 다른 요청의 지오메트리를 재사용해
+     * 표시 거리·시간이 오염된다(2026-09-21 prod 실측). 노드 쌍의 좌표는 보통 고정이라
+     * 기존 쌍에는 영향이 없다. 좌표는 6자리(≈0.1m)로 반올림해 키를 안정화한다.
+     */
+    static String keyOf(String fromNodeId, String toNodeId,
+            double fromLat, double fromLng, double toLat, double toLng) {
+        return fromNodeId + "->" + toNodeId
+                + "@" + String.format(java.util.Locale.ROOT, "%.6f,%.6f>%.6f,%.6f",
+                        fromLat, fromLng, toLat, toLng);
     }
 }

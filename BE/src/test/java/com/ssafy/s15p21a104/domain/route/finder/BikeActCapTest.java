@@ -1,0 +1,100 @@
+package com.ssafy.s15p21a104.domain.route.finder;
+
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bike;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.bus;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.graphOf;
+import static com.ssafy.s15p21a104.domain.route.RouteTestFixtures.walk;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
+import com.ssafy.s15p21a104.domain.route.mapper.RouteMapper;
+import com.ssafy.s15p21a104.domain.route.transfer.TransferRule;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * 대여 1회(연속 BIKE) 600초 상한 테스트(5부 T3). 12km/h 기준 약 2km이며,
+ * 레거시 폴백 경로에서도 같은 시간 상한을 적용한다.
+ */
+class BikeActCapTest {
+
+    private static RouteCandidateFinder finder() {
+        Map<String, RouteMapper.StationInfo> infos = new HashMap<>();
+        for (String id : List.of("A", "B", "C", "D")) {
+            infos.put(id, new RouteMapper.StationInfo(id, id, 37.5, 127.0));
+        }
+        return new RouteCandidateFinder(new TransferRule(0), Map.of(), Set.of(), infos, Map::of,
+                BusRouteIndex.build(Map.of()));
+    }
+
+    @Test
+    @DisplayName("C1: 연속 자전거 620초(>600초) 경로는 후보에서 제외된다")
+    void c1_상한초과_제외() {
+        var graph = graphOf(bike("A", "B", 310), bike("B", "C", 310));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
+
+        assertTrue(candidates.isEmpty(), "상한 초과 자전거 경로가 남았다");
+    }
+
+    @Test
+    @DisplayName("C2: 연속 자전거 600초 경계 경로는 유지된다")
+    void c2_상한이내_유지() {
+        var graph = graphOf(bike("A", "B", 300), bike("B", "C", 300));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
+
+        assertFalse(candidates.isEmpty(), "상한 이내 자전거 경로가 사라졌다");
+    }
+
+    @Test
+    @DisplayName("C3: 역삼→한티급 1.5km(450초) 경로는 유지된다 (2026-09-22 상향 근거)")
+    void c3_역삼한티급_유지() {
+        var graph = graphOf(bike("A", "B", 225), bike("B", "C", 225));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "C", 3, null, null);
+
+        assertFalse(candidates.isEmpty(), "1.5km 자전거 경로가 사라졌다");
+    }
+
+    @Test
+    @DisplayName("C4: 무탑승 BIKE→WALK→BIKE(2런) 경로는 제외된다 (2026-09-23)")
+    void c4_무탑승_체인_제외() {
+        var graph = graphOf(bike("A", "B", 120), walk("B", "C", 60), bike("C", "D", 120));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "D", 3, null, null);
+
+        assertTrue(candidates.isEmpty(), "무탑승 자전거 체인이 남았다");
+    }
+
+    @Test
+    @DisplayName("C5: 접근 1런 + 이탈 1런(탑승 포함)은 유지된다 (2026-09-23)")
+    void c5_양끝_유지() {
+        var graph = graphOf(bike("A", "B", 120), bus("B", "C", "B1", 100), bike("C", "D", 120));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "D", 3, null, null);
+
+        assertFalse(candidates.isEmpty(), "접근·이탈 각 1런 경로가 사라졌다");
+    }
+
+    @Test
+    @DisplayName("C6: 탑승 사이 BIKE 런은 제외된다 (2026-09-23)")
+    void c6_중간_제외() {
+        var graph = graphOf(bus("A", "B", "B1", 100), bike("B", "C", 120), bus("C", "D", "B2", 100));
+
+        List<ScoredCandidate> candidates =
+                finder().findCandidatesWithPaths(graph, "A", "D", 3, null, null);
+
+        assertTrue(candidates.isEmpty(), "중간 자전거 런이 남았다");
+    }
+}

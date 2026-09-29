@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.ssafy.s15p21a104.domain.route.bus.BusEdgeBuilder;
+import com.ssafy.s15p21a104.domain.route.bus.BusRouteIndex;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSearchResponse;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteSource;
 import com.ssafy.s15p21a104.domain.route.dto.response.RouteType;
@@ -77,6 +79,28 @@ class RouteMapperTest {
 
         assertEquals(720 / 60.0, response.totalMinutes(), TOLERANCE);
         double sum = response.legs().stream().mapToDouble(leg -> leg.minutes()).sum();
+        assertEquals(response.totalMinutes(), sum, TOLERANCE);
+    }
+
+    @Test
+    @DisplayName("대기 분리: leg 분은 이동만, 탑승 대기는 waitMinutes로 간다(합은 총계)")
+    void 대기_분리() {
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 120, TravelMode.SUBWAY, 150),
+                new EngineSegment("1002", "1003", "7", 180, TravelMode.SUBWAY, 60)
+        ), 510, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponse(enginePath, stations, RouteType.SHORTEST, RouteSource.MOCK)
+                .orElseThrow();
+
+        assertEquals(510 / 60.0, response.totalMinutes(), TOLERANCE);
+        assertEquals(120 / 60.0, response.legs().get(0).minutes(), TOLERANCE);
+        assertEquals(Double.valueOf(150 / 60.0), response.legs().get(0).waitMinutes());
+        assertEquals(180 / 60.0, response.legs().get(1).minutes(), TOLERANCE);
+        assertEquals(Double.valueOf(60 / 60.0), response.legs().get(1).waitMinutes());
+        double sum = response.legs().stream()
+                .mapToDouble(leg -> leg.minutes() + leg.waitMinutes()).sum();
         assertEquals(response.totalMinutes(), sum, TOLERANCE);
     }
 
@@ -173,8 +197,7 @@ class RouteMapperTest {
 
     @Test
     @DisplayName("105-T2: 환승 없으면 기존과 같은 1개 leg이다")
-    void t105_환승없음_기존동일() {
-        EnginePath enginePath = new EnginePath(List.of(
+    void t105_환승없음_기존동일() {        EnginePath enginePath = new EnginePath(List.of(
                 new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY)
         ), 300, 0);
 
@@ -185,6 +208,30 @@ class RouteMapperTest {
 
         assertEquals(1, response.legs().size());
         assertEquals(TravelMode.SUBWAY, response.legs().get(0).mode());
+    }
+
+    @Test
+    @DisplayName("232-T4: WALK 경유 노선 변경도 TRANSFER leg가 낀다")
+    void t232_도보경유_노선변경_TRANSFER() {
+        Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
+        mixed.put("W1", new StationInfo("W1", "도보점", 37.5000, 127.0045));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("1001", "1002", "2", 300, TravelMode.SUBWAY),
+                new EngineSegment("1002", "W1", "WALK", 60, TravelMode.WALK),
+                new EngineSegment("W1", "1003", "7", 420, TravelMode.SUBWAY)
+        ), 960, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, mixed,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L))
+                .orElseThrow();
+
+        assertEquals(4, response.legs().size());
+        assertEquals(TravelMode.SUBWAY, response.legs().get(0).mode());
+        assertEquals(TravelMode.WALK, response.legs().get(1).mode());
+        assertEquals(TravelMode.TRANSFER, response.legs().get(2).mode());
+        assertEquals(TravelMode.SUBWAY, response.legs().get(3).mode());
+        assertEquals(180 / 60.0, response.legs().get(2).minutes(), TOLERANCE);
     }
 
     @Test
@@ -234,40 +281,36 @@ class RouteMapperTest {
     }
 
     @Test
-    @DisplayName("122-T4: 동일 BIKE 구간도 대여소 경계에서 나뉜다")
-    void t122_BIKE구간_대여소경계_분할() {
+    @DisplayName("122-T4: 대여소를 경유해도 BIKE는 대여~반납 1 leg로 합쳐진다 (로드맵 1단계)")
+    void t122_BIKE구간_대여소경계_합침() {
         Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
         mixed.put("R1", new StationInfo("R1", "대여소1", 37.5000, 127.0045));
         mixed.put("R2", new StationInfo("R2", "대여소2", 37.5000, 127.0090));
         mixed.put("R3", new StationInfo("R3", "대여소3", 37.5000, 127.0135));
+        // 213 T1: WALK ↔ BIKE 경계는 접근이라 transferCount 0, TRANSFER leg 없음.
         EnginePath enginePath = new EnginePath(List.of(
                 new EngineSegment("1001", "R1", "WALK", 120, TravelMode.WALK),
                 new EngineSegment("R1", "R2", "BIKE", 240, TravelMode.BIKE),
                 new EngineSegment("R2", "R3", "BIKE", 240, TravelMode.BIKE),
                 new EngineSegment("R3", "1003", "WALK", 120, TravelMode.WALK)
-        ), 1080, 2);
+        ), 1080, 0);
 
         RouteSearchResponse response = RouteMapper
                 .toResponseWithTransfers(enginePath, mixed,
-                        RouteType.SHORTEST, RouteSource.ALGORITHM,
-                        List.of(180L, 180L), Set.of("R1", "R2", "R3"))
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of())
                 .orElseThrow();
 
-        assertEquals(6, response.legs().size());
+        // 경유 대여소(R2)는 leg 경계로 노출되지 않는다 — 대여~반납 1 leg.
+        assertEquals(3, response.legs().size());
         assertEquals(TravelMode.WALK, response.legs().get(0).mode());
-        assertEquals(TravelMode.TRANSFER, response.legs().get(1).mode());
-        assertEquals(TravelMode.BIKE, response.legs().get(2).mode());
-        assertEquals(TravelMode.BIKE, response.legs().get(3).mode());
-        assertEquals(TravelMode.TRANSFER, response.legs().get(4).mode());
-        assertEquals(TravelMode.WALK, response.legs().get(5).mode());
-        assertEquals("R1", response.legs().get(2).fromNodeId());
-        assertEquals("R2", response.legs().get(2).toNodeId());
-        assertEquals("R2", response.legs().get(3).fromNodeId());
-        assertEquals("R3", response.legs().get(3).toNodeId());
+        assertEquals(TravelMode.BIKE, response.legs().get(1).mode());
+        assertEquals(TravelMode.WALK, response.legs().get(2).mode());
+        assertEquals("R1", response.legs().get(1).fromNodeId());
+        assertEquals("R3", response.legs().get(1).toNodeId());
     }
 
     @Test
-    @DisplayName("122-T5: 대여소 집합 없으면 기존 합침 유지")
+    @DisplayName("122-T5: 대여소 집합 없으면 기존 합침 유지 (213 T1: 접근 경계 TRANSFER 없음)")
     void t122_집합없음_기존합침() {
         Map<String, StationInfo> mixed = new java.util.HashMap<>(stations);
         mixed.put("R1", new StationInfo("R1", "대여소1", 37.5000, 127.0045));
@@ -278,15 +321,172 @@ class RouteMapperTest {
                 new EngineSegment("R1", "R2", "BIKE", 240, TravelMode.BIKE),
                 new EngineSegment("R2", "R3", "BIKE", 240, TravelMode.BIKE),
                 new EngineSegment("R3", "1003", "WALK", 120, TravelMode.WALK)
-        ), 1080, 2);
+        ), 1080, 0);
 
         RouteSearchResponse response = RouteMapper
                 .toResponseWithTransfers(enginePath, mixed,
-                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L, 180L))
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of())
                 .orElseThrow();
 
-        assertEquals(5, response.legs().size());
-        assertEquals("R1", response.legs().get(2).fromNodeId());
-        assertEquals("R3", response.legs().get(2).toNodeId());
+        assertEquals(3, response.legs().size());
+        assertEquals("R1", response.legs().get(1).fromNodeId());
+        assertEquals("R3", response.legs().get(1).toNodeId());
+    }
+
+    @Test
+    @DisplayName("234-T52: 교집합이 비는 BUS 연속은 2개 leg + TRANSFER 1개이다")
+    void t234_분리BUS_환승분리() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050),
+                "S3", new StationInfo("S3", "정류장3", 37.5000, 127.0100));
+        // 108은 S1→S2만, 143은 S2→S3만 운행 — 같은 "BUS" routeId라도 갈아타야 한다.
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S2", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 2, 37.5000, 127.0100))));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS),
+                new EngineSegment("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS)
+        ), 660, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), index)
+                .orElseThrow();
+
+        assertEquals(3, response.legs().size());
+        assertEquals(TravelMode.BUS, response.legs().get(0).mode());
+        assertEquals(TravelMode.TRANSFER, response.legs().get(1).mode());
+        assertEquals(TravelMode.BUS, response.legs().get(2).mode());
+        assertEquals("S1", response.legs().get(0).fromNodeId());
+        assertEquals("S2", response.legs().get(0).toNodeId());
+        assertEquals("S2", response.legs().get(2).fromNodeId());
+        assertEquals("S3", response.legs().get(2).toNodeId());
+        assertEquals(List.of("108"), response.legs().get(0).routeOptions().stream()
+                .map(option -> option.routeId()).sorted().toList());
+        assertEquals(List.of("143"), response.legs().get(2).routeOptions().stream()
+                .map(option -> option.routeId()).sorted().toList());
+        long transfers = response.legs().stream()
+                .filter(leg -> leg.mode() == TravelMode.TRANSFER).count();
+        assertEquals(enginePath.transferCount(), transfers);
+        assertEquals(1, response.transferCount());
+    }
+
+    @Test
+    @DisplayName("234-T53: 교집합이 유지되는 BUS 연속은 TRANSFER 없이 1개 leg이다")
+    void t234_공유BUS_단일leg() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050),
+                "S3", new StationInfo("S3", "정류장3", 37.5000, 127.0100));
+        // 108·143 모두 S1→S2→S3 운행 — 환승 없이 한 번에 간다.
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 3, 37.5000, 127.0100)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 3, 37.5000, 127.0100))));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS),
+                new EngineSegment("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS)
+        ), 480, 0);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(), index)
+                .orElseThrow();
+
+        assertEquals(1, response.legs().size());
+        assertEquals(TravelMode.BUS, response.legs().get(0).mode());
+        assertEquals("S1", response.legs().get(0).fromNodeId());
+        assertEquals("S3", response.legs().get(0).toNodeId());
+        assertEquals(List.of("108", "143"), response.legs().get(0).routeOptions().stream()
+                .map(option -> option.routeId()).sorted().toList());
+        long transfers = response.legs().stream()
+                .filter(leg -> leg.mode() == TravelMode.TRANSFER).count();
+        assertEquals(enginePath.transferCount(), transfers);
+        assertEquals(0, response.transferCount());
+    }
+
+    @Test
+    @DisplayName("234-T55: BUS 누적 공통 노선 소진 경계에서 leg를 분리한다")
+    void t234_BUS누적교집합소진_경계분리() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050),
+                "S3", new StationInfo("S3", "정류장3", 37.5000, 127.0100),
+                "S4", new StationInfo("S4", "정류장4", 37.5000, 127.0150));
+        BusRouteIndex index = BusRouteIndex.build(Map.of(
+                "108", List.of(
+                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 3, 37.5000, 127.0100)),
+                "143", List.of(
+                        new BusEdgeBuilder.RouteStop("S2", 1, 37.5000, 127.0050),
+                        new BusEdgeBuilder.RouteStop("S3", 2, 37.5000, 127.0100),
+                        new BusEdgeBuilder.RouteStop("S4", 3, 37.5000, 127.0150))));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        100, TravelMode.BUS),
+                new EngineSegment("S2", "S3", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        100, TravelMode.BUS),
+                new EngineSegment("S3", "S4", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        100, TravelMode.BUS)
+        ), 480, 1);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(180L), index)
+                .orElseThrow();
+
+        assertEquals(List.of(TravelMode.BUS, TravelMode.TRANSFER, TravelMode.BUS),
+                response.legs().stream().map(leg -> leg.mode()).toList());
+        assertEquals(List.of("S1", "S3", List.of("108")), List.of(
+                response.legs().get(0).fromNodeId(), response.legs().get(0).toNodeId(),
+                response.legs().get(0).routeOptions().stream().map(option -> option.routeId()).toList()));
+        assertEquals(List.of("S3", "S3"), List.of(
+                response.legs().get(1).fromNodeId(), response.legs().get(1).toNodeId()));
+        assertEquals(List.of("S3", "S4", List.of("143")), List.of(
+                response.legs().get(2).fromNodeId(), response.legs().get(2).toNodeId(),
+                response.legs().get(2).routeOptions().stream().map(option -> option.routeId()).toList()));
+        assertEquals(1, response.transferCount());
+    }
+
+    @Test
+    @DisplayName("234-T30: 같은 구간 BUS 연속은 TRANSFER 없이 1개 leg이다")
+    void t230_같은구간BUS_단일leg_비환승() {
+        Map<String, StationInfo> stops = Map.of(
+                "S1", new StationInfo("S1", "정류장1", 37.5000, 127.0000),
+                "S2", new StationInfo("S2", "정류장2", 37.5000, 127.0050));
+        EnginePath enginePath = new EnginePath(List.of(
+                new EngineSegment("S1", "S2", BusEdgeBuilder.BUS_CORRIDOR_ROUTE_ID,
+                        240, TravelMode.BUS)
+        ), 240, 0);
+
+        RouteSearchResponse response = RouteMapper
+                .toResponseWithTransfers(enginePath, stops,
+                        RouteType.SHORTEST, RouteSource.ALGORITHM, List.of(),
+                        BusRouteIndex.build(Map.of(
+                                "108", List.of(
+                                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)),
+                                "143", List.of(
+                                        new BusEdgeBuilder.RouteStop("S1", 1, 37.5000, 127.0000),
+                                        new BusEdgeBuilder.RouteStop("S2", 2, 37.5000, 127.0050)))))
+                .orElseThrow();
+
+        assertEquals(1, response.legs().size());
+        assertEquals(TravelMode.BUS, response.legs().get(0).mode());
     }
 }

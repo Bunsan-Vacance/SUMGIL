@@ -18,13 +18,13 @@ class BikeStockGateTest {
     private static RouteLegResponse bikeLeg(String from) {
         return new RouteLegResponse(TravelMode.BIKE,
                 from, "출발", 37.5, 127.0, "C", "도착", 37.5, 127.0,
-                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable", null, null);
+                BikeEdgeBuilder.BIKE_ROUTE_ID, 4.0, null, "unavailable", null, null, null);
     }
 
     private static RouteLegResponse subwayLeg() {
         return new RouteLegResponse(TravelMode.SUBWAY,
                 "A", "출발", 37.5, 127.0, "C", "도착", 37.5, 127.0,
-                "L1", 15.0, null, "unavailable", null, null);
+                "L1", 15.0, null, "unavailable", null, null, null);
     }
 
     @Test
@@ -59,5 +59,32 @@ class BikeStockGateTest {
                 List.of("A", "R1"), List.of(TravelMode.BIKE, TravelMode.BIKE), Map.of("R1", 5)));
         assertTrue(BikeStockGate.passesEdges(
                 List.of("A", "R1"), List.of(TravelMode.BIKE, TravelMode.BIKE), Map.of()));
+    }
+
+    @Test
+    @DisplayName("T5(재고 게이트): 따릉이 구간 전까지 누적 시간으로 도착 시점 재고를 본다 — 끝 구간 대여는 나중 시점")
+    void t5_도착시점_재고() {
+        // 도보 300초 → 지하철 1500초(대기 120초) → 자전거(R2). R2 도착은 출발 1920초 뒤.
+        List<com.ssafy.s15p21a104.domain.route.graph.Edge> edges = List.of(
+                new com.ssafy.s15p21a104.domain.route.graph.Edge("O", "S1", "WALK", 300, 0, TravelMode.WALK),
+                new com.ssafy.s15p21a104.domain.route.graph.Edge("S1", "S2", "L1", 1500, 120, TravelMode.SUBWAY),
+                new com.ssafy.s15p21a104.domain.route.graph.Edge("R2", "R3", "BIKE", 300, 0, TravelMode.BIKE));
+        java.util.List<Long> asked = new java.util.ArrayList<>();
+        java.util.function.LongFunction<Map<String, Integer>> emptyLater = offset -> {
+            asked.add(offset);
+            return offset >= 1800 ? Map.of("R2", 0) : Map.of("R2", 5);
+        };
+
+        assertFalse(BikeStockGate.passesAt(edges, emptyLater));
+        assertTrue(asked.equals(List.of(1920L)), "대여 시점 조회: " + asked);
+    }
+
+    @Test
+    @DisplayName("T6(재고 게이트): 예측이 없는 대여소는 통과한다")
+    void t6_예측없음_통과() {
+        List<com.ssafy.s15p21a104.domain.route.graph.Edge> edges = List.of(
+                new com.ssafy.s15p21a104.domain.route.graph.Edge("R1", "R2", "BIKE", 300, 0, TravelMode.BIKE));
+
+        assertTrue(BikeStockGate.passesAt(edges, offset -> Map.of("OTHER", 0)));
     }
 }

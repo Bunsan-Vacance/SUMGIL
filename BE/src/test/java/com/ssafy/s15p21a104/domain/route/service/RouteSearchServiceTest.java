@@ -58,11 +58,15 @@ class RouteSearchServiceTest {
         lenient().when(stationRepository.findById("9999")).thenReturn(Optional.empty());
         lenient().when(graphRegistry.graph()).thenReturn(graphOf(
                 new Edge("0222", "0221", "2", 300, 0, TravelMode.SUBWAY)));
+        lenient().when(graphRegistry.graphFor(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(invocation -> graphRegistry.graph());
         routeSearchService = new RouteSearchService(
                 stationRepository, graphRegistry, new TransferRule(180), new RailGeometryRegistry(null, null),
                 RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
     }
 
     @Test
@@ -90,7 +94,8 @@ class RouteSearchServiceTest {
                 stationRepository, null, new TransferRule(180), new RailGeometryRegistry(null, null),
                 RouteTestFixtures.noopWalkGeometryRegistry(), RouteTestFixtures.noopBikeGeometryRegistry(),
                 RouteTestFixtures.noopRouteLineRepository(), RouteTestFixtures.noopBusRouteRepository(),
-                RouteTestFixtures.noopCongestionRepository());
+                RouteTestFixtures.noopCongestionRepository(),
+                RouteTestFixtures.noopCongestionPredRepository());
 
         DomainException exception = assertThrows(DomainException.class,
                 () -> unloaded.search("0222", "0221", null, null, null));

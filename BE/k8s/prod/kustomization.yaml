@@ -12,6 +12,7 @@ resources:
   - be-collector.yaml
   - be-consumer.yaml
   - be-collector-evening.yaml   # 둘째 키로 15:30-21:00 창 (2026-09-18, 170 후속)
+  - be-load-pred.yaml           # 예측 적재 CronJob (2026-09-22, 307)
   - ingress.yaml
 images:
   - name: sumgil-be

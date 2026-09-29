@@ -1,0 +1,36 @@
+# AI 라우팅 (S15P21A104-292, TO_INFRA-ai-ingress-01 회신). AI 소유 — 자기 경로 /ai/ 만 선언한다.
+# BE 경로(/api/)는 BE/k8s/prod/ingress.yaml, FE 경로(/)는 FE/k8s/prod/ingress.yaml이 소유한다.
+# FE·BE와 같은 호스트(j15a104.p.ssafy.io)에 물린다 — 같은 오리진이라 브라우저 CORS 자체가
+# 발생하지 않는다(요청 문서 2·3번 답, 아래 handoff 참고).
+#
+# AI 앱은 자기 라우터를 /ai 접두어 없이 등록한다(app/main.py, 예: /time/reroute/check).
+# 그래서 외부 경로 /ai/**를 서비스로 넘길 때 접두어를 벗겨야 한다(prefix strip) —
+# rewrite-target으로 캡처 그룹 2번(/ai 뒤 나머지)만 넘긴다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # 무인증 노출 방지(요청 문서 3번, 안 A) — 세션 토큰이 없는 상태에서 LLM 게이트웨이 키가
+    # 과다 호출로 새지 않게 클라이언트 IP당 분당 호출 수를 먼저 막는다. AI가 세션 토큰
+    # 검증을 붙이기 전까지의 최소 방어선이며, 숫자는 실측 후 조정한다(⬜ AI 팀 확인).
+    nginx.ingress.kubernetes.io/limit-rpm: "30"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - j15a104.p.ssafy.io
+      secretName: sumgil-tls
+  rules:
+    - host: j15a104.p.ssafy.io
+      http:
+        paths:
+          - path: /ai(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: ai
+                port:
+                  number: 8000

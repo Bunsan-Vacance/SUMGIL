@@ -2,12 +2,15 @@ package com.ssafy.s15p21a104.load;
 
 import com.ssafy.s15p21a104.load.bike.BikeStationParser;
 import com.ssafy.s15p21a104.load.bike.BikeStationRow;
+import com.ssafy.s15p21a104.load.bus.BusHeadwayParser;
 import com.ssafy.s15p21a104.load.bus.BusRouteParser;
 import com.ssafy.s15p21a104.load.bus.BusRouteRow;
 import com.ssafy.s15p21a104.load.bus.BusStopParser;
 import com.ssafy.s15p21a104.load.bus.BusStopRow;
+import com.ssafy.s15p21a104.load.bikepred.BikeStockPredSource;
 import com.ssafy.s15p21a104.load.crowd.CongestionParser;
 import com.ssafy.s15p21a104.load.crowd.CrowdStationCodes;
+import com.ssafy.s15p21a104.load.crowdpred.CongestionPredSource;
 import com.ssafy.s15p21a104.load.csv.CsvTable;
 import com.ssafy.s15p21a104.load.railgeometry.RailGeometryParser;
 import com.ssafy.s15p21a104.load.subway.DirectedSegment;
@@ -31,6 +34,7 @@ import com.ssafy.s15p21a104.load.subway.StationNameNormalizer;
 import com.ssafy.s15p21a104.load.subway.StationRow;
 import com.ssafy.s15p21a104.load.subway.SubwayGraph;
 import com.ssafy.s15p21a104.load.subway.SubwayGraphBuilder;
+import com.ssafy.s15p21a104.load.subway.TagoTimetableParser;
 import com.ssafy.s15p21a104.load.subway.TrainTimetableParser;
 import com.ssafy.s15p21a104.load.subway.TransferParser;
 import com.ssafy.s15p21a104.load.subway.TransferRecord;
@@ -76,6 +80,11 @@ public class StaticLoadRunner implements ApplicationRunner {
 
     // 원천 파일명 (출처·갱신일은 각 폴더 README). 새 배포분을 받으면 여기와 README 를 함께 바꾼다.
     static final String TIMETABLE_FILE = "seoul-train-timetable_20260616.csv.gz";
+    /**
+     * TAGO 지하철정보(공공데이터포털 15098554) 역별 시각표 — 열차운행시각표가 덮지 않는 9개 노선의 wait_sec 원천 (S15P21A104-243).
+     * BE/scripts/data/tago-timetable-fetch.mjs 산출물. 열차 번호가 없어 구간 소요(travel_sec)는 못 만들고 슬롯별 대기만 붙인다.
+     */
+    static final String TAGO_TIMETABLE_FILE = "tago-timetable_20260918.csv";
     /** 국토교통부 도시철도 전체노선(15122916). 시각표 밖 노선의 후보 목록과 역 목록 대조용 — 인접 관계는 여기서 뽑지 않는다(지선 순번 중복). */
     static final String URBAN_LINES_FILE = "molit-urban-lines_20251211.csv";
     /** 전국도시철도역사정보표준데이터(15013205). 코레일·사철 역의 좌표(국가철도공단 역위치 파일이 없는 노선)와 역번호(station-ids 정본). */
@@ -98,10 +107,17 @@ public class StaticLoadRunner implements ApplicationRunner {
     static final double COORD_REPLACE_METERS = 5000;
     static final String BUS_STOPS_FILE = "seoul-bus-stops_20260902.csv";
     static final String BUS_ROUTE_STOPS_FILE = "seoul-bus-route-stops_20260902.csv";
+    /** 버스 배차간격 수집 결과 (BE/scripts/data/bus-headway-fetch.mjs). 도착정보 API 의 term 을 노선당 한 행으로 모은 것. */
+    static final String BUS_HEADWAY_FILE = "seoul-bus-headway_20260917.csv";
     static final String BIKE_SNAPSHOT_FILE = "seoul-bike-stations-live_20260909.csv";
     static final String BIKE_FILE = "seoul-bike-stations_202606.csv";
     /** 서울교통공사 지하철혼잡도정보(공공데이터포털 15071311). 1~8호선 요일·30분 슬롯별 혼잡도 %. */
     static final String CONGESTION_FILE = "seoulmetro-congestion_20260630.csv";
+    /**
+     * {@code congestion_pred.predictor_version} 열 폭 (V9). AI 아티팩트 이름이 실측 67자라
+     * V7 의 32 로는 안 들어갔다. DB 가 적재 도중 끊기기 전에 검증기가 먼저 막는 기준이다.
+     */
+    static final int PREDICTOR_VERSION_MAX = 128;
 
     private final LoadProperties props;
     private final UpsertWriter writer;
@@ -116,7 +132,10 @@ public class StaticLoadRunner implements ApplicationRunner {
                 case "bike" -> loadBike();
                 case "railgeometry" -> loadRailGeometry();
                 case "congestion" -> loadCongestion();
-                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion)", source);
+                case "bikepred" -> loadBikeStockPred();
+                case "crowdpred" -> loadCongestionPred();
+                case "busheadway" -> loadBusHeadway();
+                default -> log.warn("모르는 적재 대상 '{}' — 건너뜁니다 (가능: subway, bus, bike, railgeometry, congestion, bikepred, crowdpred, busheadway)", source);
             }
         }
         log.info("적재 실행 종료: {} ({} ms)", props.sources(), elapsedMs(started));
@@ -176,8 +195,20 @@ public class StaticLoadRunner implements ApplicationRunner {
         List<StationCoord> coords = readCoords(normalizer);
         logWarnings("환승 파싱", transferParser.warnings());
 
+        // 2-1) TAGO 역별 시각표 → KTDB 거리 구간의 슬롯 대기 (243). 시각표 노선의 키는 건드리지 않는다(putIfAbsent).
+        //      travel_sec 은 여전히 거리 ÷ 표정속도(source=avg)이고 wait_sec 만 실제 시각표 기반이 된다 — load-subway.md 참고.
+        long tagoStarted = System.nanoTime();
+        var tagoParser = new TagoTimetableParser(normalizer);
+        TagoTimetableParser.Result tago = tagoParser.parse(csv(SUBWAY_DIR, TAGO_TIMETABLE_FILE).rows(), distanceSegments);
+        var ts = tago.stats();
+        log.info("TAGO 시각표: {} 행 · 대기 붙인 방향 엣지 {}/{} · 노선 {} · 출발 없음 {} · 종착 행 {} · 행선지 미해결 {} (U/D 다수결로 살림 {}) · 버림 {} ({} ms)",
+                ts.rows(), ts.edgesCovered(), ts.edgesTotal(), ts.lineIds(), ts.noDeparture(), ts.terminalHere(),
+                ts.unresolvedTerminal(), ts.fallbackUpDown(), ts.dropped(), elapsedMs(tagoStarted));
+        logWarnings("TAGO 시각표 파싱", tagoParser.warnings());
+
         List<DirectedSegment> directed = tt.segments();
-        Map<String, SlotWaits> waits = tt.slotWaits();
+        Map<String, SlotWaits> waits = new LinkedHashMap<>(tt.slotWaits());
+        tago.slotWaits().forEach(waits::putIfAbsent);
         if (!props.region().isEmpty()) {
             directed = directed.stream().filter(s -> props.region().contains(s.lineId())).toList();
             waits = waits.entrySet().stream().filter(e -> props.region().contains(e.getKey().substring(0, e.getKey().indexOf('|'))))
@@ -328,6 +359,104 @@ public class StaticLoadRunner implements ApplicationRunner {
 
         timed("congestion", () -> writer.upsertCongestion(parsed.rows()));
         log.info("혼잡도 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 버스 배차간격. 수집 CSV 의 {@code term} 을 {@code bus_route.headway_min} 에 <b>갱신</b>한다(새 행을 만들지 않는다).
+     * <p>
+     * <b>버스 마스터 적재(bus)가 선행 조건이다</b> — 기존 행을 UPDATE 하므로 대상이 없으면 갱신될 것이 없다.
+     * 그래서 {@code application-load.yml} 기본 순서에서 {@code bus} 뒤에 온다.
+     * <p>
+     * 718 노선 중 값이 있는 것은 446 개다. 나머지는 도착정보 API 가 다루지 않아 NULL 로 남는다 —
+     * 정류소·시간대를 바꿔도 받을 수 없다는 것을 2026-09-17 에 호출 525회로 확인했다
+     * (근거는 {@code docs/db/load-bus-bike.md} "배차간격").
+     */
+    private void loadBusHeadway() throws IOException {
+        long started = System.nanoTime();
+
+        var parser = new BusHeadwayParser();
+        BusHeadwayParser.Result parsed = parser.parse(csv(BUS_DIR, BUS_HEADWAY_FILE).rows());
+        logWarnings("배차간격 파싱", parser.warnings());
+        var st = parsed.stats();
+        log.info("버스 배차간격: 원천 {} 행 · 갱신 대상 {} · 값 있음 {} · 건너뜀 {} ({})",
+                st.sourceRows(), parsed.rows().size(), st.withHeadway(), st.skipped(), BUS_HEADWAY_FILE);
+
+        // dry-run 은 DB 를 읽지 않으므로 마스터 대조를 건너뛴다 (검증기가 빈 집합을 그렇게 다룬다).
+        Set<String> knownRouteIds = props.dryRun() ? Set.of() : writer.existingRouteIds();
+        ValidationReport report = MasterValidator.validateBusHeadway(parsed.rows(), knownRouteIds);
+        logWarnings("검증", report.warnings());
+        if (!abortIfErrors("버스 배차간격", report) || dryRun("버스 배차간격", started)) {
+            return;
+        }
+
+        timed("bus_route.headway_min", () -> writer.updateBusHeadway(parsed.rows()));
+        log.info("버스 배차간격 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 따릉이 재고 예측. AI 배치 산출물(대여소 × 요일 3 × 슬롯 48)을 그대로 옮긴다 — 값을 계산하지 않는다.
+     * <p>
+     * 원천은 {@code load.bikepred.source} 로 고르고 지금은 CSV 파일뿐이다. 경로가 폴더면 그 안의 최신 산출물을 쓰므로
+     * 배치가 매일 새 파일을 만들어도 명령이 그대로다.
+     * <p>
+     * <b>마스터에 없는 대여소도 함께 적재한다.</b> 예측 표가 대여소 마스터보다 최근이라 신설 대여소가 정상적으로 섞인다 —
+     * 건너뛰면 그 대여소의 예측이 통째로 사라지므로, 경고로 남기고 넣는다. 대여소 마스터 갱신은 별건이다.
+     */
+    private void loadBikeStockPred() throws IOException {
+        long started = System.nanoTime();
+
+        BikeStockPredSource.Loaded loaded = props.bikepred().toSource().read();
+        logWarnings("재고 예측 파싱", loaded.warnings());
+        var st = loaded.stats();
+        log.info("재고 예측: 원천 {} 행 · 대여소 {} · 건너뜀 {} · 적재 대상 {} 행 · 출처 등급 {} ({})",
+                st.sourceRows(), st.stations(), st.skipped(), loaded.rows().size(), st.predictionSources(),
+                loaded.origin());
+
+        // dry-run 은 DB 를 읽지 않으므로 마스터 대조를 건너뛴다 (검증기가 빈 집합을 그렇게 다룬다).
+        Set<String> knownRentalIds = props.dryRun() ? Set.of() : writer.existingRentalIds();
+        ValidationReport report = MasterValidator.validateBikeStockPred(loaded.rows(), knownRentalIds);
+        logWarnings("검증", report.warnings());
+        if (!abortIfErrors("재고 예측", report) || dryRun("재고 예측", started)) {
+            return;
+        }
+
+        timed("bike_stock_pred", () -> writer.upsertBikeStockPred(loaded.rows()));
+        log.info("재고 예측 적재 완료 ({} ms)", elapsedMs(started));
+    }
+
+    /**
+     * 혼잡도 예측. AI CROWD 배치의 링크 단위 산출물(날짜 × 링크 × 방향 × 슬롯)을 그대로 옮긴다 (S15P21A104-305).
+     * <p>
+     * 역번호 매핑은 혼잡도 통계 적재와 <b>같은 표</b>를 쓴다 — 원천이 같은 서울교통공사 외부역코드 체계다.
+     * {@code direction} 은 원천 값을 그대로 넣는다(2호선 지선이 상선/하선으로 온다 — AI 통지 07).
+     * <p>
+     * {@code generated_at} 은 산출물 사이드카 값이라 적재 시각과 다르다 — 재적재 판정 근거다.
+     * 사이드카가 없거나 행 수가 어긋나면 원천 단계에서 멈춘다(잘린 파일을 넣지 않는다).
+     */
+    private void loadCongestionPred() throws IOException {
+        long started = System.nanoTime();
+
+        CrowdStationCodes codes = CrowdStationCodes.from(
+                csv(SUBWAY_DIR, "conf/station-ids.csv").rows(), csv(CROWD_DIR, "conf/crowd-station-aliases.csv").rows());
+        CongestionPredSource.Loaded loaded = props.crowdpred().toSource(codes).read();
+        logWarnings("혼잡도 예측 파싱", loaded.warnings());
+        var st = loaded.stats();
+        log.info("혼잡도 예측: 원천 {} 행 · 날짜 {} · 링크 {} · 슬롯 {}종 · 건너뜀 {} · 적재 대상 {} 행 · 출처 {} · 산출 {} ({})",
+                st.sourceRows(), st.predDates(), st.links(), st.timeSlots(), st.skipped(), loaded.rows().size(),
+                st.predSources(), loaded.meta().generatedAt(), loaded.origin());
+
+        // dry-run 은 DB 를 읽지 않으므로 마스터 대조를 건너뛴다 (검증기가 빈 집합을 그렇게 다룬다).
+        Set<String> stationIds = props.dryRun() ? Set.of() : writer.existingStationIds();
+        Set<String> lineIds = props.dryRun() ? Set.of() : writer.existingLineIds();
+        ValidationReport report = MasterValidator.validateCongestionPred(
+                loaded.rows(), stationIds, lineIds, PREDICTOR_VERSION_MAX);
+        logWarnings("검증", report.warnings());
+        if (!abortIfErrors("혼잡도 예측", report) || dryRun("혼잡도 예측", started)) {
+            return;
+        }
+
+        timed("congestion_pred", () -> writer.upsertCongestionPred(loaded.rows(), loaded.meta().generatedAt()));
+        log.info("혼잡도 예측 적재 완료 ({} ms)", elapsedMs(started));
     }
 
     /**

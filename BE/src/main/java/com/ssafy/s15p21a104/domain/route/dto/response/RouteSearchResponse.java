@@ -14,10 +14,16 @@ public record RouteSearchResponse(
          */
         Double totalDistanceMeters,
         /**
-         * 환승 횟수(S15P21A104-150/FE-175 항목8). 현재는 routeId 전환마다 삽입되는 TRANSFER
-         * leg 수를 그대로 센다 — WALK·BIKE 접근/반납 경계도 포함하는 현재 정의 그대로이며,
-         * "대중교통 환승만" 세는 정의로 좁히는 건 별도 정책 합의(FE-175 항목7, 전우석 영역) 대상이다.
+         * 환승 횟수(S15P21A104-150/FE-175 항목8, S15P21A104-213 T1·214).
+         * 실제 탑승 수단(BIKE·BUS·SUBWAY) 전환 횟수다. WALK와 TRANSFER leg 자체는
+         * 세지 않으며, 명시 TRANSFER는 다음 실제 탑승 경계에서 한 번 보조한다. 따라서
+         * TRANSFER leg 수와 다를 수 있다.
          */
-        Integer transferCount
+        Integer transferCount,
+        /**
+         * 혼잡 예측(S15P21A104-236, FE-BE 통합 계약 §2). null이면 미제공 —
+         * FE는 {@code 예측 정보 없음}을 표시한다.
+         */
+        CongestionPrediction congestionPrediction
 ) {
 }

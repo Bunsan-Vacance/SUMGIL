@@ -51,13 +51,13 @@ class RealCoordRoutingTest {
                 .search("415", "S115", null, null, null);
 
         // 185: SUBWAY 전용 조합으로도 (더 느린) 직통 대체 후보가 따로 나온다.
+        // 213 T1: 접근(WALK ↔ BIKE) 경계는 TRANSFER가 아니다.
         assertTrue(result.size() >= 1);
         List<TravelMode> modes = result.get(0).legs().stream()
                 .map(com.ssafy.s15p21a104.domain.route.dto.response.RouteLegResponse::mode).toList();
-        assertEquals(List.of(TravelMode.WALK, TravelMode.TRANSFER, TravelMode.BIKE,
-                TravelMode.TRANSFER, TravelMode.WALK), modes);
+        assertEquals(List.of(TravelMode.WALK, TravelMode.BIKE, TravelMode.WALK), modes);
         assertEquals("ST-948", result.get(0).legs().get(0).toNodeId());
-        assertEquals("ST-1391", result.get(0).legs().get(2).toNodeId());
+        assertEquals("ST-1391", result.get(0).legs().get(1).toNodeId());
     }
 
     @Test

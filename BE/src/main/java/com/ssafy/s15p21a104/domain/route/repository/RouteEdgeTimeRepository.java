@@ -26,6 +26,9 @@ public interface RouteEdgeTimeRepository extends JpaRepository<EdgeTime, EdgeTim
     /**
      * 대표 슬롯 1개의 SUBWAY 구간 행을 조립 입력 형태로 조회한다.
      *
+     * <p>{@code order by from,to} — 조립기가 행 순서에 영향받지 않게(결정적) 고정한다.
+     * (prod Parallel Seq Scan 은 실행마다 순서가 달라질 수 있었다.)
+     *
      * @param dowType 대표 슬롯 dow_type
      * @param timeSlot 대표 슬롯 time_slot
      * @return SUBWAY 행(SUBWAY 행 0개면 빈 목록)
@@ -36,6 +39,7 @@ public interface RouteEdgeTimeRepository extends JpaRepository<EdgeTime, EdgeTim
             from EdgeTime e
             where e.id.mode = com.ssafy.s15p21a104.domain.route.entity.TravelMode.SUBWAY
               and e.id.dowType = :dowType and e.id.timeSlot = :timeSlot
+            order by e.id.fromNode, e.id.toNode
             """)
     List<RouteEdgeRow> findSubwayEdgesBySlot(@Param("dowType") int dowType,
                                              @Param("timeSlot") int timeSlot);
