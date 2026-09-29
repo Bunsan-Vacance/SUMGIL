@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 
 from app.BIKE.router import router as bike_router
@@ -8,6 +10,16 @@ from app.TIME.router import router as time_router
 from app.TIME.router import snapshot_age_sec
 
 settings = get_settings()
+
+# uvicorn은 자기 로거(uvicorn.*)만 설정하고 루트는 WARNING이라 app.* 의 INFO(예: TIME `reroute_check`
+# 운영 로그)는 아무 데도 안 나간다. app 로거에만 stdout 핸들러를 달아 접근 로그와 같은 파일로 보낸다.
+# 테스트·재import로 두 번 달리지 않게 핸들러 유무를 본다.
+_app_log = logging.getLogger("app")
+if not _app_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     [%(name)s] %(message)s"))
+    _app_log.addHandler(_handler)
+    _app_log.setLevel(logging.INFO)
 
 app = FastAPI(title=settings.app_name)
 
