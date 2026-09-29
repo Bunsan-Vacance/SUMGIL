@@ -402,6 +402,9 @@ export function mapBackendRoute(value: unknown, index: number, departedAt: strin
         '이동 구간',
       distanceMeters: optionalDistance(rawLeg.distanceMeters),
       minutes: rawLeg.minutes as number,
+      ...(finite(rawLeg.waitMinutes, 0, 24 * 60)
+        ? { waitMinutes: rawLeg.waitMinutes as number }
+        : {}),
       ...(transition ? { transitionType: transition } : {}),
       ...(geometry ? { geometry } : {}),
       ...(routeId ? { routeId } : {}),

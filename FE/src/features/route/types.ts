@@ -58,6 +58,8 @@ export interface Leg {
   title: string
   note: string
   minutes: number
+  // 탑승 대기 분. BE 217 이후 `minutes`(이동 시간)와 분리됐다. 표시용 `minutes`와 별개다.
+  waitMinutes?: number
   transfer?: boolean
   transitionType?: TransitionType
   routeId?: string
