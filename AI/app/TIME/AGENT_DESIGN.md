@@ -194,6 +194,9 @@ Kafka `bike.stock` 수집 창은 **07:00~24:00**뿐이다(`FROM_BE-bike-stock-da
 코드가 이 응답을 실제 조회와 구분하지 않으므로, 목록에 넣은 대여소는 트리거 대상으로도 재안내 후보로도
 재고 0으로 보인다. 트리거·서비스·전략 코드는 손대지 않는다.
 
+BE 경로 카드가 쓰는 `/bike/stations/{id}/eta-stock`도 같은 게이트로 덮어쓴다(`BIKE/service.apply_debug_override`) —
+카드와 팝업 숫자가 어긋나지 않게 하려는 것이다. 덮는 필드·유지하는 필드는 어댑터와 같고, 404/503은 덮지 않는다.
+
 덮지 않는 규칙: `ToolError`·오류 dict·`get_eta_stock` 외 도구는 그대로 통과한다 — `trigger.evaluate`의
 규칙 1~4(오류·horizon·저신뢰·쿨다운)는 `forced`(5번)와 같은 원칙으로 이 override도 우회하지 않는다.
 
