@@ -217,6 +217,42 @@ uvicorn app.main:app --port 8000
 `rental_id=ST-10, dow_type=0, time_slot=9`는 ST-10 대여소의 평일
 04:30~04:59에 해당하는 과거 평균·빈도를 나타낸다.
 
+### 운영 반영 (J15A104A)
+
+운영 AI API는 k3s 파드가 아니라 **J15A104A 호스트의 systemd 유닛**이다(AI 이미지 S15P21A104-211 전까지).
+클러스터 연결·외부 노출은 [`k8s/README.md`](k8s/README.md)를 본다.
+
+- 서버 사본: `~/Soomgil-INFRA-ai-data-monitoring/AI` — **git 저장소가 아니다.** scp로 파일 단위 반영한다.
+- 유닛: `ai-api.service` (`EnvironmentFile`=`.env`, `--host 100.64.193.109 --port 8000`). 로그는 `logs/ai-api.log`.
+- 반영 단위(TIME 배포): `app/TIME/` 전체, `app/main.py`, `app/core/config.py`, `app/BIKE/router.py`·`service.py`
+  (TIME이 쓰는 파일). 그 외 BIKE 파이프라인 파일은 DATA_ENGINE/BIKE 담당 범위라 TIME 배포에서 건드리지 않는다.
+
+절차:
+
+```bash
+# ① 서버에서 교체 대상 백업 (<sha> = 배포하는 커밋)
+mkdir -p .deploy-backups/<sha> && tar czf .deploy-backups/<sha>/before.tgz app/TIME app/main.py app/core/config.py app/BIKE/router.py app/BIKE/service.py
+# ② 로컬에서 scp → 서버에서 풀기 (파일 단위)
+# ③ 재시작 전 사전 import (깨진 코드를 올리지 않는다)
+set -a; . ./.env; set +a; .venv/bin/python -c "import app.main"
+# ④ 재시작 — 순단 약 2초. BE가 /bike/.../eta-stock을 실시간 호출하므로 피크 시간을 피한다
+sudo systemctl restart ai-api
+# ⑤ 확인
+curl 100.64.193.109:8000/health
+curl 100.64.193.109:8000/time/meta   # stationIndexSize ≈ 2,741, snapshotAgeSec < 300
+```
+
+`.env` 키 (서버 `AI/.env`):
+
+| 키 | 값·용도 |
+|---|---|
+| `TIME_BE_BASE_URL` | BE 공개 주소 `https://j15a104.p.ssafy.io` |
+| `TIME_LLM_BASE_URL` / `TIME_LLM_MODEL` / `GMS_API_KEY` | LLM 재안내 사유 생성. 비우면 규칙 전략으로 동작 |
+| `TIME_DEBUG_FORCE_TRIGGER_ENABLED` / `TIME_DEBUG_EMPTY_RENTAL_IDS` | 시연용 강제 트리거. **운영은 비운다** — 시연 후 삭제하고 재시작 |
+| `TIME_TRIGGER_P_EMPTY` 등 트리거 임계값 | 기본값은 `app/core/config.py` 참조 |
+
+롤백: 서버 `.deploy-backups/<sha>/`의 tar를 풀어 복원한 뒤 `sudo systemctl restart ai-api`.
+
 ## 7. 디렉터리 구조
 
 FastAPI 기준 **도메인 우선(domain-first)** 구조를 쓴다. 기능(산출물)마다 `app/<도메인>/`
