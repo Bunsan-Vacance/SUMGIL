@@ -115,7 +115,7 @@ describe('useRerouteCheck', () => {
     unmount()
   })
 
-  it('조건을 만족하면 즉시 1회 호출하고 이후 120초마다 다시 확인한다', () => {
+  it('조건을 만족하면 즉시 1회 호출하고, 첫 체크포인트(하차 120초 전)에 다시 확인한다', () => {
     vi.useFakeTimers()
     const check = vi.fn(async () => ({ status: 'no_trigger', reason: 'below_threshold' }) as const)
     const repository: RerouteRepository = { check }
@@ -128,15 +128,67 @@ describe('useRerouteCheck', () => {
       }),
     )
     expect(check).toHaveBeenCalledTimes(1)
+    // 지하철 5분 leg → 체크포인트는 3분 시점 하나뿐이다.
     act(() => {
-      vi.advanceTimersByTime(120_000)
+      vi.advanceTimersByTime(179_000)
+    })
+    expect(check).toHaveBeenCalledTimes(1)
+    act(() => {
+      vi.advanceTimersByTime(1_000)
     })
     expect(check).toHaveBeenCalledTimes(2)
     act(() => {
-      vi.advanceTimersByTime(120_000)
+      vi.advanceTimersByTime(600_000)
+    })
+    expect(check).toHaveBeenCalledTimes(2)
+    unmount()
+  })
+
+  it('step이 바뀌면 즉시 다시 확인하고 체크포인트를 새로 건다', () => {
+    vi.useFakeTimers()
+    const twoSubway: Route = {
+      ...baseRoute,
+      legs: [
+        baseRoute.legs[0],
+        { ...baseRoute.legs[1], minutes: 10 },
+        { ...baseRoute.legs[1], minutes: 8 },
+        ...baseRoute.legs.slice(2),
+      ],
+    }
+    const check = vi.fn(async () => ({ status: 'no_trigger' }) as const)
+    const repository: RerouteRepository = { check }
+    const { rerender, unmount } = renderHook(
+      ({ state }: { state: GuidanceState }) =>
+        useRerouteCheck({ state, enabled: true, repository, onProposal: vi.fn() }),
+      { initialProps: { state: makeState({ route: twoSubway, step: 1 }) } },
+    )
+    expect(check).toHaveBeenCalledTimes(1)
+
+    rerender({ state: makeState({ route: twoSubway, step: 2 }) })
+    expect(check).toHaveBeenCalledTimes(2)
+    // 이전 step의 예약(8분 시점)은 정리되고 새 step 기준 6분 시점만 남는다.
+    act(() => {
+      vi.advanceTimersByTime(360_000)
+    })
+    expect(check).toHaveBeenCalledTimes(3)
+    act(() => {
+      vi.advanceTimersByTime(600_000)
     })
     expect(check).toHaveBeenCalledTimes(3)
     unmount()
+  })
+
+  it('언마운트하면 예약된 체크포인트를 정리한다', () => {
+    vi.useFakeTimers()
+    const check = vi.fn(async () => ({ status: 'no_trigger' }) as const)
+    const repository: RerouteRepository = { check }
+    const { unmount } = renderHook(() =>
+      useRerouteCheck({ state: makeState(), enabled: true, repository, onProposal: vi.fn() }),
+    )
+    expect(vi.getTimerCount()).toBe(1)
+    unmount()
+    expect(vi.getTimerCount()).toBe(0)
+    expect(check).toHaveBeenCalledTimes(1)
   })
 
   it('같은 recommendationId는 한 번만 onProposal로 알린다', async () => {
@@ -153,7 +205,7 @@ describe('useRerouteCheck', () => {
     expect(onProposal).toHaveBeenCalledWith(response, 2)
 
     act(() => {
-      vi.advanceTimersByTime(120_000)
+      vi.advanceTimersByTime(180_000)
     })
     await flushMicrotasks()
     expect(onProposal).toHaveBeenCalledTimes(1)
