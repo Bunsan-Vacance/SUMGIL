@@ -243,7 +243,7 @@ interface ResolvedBoundary extends Boundary {
 
 /** step 이후 첫 대여소행 WALK leg를 찾는다 — `to.rentalId`가 있거나 바로 다음 leg가 BIKE인 것.
  * 네 값(legIndex·nodeId·lat·lng) 중 하나라도 없으면 추측하지 않고 null을 반환한다. */
-function findBoundary(route: Route, fromStep: number): ResolvedBoundary | null {
+export function findBoundary(route: Route, fromStep: number): ResolvedBoundary | null {
   for (let i = fromStep; i < route.legs.length; i += 1) {
     const leg = route.legs[i]
     if (leg.mode !== 'walk') continue
@@ -268,6 +268,16 @@ function lastSubwayStationId(route: Route): string | undefined {
   return undefined
 }
 
+/** step부터 경계(대여소로 걷는 leg)까지의 남은 소요(분, 반올림). 대여소 도착 예상 분이므로
+ * 탑승 대기(waitMinutes, BE 217 이후 minutes와 분리)도 포함한다. 현재 leg는 전체 시간으로 근사한다. */
+export function calcEtaToRentalMinutes(route: Route, step: number, boundaryLegIndex: number) {
+  return Math.round(
+    route.legs
+      .slice(step, boundaryLegIndex + 1)
+      .reduce((sum, leg) => sum + leg.minutes + (leg.waitMinutes ?? 0), 0),
+  )
+}
+
 /** 호출 조건을 모두 만족할 때만 요청을 만들고, 수락 시 `keepLegs`로 쓸 `legIndex`를 함께 돌려준다.
  * 하나라도 어긋나면 null — 좌표·역 정보를 추측해서 채우지 않는다. */
 export function buildRerouteRequest(
@@ -290,11 +300,7 @@ export function buildRerouteRequest(
   if (!destStationId) return null
   // 현재 leg는 전체 시간으로 근사하고, 그 뒤 boundary까지의 leg 시간을 더해 반올림한다.
   // 대여소 도착 예상 분이므로 탑승 대기(waitMinutes, BE 217 이후 minutes와 분리)도 포함한다.
-  const etaToRentalMinutes = Math.round(
-    route.legs
-      .slice(state.step, boundary.legIndex + 1)
-      .reduce((sum, leg) => sum + leg.minutes + (leg.waitMinutes ?? 0), 0),
-  )
+  const etaToRentalMinutes = calcEtaToRentalMinutes(route, state.step, boundary.legIndex)
   const request: RerouteCheckRequest = {
     sessionId,
     step: state.step,

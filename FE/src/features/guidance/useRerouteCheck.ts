@@ -5,8 +5,7 @@ import {
   type RerouteCheckResponse,
   type RerouteRepository,
 } from '../../api/reroute'
-
-const POLL_INTERVAL_MS = 120_000
+import { buildCheckpointDelays } from './rerouteSchedule'
 
 function createSessionId() {
   try {
@@ -24,8 +23,10 @@ interface UseRerouteCheckOptions {
   onProposal: (proposal: RerouteCheckResponse, legIndex: number) => void
 }
 
-/** 지하철 구간 안내 중 따릉이 대여소 고갈 가능성을 120초 주기로 확인한다(TO_FE-bike-reroute-04.md §3).
- * 조건 충족 시 즉시 1회 + 120초 간격, 조건이 깨지면 정리한다. */
+/** 지하철 구간 안내 중 따릉이 대여소 고갈 가능성을 확인한다(TO_FE-bike-reroute-04.md §3).
+ * 예전의 120초 주기 폴링은 일정 기반 체크포인트로 대체했다. 조건 충족 시(그리고 step·route가 바뀔 때)
+ * 즉시 1회 확인한 뒤, `buildCheckpointDelays`가 계산한 시점(환승·하차 120초 전, 대여소까지 남은
+ * 시간이 30분이 되는 때, 긴 구간 중간)에만 다시 확인한다. 조건이 깨지면 예약을 모두 정리한다. */
 export function useRerouteCheck({
   state,
   enabled,
@@ -75,13 +76,16 @@ export function useRerouteCheck({
         })
     }
     runCheck()
-    const interval = setInterval(runCheck, POLL_INTERVAL_MS)
+    // 이 effect가 (route, step) 조합에 대해 다시 실행된 순간을 step 시작으로 본다.
+    const timers = buildCheckpointDelays(stateRef.current.route, stateRef.current.step).map(
+      (delay) => setTimeout(runCheck, delay),
+    )
     return () => {
       cancelled = true
-      clearInterval(interval)
+      timers.forEach(clearTimeout)
       controller?.abort()
     }
-    // eligible이 true로 바뀌는 시점에만 즉시 호출 + 주기를 새로 건다. tick마다 최신 state는
-    // stateRef로 읽으므로 state 자체는 의존성에 넣지 않는다.
-  }, [eligible, repository, debugForce])
+    // eligible이 true로 바뀌거나 route·step이 바뀔 때 즉시 호출 + 체크포인트를 새로 건다.
+    // 체크포인트 시점의 최신 state는 stateRef로 읽으므로 state 전체는 의존성에 넣지 않는다.
+  }, [eligible, repository, debugForce, state.route, state.step])
 }
