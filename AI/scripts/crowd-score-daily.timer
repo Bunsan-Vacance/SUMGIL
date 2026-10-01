@@ -1,0 +1,13 @@
+# systemd 타이머 템플릿. 설치 방법은 crowd-score-daily.service 머리 주석 참고.
+
+[Unit]
+Description=S15P21A104 CROWD 일별 채점 타이머 (매일 14:10 KST)
+
+[Timer]
+OnCalendar=*-*-* 14:10:00 Asia/Seoul
+Persistent=true
+RandomizedDelaySec=120
+Unit=crowd-score-daily.service
+
+[Install]
+WantedBy=timers.target
