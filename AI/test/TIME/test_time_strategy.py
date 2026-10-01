@@ -14,18 +14,23 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from app.TIME.context import AgentContext, CandidateContext, RentalCandidate
+from app.TIME.llm import LlmError, LlmErrorCode, LlmResult
 from app.TIME.station_index import RentalStation
 from app.TIME.strategy import (
     DEFAULT_WALK_SPEED_M_PER_MIN,
     RECOMMENDED_BY_ALGORITHM,
+    AgentStrategy,
     RuleStrategy,
     ScoreWeights,
     _allowed_numbers,
     _build_user_prompt,
     _numbers_in,
+    _strip_candidate_label,
     _system_prompt,
     build_reason,
     describe_candidate,
@@ -347,6 +352,8 @@ def test_시스템_프롬프트는_260자_이내이고_선택_기준과_형식_�
     assert '{"chosen_index": <정수>, "reason": <문자열>}' in prompt
     assert "chosen_index" in prompt
     assert "[후보]" in prompt
+    # 331 운영 후속 — '후보 N' 번호 표기 금지(안내 문장에 번호가 샌 사례).
+    assert "'후보 N'" in prompt
     # 문장·글자 상한 인자가 하드코딩이 아니라 그대로 박힌다 — 값을 바꾸면 문구도 바뀐다.
     assert "2문장" in prompt
     assert "120자" in prompt
@@ -374,3 +381,132 @@ def test_설정에_없으면_기본값을_쓴다():
         pass
 
     assert ScoreWeights.from_settings(EmptySettings()) == ScoreWeights()
+
+
+# ── 에이전트 전략 탈락 로그 — 331 운영 후속 2-1 ──
+#
+# `AgentStrategy.rejections`는 요청마다 새 인스턴스에 쌓여 버려지므로(`registry._strategy`),
+# 운영에서 "왜 규칙으로 떨어졌나"는 `_reject`가 남기는 INFO 한 줄이 유일한 단서다. 형식은
+# 라우터 `reroute_check` 줄과 같은 `key=value`를 고정한다. 환각 가드 자체의 판정은
+# `test_time_agent_strategy.py`가 보고, 여기서는 로그 줄만 본다.
+
+STRATEGY_LOGGER = "app.TIME.strategy"
+
+
+class _FakeLlmClient:
+    """정해진 값을 그대로 돌려주는 가짜 게이트웨이."""
+
+    def __init__(self, outcome: LlmResult | LlmError) -> None:
+        self.outcome = outcome
+        self.calls = 0
+
+    def complete(self, system: str, user: str, *, json_schema=None):
+        self.calls += 1
+        return self.outcome
+
+
+def _llm_result(text: str) -> LlmResult:
+    return LlmResult(text=text, input_tokens=100, output_tokens=20, latency_ms=5.0, model="fake")
+
+
+def _agent(outcome: LlmResult | LlmError) -> AgentStrategy:
+    return AgentStrategy(_FakeLlmClient(outcome), RuleStrategy(WEIGHTS))
+
+
+def _two_candidates() -> AgentContext:
+    return fired_ctx(
+        candidate("교대", distance_m=80.0, p_empty=0.2, current_stock=4, predicted_stock=3.0),
+        candidate("사당", distance_m=400.0, p_empty=0.5, current_stock=2, predicted_stock=2.5),
+    )
+
+
+def _reject_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("agent_reject ")]
+
+
+def test_LLM_오류_탈락은_사유와_LlmError_코드를_INFO로_남긴다(caplog):
+    error = LlmError(code=LlmErrorCode.TIMEOUT, detail="응답 없음", retryable=True)
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(error).decide(_two_candidates())
+
+    assert proposal is not None and proposal.recommended_by == RECOMMENDED_BY_ALGORITHM
+    lines = _reject_lines(caplog)
+    assert lines == ["agent_reject reason=LLM_ERROR rental=TARGET candidates=2 llm=TIMEOUT"]
+    assert caplog.records[0].levelno == logging.INFO
+
+
+def test_BAD_JSON_탈락은_llm_칸을_대시로_남긴다(caplog):
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        _agent(_llm_result("이건 JSON이 아니다")).decide(_two_candidates())
+
+    assert _reject_lines(caplog) == [
+        "agent_reject reason=BAD_JSON rental=TARGET candidates=2 llm=-"
+    ]
+
+
+def test_WRONG_CANDIDATE_NAME_탈락도_같은_형식으로_남긴다(caplog):
+    text = '{"chosen_index": 0, "reason": "교대로 가세요. 사당은 멀어요."}'
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        _agent(_llm_result(text)).decide(_two_candidates())
+
+    assert _reject_lines(caplog) == [
+        "agent_reject reason=WRONG_CANDIDATE_NAME rental=TARGET candidates=2 llm=-"
+    ]
+
+
+def test_후보가_하나라_LLM을_생략한_경우는_탈락_로그를_남기지_않는다(caplog):
+    error = LlmError(code=LlmErrorCode.TIMEOUT, detail="응답 없음", retryable=True)
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(error).decide(fired_ctx(candidate("교대", distance_m=80.0)))
+
+    assert proposal is not None
+    assert _reject_lines(caplog) == []
+
+
+def test_정상_채택이면_탈락_로그가_없다(caplog):
+    text = '{"chosen_index": 0, "reason": "역삼은 비어 있을 확률 90%입니다. 교대로 가세요."}'
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(_llm_result(text)).decide(_two_candidates())
+
+    assert proposal is not None and proposal.recommended_by == "AGENT"
+    assert _reject_lines(caplog) == []
+
+
+# ── 후보 번호 표기 정규화 — 331 운영 후속 2-2 ──
+#
+# 실제 출력 `후보 3. 4856. 올림픽공원 서1문 앞은 현재 22대, …`. 프롬프트 `[후보]` 목록의 번호를
+# LLM이 이름의 일부로 베낀다. 가드는 숫자 3이 허용집합에 있어 통과시키므로, 가드 앞단에서
+# `_strip_candidate_label`이 걷어낸다. 가드 규칙 자체는 바꾸지 않는다.
+
+
+def test_접두_후보_번호를_걷어낸다():
+    text = "후보 3. 4856. 올림픽공원 서1문 앞은 현재 22대입니다."
+
+    assert _strip_candidate_label(text) == "4856. 올림픽공원 서1문 앞은 현재 22대입니다."
+
+
+def test_문장_중간의_후보_번호도_걷어낸다():
+    text = "역삼은 비어 있을 확률 90%입니다. 후보 1. 교대로 가세요."
+
+    assert _strip_candidate_label(text) == "역삼은 비어 있을 확률 90%입니다. 교대로 가세요."
+
+
+def test_번호_표기가_없으면_그대로다():
+    text = "역삼은 비어 있을 확률 90%입니다. 교대로 가세요."
+
+    assert _strip_candidate_label(text) == text
+    # `후보 3.5대`처럼 뒤에 숫자가 이어지면 소수일 수 있어 건드리지 않는다.
+    assert _strip_candidate_label("후보 3.5대 예상") == "후보 3.5대 예상"
+
+
+def test_접두_번호가_붙은_응답도_AGENT로_채택되고_문장에서_번호가_빠진다(caplog):
+    text = '{"chosen_index": 0, "reason": "후보 0. 교대는 현재 4대입니다. 역삼은 비어 있을 확률 90%입니다."}'
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(_llm_result(text)).decide(_two_candidates())
+
+    assert proposal is not None
+    assert proposal.recommended_by == "AGENT"
+    assert proposal.candidate_index == 0
+    assert proposal.reason == "교대는 현재 4대입니다. 역삼은 비어 있을 확률 90%입니다."
+    assert "후보 0." not in proposal.reason
+    assert _reject_lines(caplog) == []

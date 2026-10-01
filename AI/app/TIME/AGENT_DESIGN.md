@@ -171,6 +171,12 @@ p_empty가 1(=100% 확률로 빈다)이면 도보 10분 거리만큼 불리하�
 명시했다("비어 있을 확률 낮은 후보 우선, 비슷하면 가까운 후보"). 기준 부재가 real 실행에서
 LLM이 규칙과 다른 후보를 고른 원인이었다(`RESULTS.md` real 절).
 
+**331 운영 후속** — `reason`은 환각 가드(`RejectReason` 5종) 앞단에서 `strategy._strip_candidate_label`로
+`후보 N.` 번호 표기를 먼저 걷어낸다. 10-01 운영 검증에서 LLM이 `[후보]` 목록 번호를 이름의 일부로
+베껴 `후보 3. 4856. 올림픽공원 …`처럼 안내 문장에 샜고, 가드는 그 번호가 허용 숫자 집합에 있어
+통과시켰다. 가드 규칙 자체는 바꾸지 않는다 — 정규화된 문장이 그대로 가드를 통과해야 채택된다.
+탈락은 `agent_reject reason=… rental=… candidates=… llm=…` INFO 한 줄로 남긴다(`AgentStrategy._reject`).
+
 ### 2.6 새벽 07시 이전 미제공
 
 Kafka `bike.stock` 수집 창은 **07:00~24:00**뿐이다(`FROM_BE-bike-stock-data-01`). 그 밖

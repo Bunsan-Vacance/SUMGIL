@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -26,6 +27,8 @@ from app.TIME.llm import LlmClient, LlmError, LlmResult
 from app.TIME.llm_budget import LlmBudget
 from app.TIME.station_index import WALK_SPEED_M_PER_MIN
 from app.TIME.trigger import StockReading
+
+_log = logging.getLogger(__name__)
 
 DEFAULT_WALK_SPEED_M_PER_MIN = WALK_SPEED_M_PER_MIN
 """`station_index.WALK_SPEED_M_PER_MIN`과 같은 값이다 — 후보 순위 근사(여기)와 실제 `walkLeg`
@@ -279,13 +282,20 @@ def _system_prompt(max_sentences: int, max_chars: int) -> str:
     문장으로 옮겼고, 가중치·계산식은 LLM에 시키지 않는다. "다른 후보의 이름은 쓰지 않는다"는 real 재측정에서 나온 교훈이다 — 선택 기준을 주자 LLM이
     올바른 후보를 고르고도 사유에 비교 상대 후보 이름을 써서 7건 중 6건이 `WRONG_CANDIDATE_NAME`으로
     탈락했다(`validation/TIME/reroute-baseline-check/RESULTS.md`). 가드는 그대로 두고 프롬프트에서
-    막는다."""
+    막는다.
+
+    331 운영 후속 — "'후보 N' 같은 번호는 쓰지 않는다"를 더했다. 10-01 운영 검증에서 LLM이
+    `[후보]` 목록의 번호 표기를 이름의 일부로 베껴 `후보 3. 4856. 올림픽공원 …`처럼 안내 문장에
+    새어 나왔다(숫자 3이 허용집합에 있어 가드는 통과한다). 프롬프트만으로는 재발을 못 막으므로
+    `_strip_candidate_label`이 가드 앞단에서 한 번 더 걷어낸다. 260자 상한을 지키려 "당신은"·
+    "이 JSON"·"후보 하나를"·"더 가까운"의 군말을 뺐다."""
     return (
-        "당신은 따릉이 재고 고갈 재안내 에이전트다. [대상 대여소]·[후보]만 보고 후보 하나를 골라 "
-        '이 JSON으로만 답하라: {"chosen_index": <정수>, "reason": <문자열>}. '
-        "비어 있을 확률이 낮은 후보를 우선하고, 비슷하면 더 가까운 후보를 고른다. "
+        "따릉이 재고 고갈 재안내 에이전트다. [대상 대여소]·[후보]만 보고 하나를 골라 "
+        'JSON으로만 답하라: {"chosen_index": <정수>, "reason": <문자열>}. '
+        "비어 있을 확률이 낮은 후보를 우선하고, 비슷하면 가까운 후보를 고른다. "
         "chosen_index는 [후보] 번호 그대로. reason에는 고른 후보와 대상 대여소의 이름·숫자만 "
-        f"그대로 인용하고 다른 후보의 이름은 쓰지 않는다. 한국어 {max_sentences}문장·{max_chars}자 이내."
+        "그대로 인용하고, 다른 후보 이름이나 '후보 N' 같은 번호는 쓰지 않는다. "
+        f"한국어 {max_sentences}문장·{max_chars}자 이내."
     )
 
 
@@ -366,6 +376,20 @@ def _sentence_count(text: str) -> int:
     return len([piece for piece in _SENTENCE_SPLIT_RE.split(text) if piece.strip()])
 
 
+_CANDIDATE_LABEL_RE = re.compile(r"후보\s*\d+\.(?!\d)\s*")
+"""`[후보]` 목록의 번호 표기(`후보 3.`)가 `reason`에 샌 것. 뒤에 숫자가 이어지는 `후보 3.5대`
+같은 꼴은 소수일 수 있어 건드리지 않는다."""
+
+
+def _strip_candidate_label(reason: str) -> str:
+    """`reason`에서 `후보 N.` 번호 표기를 걷어낸다 — 문장 머리(`후보 3. 4856. 올림픽공원 …`)와
+    문장 중간 둘 다. 10-01 운영 검증에서 LLM이 프롬프트 `[후보]` 목록의 번호를 이름의 일부로
+    베껴 안내 문장에 그대로 새어 나왔고, 가드(`_numbers_in`)는 그 번호가 허용집합에 있어
+    통과시켰다. **가드 앞단에서만 쓴다** — 가드 5종의 규칙은 바꾸지 않는다(정규화된 문장이
+    그대로 가드를 통과해야 채택된다)."""
+    return _CANDIDATE_LABEL_RE.sub("", reason).strip()
+
+
 def _parse_decision(text: str) -> tuple[int, str] | None:
     """LLM 응답 본문에서 `(chosen_index, reason)`을 뽑는다. 형식이 조금이라도 어긋나면
     전부 `None`이다 — 호출자가 `RejectReason.BAD_JSON` 하나로 묶어 폴백으로 넘어간다."""
@@ -433,7 +457,7 @@ class AgentStrategy:
         system = _system_prompt(self.max_sentences, self.max_chars)
         outcome = self.client.complete(system=system, user=_build_user_prompt(ctx))
         if isinstance(outcome, LlmError):
-            return self._reject(RejectReason.LLM_ERROR, ctx)
+            return self._reject(RejectReason.LLM_ERROR, ctx, llm_error=outcome)
         self.last_usage = outcome
         self.budget.record(outcome)
 
@@ -441,6 +465,9 @@ class AgentStrategy:
         if parsed is None:
             return self._reject(RejectReason.BAD_JSON, ctx)
         chosen_index, reason = parsed
+        # 가드에 넣기 **전에** 번호 표기를 걷어낸다 — 가드 뒤에 두면 `후보 3.`의 3이 허용집합에
+        # 있어 통과한 채로 안내 문장에 샌다(10-01 운영 검증).
+        reason = _strip_candidate_label(reason)
 
         candidates = ctx.usable_candidates
         if not (0 <= chosen_index < len(candidates)):
@@ -471,8 +498,22 @@ class AgentStrategy:
             score=None,
         )
 
-    def _reject(self, reason: RejectReason, ctx: AgentContext) -> RerouteProposal | None:
+    def _reject(
+        self, reason: RejectReason, ctx: AgentContext, *, llm_error: LlmError | None = None
+    ) -> RerouteProposal | None:
         self.rejections[reason] += 1
+        # 운영에서 "왜 규칙으로 떨어졌나"를 보려는 한 줄(키=값, 공백 구분 — 라우터의
+        # `reroute_check` 줄과 같은 형식). `rejections` 카운터는 요청마다 새 인스턴스라
+        # (`registry._strategy`) 요청이 끝나면 버려지므로, 로그가 없으면 폴백 사유를 알 길이 없다.
+        # LLM 오류일 때만 `LlmError.code`(TIMEOUT·UPSTREAM_ERROR·BAD_RESPONSE·CONFIG_MISSING)를
+        # 덧붙인다 — `detail`은 게이트웨이 응답 본문이 섞일 수 있어 남기지 않는다.
+        _log.info(
+            "agent_reject reason=%s rental=%s candidates=%d llm=%s",
+            reason.value,
+            ctx.target.rental_id,
+            len(ctx.usable_candidates),
+            llm_error.code.value if llm_error is not None else "-",
+        )
         return self.fallback.decide(ctx)
 
 
