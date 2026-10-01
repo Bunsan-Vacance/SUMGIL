@@ -1,0 +1,23 @@
+# systemd 유닛 템플릿. 설치 시 <REPO_ROOT>/<VENV_PATH>를 실제 경로로 치환한다.
+#
+#   for u in service timer; do
+#     sed -e "s|<REPO_ROOT>|/home/ubuntu/Soomgil-INFRA-ai-data-monitoring|g" \
+#         -e "s|<VENV_PATH>|/home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI/.venv|g" \
+#         crowd-score-daily.$u | sudo tee /etc/systemd/system/crowd-score-daily.$u
+#   done
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now crowd-score-daily.timer
+#   systemctl list-timers crowd-score-daily.timer
+
+[Unit]
+Description=S15P21A104 CROWD 예측 아카이브·일별 채점·드리프트 판정
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=<REPO_ROOT>/AI
+EnvironmentFile=<REPO_ROOT>/AI/.env
+ExecStart=/bin/bash <REPO_ROOT>/AI/scripts/run_crowd_score_daily.sh
+TimeoutStartSec=1800
+StandardOutput=append:<REPO_ROOT>/AI/logs/crowd_score_daily.log
+StandardError=append:<REPO_ROOT>/AI/logs/crowd_score_daily.log
