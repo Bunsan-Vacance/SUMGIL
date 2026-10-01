@@ -101,11 +101,22 @@ def panel_output_name(start: pd.Timestamp, end: pd.Timestamp) -> str:
     return f"crowd_panel_{pd.Timestamp(start).year}_{pd.Timestamp(end).year}.parquet"
 
 
+DEFAULT_LONG_PATH = CROWD_INTERIM / "crowd_daily_ridership_long.parquet"
+
+
 def load_ridership_window(
-    start: pd.Timestamp = PANEL_START, end: pd.Timestamp = PANEL_END
+    start: pd.Timestamp = PANEL_START,
+    end: pd.Timestamp = PANEL_END,
+    long_path: Path = DEFAULT_LONG_PATH,
 ) -> pd.DataFrame:
-    """분석 구간의 일별 승하차만 읽어온다."""
-    df = pd.read_parquet(CROWD_INTERIM / "crowd_daily_ridership_long.parquet")
+    """분석 구간의 일별 승하차만 읽어온다.
+
+    `long_path`로 다른 롱 표를 줄 수 있다(340) — 재학습 러너가 Spark 재집계 롱
+    (`processed/auto/panel_<run>.parquet`)을 넘겨 같은 조인 규칙으로 와이드 패널을 만든다.
+    컬럼 계약은 같다: `date, line, station_no, station_name, direction, passengers, time_slot`.
+    """
+    df = pd.read_parquet(long_path)
+    df["date"] = pd.to_datetime(df["date"])
     return df[(df["date"] >= start) & (df["date"] <= end)].copy()
 
 
@@ -202,13 +213,15 @@ def attach_station_meta(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_panel(
-    start: pd.Timestamp = PANEL_START, end: pd.Timestamp = PANEL_END
+    start: pd.Timestamp = PANEL_START,
+    end: pd.Timestamp = PANEL_END,
+    long_path: Path = DEFAULT_LONG_PATH,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
-    ridership = load_ridership_window(start, end)
+    ridership = load_ridership_window(start, end, long_path)
     if ridership.empty:
         raise ValueError(
             f"{start:%Y-%m-%d}~{end:%Y-%m-%d} 구간에 승하차가 없다 — "
-            "`crowd_daily_ridership_long.parquet`의 커버 범위를 먼저 확인할 것."
+            f"`{Path(long_path).name}`의 커버 범위를 먼저 확인할 것."
         )
     name_changes = station_name_inventory(ridership)
 
@@ -252,13 +265,19 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--start", default=str(PANEL_START.date()), help="분석 구간 시작(YYYY-MM-DD)")
     ap.add_argument("--end", default=str(PANEL_END.date()), help="분석 구간 끝(YYYY-MM-DD)")
     ap.add_argument("--out", default=None, help="출력 파일명(기본: 구간에서 자동)")
+    ap.add_argument(
+        "--long",
+        default=str(DEFAULT_LONG_PATH),
+        help="입력 롱 표 parquet(기본: interim/crowd_daily_ridership_long.parquet). "
+        "재학습 러너는 Spark 재집계 롱을 넘긴다(340)",
+    )
     args = ap.parse_args(argv)
     start, end = pd.Timestamp(args.start), pd.Timestamp(args.end)
     if start > end:
         raise SystemExit("--start가 --end보다 늦다.")
     output_name = args.out or panel_output_name(start, end)
 
-    panel, name_changes, fill_counts = build_panel(start, end)
+    panel, name_changes, fill_counts = build_panel(start, end, Path(args.long))
 
     # 콘솔이 cp949라 이모지를 못 찍는다(UnicodeEncodeError) — 표기는 한글로 둔다.
     if len(name_changes):
