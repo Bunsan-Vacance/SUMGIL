@@ -30,6 +30,7 @@ from app.TIME.strategy import (
     _allowed_numbers,
     _build_user_prompt,
     _numbers_in,
+    _strip_candidate_label,
     _system_prompt,
     build_reason,
     describe_candidate,
@@ -351,6 +352,8 @@ def test_시스템_프롬프트는_260자_이내이고_선택_기준과_형식_�
     assert '{"chosen_index": <정수>, "reason": <문자열>}' in prompt
     assert "chosen_index" in prompt
     assert "[후보]" in prompt
+    # 331 운영 후속 — '후보 N' 번호 표기 금지(안내 문장에 번호가 샌 사례).
+    assert "'후보 N'" in prompt
     # 문장·글자 상한 인자가 하드코딩이 아니라 그대로 박힌다 — 값을 바꾸면 문구도 바뀐다.
     assert "2문장" in prompt
     assert "120자" in prompt
@@ -466,4 +469,44 @@ def test_정상_채택이면_탈락_로그가_없다(caplog):
         proposal = _agent(_llm_result(text)).decide(_two_candidates())
 
     assert proposal is not None and proposal.recommended_by == "AGENT"
+    assert _reject_lines(caplog) == []
+
+
+# ── 후보 번호 표기 정규화 — 331 운영 후속 2-2 ──
+#
+# 실제 출력 `후보 3. 4856. 올림픽공원 서1문 앞은 현재 22대, …`. 프롬프트 `[후보]` 목록의 번호를
+# LLM이 이름의 일부로 베낀다. 가드는 숫자 3이 허용집합에 있어 통과시키므로, 가드 앞단에서
+# `_strip_candidate_label`이 걷어낸다. 가드 규칙 자체는 바꾸지 않는다.
+
+
+def test_접두_후보_번호를_걷어낸다():
+    text = "후보 3. 4856. 올림픽공원 서1문 앞은 현재 22대입니다."
+
+    assert _strip_candidate_label(text) == "4856. 올림픽공원 서1문 앞은 현재 22대입니다."
+
+
+def test_문장_중간의_후보_번호도_걷어낸다():
+    text = "역삼은 비어 있을 확률 90%입니다. 후보 1. 교대로 가세요."
+
+    assert _strip_candidate_label(text) == "역삼은 비어 있을 확률 90%입니다. 교대로 가세요."
+
+
+def test_번호_표기가_없으면_그대로다():
+    text = "역삼은 비어 있을 확률 90%입니다. 교대로 가세요."
+
+    assert _strip_candidate_label(text) == text
+    # `후보 3.5대`처럼 뒤에 숫자가 이어지면 소수일 수 있어 건드리지 않는다.
+    assert _strip_candidate_label("후보 3.5대 예상") == "후보 3.5대 예상"
+
+
+def test_접두_번호가_붙은_응답도_AGENT로_채택되고_문장에서_번호가_빠진다(caplog):
+    text = '{"chosen_index": 0, "reason": "후보 0. 교대는 현재 4대입니다. 역삼은 비어 있을 확률 90%입니다."}'
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(_llm_result(text)).decide(_two_candidates())
+
+    assert proposal is not None
+    assert proposal.recommended_by == "AGENT"
+    assert proposal.candidate_index == 0
+    assert proposal.reason == "교대는 현재 4대입니다. 역삼은 비어 있을 확률 90%입니다."
+    assert "후보 0." not in proposal.reason
     assert _reject_lines(caplog) == []
