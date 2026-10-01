@@ -33,5 +33,23 @@ elif [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi
 
+# shadow 후보(shadow_candidates.json)가 있으면 후보별 예측 판도 같은 규칙으로 채점한다.
+# 입력은 data/CROWD/shadow/<후보명>/, 출력은 monitoring/score_shadow/<후보명>/ — 챔피언 채점(score_daily)과
+# 섞이지 않게 분리하고, `gate shadow --champion-score-dir … --shadow-score-dir …`가 둘을 나란히 읽는다.
+CANDIDATES="data/CROWD/monitoring/shadow_candidates.json"
+if [ -f "$CANDIDATES" ]; then
+  for name in $("$PY" -c 'import json,sys; [print(c["artifact"] if isinstance(c, dict) else c) for c in json.load(open(sys.argv[1], encoding="utf-8")).get("candidates", [])]' "$CANDIDATES"); do
+    if [ ! -d "data/CROWD/shadow/$name" ]; then
+      echo "[score_daily] shadow 후보 $name: 예측 판 없음(data/CROWD/shadow/$name) - 건너뜀"
+      continue
+    fi
+    rc=0
+    run_step "score_shadow:$name" "$PY" -m app.CROWD.pipeline.retrain.score --catch-up-days 7       --serving-dir "data/CROWD/shadow/$name"       --archive-dir "data/CROWD/monitoring/pred_archive_shadow/$name"       --out-dir "data/CROWD/monitoring/score_shadow/$name" || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 99 ]; then
+      exit "$rc"
+    fi
+  done
+fi
+
 run_step drift "$PY" -m app.CROWD.pipeline.retrain.drift
 run_step report "$PY" -m app.CROWD.pipeline.retrain.report

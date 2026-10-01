@@ -1,0 +1,12 @@
+# systemd 타이머 템플릿. 설치 방법은 crowd-shadow-predict.service 머리 주석 참고.
+
+[Unit]
+Description=S15P21A104 CROWD shadow 예측 타이머 (매일 09:50 KST, 예측 timer 09:30 뒤)
+
+[Timer]
+OnCalendar=*-*-* 09:50:00 Asia/Seoul
+Persistent=true
+Unit=crowd-shadow-predict.service
+
+[Install]
+WantedBy=timers.target
