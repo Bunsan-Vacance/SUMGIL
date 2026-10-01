@@ -14,13 +14,17 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from app.TIME.context import AgentContext, CandidateContext, RentalCandidate
+from app.TIME.llm import LlmError, LlmErrorCode, LlmResult
 from app.TIME.station_index import RentalStation
 from app.TIME.strategy import (
     DEFAULT_WALK_SPEED_M_PER_MIN,
     RECOMMENDED_BY_ALGORITHM,
+    AgentStrategy,
     RuleStrategy,
     ScoreWeights,
     _allowed_numbers,
@@ -374,3 +378,92 @@ def test_설정에_없으면_기본값을_쓴다():
         pass
 
     assert ScoreWeights.from_settings(EmptySettings()) == ScoreWeights()
+
+
+# ── 에이전트 전략 탈락 로그 — 331 운영 후속 2-1 ──
+#
+# `AgentStrategy.rejections`는 요청마다 새 인스턴스에 쌓여 버려지므로(`registry._strategy`),
+# 운영에서 "왜 규칙으로 떨어졌나"는 `_reject`가 남기는 INFO 한 줄이 유일한 단서다. 형식은
+# 라우터 `reroute_check` 줄과 같은 `key=value`를 고정한다. 환각 가드 자체의 판정은
+# `test_time_agent_strategy.py`가 보고, 여기서는 로그 줄만 본다.
+
+STRATEGY_LOGGER = "app.TIME.strategy"
+
+
+class _FakeLlmClient:
+    """정해진 값을 그대로 돌려주는 가짜 게이트웨이."""
+
+    def __init__(self, outcome: LlmResult | LlmError) -> None:
+        self.outcome = outcome
+        self.calls = 0
+
+    def complete(self, system: str, user: str, *, json_schema=None):
+        self.calls += 1
+        return self.outcome
+
+
+def _llm_result(text: str) -> LlmResult:
+    return LlmResult(text=text, input_tokens=100, output_tokens=20, latency_ms=5.0, model="fake")
+
+
+def _agent(outcome: LlmResult | LlmError) -> AgentStrategy:
+    return AgentStrategy(_FakeLlmClient(outcome), RuleStrategy(WEIGHTS))
+
+
+def _two_candidates() -> AgentContext:
+    return fired_ctx(
+        candidate("교대", distance_m=80.0, p_empty=0.2, current_stock=4, predicted_stock=3.0),
+        candidate("사당", distance_m=400.0, p_empty=0.5, current_stock=2, predicted_stock=2.5),
+    )
+
+
+def _reject_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("agent_reject ")]
+
+
+def test_LLM_오류_탈락은_사유와_LlmError_코드를_INFO로_남긴다(caplog):
+    error = LlmError(code=LlmErrorCode.TIMEOUT, detail="응답 없음", retryable=True)
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(error).decide(_two_candidates())
+
+    assert proposal is not None and proposal.recommended_by == RECOMMENDED_BY_ALGORITHM
+    lines = _reject_lines(caplog)
+    assert lines == ["agent_reject reason=LLM_ERROR rental=TARGET candidates=2 llm=TIMEOUT"]
+    assert caplog.records[0].levelno == logging.INFO
+
+
+def test_BAD_JSON_탈락은_llm_칸을_대시로_남긴다(caplog):
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        _agent(_llm_result("이건 JSON이 아니다")).decide(_two_candidates())
+
+    assert _reject_lines(caplog) == [
+        "agent_reject reason=BAD_JSON rental=TARGET candidates=2 llm=-"
+    ]
+
+
+def test_WRONG_CANDIDATE_NAME_탈락도_같은_형식으로_남긴다(caplog):
+    text = '{"chosen_index": 0, "reason": "교대로 가세요. 사당은 멀어요."}'
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        _agent(_llm_result(text)).decide(_two_candidates())
+
+    assert _reject_lines(caplog) == [
+        "agent_reject reason=WRONG_CANDIDATE_NAME rental=TARGET candidates=2 llm=-"
+    ]
+
+
+def test_후보가_하나라_LLM을_생략한_경우는_탈락_로그를_남기지_않는다(caplog):
+    error = LlmError(code=LlmErrorCode.TIMEOUT, detail="응답 없음", retryable=True)
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(error).decide(fired_ctx(candidate("교대", distance_m=80.0)))
+
+    assert proposal is not None
+    assert _reject_lines(caplog) == []
+
+
+def test_정상_채택이면_탈락_로그가_없다(caplog):
+    text = '{"chosen_index": 0, "reason": "역삼은 비어 있을 확률 90%입니다. 교대로 가세요."}'
+    with caplog.at_level(logging.INFO, logger=STRATEGY_LOGGER):
+        proposal = _agent(_llm_result(text)).decide(_two_candidates())
+
+    assert proposal is not None and proposal.recommended_by == "AGENT"
+    assert _reject_lines(caplog) == []

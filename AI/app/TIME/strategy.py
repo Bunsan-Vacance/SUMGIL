@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -26,6 +27,8 @@ from app.TIME.llm import LlmClient, LlmError, LlmResult
 from app.TIME.llm_budget import LlmBudget
 from app.TIME.station_index import WALK_SPEED_M_PER_MIN
 from app.TIME.trigger import StockReading
+
+_log = logging.getLogger(__name__)
 
 DEFAULT_WALK_SPEED_M_PER_MIN = WALK_SPEED_M_PER_MIN
 """`station_index.WALK_SPEED_M_PER_MIN`과 같은 값이다 — 후보 순위 근사(여기)와 실제 `walkLeg`
@@ -433,7 +436,7 @@ class AgentStrategy:
         system = _system_prompt(self.max_sentences, self.max_chars)
         outcome = self.client.complete(system=system, user=_build_user_prompt(ctx))
         if isinstance(outcome, LlmError):
-            return self._reject(RejectReason.LLM_ERROR, ctx)
+            return self._reject(RejectReason.LLM_ERROR, ctx, llm_error=outcome)
         self.last_usage = outcome
         self.budget.record(outcome)
 
@@ -471,8 +474,22 @@ class AgentStrategy:
             score=None,
         )
 
-    def _reject(self, reason: RejectReason, ctx: AgentContext) -> RerouteProposal | None:
+    def _reject(
+        self, reason: RejectReason, ctx: AgentContext, *, llm_error: LlmError | None = None
+    ) -> RerouteProposal | None:
         self.rejections[reason] += 1
+        # 운영에서 "왜 규칙으로 떨어졌나"를 보려는 한 줄(키=값, 공백 구분 — 라우터의
+        # `reroute_check` 줄과 같은 형식). `rejections` 카운터는 요청마다 새 인스턴스라
+        # (`registry._strategy`) 요청이 끝나면 버려지므로, 로그가 없으면 폴백 사유를 알 길이 없다.
+        # LLM 오류일 때만 `LlmError.code`(TIMEOUT·UPSTREAM_ERROR·BAD_RESPONSE·CONFIG_MISSING)를
+        # 덧붙인다 — `detail`은 게이트웨이 응답 본문이 섞일 수 있어 남기지 않는다.
+        _log.info(
+            "agent_reject reason=%s rental=%s candidates=%d llm=%s",
+            reason.value,
+            ctx.target.rental_id,
+            len(ctx.usable_candidates),
+            llm_error.code.value if llm_error is not None else "-",
+        )
         return self.fallback.decide(ctx)
 
 
