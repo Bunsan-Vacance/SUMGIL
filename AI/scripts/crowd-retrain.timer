@@ -1,0 +1,14 @@
+# systemd 타이머 템플릿. 설치 방법은 crowd-retrain.service 머리 주석 참고.
+# 첫 달은 enable 하지 않고 수동 실행한다(bash scripts/run_crowd_retrain.sh --force).
+
+[Unit]
+Description=S15P21A104 CROWD 재학습 타이머 (매일 22:00 KST, 조건이 없으면 러너가 skip)
+
+[Timer]
+OnCalendar=*-*-* 22:00:00 Asia/Seoul
+# 야간창(21:00~08:00) 밖에서 밀린 실행이 돌지 않게 한다.
+Persistent=false
+Unit=crowd-retrain.service
+
+[Install]
+WantedBy=timers.target

@@ -109,3 +109,26 @@ def test_main_rejects_reversed_range_before_touching_data():
     """구간이 뒤집혀 있으면 원천을 읽기 전에 멈춘다 — 빈 판을 조용히 저장하지 않는다."""
     with pytest.raises(SystemExit):
         main(["--start", "2025-01-01", "--end", "2024-01-01"])
+
+
+def test_load_ridership_window_reads_alternate_long_table(tmp_path):
+    """`long_path`를 주면 기본 interim 표 대신 그 롱 표를 읽고 구간으로 자른다(340 재학습 러너 경로)."""
+    long = pd.DataFrame(
+        {
+            "date": ["2026-01-01", "2026-01-02", "2026-02-01"],
+            "line": ["2호선"] * 3,
+            "station_no": [201, 201, 201],
+            "station_name": ["강남"] * 3,
+            "direction": ["boarding"] * 3,
+            "passengers": [10.0, 20.0, 30.0],
+            "time_slot": ["08-09"] * 3,
+        }
+    )
+    path = tmp_path / "panel_long.parquet"
+    long.to_parquet(path, index=False)
+    out = build_crowd_panel_module.load_ridership_window(
+        pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-31"), path
+    )
+    assert len(out) == 2
+    assert pd.api.types.is_datetime64_any_dtype(out["date"])
+    assert out["passengers"].tolist() == [10.0, 20.0]

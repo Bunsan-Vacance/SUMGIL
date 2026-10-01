@@ -1,0 +1,23 @@
+# systemd 유닛 템플릿. 설치 시 <REPO_ROOT>/<VENV_PATH>를 실제 경로로 치환한다.
+#
+#   for u in service timer; do
+#     sed -e "s|<REPO_ROOT>|/home/ubuntu/Soomgil-INFRA-ai-data-monitoring|g" \
+#         -e "s|<VENV_PATH>|/home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI/.venv|g" \
+#         crowd-shadow-predict.$u | sudo tee /etc/systemd/system/crowd-shadow-predict.$u
+#   done
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now crowd-shadow-predict.timer
+#   systemctl list-timers crowd-shadow-predict.timer
+
+[Unit]
+Description=S15P21A104 CROWD shadow 후보 예측(등록된 후보만, 챔피언 서빙과 분리)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=<REPO_ROOT>/AI
+EnvironmentFile=<REPO_ROOT>/AI/.env
+ExecStart=/bin/bash <REPO_ROOT>/AI/scripts/run_crowd_shadow_predict.sh
+TimeoutStartSec=1800
+StandardOutput=append:<REPO_ROOT>/AI/logs/crowd_shadow_predict.log
+StandardError=append:<REPO_ROOT>/AI/logs/crowd_shadow_predict.log
