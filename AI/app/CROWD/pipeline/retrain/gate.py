@@ -337,17 +337,24 @@ def gate_holdout(
     split_date: pd.Timestamp,
     days: int = HOLDOUT_DAYS,
     *,
+    events_path: Path | None = None,
     n_boot: int = N_BOOT,
     seed: int = 0,
 ) -> dict:
     """학습 직후 홀드아웃(`split_date` 이후 `days`일)을 두 아티팩트로 예측해 판정한다.
 
     예측은 기존 공개 함수(`build_predictor`·`predict_for_date`)를 재사용한다. 가용성 정보가 없어
-    전체만 계산한다.
+    전체만 계산한다. `events_path`는 후보를 학습시킨 이벤트 표(러너의 `auto/<run>/events.parquet`)를
+    주기 위한 것이다 — 비우면 배포 이벤트 표(`EVENTS_NAME`)를 읽어 후보와 다른 표로 평가하게 된다.
     """
     from app.CROWD.pipeline.dataset import load_panel
 
-    panel = load_panel(with_events=True, panel_path=Path(panel_path))
+    if events_path is None:
+        panel = load_panel(with_events=True, panel_path=Path(panel_path))
+    else:
+        panel = load_panel(
+            with_events=True, panel_path=Path(panel_path), events_path=Path(events_path)
+        )
     panel["date"] = pd.to_datetime(panel["date"]).dt.normalize()
     all_dates = sorted(d for d in panel["date"].unique() if d >= pd.Timestamp(split_date))
     dates = [pd.Timestamp(d) for d in all_dates[:days]]
@@ -423,6 +430,7 @@ def main(argv: list[str] | None = None) -> None:
     ho.add_argument("--candidate", required=True)
     ho.add_argument("--split-date", required=True)
     ho.add_argument("--days", type=int, default=HOLDOUT_DAYS)
+    ho.add_argument("--events", default=None, help="후보 학습에 쓴 이벤트 표(비우면 배포 표)")
 
     args = ap.parse_args(argv)
     try:
@@ -441,6 +449,7 @@ def main(argv: list[str] | None = None) -> None:
                 Path(args.candidate),
                 pd.Timestamp(args.split_date),
                 args.days,
+                events_path=Path(args.events) if args.events else None,
                 n_boot=args.n_boot,
                 seed=args.seed,
             )

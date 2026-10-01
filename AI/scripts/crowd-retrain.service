@@ -1,0 +1,25 @@
+# systemd 유닛 템플릿. 설치 시 <REPO_ROOT>/<VENV_PATH>를 실제 경로로 치환한다.
+#
+# 첫 달은 타이머를 enable 하지 않고 수동 실행한다(자동 승격 없음, 결과를 사람이 본다):
+#   bash scripts/run_crowd_retrain.sh --force
+#
+#   for u in service timer; do
+#     sed -e "s|<REPO_ROOT>|/home/ubuntu/Soomgil-INFRA-ai-data-monitoring|g" \
+#         -e "s|<VENV_PATH>|/home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI/.venv|g" \
+#         crowd-retrain.$u | sudo tee /etc/systemd/system/crowd-retrain.$u
+#   done
+#   sudo systemctl daemon-reload
+#   # 운영 전환 후에만: sudo systemctl enable --now crowd-retrain.timer
+
+[Unit]
+Description=S15P21A104 CROWD 재학습 러너(요청 파일·R3 있을 때만 야간 실행)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=<REPO_ROOT>/AI
+EnvironmentFile=<REPO_ROOT>/AI/.env
+ExecStart=/bin/bash <REPO_ROOT>/AI/scripts/run_crowd_retrain.sh
+TimeoutStartSec=5h
+StandardOutput=append:<REPO_ROOT>/AI/logs/crowd_retrain.log
+StandardError=append:<REPO_ROOT>/AI/logs/crowd_retrain.log
