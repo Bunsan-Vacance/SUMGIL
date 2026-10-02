@@ -10,7 +10,10 @@
   (`baseline`)이 있으면 점추정이 기준 − `drop_pp`%p 아래로 떨어진 경우도 경보. 날짜가 7개 미만인
   그룹은 건너뛴다.
 - **R3 달력 트리거.** 매달 첫 일요일이고 마지막 후보 이후 채점일이 20일 이상 쌓였으면 due.
-- R2(대시보드 전용 규칙)는 구현하지 않는다.
+- **R2 입력 드리프트(표시 전용).** 최근 7일 `features/dt=*/part.json`에서 PSI crit 피처가 2개 이상인
+  날이 있거나, `data_quality/dt=*/part.json`의 호선 총량 |z| > 3인 호선이 3일 연속이면 기록한다.
+  알림 전송·요청 파일 생성은 하지 않고 `drift_latest.json`의 `r2` 키에만 남긴다(성능 규칙이 판단하고
+  입력 드리프트는 "먼저 보는 신호").
 
 ## 요청 파일
 
@@ -44,6 +47,9 @@ TARGETS = ("boarding", "alighting")
 MIN_DATES = 7
 COLS = ("actual", "pred", "lookup")
 RECENT_DAYS = 14
+R2_CRIT_FEATURES = 2
+R2_LINE_Z = 3.0
+R2_LINE_STREAK = 3
 
 
 # ── 채점 결과 읽기 ──
@@ -207,6 +213,76 @@ def r3_calendar_due(
     }
 
 
+# ── R2 ──
+def _dated_parts(
+    root: Path, start: pd.Timestamp, end: pd.Timestamp
+) -> list[tuple[pd.Timestamp, dict]]:
+    """`root/dt=*/part.json` 중 [start, end] 구간을 날짜 오름차순으로 읽는다. 깨진 파일은 건너뛴다."""
+    found = []
+    for path in sorted(Path(root).glob("dt=*")):
+        try:
+            day = pd.Timestamp(path.name.removeprefix("dt=")).normalize()
+        except ValueError:
+            continue
+        if not start <= day <= end:
+            continue
+        part = read_json(path / "part.json")
+        if part is not None:
+            found.append((day, part))
+    return found
+
+
+def r2_input_drift(
+    features_root: Path | None,
+    dq_root: Path | None,
+    today: pd.Timestamp,
+    lookback_days: int = 7,
+) -> dict | None:
+    """최근 `lookback_days`일(오늘 포함) 입력 분포·품질 신호. 해당 없으면 None.
+
+    - 피처 PSI level == "crit"인 피처가 하루에 2개 이상인 날이 있다.
+    - 호선 총량 |z| > 3인 호선이 3일 연속(달력 기준)이다.
+    알림은 보내지 않는다.
+    """
+    today = pd.Timestamp(today).normalize()
+    start = today - pd.Timedelta(days=lookback_days - 1)
+    reasons: list[str] = []
+
+    crit_features: list[str] = []
+    if features_root is not None and Path(features_root).is_dir():
+        for _, part in _dated_parts(features_root, start, today):
+            crit = [f["name"] for f in part.get("features", []) if f.get("level") == "crit"]
+            if len(crit) >= R2_CRIT_FEATURES:
+                crit_features.extend(n for n in crit if n not in crit_features)
+        if crit_features:
+            reasons.append(f"PSI crit 피처 {R2_CRIT_FEATURES}개 이상인 날 있음")
+
+    streak_lines: list[str] = []
+    if dq_root is not None and Path(dq_root).is_dir():
+        flagged: dict[str, set[pd.Timestamp]] = {}
+        for day, part in _dated_parts(dq_root, start, today):
+            for item in part.get("line_totals", []):
+                z = item.get("z")
+                if z is not None and abs(z) > R2_LINE_Z:
+                    flagged.setdefault(str(item.get("line")), set()).add(day)
+        for line, days in sorted(flagged.items()):
+            if any(
+                all(d + pd.Timedelta(days=k) in days for k in range(R2_LINE_STREAK)) for d in days
+            ):
+                streak_lines.append(line)
+        if streak_lines:
+            reasons.append(f"호선 총량 |z|>{R2_LINE_Z:g} {R2_LINE_STREAK}일 연속")
+
+    if not reasons:
+        return None
+    return {
+        "rule": "R2",
+        "reason": " · ".join(reasons),
+        "features": crit_features,
+        "lines": streak_lines,
+    }
+
+
 # ── 요청 파일 ──
 def _sibling(path: Path, tag: str) -> Path:
     return path.with_name(f"{path.stem}.{tag}{path.suffix}")
@@ -286,6 +362,10 @@ def evaluate(
     state = read_json(monitoring_dir / "retrain_state.json")
     r3 = r3_calendar_due(today, state, scored_dates(score_root))
 
+    # R2는 표시 전용 — 요청 파일·알림과 무관하다.
+    dq_root = monitoring_dir / "data_quality"
+    r2 = r2_input_drift(dq_root / "features", dq_root, today)
+
     request_path = monitoring_dir / "retrain_request.json"
     existing, status = read_request(request_path, now)
     request_info = {"status": status, "written": False, "path": str(request_path)}
@@ -303,6 +383,7 @@ def evaluate(
         "r0": r0,
         "r1": r1,
         "r3": r3,
+        "r2": r2,
         "request": request_info,
     }
     write_json(monitoring_dir / "drift_latest.json", result)
@@ -333,6 +414,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     print(f"[드리프트] R1' 경보 {len(r1['alerts'])}건 · 건너뜀 {len(r1['skipped'])}건", flush=True)
     print(f"[드리프트] R3 due={r3['due']} ({r3['reason']}) · 요청 {req['status']}", flush=True)
+    if result["r2"] is not None:
+        print(f"[드리프트] R2(표시 전용) {result['r2']['reason']}", flush=True)
     # Discord 전송은 여기서 하지 않는다 — 웹훅 시크릿이 DAG 환경변수에만 있어서 stdout으로 넘기고
     # DAG가 `[ALERT]` 줄을 모아 보낸다.
     for a in r1["alerts"]:

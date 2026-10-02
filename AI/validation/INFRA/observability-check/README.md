@@ -9,14 +9,14 @@
 
 | 서비스 | 포트 | 역할 |
 | --- | --- | --- |
-| grafana (11.6, Infinity 플러그인) | 3000 | 대시보드 3장 + 데이터소스 2개 프로비저닝 |
+| grafana (11.6, Infinity 플러그인) | 3000 | 대시보드 4장 + 데이터소스 2개 프로비저닝 |
 | prometheus | 9090 | node-exporter 15초 스크레이프, 보존 15일 |
 | node-exporter | - | `./textfile/*.prom`을 textfile collector로 노출 |
 | (호스트) uvicorn ai-api | 8000 | `/ops/*` — Grafana(Infinity)가 `host.docker.internal:8000`으로 읽는다 |
 
 - 데이터소스 UID: `prometheus`, `infinity-ai`(서버용 `pg-ro`는 `datasources.yml`에 주석 예시만).
-- 대시보드(폴더 `SUMGIL 운영`): `sumgil-model-quality`(보드 ②, 9패널), `sumgil-pipeline-health`(보드 ③, 7패널),
-  `sumgil-spark-jobs`(보드 ⑤, 7패널). 텍스트 패널 포함 개수다.
+- 대시보드(폴더 `SUMGIL 운영`): `sumgil-model-quality`(보드 ②, 9패널), `sumgil-pipeline-health`(보드 ③, 8패널),
+  `sumgil-spark-jobs`(보드 ⑤, 7패널), `sumgil-data-quality`(보드 ⑥, 12패널). 텍스트 패널 포함 개수다.
 
 ## 실행 순서
 
@@ -25,7 +25,7 @@
 python validation/INFRA/observability-check/fixtures/make_fixtures.py          # 1) 합성 데이터
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000                       # 2) ai-api (별도 터미널)
 cd validation/INFRA/observability-check && docker compose up -d                 # 3) 스택
-# 4) http://localhost:3000  (admin / admin, 로컬 전용) -> 폴더 "SUMGIL 운영" 3장 확인
+# 4) http://localhost:3000  (admin / admin, 로컬 전용) -> 폴더 "SUMGIL 운영" 4장 확인
 docker compose down -v                                                          # 5) 정리(볼륨 포함)
 ```
 
@@ -36,6 +36,16 @@ docker compose down -v                                                          
 - 픽스처가 쓰는 곳(모두 gitignore 대상): `AI/data/CROWD/{monitoring,processed/auto,interim/spark_exp}`,
   `AI/models/CROWD/_experiments/auto/auto_synth-*`, 이 폴더의 `textfile/sumgil_*.prom`. 경로는
   `--root`·`--models-root`·`--textfile-dir`로 바꿀 수 있다.
+- 보드 ⑥(`data-quality.json`)은 ops API `/ops/data-quality` 계열 6개를 읽는다. 픽스처는
+  `monitoring/data_quality/dt=<최근 30일>/part.json`과 `features/dt=<최근 8일>/part.json`을 합성한다
+  (이상치 17건·DQ4 하루, 결손 역 3개·DQ1 하루, `schema_ok:false` 하루, 호선 7개 z 추세, 2일은 `z_adjusted` 포함,
+  PSI crit 2개(`TD1:lag1d_*`) 하루). **실데이터 사이드카가 이미 있으면** `make_fixtures.py --skip-data-quality`로
+  이 합성을 건너뛴다(나머지 보드용 픽스처는 그대로 생성).
+- 보드 ⑥ 호선 z "히트맵"은 히트맵 패널이 아니라 `groupingToMatrix`(날짜 x 호선) + 셀 배경색 표다(|z| 2·3 임계).
+  이상치 표는 변수 `date`(textbox)를 쓴다. **비우면 API가 422**(`date=` 빈 문자열을 거부)이므로
+  `YYYY-MM-DD`를 넣어야 표가 채워진다.
+- 보드 ③의 "데이터 품질 경보(최근일)" Stat은 `/ops/data-quality?days=1`의 `alert_count`다.
+  R2 입력 드리프트(`drift_latest.json`)를 읽는 API가 없어 R2 자체는 담지 않는다.
 - shadow 패널은 상단 변수 `shadow`에 `auto_synth-r2`를 넣으면 채워진다.
 
 ## 합성 데이터 주의

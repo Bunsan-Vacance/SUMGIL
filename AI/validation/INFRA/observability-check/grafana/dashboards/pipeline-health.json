@@ -625,6 +625,86 @@
         "showHeader": true,
         "cellHeight": "sm"
       }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "데이터 품질 경보(최근일)",
+      "description": "/ops/data-quality?days=1의 alert_count. 0 초록, 1 이상 노랑. 상세는 보드 ⑥. (R2 입력 드리프트는 drift_latest.json을 읽는 API가 없어 포함하지 않음)",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/data-quality?days=1",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "string"
+            },
+            {
+              "selector": "alert_count",
+              "text": "alert_count",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^alert_count$/",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "orientation": "auto"
+      }
     }
   ]
 }

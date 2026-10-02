@@ -282,3 +282,292 @@ def test_cache_and_clear(paths) -> None:
     assert client.get("/ops/score-daily").json() == []  # 60초 캐시
     service.clear_cache()
     assert len(client.get("/ops/score-daily").json()) == 1
+
+
+# ── 데이터 품질(S15P21A104-341) ──
+def _dq_doc(day: str, *, bad: bool = False, adjusted: bool = True) -> dict:
+    def line(name: str, total: float, z: float) -> dict:
+        row = {
+            "line": name, "total": total, "baseline_mean": 1000.0, "baseline_std": 50.0, "z": z,
+        }  # fmt: skip
+        if adjusted:
+            row["z_adjusted"] = z / 2
+        return row
+
+    outliers = [
+        {
+            "station_no": 222, "station_name": "강남", "line": "2호선", "time_slot": "08-09",
+            "direction": "boarding", "value": 24810, "baseline_mean": 18120,
+            "baseline_std": 1210, "z": 5.5,
+        },
+        {
+            "station_no": 150, "station_name": "서울역", "time_slot": "18-19",
+            "direction": "alighting", "value": 100, "baseline_mean": 900,
+            "baseline_std": 100, "z": -8.0,
+        },
+        {
+            "station_no": 300, "station_name": "잠실", "line": "2호선", "time_slot": "07-08",
+            "direction": "boarding", "value": 5, "baseline_mean": 4, "baseline_std": 1, "z": None,
+        },
+    ]  # fmt: skip
+    return {
+        "date": day,
+        "baseline_version": "panel@1",
+        "day_type": "평일",
+        "rows": 10904,
+        "stations": 622,
+        "expected_stations": 625,
+        "missing_stations": [1234, 2345, 3456],
+        "nan_ratio": float("nan") if bad else 0.0,
+        "zero_ratio": 0.031,
+        "zero_ratio_baseline": 0.028,
+        "line_totals": [line("2호선", 1100.0, -3.0 if bad else 0.8), line("1호선", 990.0, 0.2)],
+        "slot_js": 0.012,
+        "schema_ok": not bad,
+        "collect_lag_days": 1,
+        "outlier_count": 17 if bad else 0,
+        "outliers_top": outliers if bad else [],
+        "alerts": ["DQ4", "DQ1"] if bad else [],
+        "generated_at": "2026-10-02T14:10:00+09:00",
+        "synthetic": True,
+    }
+
+
+def _feat_doc(day: str) -> dict:
+    q = {"q5": 0.0, "q25": 10.0, "q50": 20.0, "q75": 30.0, "q95": 50.0}
+    return {
+        "date": day,
+        "window": ["2026-09-25", day],
+        "feature_set": "lag_only",
+        "features": [
+            {"name": "lag1d_resid", "psi": 0.31, "ks": 0.2, "ks_p": 0.001, "level": "alert"},
+            {"name": "temp", "psi": float("nan"), "ks": None, "ks_p": None, "level": "ok"},
+        ],
+        "targets": {
+            "boarding": {"baseline": q, "recent": {**q, "q95": 60.0}},
+            "alighting": {"baseline": q},
+        },
+        "availability_ratio": {"full": 0.7, "d1_only": 0.2, "d7_only": 0.05, "no_lag": 0.05},
+        "alerts": [],
+        "synthetic": True,
+    }
+
+
+@pytest.fixture
+def dq(paths: service.OpsPaths) -> service.OpsPaths:
+    root = paths.monitoring_dir / "data_quality"
+    _write(root / "dt=2026-10-01" / "part.json", _dq_doc("2026-10-01"))
+    _write(root / "dt=2026-09-29" / "part.json", _dq_doc("2026-09-29", bad=True))
+    _write(root / "dt=2026-09-30" / "part.json", _dq_doc("2026-09-30", adjusted=False))
+    _write(root / "features" / "dt=2026-09-30" / "part.json", _feat_doc("2026-09-30"))
+    _write(root / "features" / "dt=2026-10-01" / "part.json", _feat_doc("2026-10-01"))
+    return paths
+
+
+def test_data_quality_rows_sorted_and_fields(dq) -> None:
+    rows = client.get("/ops/data-quality", params={"days": 30}).json()
+    assert [r["date"] for r in rows] == ["2026-09-29", "2026-09-30", "2026-10-01"]
+    bad, ok = rows[0], rows[1]
+    assert bad["missing_station_count"] == 3
+    assert bad["max_abs_line_z"] == 3.0  # 절댓값 최대
+    assert bad["alert_count"] == 2
+    assert bad["alerts"] == "DQ4,DQ1"
+    assert bad["schema_ok"] is False
+    assert bad["nan_ratio"] is None  # NaN은 null
+    assert bad["outlier_count"] == 17
+    assert ok["alerts"] == ""
+    assert ok["alert_count"] == 0
+    assert ok["synthetic"] is True
+    assert set(ok) == {
+        "date", "day_type", "rows", "stations", "expected_stations", "missing_station_count",
+        "nan_ratio", "zero_ratio", "zero_ratio_baseline", "slot_js", "schema_ok",
+        "collect_lag_days", "outlier_count", "max_abs_line_z", "alert_count", "alerts",
+        "synthetic",
+    }  # fmt: skip
+
+
+def test_data_quality_days_limits_to_recent(dq) -> None:
+    rows = client.get("/ops/data-quality", params={"days": 2}).json()
+    assert [r["date"] for r in rows] == ["2026-09-30", "2026-10-01"]
+
+
+def test_data_quality_lines_and_z_adjusted_null(dq) -> None:
+    rows = client.get("/ops/data-quality/lines", params={"days": 30}).json()
+    assert len(rows) == 6  # 3일 x 2개 노선
+    assert [(r["date"], r["line"]) for r in rows[:2]] == [
+        ("2026-09-29", "1호선"),
+        ("2026-09-29", "2호선"),
+    ]
+    assert rows[1]["z"] == -3.0
+    assert rows[1]["z_adjusted"] == -1.5
+    assert rows[2]["z_adjusted"] is None  # 09-30은 z_adjusted 없음
+    assert rows[2]["total"] == 990.0
+    assert set(rows[0]) == {
+        "date", "line", "total", "baseline_mean", "baseline_std", "z", "z_adjusted",
+    }  # fmt: skip
+
+
+def test_outliers_sorted_by_abs_z_and_default_latest(dq) -> None:
+    rows = client.get("/ops/data-quality/outliers", params={"date": "2026-09-29"}).json()
+    assert [r["station_name"] for r in rows] == [
+        "서울역",
+        "강남",
+        "잠실",
+    ]  # |z| 내림차순, null 마지막
+    assert rows[0]["line"] is None
+    assert rows[1]["value"] == 24810.0
+    assert rows[2]["z"] is None
+    assert rows[0]["date"] == "2026-09-29"
+    # date 생략 -> 최신 파티션(10-01)은 이상치가 없다
+    assert client.get("/ops/data-quality/outliers").json() == []
+
+
+def test_outliers_limit_and_latest_partition(dq) -> None:
+    rows = client.get(
+        "/ops/data-quality/outliers", params={"date": "2026-09-29", "limit": 1}
+    ).json()
+    assert [r["station_name"] for r in rows] == ["서울역"]
+    # 이상치가 있는 날이 최신이면 date 없이도 그 날을 돌려준다
+    _write(
+        dq.monitoring_dir / "data_quality" / "dt=2026-10-02" / "part.json",
+        _dq_doc("2026-10-02", bad=True),
+    )
+    service.clear_cache()
+    latest = client.get("/ops/data-quality/outliers").json()
+    assert {r["date"] for r in latest} == {"2026-10-02"}
+    assert len(latest) == 3
+
+
+@pytest.mark.parametrize("date", ["20261001", "2026-13-01", "abc", "2026-10-1"])
+def test_outliers_rejects_bad_date(dq, date: str) -> None:
+    assert client.get("/ops/data-quality/outliers", params={"date": date}).status_code == 422
+
+
+def test_outliers_limit_validation(dq) -> None:
+    assert client.get("/ops/data-quality/outliers", params={"limit": 0}).status_code == 422
+
+
+def test_data_quality_features_flattened(dq) -> None:
+    rows = client.get("/ops/data-quality/features", params={"days": 8}).json()
+    assert len(rows) == 4  # 2일 x 2피처
+    assert [r["date"] for r in rows] == ["2026-09-30", "2026-09-30", "2026-10-01", "2026-10-01"]
+    lag, temp = rows[0], rows[1]
+    assert (lag["feature"], lag["psi"], lag["ks_p"], lag["level"]) == (
+        "lag1d_resid", 0.31, 0.001, "alert",
+    )  # fmt: skip
+    assert temp["psi"] is None  # NaN은 null
+    assert temp["ks"] is None
+    assert len(client.get("/ops/data-quality/features", params={"days": 1}).json()) == 2
+
+
+def test_data_quality_targets_quantile_rows(dq) -> None:
+    rows = client.get("/ops/data-quality/targets", params={"days": 8}).json()
+    # 하루당 alighting(baseline) + boarding(baseline, recent) 3행, 2일
+    assert len(rows) == 6
+    assert [(r["target"], r["kind"]) for r in rows[:3]] == [
+        ("alighting", "baseline"),
+        ("boarding", "baseline"),
+        ("boarding", "recent"),
+    ]
+    assert rows[2]["q95"] == 60.0
+    assert rows[1]["q50"] == 20.0
+    assert set(rows[0]) == {"date", "target", "kind", "q5", "q25", "q50", "q75", "q95"}
+
+
+def test_data_quality_availability(dq) -> None:
+    rows = client.get("/ops/data-quality/availability", params={"days": 8}).json()
+    assert [r["date"] for r in rows] == ["2026-09-30", "2026-10-01"]
+    assert rows[0] == {
+        "date": "2026-09-30", "full": 0.7, "d1_only": 0.2, "d7_only": 0.05, "no_lag": 0.05,
+        "baseline_full": None, "baseline_d1_only": None,
+        "baseline_d7_only": None, "baseline_no_lag": None,
+    }  # fmt: skip  # 구형 평평한 입력: baseline_*는 null
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/ops/data-quality",
+        "/ops/data-quality/lines",
+        "/ops/data-quality/outliers",
+        "/ops/data-quality/features",
+        "/ops/data-quality/targets",
+        "/ops/data-quality/availability",
+    ],
+)
+def test_data_quality_empty_dirs_return_empty_array(paths, url: str) -> None:
+    res = client.get(url)
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_data_quality_broken_file_skipped_with_warning(dq, caplog) -> None:
+    _write(dq.monitoring_dir / "data_quality" / "dt=2026-10-03" / "part.json", None, raw="{broken")
+    with caplog.at_level("WARNING", logger="app.ops"):
+        rows = client.get("/ops/data-quality").json()
+    assert len(rows) == 3
+    assert any("part.json" in rec.getMessage() for rec in caplog.records)
+
+
+def test_data_quality_dir_override(tmp_path: Path) -> None:
+    custom = tmp_path / "elsewhere"
+    _write(custom / "dt=2026-10-01" / "part.json", _dq_doc("2026-10-01"))
+    service.set_paths_for_test(
+        service.OpsPaths(
+            monitoring_dir=tmp_path / "monitoring",
+            experiments_dir=tmp_path / "e",
+            processed_auto_dir=tmp_path / "p",
+            spark_exp_dir=tmp_path / "s",
+            data_quality_dir=custom,
+        )
+    )
+    try:
+        assert len(client.get("/ops/data-quality").json()) == 1
+    finally:
+        service.set_paths_for_test(None)
+
+
+def _producer_feat_doc(day: str) -> dict:
+    """생산자(input_drift.py) 형태: 분위수 키 "5"…"95", 중첩 availability_ratio."""
+    q = {"5": 1.0, "25": 11.0, "50": 21.0, "75": 31.0, "95": 51.0}
+    return {
+        "date": day,
+        "features": [],
+        "targets": {"boarding": {"baseline": q, "recent": {**q, "95": 61.0}, "shifted": False}},
+        "availability_ratio": {
+            "baseline": {"full": 0.6, "d1_only": 0.2, "d7_only": 0.1, "no_lag": 0.1},
+            "recent": {"full": 0.5, "d1_only": 0.3, "d7_only": 0.1, "no_lag": 0.1},
+        },
+    }
+
+
+@pytest.fixture
+def dq_producer(paths: service.OpsPaths) -> service.OpsPaths:
+    root = paths.monitoring_dir / "data_quality"
+    _write(root / "features" / "dt=2026-10-01" / "part.json", _producer_feat_doc("2026-10-01"))
+    return paths
+
+
+def test_targets_accepts_producer_quantile_keys(dq_producer) -> None:
+    rows = client.get("/ops/data-quality/targets").json()
+    assert [r["kind"] for r in rows] == ["baseline", "recent"]
+    assert (rows[0]["q5"], rows[0]["q50"], rows[0]["q95"]) == (1.0, 21.0, 51.0)
+    assert rows[1]["q95"] == 61.0
+
+
+def test_availability_nested_producer_shape(dq_producer) -> None:
+    rows = client.get("/ops/data-quality/availability").json()
+    assert rows == [
+        {
+            "date": "2026-10-01", "full": 0.5, "d1_only": 0.3, "d7_only": 0.1, "no_lag": 0.1,
+            "baseline_full": 0.6, "baseline_d1_only": 0.2,
+            "baseline_d7_only": 0.1, "baseline_no_lag": 0.1,
+        }
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize("date", ["", "%20", "   "])
+def test_outliers_blank_date_means_latest(dq, date: str) -> None:
+    res = client.get(f"/ops/data-quality/outliers?date={date}")
+    assert res.status_code == 200
+    assert res.json() == client.get("/ops/data-quality/outliers").json()
