@@ -30,8 +30,15 @@ cd $R
 export PYTHONIOENCODING=utf-8
 PY=.venv/bin/python
 X=$X
+rm -f \$X/results.jsonl \$X/pandas_long.parquet   # 이전 실행 기록·기준 파일이 섞이지 않게 비운다
 echo "=== pandas_baseline"
-nice -n 10 \$PY \$X/measure.py pandas_baseline \$X/results.jsonl -- \$PY \$X/pandas_baseline.py data/CROWD/raw/ridership_daily \$X/pandas_long.parquet
+# 파일 경로로 실행하면 sys.path[0]이 스크립트 폴더라 DATA_ENGINE을 못 찾는다 -> PYTHONPATH로 AI 루트를 넣는다
+PYTHONPATH=. nice -n 10 \$PY \$X/measure.py pandas_baseline \$X/results.jsonl -- \$PY \$X/pandas_baseline.py data/CROWD/raw/ridership_daily \$X/pandas_long.parquet
+if [ ! -s \$X/pandas_long.parquet ]; then
+  echo "pandas 기준선 실패 - Spark 대조 단계를 건너뛴다" >&2
+  cat \$X/results.jsonl
+  exit 1
+fi
 for cfg in "3 3g" "2 2g"; do
   set -- \$cfg; cores=\$1; mem=\$2; run="c\${cores}_\${mem}"
   echo "=== spark_\$run (2026 증분 ∪ 2024-2025 고정 패널, pandas 롱과 대조)"
