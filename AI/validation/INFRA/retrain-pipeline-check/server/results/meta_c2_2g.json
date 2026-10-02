@@ -1,0 +1,42 @@
+{
+  "run": "c2_2g",
+  "input_root": "data/CROWD/raw/ridership_daily",
+  "full": false,
+  "years": [
+    2026
+  ],
+  "input_partitions": 17,
+  "new_rows": 185386,
+  "missing_days": [],
+  "spark": {
+    "master": "local[2]",
+    "cores": "2",
+    "driver_memory": "2g",
+    "shuffle_partitions": "32",
+    "version": "4.2.0"
+  },
+  "driver_collect": false,
+  "base_panel": "data/CROWD/processed/crowd_panel_2024_2025.parquet",
+  "duplicate_keys": {
+    "new": 0,
+    "final": 0
+  },
+  "panel_rows": 8159386,
+  "verify": {
+    "passed": true,
+    "range": [
+      "2026-09-15",
+      "2026-10-01"
+    ],
+    "tolerance": 1e-06,
+    "rows_pandas": 185386,
+    "rows_spark": 185386,
+    "rows_match": true,
+    "max_abs_err": 0.0
+  },
+  "written_rows": 8159386,
+  "output": "data/CROWD/interim/spark_exp/panel_check/spark_c2_2g/panel_c2_2g.parquet",
+  "elapsed_sec": 109.54,
+  "peak_rss_mb": 143.0,
+  "generated_at": "2026-10-02T13:32:35+09:00"
+}
