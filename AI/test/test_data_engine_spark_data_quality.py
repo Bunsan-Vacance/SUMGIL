@@ -270,8 +270,58 @@ def test_injected_outlier_is_top_and_alerts_dq4(baseline, tmp_path):
     assert (top["station_no"], top["time_slot"], top["direction"]) == (150, "08-09", "boarding")
     assert top["value"] == pytest.approx(1000.0)
     assert top["z"] > DQ_THRESHOLDS["outlier_z"]
+    # 합성 하루는 24행(역 3 x 슬롯 4 x 방향 2) -> 주입 1셀(승차·하차 2건)이 비율 임계를 넘는다
+    assert part["rows"] == 24
+    assert part["outlier_ratio"] == pytest.approx(part["outlier_count"] / part["rows"])
+    assert DQ_THRESHOLDS["outlier_ratio_warn"] <= part["outlier_ratio"]
+    assert part["outlier_ratio"] < DQ_THRESHOLDS["outlier_ratio_crit"]
+    assert part["alert_levels"]["DQ4"] == "warn"
     assert "DQ4" in part["alerts"]
     assert part["synthetic"] is True
+
+
+def test_minor_outliers_keep_list_but_no_dq4(baseline, tmp_path):
+    """비율이 warn 미만이면 목록·건수는 남지만 DQ4 경보는 없다(합성 행이 적어 임계를 올려 재현)."""
+    raw = _raw_day("20260310", overrides={(150, "08-09"): 1000.0})
+    rc, part = _run_day(
+        tmp_path,
+        baseline["dir"],
+        raw,
+        "--outlier-ratio-warn",
+        "0.5",
+        "--outlier-ratio-crit",
+        "0.9",
+    )
+    assert rc == 0
+    assert part["outlier_count"] >= 1 and part["outliers_top"]
+    assert part["outlier_ratio"] < 0.5
+    assert "DQ4" not in part["alerts"]
+    meta = json.loads((tmp_path / "out" / "run_meta.json").read_text(encoding="utf-8"))
+    assert meta["thresholds"]["outlier_ratio_warn"] == 0.5
+    assert meta["thresholds"]["outlier_ratio_crit"] == 0.9
+    assert meta["thresholds"]["outlier_z"] == DQ_THRESHOLDS["outlier_z"]
+
+
+def test_outlier_ratio_crit_level(baseline, tmp_path):
+    raw = _raw_day("20260310", overrides={(150, "08-09"): 1000.0})
+    rc, part = _run_day(tmp_path, baseline["dir"], raw, "--outlier-ratio-crit", "0.06")
+    assert rc == 0
+    assert part["alert_levels"]["DQ4"] == "crit"
+
+
+def test_zero_ratio_floor_suppresses_dq2(baseline, tmp_path):
+    """0비율이 기준의 2배를 넘어도 하한 미만이면 DQ2 없음, 하한이 이하면 경보."""
+    raw = _raw_day("20260310", overrides={(150, "08-09"): 0.0})  # 24행 중 승·하차 0 2건 = 0.083
+    rc, part = _run_day(tmp_path, baseline["dir"], raw)
+    assert rc == 0
+    zr, zb = part["zero_ratio"], part["zero_ratio_baseline"]
+    assert zr >= DQ_THRESHOLDS["zero_ratio_factor"] * zb and zr >= DQ_THRESHOLDS["zero_ratio_floor"]
+    assert "DQ2" in part["alerts"]
+
+    rc, part = _run_day(tmp_path / "floor", baseline["dir"], raw, "--zero-ratio-floor", "0.5")
+    assert rc == 0
+    assert part["zero_ratio"] >= DQ_THRESHOLDS["zero_ratio_factor"] * part["zero_ratio_baseline"]
+    assert "DQ2" not in part["alerts"]
 
 
 def test_missing_station_alerts_dq1(baseline, tmp_path):

@@ -89,10 +89,21 @@ BASELINE_COLUMNS = [
     "n",
 ]
 
+# 2026-10-02 실데이터 17일(raw 09-15~10-01, 185,386행, 하루 약 10,900행) 결과로 DQ2·DQ4 조정.
+# - DQ4: "이상치 1개라도 있으면 경보"는 정상일에도 83~321개(행의 0.8~3%)가 나와 17일 전부 상시 경보였다.
+#   추석 연휴(공휴일 표 없이 평일 기준 비교)는 6,625~8,054개(60~74%), 연휴 전날 09-23은 1,557개(14%),
+#   09-18은 532개(4.9%). 그래서 건수 대신 비율(outlier_count/rows)로 판정한다 -- 5%(warn)·20%(crit).
+#   `outlier_z`는 이상치 목록·건수를 만드는 기준으로만 남는다.
+# - DQ2: 평일 기준 0비율이 0.000이라 0이 하나만 있어도 경보 -> 17일 중 13일 경보(실제 zero_ratio 0.000~0.018).
+#   그래서 `zero_ratio_floor`(0.01) 미만의 0비율은 기준 배수와 무관하게 경보하지 않는다. NaN은 수집 결함이라 유지.
+# 다음 최적화는 CLI --outlier-ratio-warn/--outlier-ratio-crit/--zero-ratio-floor로 재실행해 비교한다.
 DQ_THRESHOLDS = {
     "missing_stations_warn": 1,
     "missing_stations_crit": 10,
     "zero_ratio_factor": 2.0,
+    "zero_ratio_floor": 0.01,
+    "outlier_ratio_warn": 0.05,
+    "outlier_ratio_crit": 0.20,
     "line_z_warn": 2.0,
     "line_z_crit": 3.0,
     "outlier_z": 3.0,
@@ -295,12 +306,13 @@ def judge_dates(
     top_n: int,
     level_adjust: bool,
     mark_synthetic: bool,
+    thresholds: dict | None = None,
 ) -> tuple[dict[str, dict], int]:
     """파티션 파일들을 날짜별로 판정한다. `({ISO 날짜: part.json 내용}, 입력 롱 행 수)`."""
     from pyspark.sql import Window
     from pyspark.sql import functions as F
 
-    thr = DQ_THRESHOLDS
+    thr = {**DQ_THRESHOLDS, **(thresholds or {})}
     long_df = _with_ds(aggregate_long_spark(spark, files)).persist()
 
     # 파티션 단위 정보(스키마·mtime). 파티션 이름 dt=<ISO>가 날짜 키다.
@@ -451,13 +463,16 @@ def judge_dates(
             levels["DQ1"] = "crit" if len(missing) >= thr["missing_stations_crit"] else "warn"
         zb = zero_base.get(bdt)
         if (nan_ratio or 0) > 0 or (
-            zero_ratio is not None and zb and zero_ratio >= thr["zero_ratio_factor"] * zb
+            zero_ratio is not None
+            and zb is not None
+            and zero_ratio >= max(thr["zero_ratio_factor"] * zb, thr["zero_ratio_floor"])
         ):
             levels["DQ2"] = "warn"
         if max_line_z is not None and max_line_z >= thr["line_z_warn"]:
             levels["DQ3"] = "crit" if max_line_z >= thr["line_z_crit"] else "warn"
-        if out_count.get(ds, 0) > 0:
-            levels["DQ4"] = "warn"
+        outlier_ratio = (out_count.get(ds, 0) / rows) if rows else None
+        if outlier_ratio is not None and outlier_ratio >= thr["outlier_ratio_warn"]:
+            levels["DQ4"] = "crit" if outlier_ratio >= thr["outlier_ratio_crit"] else "warn"
         if js is not None and js > thr["slot_js"]:
             levels["DQ5"] = "warn"
         if diff:
@@ -483,6 +498,7 @@ def judge_dates(
             "schema_diff": diff,
             "collect_lag_days": lag,
             "outlier_count": out_count.get(ds, 0),
+            "outlier_ratio": outlier_ratio,
             "outliers_top": top_rows.get(ds, []),
             "alerts": sorted(levels),
             "alert_levels": levels,
@@ -533,6 +549,18 @@ def run(args: argparse.Namespace) -> int:
         print(f"[{JOB_NAME}] 입력 파티션 없음: {args.input_root}", file=sys.stderr)
         return 1
 
+    thresholds = {
+        **DQ_THRESHOLDS,
+        **{
+            k: v
+            for k, v in {
+                "outlier_ratio_warn": args.outlier_ratio_warn,
+                "outlier_ratio_crit": args.outlier_ratio_crit,
+                "zero_ratio_floor": args.zero_ratio_floor,
+            }.items()
+            if v is not None
+        },
+    }
     spark = build_spark_session(
         "crowd-data-quality", cores=args.cores, driver_memory=args.driver_memory
     )
@@ -545,6 +573,7 @@ def run(args: argparse.Namespace) -> int:
             top_n=args.top_n,
             level_adjust=args.level_adjust,
             mark_synthetic=args.mark_synthetic,
+            thresholds=thresholds,
         )
     finally:
         spark.stop()
@@ -559,6 +588,7 @@ def run(args: argparse.Namespace) -> int:
         "rows_in": rows_in,
         "dates": sorted(results),
         "baseline_version": meta["version"],
+        "thresholds": thresholds,
         "spark": {"cores": args.cores, "driver_memory": args.driver_memory},
         "peak_rss_mb": _peak_rss_mb(),
         "rc": 0,
@@ -580,6 +610,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--years", type=int, nargs="+", default=[2026], help="판정 대상 연도")
     ap.add_argument("--full", action="store_true", help="전 파티션(없으면 --years 연도만)")
     ap.add_argument("--top-n", type=int, default=50, help="날짜별 이상치 목록 길이")
+    ap.add_argument(
+        "--outlier-ratio-warn", type=float, default=None, help="DQ4 warn 비율(기본 DQ_THRESHOLDS)"
+    )
+    ap.add_argument(
+        "--outlier-ratio-crit", type=float, default=None, help="DQ4 crit 비율(기본 DQ_THRESHOLDS)"
+    )
+    ap.add_argument(
+        "--zero-ratio-floor", type=float, default=None, help="DQ2 0비율 하한(기본 DQ_THRESHOLDS)"
+    )
     ap.add_argument("--level-adjust", action="store_true", help="호선 레벨 보정 z_adjusted 기록")
     ap.add_argument("--mark-synthetic", action="store_true", help="결과에 synthetic=true 표시")
     ap.add_argument("--cores", default="3")
