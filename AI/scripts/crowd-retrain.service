@@ -19,6 +19,7 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=<REPO_ROOT>/AI
 EnvironmentFile=<REPO_ROOT>/AI/.env
+Environment=SUMGIL_TEXTFILE_DIR=/var/lib/node_exporter/textfile
 ExecStart=/bin/bash <REPO_ROOT>/AI/scripts/run_crowd_retrain.sh
 TimeoutStartSec=5h
 StandardOutput=append:<REPO_ROOT>/AI/logs/crowd_retrain.log
