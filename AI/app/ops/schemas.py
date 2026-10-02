@@ -70,3 +70,74 @@ class SparkRunRow(BaseModel):
     cores: str | None = None
     driver_memory: str | None = None
     path: str
+
+
+class DataQualityRow(BaseModel):
+    date: str
+    day_type: str | None = None
+    rows: int | None = None
+    stations: int | None = None
+    expected_stations: int | None = None
+    missing_station_count: int | None = None
+    nan_ratio: float | None = None
+    zero_ratio: float | None = None
+    zero_ratio_baseline: float | None = None
+    slot_js: float | None = None
+    schema_ok: bool | None = None
+    collect_lag_days: int | None = None
+    outlier_count: int | None = None
+    max_abs_line_z: float | None = None
+    alert_count: int
+    alerts: str
+    synthetic: bool | None = None
+
+
+class DataQualityLineRow(BaseModel):
+    date: str
+    line: str
+    total: float | None = None
+    baseline_mean: float | None = None
+    baseline_std: float | None = None
+    z: float | None = None
+    z_adjusted: float | None = None
+
+
+class DataQualityOutlierRow(BaseModel):
+    date: str
+    station_no: int | None = None
+    station_name: str | None = None
+    line: str | None = None
+    time_slot: str | None = None
+    direction: str | None = None
+    value: float | None = None
+    baseline_mean: float | None = None
+    baseline_std: float | None = None
+    z: float | None = None
+
+
+class DataQualityFeatureRow(BaseModel):
+    date: str
+    feature: str
+    psi: float | None = None
+    ks: float | None = None
+    ks_p: float | None = None
+    level: str | None = None
+
+
+class DataQualityTargetRow(BaseModel):
+    date: str
+    target: str
+    kind: str
+    q5: float | None = None
+    q25: float | None = None
+    q50: float | None = None
+    q75: float | None = None
+    q95: float | None = None
+
+
+class DataQualityAvailabilityRow(BaseModel):
+    date: str
+    full: float | None = None
+    d1_only: float | None = None
+    d7_only: float | None = None
+    no_lag: float | None = None

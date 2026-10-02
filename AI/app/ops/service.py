@@ -26,7 +26,12 @@ CACHE_TTL_SEC = 60.0
 # retrain/common.py의 SCORE_META_NAME과 같다(import하면 pandas·numpy가 딸려 온다).
 SCORE_META_NAME = "part.meta.json"
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _EPOCH = datetime.min.replace(tzinfo=timezone.utc)
+
+
+class InvalidDateError(ValueError):
+    """`date` 파라미터 형식 오류(YYYY-MM-DD가 아님)."""
 
 
 class InvalidSourceError(ValueError):
@@ -39,6 +44,8 @@ class OpsPaths:
     experiments_dir: Path  # <auto_<run>>/gate.json
     processed_auto_dir: Path  # crowd_panel_rebuild의 meta.json
     spark_exp_dir: Path  # replay_kafka 등 spark_exp 실험의 meta.json
+    # 데이터 품질 사이드카 루트(None이면 monitoring_dir/data_quality). features는 그 아래 features/
+    data_quality_dir: Path | None = None
 
 
 def default_paths() -> OpsPaths:
@@ -360,3 +367,202 @@ def spark_runs(limit: int) -> list[dict]:
         return rows[:limit]
 
     return _cached(("spark_runs", limit), build)
+
+
+# ── data-quality ──
+_DQ_NAME = "part.json"
+
+
+def _dq_root() -> Path:
+    paths = get_paths()
+    return paths.data_quality_dir or paths.monitoring_dir / "data_quality"
+
+
+def _dq_docs(root: Path, days: int | None) -> list[tuple[str, dict]]:
+    """`dt=*/part.json`을 날짜 오름차순으로 읽는다. days가 있으면 파티션 있는 최근 N일만."""
+    if not root.is_dir():
+        return []
+    dirs = sorted(p for p in root.glob("dt=*") if p.is_dir())
+    if days is not None:
+        dirs = dirs[-days:]
+    out = []
+    for d in dirs:
+        path = d / _DQ_NAME
+        if not path.is_file():
+            continue
+        doc = _read_json(path)
+        if isinstance(doc, dict):
+            out.append((d.name.removeprefix("dt="), doc))
+    return out
+
+
+def _dicts(value: Any) -> list[dict]:
+    return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
+
+
+def _bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def data_quality(days: int) -> list[dict]:
+    def build() -> list[dict]:
+        rows = []
+        for day, doc in _dq_docs(_dq_root(), days):
+            zs = [
+                abs(z)
+                for t in _dicts(doc.get("line_totals"))
+                if (z := _num(t.get("z"))) is not None
+            ]
+            missing = doc.get("missing_stations")
+            raw_alerts = doc.get("alerts")
+            alerts = [str(a) for a in raw_alerts] if isinstance(raw_alerts, list) else []
+            rows.append(
+                {
+                    "date": day,
+                    "day_type": _str(doc.get("day_type")),
+                    "rows": _int(doc.get("rows")),
+                    "stations": _int(doc.get("stations")),
+                    "expected_stations": _int(doc.get("expected_stations")),
+                    "missing_station_count": len(missing) if isinstance(missing, list) else None,
+                    "nan_ratio": _num(doc.get("nan_ratio")),
+                    "zero_ratio": _num(doc.get("zero_ratio")),
+                    "zero_ratio_baseline": _num(doc.get("zero_ratio_baseline")),
+                    "slot_js": _num(doc.get("slot_js")),
+                    "schema_ok": _bool(doc.get("schema_ok")),
+                    "collect_lag_days": _int(doc.get("collect_lag_days")),
+                    "outlier_count": _int(doc.get("outlier_count")),
+                    "max_abs_line_z": max(zs) if zs else None,
+                    "alert_count": len(alerts),
+                    "alerts": ",".join(alerts),
+                    "synthetic": _bool(doc.get("synthetic")),
+                }
+            )
+        return rows
+
+    return _cached(("data_quality", days), build)
+
+
+def data_quality_lines(days: int) -> list[dict]:
+    def build() -> list[dict]:
+        rows = []
+        for day, doc in _dq_docs(_dq_root(), days):
+            items = [t for t in _dicts(doc.get("line_totals")) if t.get("line") is not None]
+            for t in sorted(items, key=lambda t: str(t["line"])):
+                rows.append(
+                    {
+                        "date": day,
+                        "line": str(t["line"]),
+                        "total": _num(t.get("total")),
+                        "baseline_mean": _num(t.get("baseline_mean")),
+                        "baseline_std": _num(t.get("baseline_std")),
+                        "z": _num(t.get("z")),
+                        "z_adjusted": _num(t.get("z_adjusted")),
+                    }
+                )
+        return rows
+
+    return _cached(("data_quality_lines", days), build)
+
+
+def data_quality_outliers(date: str | None, limit: int) -> list[dict]:
+    if date is not None:
+        try:
+            if not _DATE_RE.fullmatch(date):
+                raise ValueError(date)
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError as exc:
+            raise InvalidDateError("date는 존재하는 YYYY-MM-DD 형식이어야 한다") from exc
+
+    def build() -> list[dict]:
+        docs = _dq_docs(_dq_root(), None)
+        picked = docs[-1:] if date is None else [(d, doc) for d, doc in docs if d == date]
+        rows = []
+        for day, doc in picked:
+            for o in _dicts(doc.get("outliers_top")):
+                rows.append(
+                    {
+                        "date": day,
+                        "station_no": _int(o.get("station_no")),
+                        "station_name": _str(o.get("station_name")),
+                        "line": _str(o.get("line")),
+                        "time_slot": _str(o.get("time_slot")),
+                        "direction": _str(o.get("direction")),
+                        "value": _num(o.get("value")),
+                        "baseline_mean": _num(o.get("baseline_mean")),
+                        "baseline_std": _num(o.get("baseline_std")),
+                        "z": _num(o.get("z")),
+                    }
+                )
+        # z가 없는 행은 맨 뒤로 보낸다
+        rows.sort(key=lambda r: -abs(r["z"]) if r["z"] is not None else math.inf)
+        return rows[:limit]
+
+    return _cached(("data_quality_outliers", date, limit), build)
+
+
+def _feature_docs(days: int) -> list[tuple[str, dict]]:
+    return _dq_docs(_dq_root() / "features", days)
+
+
+def data_quality_features(days: int) -> list[dict]:
+    def build() -> list[dict]:
+        rows = []
+        for day, doc in _feature_docs(days):
+            for f in _dicts(doc.get("features")):
+                if f.get("name") is None:
+                    continue
+                rows.append(
+                    {
+                        "date": day,
+                        "feature": str(f["name"]),
+                        "psi": _num(f.get("psi")),
+                        "ks": _num(f.get("ks")),
+                        "ks_p": _num(f.get("ks_p")),
+                        "level": _str(f.get("level")),
+                    }
+                )
+        return rows
+
+    return _cached(("data_quality_features", days), build)
+
+
+def data_quality_targets(days: int) -> list[dict]:
+    def build() -> list[dict]:
+        rows = []
+        for day, doc in _feature_docs(days):
+            targets = doc.get("targets")
+            if not isinstance(targets, dict):
+                continue
+            for target in sorted(targets):
+                blk = targets[target]
+                if not isinstance(blk, dict):
+                    continue
+                for kind in ("baseline", "recent"):
+                    q = blk.get(kind)
+                    if not isinstance(q, dict):
+                        continue
+                    rows.append(
+                        {
+                            "date": day,
+                            "target": str(target),
+                            "kind": kind,
+                            **{k: _num(q.get(k)) for k in ("q5", "q25", "q50", "q75", "q95")},
+                        }
+                    )
+        return rows
+
+    return _cached(("data_quality_targets", days), build)
+
+
+def data_quality_availability(days: int) -> list[dict]:
+    def build() -> list[dict]:
+        rows = []
+        for day, doc in _feature_docs(days):
+            a = doc.get("availability_ratio")
+            if not isinstance(a, dict):
+                continue
+            keys = ("full", "d1_only", "d7_only", "no_lag")
+            rows.append({"date": day, **{k: _num(a.get(k)) for k in keys}})
+        return rows
+
+    return _cached(("data_quality_availability", days), build)

@@ -11,7 +11,19 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from app.ops import service
-from app.ops.schemas import GateRow, JobRow, ScoreByLineRow, ScoreDailyRow, SparkRunRow
+from app.ops.schemas import (
+    DataQualityAvailabilityRow,
+    DataQualityFeatureRow,
+    DataQualityLineRow,
+    DataQualityOutlierRow,
+    DataQualityRow,
+    DataQualityTargetRow,
+    GateRow,
+    JobRow,
+    ScoreByLineRow,
+    ScoreDailyRow,
+    SparkRunRow,
+)
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 
@@ -47,3 +59,39 @@ def get_jobs(
 @router.get("/spark-runs", response_model=list[SparkRunRow])
 def get_spark_runs(limit: Annotated[int, Query(ge=1, le=500)] = 50) -> list[dict]:
     return service.spark_runs(limit)
+
+
+@router.get("/data-quality", response_model=list[DataQualityRow])
+def get_data_quality(days: DaysQ = 30) -> list[dict]:
+    return service.data_quality(days)
+
+
+@router.get("/data-quality/lines", response_model=list[DataQualityLineRow])
+def get_data_quality_lines(days: DaysQ = 30) -> list[dict]:
+    return service.data_quality_lines(days)
+
+
+@router.get("/data-quality/outliers", response_model=list[DataQualityOutlierRow])
+def get_data_quality_outliers(
+    date: Annotated[str | None, Query(description="YYYY-MM-DD, 생략하면 최신 파티션")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> list[dict]:
+    try:
+        return service.data_quality_outliers(date, limit)
+    except service.InvalidDateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/data-quality/features", response_model=list[DataQualityFeatureRow])
+def get_data_quality_features(days: DaysQ = 8) -> list[dict]:
+    return service.data_quality_features(days)
+
+
+@router.get("/data-quality/targets", response_model=list[DataQualityTargetRow])
+def get_data_quality_targets(days: DaysQ = 8) -> list[dict]:
+    return service.data_quality_targets(days)
+
+
+@router.get("/data-quality/availability", response_model=list[DataQualityAvailabilityRow])
+def get_data_quality_availability(days: DaysQ = 8) -> list[dict]:
+    return service.data_quality_availability(days)

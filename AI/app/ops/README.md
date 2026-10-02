@@ -17,6 +17,12 @@ FE/BE 계약이 아니라 운영자용이라 `SERVING_CONTRACT.md`에는 넣지 
 | `GET /ops/gate?limit=10` | `models/CROWD/_experiments/auto/*/gate.json` + `monitoring/shadow_candidates.json` | `run, mode, window_start, window_end, decided_at, accepted, boarding_point_pp, boarding_ci_low_pp, alighting_point_pp, alighting_ci_low_pp, registered_shadow` — `decided_at` 내림차순 |
 | `GET /ops/jobs?limit=20` | `monitoring/retrain_state.json`의 `runs[]` | `run_id, status, started_at, finished_at, exit_code, step, step_rc, step_sec` — run x step 한 행, 최근 run 순(`limit`은 run 수) |
 | `GET /ops/spark-runs?limit=50` | `data/CROWD/processed/auto/**/meta.json`, `data/CROWD/interim/spark_exp/**/meta.json` | `job, run, generated_at, elapsed_sec, peak_rss_mb, rows, input_partitions, verify_passed, verify_max_abs_err, cores, driver_memory, path` — `generated_at` 내림차순 |
+| `GET /ops/data-quality?days=30` | `monitoring/data_quality/dt=*/part.json` | `date, day_type, rows, stations, expected_stations, missing_station_count, nan_ratio, zero_ratio, zero_ratio_baseline, slot_js, schema_ok, collect_lag_days, outlier_count, max_abs_line_z, alert_count, alerts, synthetic` — 날짜 오름차순. `missing_station_count`는 `missing_stations[]` 길이, `max_abs_line_z`는 `line_totals[].z` 절댓값 최대, `alerts`는 쉼표로 이은 문자열 |
+| `GET /ops/data-quality/lines?days=30` | 위 `line_totals[]` | `date, line, total, baseline_mean, baseline_std, z, z_adjusted` — 날짜·노선 오름차순, `z_adjusted`는 없으면 null |
+| `GET /ops/data-quality/outliers?date=YYYY-MM-DD&limit=50` | 위 `outliers_top[]` | `date, station_no, station_name, line, time_slot, direction, value, baseline_mean, baseline_std, z` — z 절댓값 내림차순, `date` 생략 시 최신 파티션, 형식 오류는 422 |
+| `GET /ops/data-quality/features?days=8` | `monitoring/data_quality/features/dt=*/part.json`의 `features[]` | `date, feature, psi, ks, ks_p, level` — 날짜 오름차순 |
+| `GET /ops/data-quality/targets?days=8` | 위 `targets` | `date, target, kind, q5, q25, q50, q75, q95` — `kind`는 `baseline`/`recent`, target x kind 한 행 |
+| `GET /ops/data-quality/availability?days=8` | 위 `availability_ratio` | `date, full, d1_only, d7_only, no_lag` |
 
 - `days`는 오늘 기준이 아니라 **채점 파티션이 있는 최근 N개 날짜**다(채점이 늦어도 빈 화면이 되지 않는다).
 - `source`가 형식에 맞지 않으면 422(`champion` 또는 `shadow:<영숫자·_.->`).
@@ -30,3 +36,4 @@ FE/BE 계약이 아니라 운영자용이라 `SERVING_CONTRACT.md`에는 넣지 
   URL `/ops/score-daily?days=30`. 응답이 배열 그대로라 **Rows/Root selector는 비워 둔다**.
 - 시계열 패널은 `date`(또는 `decided_at`, `generated_at`) 컬럼을 Time으로, 지표 컬럼을 Number로 지정한다.
 - 히트맵은 `/ops/score-daily/by-line`에서 `date` x `line` x `*_improvement_rmse_pct`를 쓴다.
+- 데이터 품질 `days`는 `data_quality/`(features는 `data_quality/features/`)에 파티션이 있는 최근 N개 날짜다. 루트는 `OpsPaths.data_quality_dir`로 바꾼다(기본 `monitoring/data_quality`). NaN·inf는 null, `outliers`의 `date` 형식 오류는 422.
