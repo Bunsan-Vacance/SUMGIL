@@ -21,7 +21,7 @@ D-1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`)가 쌓는 raw 원
 이벤트 표는 별도 잡에서 다룬다.
 
 검증: `--verify-against`(pandas 기준 롱 parquet)가 있으면 양쪽을 공통 날짜 범위로 자른 뒤
-`compare_frames`로 대조한다. `max_abs_err <= --tolerance` 이고 행수·키가 모두 일치하면 통과,
+키 full outer join으로 대조한다. `max_abs_err <= --tolerance` 이고 행수·키가 모두 일치하면 통과,
 아니면 stderr에 요약하고 exit 1(meta에는 결과를 남긴다).
 
 실행:
@@ -29,6 +29,8 @@ D-1 수집기(`DATA_ENGINE/collect/subway_ridership_daily.py`)가 쌓는 raw 원
     python -m DATA_ENGINE.spark.jobs.crowd_panel_rebuild \\
         --base-panel data/CROWD/processed/crowd_panel_2024_2025.parquet \\
         --verify-against data/CROWD/interim/crowd_recent_ridership_long.parquet
+
+드라이버 수집 없음 — 전 단계 Spark DataFrame, 출력은 mapInArrow + pyarrow 스트리밍 단일 파일(Hadoop 네이티브 불필요).
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -44,6 +47,9 @@ import pandas as pd
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+# mapInArrow 파이썬 워커가 현재 인터프리터를 쓰게 한다(Windows에서 PATH의 python 스텁 방지).
+os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
 
 AI_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(AI_ROOT))
@@ -54,7 +60,6 @@ from DATA_ENGINE.collect.subway_ridership_daily import (  # noqa: E402
     LONG_COLUMNS,
     SOURCE,
 )
-from DATA_ENGINE.spark.metrics import compare_frames  # noqa: E402
 from DATA_ENGINE.spark.session import build_spark_session  # noqa: E402
 
 DEFAULT_INPUT_ROOT = AI_ROOT / "data" / "CROWD" / "raw" / "ridership_daily"
@@ -107,21 +112,42 @@ def _read_raw(spark, files: list[Path]):
     return out
 
 
-def aggregate_long_spark(spark, files: list[Path]) -> pd.DataFrame:
-    """`to_long` 규칙(합산 -> 슬롯 매핑 -> melt)을 Spark로 재현해 pandas로 돌려준다.
+def _empty_long(spark):
+    """`LONG_COLUMNS` 스키마의 빈 DataFrame(입력이 없을 때)."""
+    from pyspark.sql import types as T
 
-    `source`·`collected_at`은 붙이지 않는다(호출부가 상수로 채운다). 입력이 비면 빈 프레임.
+    return spark.createDataFrame(
+        [],
+        T.StructType(
+            [
+                T.StructField("date", T.TimestampNTZType()),
+                T.StructField("line", T.StringType()),
+                T.StructField("station_no", T.LongType()),
+                T.StructField("station_name", T.StringType()),
+                T.StructField("direction", T.StringType()),
+                T.StructField("passengers", T.DoubleType()),
+                T.StructField("time_slot", T.StringType()),
+            ]
+        ),
+    ).select(*LONG_COLUMNS)
+
+
+def aggregate_long_spark(spark, files: list[Path]):
+    """`to_long` 규칙(합산 -> 슬롯 매핑 -> melt)을 Spark로 재현해 Spark DataFrame으로 돌려준다.
+
+    드라이버로 수집하지 않는다. `source`·`collected_at`은 붙이지 않는다(호출부가 채운다).
+    타입은 `date` timestamp_ntz(자정)·`station_no` long·`passengers` double, 입력이 비면 같은
+    스키마의 빈 DataFrame.
     """
     from pyspark.sql import functions as F
 
-    empty = pd.DataFrame(columns=LONG_COLUMNS)
     raw = _read_raw(spark, files)
     if raw is None:
-        return empty
+        return _empty_long(spark)
 
     slot_map = F.create_map(*[x for h, s in HOUR_TO_SLOT.items() for x in (F.lit(h), F.lit(s))])
     df = raw.select(
-        F.date_format(F.to_date(F.col("pasngDe"), "yyyyMMdd"), "yyyy-MM-dd").alias("date"),
+        F.to_date(F.col("pasngDe"), "yyyyMMdd").cast("timestamp_ntz").alias("date"),
         F.col("lineNm").alias("line"),
         F.col("stnCd").cast("long").alias("station_no"),
         F.col("stnNm").alias("station_name"),
@@ -134,33 +160,59 @@ def aggregate_long_spark(spark, files: list[Path]) -> pd.DataFrame:
         F.coalesce(F.sum("boarding"), F.lit(0.0)).alias("boarding"),
         F.coalesce(F.sum("alighting"), F.lit(0.0)).alias("alighting"),
     )
-    long_df = agg.select(
-        *GROUP_COLS, F.lit("boarding").alias("direction"), F.col("boarding").alias("passengers")
-    ).unionByName(
+    return _melt(agg)
+
+
+def _melt(agg):
+    """boarding/alighting 두 컬럼을 `direction`·`passengers`로 펼쳐 `LONG_COLUMNS` 순서로 돌려준다."""
+    from pyspark.sql import functions as F
+
+    parts = [
         agg.select(
             *GROUP_COLS,
-            F.lit("alighting").alias("direction"),
-            F.col("alighting").alias("passengers"),
+            F.lit(d).alias("direction"),
+            F.col(d).cast("double").alias("passengers"),
         )
-    )
-    out = long_df.toPandas()
+        for d in ("boarding", "alighting")
+    ]
+    return parts[0].unionByName(parts[1]).select(*LONG_COLUMNS)
+
+
+def to_pandas_long(df) -> pd.DataFrame:
+    """테스트·소규모 확인용 - Spark 롱 DataFrame을 pandas로 수집한다(전량 파이프라인에서 쓰지 않는다)."""
+    out = df.toPandas()
     if out.empty:
-        return empty
+        return pd.DataFrame(columns=LONG_COLUMNS)
     out["date"] = pd.to_datetime(out["date"])
     out["station_no"] = out["station_no"].astype("int64")
     out["passengers"] = out["passengers"].astype("float64")
     return out[LONG_COLUMNS].sort_values(KEY_COLS, ignore_index=True)
 
 
-def check_keys(df: pd.DataFrame, label: str) -> None:
+def check_keys(df, label: str) -> None:
     """키 컬럼 결측은 예외(`to_long`의 errors="raise"에 해당). 유일성 위반은 호출부가 exit 2."""
-    bad = int(df[KEY_COLS].isna().any(axis=1).sum())
+    from pyspark.sql import functions as F
+
+    any_null = F.lit(False)
+    for c in KEY_COLS:
+        any_null = any_null | F.col(c).isNull()
+    bad = df.filter(any_null).count()
     if bad:
         raise ValueError(f"{label}: 키 컬럼 결측 {bad}행 (날짜·역코드·시간대 파싱 실패)")
 
 
-def duplicate_keys(df: pd.DataFrame) -> int:
-    return int(df.duplicated(KEY_COLS).sum())
+def duplicate_keys(df) -> int:
+    """유일성 키 중복 행 수(`sum(count - 1)`, pandas `duplicated().sum()`과 같은 의미)."""
+    from pyspark.sql import functions as F
+
+    row = (
+        df.groupBy(*KEY_COLS)
+        .count()
+        .filter(F.col("count") > 1)
+        .agg(F.sum(F.col("count") - 1).alias("dup"))
+        .first()
+    )
+    return int(row["dup"] or 0)
 
 
 def missing_days(dates: pd.Series) -> list[str]:
@@ -172,53 +224,87 @@ def missing_days(dates: pd.Series) -> list[str]:
     return [d.date().isoformat() for d in days if d not in have]
 
 
-def load_base_panel(path: Path) -> pd.DataFrame:
-    """고정 패널을 롱 포맷으로 읽는다. 와이드(boarding·alighting)면 펼치고 키 컬럼만 쓴다."""
-    base = pd.read_parquet(path)
-    base["date"] = pd.to_datetime(base["date"]).dt.normalize()
+def _norm_date(df):
+    """`date` 컬럼을 timestamp_ntz 자정으로 정규화한다."""
+    from pyspark.sql import functions as F
+
+    return df.withColumn("date", F.col("date").cast("date").cast("timestamp_ntz"))
+
+
+def load_base_panel(spark, path: Path):
+    """고정 패널을 롱 포맷 Spark DataFrame으로 읽는다. 와이드(boarding·alighting)면 펼치고 키 컬럼만 쓴다."""
+    from pyspark.sql import functions as F
+
+    base = spark.read.parquet(str(path))
     if {"direction", "passengers"} <= set(base.columns):
-        long_df = base.reindex(columns=LONG_COLUMNS)
+        long_df = base.select(
+            *[F.col(c) if c in base.columns else F.lit(None).alias(c) for c in LONG_COLUMNS]
+        )
     else:
-        long_df = base.melt(
-            id_vars=[c for c in GROUP_COLS if c in base.columns],
-            value_vars=["boarding", "alighting"],
-            var_name="direction",
-            value_name="passengers",
-        ).reindex(columns=LONG_COLUMNS)
-    long_df["station_no"] = long_df["station_no"].astype("int64")
-    long_df["passengers"] = long_df["passengers"].astype("float64")
-    long_df["source"] = BASE_SOURCE
-    long_df["collected_at"] = pd.NaT
-    return long_df
+        cols = [c for c in GROUP_COLS if c in base.columns]
+        wide = base.select(*cols, "boarding", "alighting")
+        for c in GROUP_COLS:
+            if c not in cols:
+                wide = wide.withColumn(c, F.lit(None))
+        long_df = _melt(wide)
+    long_df = _norm_date(long_df)
+    return (
+        long_df.withColumn("station_no", F.col("station_no").cast("long"))
+        .withColumn("passengers", F.col("passengers").cast("double"))
+        .withColumn("source", F.lit(BASE_SOURCE))
+        .withColumn("collected_at", F.lit(None).cast("timestamp_ntz"))
+        .select(*OUT_COLUMNS)
+    )
 
 
-def union_with_base(new: pd.DataFrame, base: pd.DataFrame) -> pd.DataFrame:
+def union_with_base(new, base):
     """겹치는 날짜는 새 집계 우선 - 그 날짜의 base 행은 통째로 버린다(`merge_recent`와 같은 규칙)."""
-    keep = base[~base["date"].isin(new["date"].unique())]
-    parts = [p.dropna(axis=1, how="all") for p in (keep, new) if not p.empty]
-    out = pd.concat(parts, ignore_index=True) if parts else new
-    return out.reindex(columns=OUT_COLUMNS).sort_values(KEY_COLS, ignore_index=True)
+    new_dates = new.select("date").distinct()
+    keep = base.join(new_dates, on="date", how="left_anti")
+    return keep.unionByName(new.select(*OUT_COLUMNS))
 
 
-def verify_against(spark_long: pd.DataFrame, pandas_path: Path, tolerance: float) -> dict:
-    """공통 날짜 범위로 자른 뒤 `compare_frames`로 대조한다. 판정은 `passed`."""
-    pandas_df = pd.read_parquet(pandas_path)
-    pandas_df["date"] = pd.to_datetime(pandas_df["date"]).dt.normalize()
-    if spark_long.empty or pandas_df.empty:
+def verify_against(spark, new, pandas_path: Path, tolerance: float) -> dict:
+    """공통 날짜 범위로 자른 뒤 키 full outer join으로 대조한다(드라이버 수집 없음). 판정은 `passed`."""
+    from pyspark.sql import functions as F
+
+    ref = _norm_date(spark.read.parquet(str(pandas_path))).select(*KEY_COLS, "passengers")
+    cur = new.select(*KEY_COLS, "passengers")
+    lo_r, hi_r = ref.agg(F.min("date"), F.max("date")).first()
+    lo_s, hi_s = cur.agg(F.min("date"), F.max("date")).first()
+    if lo_r is None or lo_s is None:
         return {"passed": False, "reason": "비교할 행이 없음", "tolerance": tolerance}
-    lo = max(spark_long["date"].min(), pandas_df["date"].min())
-    hi = min(spark_long["date"].max(), pandas_df["date"].max())
+    lo, hi = max(lo_r, lo_s), min(hi_r, hi_s)
     if lo > hi:
         return {"passed": False, "reason": "공통 날짜 범위 없음", "tolerance": tolerance}
-    left = pandas_df[pandas_df["date"].between(lo, hi)]
-    right = spark_long[spark_long["date"].between(lo, hi)]
-    res = compare_frames(left, right, key_cols=KEY_COLS, value_cols=["passengers"])
-    passed = bool(res["max_abs_err"] <= tolerance and res["rows_match"] and res["rows_pandas"] > 0)
+    lo_d, hi_d = lo.date(), hi.date()
+
+    def _clip(df):
+        d = F.col("date").cast("date")
+        return df.filter((d >= F.lit(lo_d)) & (d <= F.lit(hi_d)))
+
+    left = _clip(ref).withColumnRenamed("passengers", "p_pandas").withColumn("_l", F.lit(1))
+    right = _clip(cur).withColumnRenamed("passengers", "p_spark").withColumn("_r", F.lit(1))
+    rows_pandas, rows_spark = left.count(), right.count()
+    agg = (
+        left.join(right, on=KEY_COLS, how="full_outer")
+        .agg(
+            F.count(F.when(F.col("_l").isNotNull() & F.col("_r").isNotNull(), 1)).alias("both"),
+            F.max(F.abs(F.col("p_pandas") - F.col("p_spark"))).alias("max_err"),
+        )
+        .first()
+    )
+    rows_match = bool(rows_pandas == rows_spark and agg["both"] == rows_pandas)
+    max_abs_err = float(agg["max_err"]) if agg["max_err"] is not None else 0.0
+    passed = bool(max_abs_err <= tolerance and rows_match and rows_pandas > 0)
     return {
         "passed": passed,
-        "range": [lo.date().isoformat(), hi.date().isoformat()],
+        "range": [lo_d.isoformat(), hi_d.isoformat()],
         "tolerance": tolerance,
-        **res,
+        "rows_pandas": int(rows_pandas),
+        "rows_spark": int(rows_spark),
+        "rows_match": rows_match,
+        "max_abs_err": max_abs_err,
     }
 
 
@@ -232,14 +318,49 @@ def _peak_rss_mb() -> float | None:
         return None
 
 
-def _write_parquet(df: pd.DataFrame, path: Path) -> None:
+def _write_parquet(df, path: Path) -> int:
+    """KEY_COLS 정렬 후 `coalesce(1)` 파티션을 `mapInArrow`로 받아 pyarrow로 단일 parquet에 스트리밍한다.
+
+    Spark `write.parquet`(Hadoop FS)을 거치지 않아 Windows에서도 네이티브 의존 없이 동작한다.
+    드라이버로 수집하지 않고 배치 하나씩만 메모리에 둔다. 임시 파일에 쓴 뒤 rename(원자적).
+    쓴 행 수를 돌려준다.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from pyspark.sql import functions as F
+
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
-    df.to_parquet(tmp, index=False)
-    tmp.replace(path)
+    tmp_str = str(tmp)
+
+    def _sink(batches):
+        writer = None
+        n = 0
+        try:
+            for b in batches:
+                if writer is None:
+                    writer = pq.ParquetWriter(tmp_str, b.schema)
+                writer.write_batch(b)
+                n += b.num_rows
+        finally:
+            if writer is not None:
+                writer.close()
+        yield pa.RecordBatch.from_pylist([{"rows": n}], schema=pa.schema([("rows", pa.int64())]))
+
+    try:
+        ordered = df.orderBy(*KEY_COLS).coalesce(1)
+        total = ordered.mapInArrow(_sink, "rows long").agg(F.sum("rows")).first()[0] or 0
+        if total == 0:  # 배치가 없으면 writer도 없다 - 스키마만 가진 빈 parquet
+            to_pandas_long(df.limit(0)).to_parquet(tmp, index=False)
+        tmp.replace(path)
+        return int(total)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def run(args: argparse.Namespace) -> int:
+    from pyspark.sql import functions as F
+
     t0 = time.perf_counter()
     run_id = args.run or now_kst().strftime("%Y%m%d-%H%M")
     files = partition_files(args.input_root, None if args.full else args.years)
@@ -252,6 +373,7 @@ def run(args: argparse.Namespace) -> int:
         "crowd-panel-rebuild", cores=args.cores, driver_memory=args.driver_memory
     )
     try:
+        spark.conf.set("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
         spark_conf = {
             "master": spark.sparkContext.master,
             "cores": args.cores,
@@ -259,52 +381,63 @@ def run(args: argparse.Namespace) -> int:
             "shuffle_partitions": spark.conf.get("spark.sql.shuffle.partitions"),
             "version": spark.version,
         }
-        new = aggregate_long_spark(spark, files)
+        collected_at = pd.Timestamp(now_kst()).tz_localize(None).isoformat(sep=" ")
+        new = (
+            aggregate_long_spark(spark, files)
+            .withColumn("source", F.lit(SOURCE))
+            .withColumn("collected_at", F.lit(collected_at).cast("timestamp_ntz"))
+            .select(*OUT_COLUMNS)
+        )
+        check_keys(new, "새 집계")
+        new_dates = pd.Series([r["date"] for r in new.select("date").distinct().collect()])
+        meta: dict = {
+            "run": run_id,
+            "input_root": str(args.input_root),
+            "full": bool(args.full),
+            "years": None if args.full else args.years,
+            "input_partitions": len(files),
+            "new_rows": new.count(),
+            "missing_days": missing_days(new_dates),
+            "spark": spark_conf,
+            "driver_collect": False,
+        }
+
+        panel = new
+        if args.base_panel:
+            panel = union_with_base(new, load_base_panel(spark, args.base_panel))
+            meta["base_panel"] = str(args.base_panel)
+        dup_new, dup_final = duplicate_keys(new), duplicate_keys(panel)
+        meta["duplicate_keys"] = {"new": dup_new, "final": dup_final}
+        meta["panel_rows"] = panel.count()
+        if dup_new or dup_final:
+            print(
+                f"[crowd_panel_rebuild] 유일성 키 중복 new={dup_new} final={dup_final} - 저장 안 함",
+                file=sys.stderr,
+            )
+            return EXIT_DUPLICATE_KEY
+
+        exit_code = 0
+        if args.verify_against:
+            verify = verify_against(spark, new, args.verify_against, args.tolerance)
+            meta["verify"] = verify
+            if not verify["passed"]:
+                print(
+                    "[crowd_panel_rebuild] 검증 실패: " + json.dumps(verify, ensure_ascii=False),
+                    file=sys.stderr,
+                )
+                exit_code = EXIT_VERIFY_FAIL
+
+        out_path = args.out_root / f"panel_{run_id}.parquet"
+        written = _write_parquet(panel, out_path)
+        meta["written_rows"] = written
+        if written != meta["panel_rows"]:
+            print(
+                f"[crowd_panel_rebuild] 경고: 쓴 행 수 {written} != panel_rows {meta['panel_rows']}",
+                file=sys.stderr,
+            )
     finally:
         spark.stop()
 
-    check_keys(new, "새 집계")
-    new["source"] = SOURCE
-    new["collected_at"] = pd.Timestamp(now_kst()).tz_localize(None)
-    new = new.reindex(columns=OUT_COLUMNS)
-    meta: dict = {
-        "run": run_id,
-        "input_root": str(args.input_root),
-        "full": bool(args.full),
-        "years": None if args.full else args.years,
-        "input_partitions": len(files),
-        "new_rows": len(new),
-        "missing_days": missing_days(new["date"]),
-        "spark": spark_conf,
-    }
-
-    panel = new
-    if args.base_panel:
-        panel = union_with_base(new, load_base_panel(args.base_panel))
-        meta["base_panel"] = str(args.base_panel)
-    dup_new, dup_final = duplicate_keys(new), duplicate_keys(panel)
-    meta["duplicate_keys"] = {"new": dup_new, "final": dup_final}
-    meta["panel_rows"] = len(panel)
-    if dup_new or dup_final:
-        print(
-            f"[crowd_panel_rebuild] 유일성 키 중복 new={dup_new} final={dup_final} - 저장 안 함",
-            file=sys.stderr,
-        )
-        return EXIT_DUPLICATE_KEY
-
-    exit_code = 0
-    if args.verify_against:
-        verify = verify_against(new, args.verify_against, args.tolerance)
-        meta["verify"] = verify
-        if not verify["passed"]:
-            print(
-                "[crowd_panel_rebuild] 검증 실패: " + json.dumps(verify, ensure_ascii=False),
-                file=sys.stderr,
-            )
-            exit_code = EXIT_VERIFY_FAIL
-
-    out_path = args.out_root / f"panel_{run_id}.parquet"
-    _write_parquet(panel, out_path)
     meta["output"] = str(out_path)
     meta["elapsed_sec"] = round(time.perf_counter() - t0, 2)
     meta["peak_rss_mb"] = _peak_rss_mb()
@@ -312,7 +445,7 @@ def run(args: argparse.Namespace) -> int:
     (args.out_root / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
-    print(f"[crowd_panel_rebuild] 완료 -- {out_path} ({len(panel):,}행)")
+    print(f"[crowd_panel_rebuild] 완료 -- {out_path} ({meta['panel_rows']:,}행)")
     return exit_code
 
 

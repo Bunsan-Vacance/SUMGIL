@@ -16,6 +16,7 @@ from DATA_ENGINE.spark.jobs.crowd_panel_rebuild import (  # noqa: E402
     aggregate_long_spark,
     main,
     partition_files,
+    to_pandas_long,
 )
 from DATA_ENGINE.spark.metrics import compare_frames  # noqa: E402
 from DATA_ENGINE.spark.session import build_spark_session  # noqa: E402
@@ -95,7 +96,7 @@ def test_spark_long_matches_pandas_to_long(spark, tmp_path):
     raw = _write_raw(raw_root, {"20260101": 10, "20260102": 20, "20260103": 30})
 
     expected = to_long(raw)
-    actual = aggregate_long_spark(spark, partition_files(raw_root, [2026]))
+    actual = to_pandas_long(aggregate_long_spark(spark, partition_files(raw_root, [2026])))
 
     # 슬롯 매핑 확인: 00~03시는 24~, 04~05시는 ~06
     assert {"24~", "~06", "08-09", "23-24"} <= set(actual["time_slot"])
@@ -129,7 +130,11 @@ def test_base_panel_union_prefers_new_and_has_no_duplicates(spark, tmp_path):
 
     panel = pd.read_parquet(out_root / "panel_test.parquet")
     assert not panel.duplicated(KEY_COLS).any()
+    assert pd.api.types.is_datetime64_any_dtype(panel["date"])
     assert (panel["date"] == pd.Timestamp("2025-12-31")).sum() == 2  # boarding·alighting
+    base_rows = panel[panel["date"] == pd.Timestamp("2025-12-31")]
+    assert base_rows["collected_at"].isna().all()  # base 행은 수집 시각 없음
+    assert (base_rows["source"] == "base_panel").all()
     assert (panel["passengers"] != -1.0).all()  # 겹친 날짜는 새 집계
 
     expected = to_long(raw)
@@ -166,3 +171,34 @@ def test_missing_days_and_verify_recorded_in_meta(spark, tmp_path):
     meta = json.loads((out_root / "meta.json").read_text(encoding="utf-8"))
     assert meta["verify"]["passed"] is False
     assert meta["verify"]["max_abs_err"] == 5.0
+
+
+def test_long_format_base_panel_is_unioned(spark, tmp_path):
+    raw_root, out_root = tmp_path / "raw", tmp_path / "out"
+    _write_raw(raw_root, {"20260101": 10})
+
+    # 롱 포맷 기존 패널(direction·passengers 컬럼): 2025-12-31 한 쌍 + 겹치는 2026-01-01
+    base = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2025-12-31", "2025-12-31", "2026-01-01"]),
+            "line": "1호선",
+            "station_no": [150, 150, 150],
+            "station_name": "서울역",
+            "direction": ["boarding", "alighting", "boarding"],
+            "passengers": [5.0, 6.0, -1.0],
+            "time_slot": "08-09",
+        }
+    )
+    base_path = tmp_path / "base_long.parquet"
+    base.to_parquet(base_path, index=False)
+
+    assert _cli(raw_root, out_root, "--base-panel", str(base_path)) == 0
+
+    panel = pd.read_parquet(out_root / "panel_test.parquet")
+    assert not panel.duplicated(KEY_COLS).any()
+    old = panel[panel["date"] == pd.Timestamp("2025-12-31")]
+    assert sorted(old["direction"]) == ["alighting", "boarding"]
+    assert sorted(old["passengers"]) == [5.0, 6.0]
+    assert (panel["passengers"] != -1.0).all()  # 겹친 날짜는 새 집계
+    assert list(out_root.glob("panel_test*.parquet")) == [out_root / "panel_test.parquet"]
+    assert not list(out_root.glob(".*tmp"))  # 임시 파일 정리
