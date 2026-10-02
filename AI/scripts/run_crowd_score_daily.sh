@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 예측 판 아카이브 → 일별 채점 → 드리프트 판정 → 리포트를 한 번에 돌린다(systemd 타이머가 호출).
 # 로그 파일은 systemd StandardOutput=append:가 받으므로 여기서 직접 열지 않는다.
+# 관측 지표: 환경변수 SUMGIL_TEXTFILE_DIR가 있으면 종료 시 node-exporter textfile(.prom)을 쓴다(없으면 건너뜀, 배치 결과에 영향 없음).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -11,6 +12,19 @@ else
 fi
 export PYTHONIOENCODING=utf-8 TZ=Asia/Seoul
 
+# 종료 시(성공·실패 모두) 관측 지표 textfile을 쓴다. 실패해도 배치 종료 코드는 바꾸지 않는다.
+T0=$(date +%s)
+STEP_RCS=()
+export_metrics() {
+  local rc=$?
+  local STEP_ARGS=() s
+  for s in ${STEP_RCS[@]+"${STEP_RCS[@]}"}; do STEP_ARGS+=(--step "$s"); done
+  "$PY" -m DATA_ENGINE.observability.export_textfile --job crowd_score_daily --rc "$rc" \
+    --duration "$(( $(date +%s) - T0 ))" ${STEP_ARGS[@]+"${STEP_ARGS[@]}"} \
+    --ok-rc 0 --ok-rc 99 || true
+}
+trap export_metrics EXIT
+
 # run_step <이름> <명령...> — 명령의 종료 코드를 돌려주고 한 줄 요약을 남긴다.
 run_step() {
   local name="$1"
@@ -18,6 +32,7 @@ run_step() {
   local start rc=0
   start=$(date +%s)
   "$@" || rc=$?
+  STEP_RCS+=("${name}=${rc}")
   echo "[score_daily] step=${name} rc=${rc} sec=$(($(date +%s) - start))"
   return "$rc"
 }

@@ -49,6 +49,30 @@ systemctl list-timers crowd-score-daily.timer
 - 로그: `AI/logs/crowd_score_daily.log`(`logs/` 폴더가 없으면 먼저 만든다). 단계마다
   `[score_daily] step=<이름> rc=<코드> sec=<n>` 한 줄이 남는다.
 
+### 관측 지표(textfile)
+
+세 배치 스크립트(`run_crowd_score_daily.sh`, `run_crowd_retrain.sh`, `run_crowd_shadow_predict.sh`)는 종료 시
+`DATA_ENGINE/observability/export_textfile.py`로 Prometheus node-exporter textfile collector용
+`sumgil_<job>.prom`을 쓴다. 최신값과 timestamp만 담고, 임시 파일에 쓴 뒤 rename한다(원자적).
+`.service`의 `Environment=SUMGIL_TEXTFILE_DIR=...`가 출력 디렉터리를 정한다. 환경변수가 없으면
+"textfile dir 미설정 - 건너뜀"만 출력하고, 쓰기에 실패해도 경고만 남길 뿐 배치 종료 코드는 바꾸지 않는다.
+
+```bash
+sudo mkdir -p /var/lib/node_exporter/textfile && sudo chown ubuntu:ubuntu /var/lib/node_exporter/textfile
+```
+
+node-exporter는 `--collector.textfile.directory=/var/lib/node_exporter/textfile`로 이 디렉터리를 읽게 한다.
+
+| 지표(gauge) | 라벨 | 의미 |
+| --- | --- | --- |
+| `sumgil_job_last_run_timestamp_seconds` | `job` | 마지막 실행 종료 시각(epoch 초) |
+| `sumgil_job_last_success_timestamp_seconds` | `job` | 마지막 성공 시각. rc 0·99를 성공으로 본다. 실패 실행은 기존 파일의 이전 값을 보존하고, 이전 값이 없으면 지표를 쓰지 않는다 |
+| `sumgil_job_last_duration_seconds` | `job` | 마지막 실행 소요 시간(초) |
+| `sumgil_job_last_rc` | `job` | 마지막 실행 종료 코드 |
+| `sumgil_job_step_last_rc` | `job`, `step` | 단계별 종료 코드(`run_step`·후보별 예측) |
+
+job 이름은 `crowd_score_daily`, `crowd_retrain`, `crowd_shadow_predict`다.
+
 ## 수동 실행
 
 ```bash

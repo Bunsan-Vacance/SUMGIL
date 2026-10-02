@@ -1,0 +1,41 @@
+# uid는 대시보드 JSON이 참조하므로 바꾸지 않는다(서버 제안서에도 그대로 옮긴다).
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+
+  # ops API(app/ops). 로컬은 호스트에서 uvicorn --port 8000, 서버는 클러스터 내부 주소(+/ai).
+  - name: AI Ops API
+    uid: infinity-ai
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    editable: false
+    jsonData:
+      auth_method: none
+      allowedHosts:
+        - http://host.docker.internal:8000
+    # Infinity 3.x는 기본 URL을 jsonData.global_queries가 아니라 url 필드로 받는다.
+    url: http://host.docker.internal:8000
+
+  # 서버 전용 예시(로컬 스택에는 DB가 없다). 읽기 전용 계정만 쓰고 비밀번호는 Secret으로 주입한다.
+  # - name: SUMGIL PostgreSQL (read-only)
+  #   uid: pg-ro
+  #   type: grafana-postgresql-datasource
+  #   access: proxy
+  #   url: postgres.<namespace>.svc:5432
+  #   user: grafana_ro
+  #   editable: false
+  #   jsonData:
+  #     database: sumgil
+  #     sslmode: disable
+  #     postgresVersion: 1600
+  #   secureJsonData:
+  #     password: ${GF_PG_RO_PASSWORD}

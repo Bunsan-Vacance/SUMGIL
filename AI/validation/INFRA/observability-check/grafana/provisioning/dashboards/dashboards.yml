@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: sumgil-ops
+    folder: SUMGIL 운영
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

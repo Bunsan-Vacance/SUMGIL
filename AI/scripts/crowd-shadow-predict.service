@@ -17,6 +17,7 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=<REPO_ROOT>/AI
 EnvironmentFile=<REPO_ROOT>/AI/.env
+Environment=SUMGIL_TEXTFILE_DIR=/var/lib/node_exporter/textfile
 ExecStart=/bin/bash <REPO_ROOT>/AI/scripts/run_crowd_shadow_predict.sh
 TimeoutStartSec=1800
 StandardOutput=append:<REPO_ROOT>/AI/logs/crowd_shadow_predict.log
