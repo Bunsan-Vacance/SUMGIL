@@ -76,6 +76,8 @@ def get_data_quality_outliers(
     date: Annotated[str | None, Query(description="YYYY-MM-DD, 생략하면 최신 파티션")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> list[dict]:
+    if date is not None and not date.strip():
+        date = None  # Grafana textbox 변수가 비면 ?date= 로 온다 -> 최신 파티션
     try:
         return service.data_quality_outliers(date, limit)
     except service.InvalidDateError as exc:

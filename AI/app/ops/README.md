@@ -19,10 +19,10 @@ FE/BE 계약이 아니라 운영자용이라 `SERVING_CONTRACT.md`에는 넣지 
 | `GET /ops/spark-runs?limit=50` | `data/CROWD/processed/auto/**/meta.json`, `data/CROWD/interim/spark_exp/**/meta.json` | `job, run, generated_at, elapsed_sec, peak_rss_mb, rows, input_partitions, verify_passed, verify_max_abs_err, cores, driver_memory, path` — `generated_at` 내림차순 |
 | `GET /ops/data-quality?days=30` | `monitoring/data_quality/dt=*/part.json` | `date, day_type, rows, stations, expected_stations, missing_station_count, nan_ratio, zero_ratio, zero_ratio_baseline, slot_js, schema_ok, collect_lag_days, outlier_count, max_abs_line_z, alert_count, alerts, synthetic` — 날짜 오름차순. `missing_station_count`는 `missing_stations[]` 길이, `max_abs_line_z`는 `line_totals[].z` 절댓값 최대, `alerts`는 쉼표로 이은 문자열 |
 | `GET /ops/data-quality/lines?days=30` | 위 `line_totals[]` | `date, line, total, baseline_mean, baseline_std, z, z_adjusted` — 날짜·노선 오름차순, `z_adjusted`는 없으면 null |
-| `GET /ops/data-quality/outliers?date=YYYY-MM-DD&limit=50` | 위 `outliers_top[]` | `date, station_no, station_name, line, time_slot, direction, value, baseline_mean, baseline_std, z` — z 절댓값 내림차순, `date` 생략 시 최신 파티션, 형식 오류는 422 |
+| `GET /ops/data-quality/outliers?date=YYYY-MM-DD&limit=50` | 위 `outliers_top[]` | `date, station_no, station_name, line, time_slot, direction, value, baseline_mean, baseline_std, z` — z 절댓값 내림차순, `date` 생략 시 최신 파티션, 형식 오류는 422, 빈 값(`?date=`)·공백은 생략으로 취급 |
 | `GET /ops/data-quality/features?days=8` | `monitoring/data_quality/features/dt=*/part.json`의 `features[]` | `date, feature, psi, ks, ks_p, level` — 날짜 오름차순 |
-| `GET /ops/data-quality/targets?days=8` | 위 `targets` | `date, target, kind, q5, q25, q50, q75, q95` — `kind`는 `baseline`/`recent`, target x kind 한 행 |
-| `GET /ops/data-quality/availability?days=8` | 위 `availability_ratio` | `date, full, d1_only, d7_only, no_lag` |
+| `GET /ops/data-quality/targets?days=8` | 위 `targets` | `date, target, kind, q5, q25, q50, q75, q95` — 소스 키는 `"5"…"95"`(생산자) 또는 `q5…q95` 모두 받는다,  `kind`는 `baseline`/`recent`, target x kind 한 행 |
+| `GET /ops/data-quality/availability?days=8` | 위 `availability_ratio` | `date, full, d1_only, d7_only, no_lag, baseline_full, baseline_d1_only, baseline_d7_only, baseline_no_lag` — 생산자의 중첩 `{baseline, recent}`면 `full…no_lag`는 `recent`, `baseline_*`는 `baseline` 값. 구형 평평한 입력이면 `baseline_*`는 null |
 
 - `days`는 오늘 기준이 아니라 **채점 파티션이 있는 최근 N개 날짜**다(채점이 늦어도 빈 화면이 되지 않는다).
 - `source`가 형식에 맞지 않으면 422(`champion` 또는 `shadow:<영숫자·_.->`).

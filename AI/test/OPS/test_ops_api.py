@@ -479,7 +479,9 @@ def test_data_quality_availability(dq) -> None:
     assert [r["date"] for r in rows] == ["2026-09-30", "2026-10-01"]
     assert rows[0] == {
         "date": "2026-09-30", "full": 0.7, "d1_only": 0.2, "d7_only": 0.05, "no_lag": 0.05,
-    }  # fmt: skip
+        "baseline_full": None, "baseline_d1_only": None,
+        "baseline_d7_only": None, "baseline_no_lag": None,
+    }  # fmt: skip  # 구형 평평한 입력: baseline_*는 null
 
 
 @pytest.mark.parametrize(
@@ -523,3 +525,49 @@ def test_data_quality_dir_override(tmp_path: Path) -> None:
         assert len(client.get("/ops/data-quality").json()) == 1
     finally:
         service.set_paths_for_test(None)
+
+
+def _producer_feat_doc(day: str) -> dict:
+    """생산자(input_drift.py) 형태: 분위수 키 "5"…"95", 중첩 availability_ratio."""
+    q = {"5": 1.0, "25": 11.0, "50": 21.0, "75": 31.0, "95": 51.0}
+    return {
+        "date": day,
+        "features": [],
+        "targets": {"boarding": {"baseline": q, "recent": {**q, "95": 61.0}, "shifted": False}},
+        "availability_ratio": {
+            "baseline": {"full": 0.6, "d1_only": 0.2, "d7_only": 0.1, "no_lag": 0.1},
+            "recent": {"full": 0.5, "d1_only": 0.3, "d7_only": 0.1, "no_lag": 0.1},
+        },
+    }
+
+
+@pytest.fixture
+def dq_producer(paths: service.OpsPaths) -> service.OpsPaths:
+    root = paths.monitoring_dir / "data_quality"
+    _write(root / "features" / "dt=2026-10-01" / "part.json", _producer_feat_doc("2026-10-01"))
+    return paths
+
+
+def test_targets_accepts_producer_quantile_keys(dq_producer) -> None:
+    rows = client.get("/ops/data-quality/targets").json()
+    assert [r["kind"] for r in rows] == ["baseline", "recent"]
+    assert (rows[0]["q5"], rows[0]["q50"], rows[0]["q95"]) == (1.0, 21.0, 51.0)
+    assert rows[1]["q95"] == 61.0
+
+
+def test_availability_nested_producer_shape(dq_producer) -> None:
+    rows = client.get("/ops/data-quality/availability").json()
+    assert rows == [
+        {
+            "date": "2026-10-01", "full": 0.5, "d1_only": 0.3, "d7_only": 0.1, "no_lag": 0.1,
+            "baseline_full": 0.6, "baseline_d1_only": 0.2,
+            "baseline_d7_only": 0.1, "baseline_no_lag": 0.1,
+        }
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize("date", ["", "%20", "   "])
+def test_outliers_blank_date_means_latest(dq, date: str) -> None:
+    res = client.get(f"/ops/data-quality/outliers?date={date}")
+    assert res.status_code == 200
+    assert res.json() == client.get("/ops/data-quality/outliers").json()

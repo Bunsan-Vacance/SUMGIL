@@ -141,3 +141,7 @@ class DataQualityAvailabilityRow(BaseModel):
     d1_only: float | None = None
     d7_only: float | None = None
     no_lag: float | None = None
+    baseline_full: float | None = None
+    baseline_d1_only: float | None = None
+    baseline_d7_only: float | None = None
+    baseline_no_lag: float | None = None

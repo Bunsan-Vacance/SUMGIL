@@ -546,7 +546,10 @@ def data_quality_targets(days: int) -> list[dict]:
                             "date": day,
                             "target": str(target),
                             "kind": kind,
-                            **{k: _num(q.get(k)) for k in ("q5", "q25", "q50", "q75", "q95")},
+                            **{
+                                f"q{p}": _num(q[p] if p in q else q.get(f"q{p}"))
+                                for p in ("5", "25", "50", "75", "95")
+                            },
                         }
                     )
         return rows
@@ -562,7 +565,19 @@ def data_quality_availability(days: int) -> list[dict]:
             if not isinstance(a, dict):
                 continue
             keys = ("full", "d1_only", "d7_only", "no_lag")
-            rows.append({"date": day, **{k: _num(a.get(k)) for k in keys}})
+            # 생산자는 {"baseline": {...}, "recent": {...}} 중첩, 구형은 평평한 키
+            nested = isinstance(a.get("recent"), dict) or isinstance(a.get("baseline"), dict)
+            recent = a.get("recent") if nested else a
+            base = a.get("baseline") if nested else None
+            recent = recent if isinstance(recent, dict) else {}
+            base = base if isinstance(base, dict) else {}
+            rows.append(
+                {
+                    "date": day,
+                    **{k: _num(recent.get(k)) for k in keys},
+                    **{f"baseline_{k}": _num(base.get(k)) for k in keys},
+                }
+            )
         return rows
 
     return _cached(("data_quality_availability", days), build)
