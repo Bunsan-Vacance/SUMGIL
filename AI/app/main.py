@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.BIKE.router import router as bike_router
 from app.core.config import get_settings
 from app.CROWD.router import router as crowd_router
+from app.ops.router import router as ops_router
 from app.ROUTE.router import router as route_router
 from app.TIME.router import router as time_router
 from app.TIME.router import snapshot_age_sec
@@ -27,6 +28,7 @@ app.include_router(crowd_router)
 app.include_router(bike_router)
 app.include_router(route_router)
 app.include_router(time_router)
+app.include_router(ops_router)
 
 
 @app.get("/health")
