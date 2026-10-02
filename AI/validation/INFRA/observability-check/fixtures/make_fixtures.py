@@ -152,6 +152,208 @@ def make_monitoring(root: Path, today: date) -> list[Path]:
     return written
 
 
+# ── 데이터 품질 사이드카 (보드 ⑥, S15P21A104-341 D5) ──
+DQ_DAYS = 30
+FEATURE_DAYS = 8
+DQ_EXPECTED_STATIONS = 625
+DQ_LINES = ("1호선", "2호선", "3호선", "4호선", "5호선", "6호선", "7호선")
+DQ_OUTLIER_OFFSET = 4  # 오늘로부터 며칠 전: 이상치 17건·DQ4
+DQ_MISSING_OFFSET = 12  # 결손 역 3개·DQ1
+DQ_SCHEMA_OFFSET = 7  # schema_ok false·DQ6
+DQ_ADJUSTED_OFFSETS = (1, 2)  # z_adjusted를 싣는 날(--level-adjust 흉내)
+FEATURE_NAMES = (
+    "game_count",
+    "festival_count",
+    "festival_short_count",
+    "festival_long_count",
+    "festival_min_duration_days",
+    "lag1d_boarding_resid",
+    "lag1d_alighting_resid",
+    "lagsd_boarding_resid",
+    "lagsd_alighting_resid",
+    "lag7d_boarding_resid",
+    "lag7d_alighting_resid",
+    "temp_c",
+)
+FEATURE_CRIT_OFFSET = 3  # PSI crit 2개(TD1:*)인 날
+OUTLIER_STATIONS = (
+    (222, "강남", "2호선"),
+    (239, "잠실", "2호선"),
+    (150, "서울역", "1호선"),
+    (426, "고속터미널", "3호선"),
+    (320, "사당", "4호선"),
+    (544, "여의도", "5호선"),
+    (633, "공덕", "6호선"),
+    (727, "강남구청", "7호선"),
+)
+
+
+def _dq_line_totals(idx: int, offset: int) -> list[dict]:
+    """호선 총량 z에 추세를 준다: 2호선은 서서히 음(-)으로, 5호선은 양(+)으로 밀린다."""
+    items = []
+    for k, line in enumerate(DQ_LINES):
+        mean = 1_500_000 - k * 140_000
+        std = mean * 0.03
+        z = math.sin((idx + k * 2) / 5) * 0.9
+        if line == "2호선":
+            z -= idx / DQ_DAYS * 3.4
+        if line == "5호선":
+            z += idx / DQ_DAYS * 2.6
+        item = {
+            "line": line,
+            "total": round(mean + z * std),
+            "baseline_mean": mean,
+            "baseline_std": round(std),
+            "z": round(z, 2),
+        }
+        if offset in DQ_ADJUSTED_OFFSETS:
+            item["z_adjusted"] = round(z * 0.45, 2)
+        items.append(item)
+    return items
+
+
+def _dq_outliers(n: int) -> list[dict]:
+    out = []
+    for i in range(n):
+        no, name, line = OUTLIER_STATIONS[i % len(OUTLIER_STATIONS)]
+        mean = 18_000 - i * 700
+        std = 1_200
+        z = (5.8 - i * 0.16) * (1 if i % 4 else -1)
+        out.append(
+            {
+                "station_no": no + (i // len(OUTLIER_STATIONS)),
+                "station_name": name,
+                "line": line,
+                "time_slot": f"{7 + i % 4:02d}-{8 + i % 4:02d}",
+                "direction": "boarding" if i % 2 == 0 else "alighting",
+                "value": round(mean + z * std),
+                "baseline_mean": mean,
+                "baseline_std": std,
+                "z": round(z, 2),
+            }
+        )
+    return out
+
+
+def _quantiles(scale: float) -> dict:
+    """`input_drift.quantiles()`의 실제 키는 "5","25",...이다. ops service는 `q5` 키를 읽으므로 둘 다 싣는다."""
+    vals = {
+        "5": 0.0,
+        "25": 40.0 * scale,
+        "50": 110.0 * scale,
+        "75": 260.0 * scale,
+        "95": 640.0 * scale,
+    }
+    return {**vals, **{f"q{k}": v for k, v in vals.items()}}
+
+
+def _dq_day_doc(i: int, day: date, offset: int) -> dict:
+    weekend = day.weekday() >= 5
+    missing = [1234, 2345, 3456] if offset == DQ_MISSING_OFFSET else []
+    alerts = ["DQ1"] if missing else []
+    outlier_n = 17 if offset == DQ_OUTLIER_OFFSET else (i * 3) % 5
+    if offset == DQ_OUTLIER_OFFSET:
+        alerts.append("DQ4")
+    schema_ok = offset != DQ_SCHEMA_OFFSET
+    if not schema_ok:
+        alerts.append("DQ6")
+    day_type = "일요일" if day.weekday() == 6 else ("토요일" if weekend else "평일")
+    return {
+        "date": day.isoformat(),
+        "baseline_version": "synthetic@3987000",
+        "day_type": day_type,
+        "rows": (7_600 if weekend else 10_900) - len(missing) * 20 + (i * 13) % 90,
+        "stations": DQ_EXPECTED_STATIONS - len(missing),
+        "expected_stations": DQ_EXPECTED_STATIONS,
+        "missing_stations": missing,
+        "nan_ratio": 0.002 if i % 9 == 0 else 0.0,
+        "zero_ratio": round(0.028 + 0.004 * math.sin(i / 3), 4),
+        "zero_ratio_baseline": 0.028,
+        "line_totals": _dq_line_totals(i, offset),
+        "slot_js": round(0.012 + 0.006 * abs(math.sin(i / 4)) + (0.05 if offset == 10 else 0), 4),
+        "schema_ok": schema_ok,
+        "collect_lag_days": 4 if offset == 15 else 1,
+        "outlier_count": outlier_n,
+        "outliers_top": _dq_outliers(min(outlier_n, 50)),
+        "alerts": alerts,
+        "generated_at": iso(day + timedelta(days=1), 10),
+        "synthetic": True,
+    }
+
+
+def _feature_day_doc(i: int, day: date, offset: int) -> dict:
+    crit_day = offset == FEATURE_CRIT_OFFSET
+    feats = []
+    for k, name in enumerate(FEATURE_NAMES):
+        psi = round(0.02 + 0.012 * k + 0.004 * math.sin(i + k), 4)
+        if k == 3:
+            psi = round(0.12 + 0.01 * i, 4)  # 노랑대
+        if crit_day and name.startswith("lag1d_"):
+            psi = round(0.31 + 0.02 * k, 4)  # TD1 crit 2개
+        level = "crit" if psi >= 0.25 else ("warn" if psi >= 0.1 else "ok")
+        feats.append(
+            {
+                "name": name,
+                "psi": psi,
+                "ks": round(psi * 0.9, 4),
+                "ks_p": 0.0004 if level == "crit" else round(0.2 + 0.05 * k, 4),
+                "level": level,
+                "n_train": 3_987_000,
+                "n_recent": 280_000,
+            }
+        )
+    no_lag = round(0.04 + 0.01 * i, 4)
+    recent = {"full": round(0.77 - no_lag, 4), "d1_only": 0.18, "d7_only": 0.05, "no_lag": no_lag}
+    return {
+        "date": day.isoformat(),
+        "window": [(day - timedelta(days=27)).isoformat(), day.isoformat()],
+        "window_days": 28,
+        "feature_set": "synthetic_feature_set",
+        "features": feats,
+        "targets": {
+            "boarding": {
+                "baseline": _quantiles(1.0),
+                "recent": _quantiles(1.0 + 0.012 * i),
+                "shifted": False,
+            },
+            "alighting": {
+                "baseline": _quantiles(0.95),
+                "recent": _quantiles(0.95 + 0.01 * i),
+                "shifted": False,
+            },
+        },
+        # input_drift는 {"baseline": {...}, "recent": {...}} 중첩으로 쓴다. ops service는 최상위 키를
+        # 읽으므로 recent 값을 최상위에도 싣는다(키 불일치 확인 전까지 보드가 비지 않게).
+        "availability_ratio": {
+            "baseline": {"full": 0.7, "d1_only": 0.2, "d7_only": 0.05, "no_lag": 0.05},
+            "recent": recent,
+            **recent,
+        },
+        "alerts": [f"TD1:{f['name']}" for f in feats if f["level"] == "crit"],
+        "generated_at": iso(day + timedelta(days=1), 10),
+        "synthetic": True,
+    }
+
+
+def make_data_quality(root: Path, today: date) -> list[Path]:
+    """`monitoring/data_quality/dt=*/part.json`(설계 3절)과 `features/dt=*/part.json`을 쓴다."""
+    base = root / "monitoring" / "data_quality"
+    written: list[Path] = []
+    for i in range(DQ_DAYS):
+        offset = DQ_DAYS - i
+        day = today - timedelta(days=offset)
+        p = base / f"dt={day}" / "part.json"
+        write_json(p, _dq_day_doc(i, day, offset))
+        written.append(p)
+    for i in range(FEATURE_DAYS):
+        offset = FEATURE_DAYS - i
+        day = today - timedelta(days=offset)
+        p = base / "features" / f"dt={day}" / "part.json"
+        write_json(p, _feature_day_doc(i, day, offset))
+        written.append(p)
+    return written
+
+
 def make_gates(models_root: Path, today: date) -> list[Path]:
     def gate(accept: bool, decided: date, point: float, reasons: list[str]) -> dict:
         vs = {"point": point, "ci_low": round(point - 1.4, 2), "ci_high": round(point + 1.4, 2)}
@@ -263,11 +465,20 @@ def main() -> int:
         type=Path,
         default=AI_ROOT / "models" / "CROWD" / "_experiments" / "auto",
     )
+    ap.add_argument(
+        "--skip-data-quality",
+        action="store_true",
+        help="monitoring/data_quality 합성 생성을 건너뛴다(실데이터 사이드카가 이미 있을 때)",
+    )
     ap.add_argument("--textfile-dir", type=Path, default=HERE.parent / "textfile")
     args = ap.parse_args()
 
     today = date.today()
     files = make_monitoring(args.root, today)
+    if args.skip_data_quality:
+        print("데이터 품질 합성 생성 건너뜀(--skip-data-quality)")
+    else:
+        files += make_data_quality(args.root, today)
     files += make_gates(args.models_root, today)
     files += make_spark(args.root, today)
     files += make_textfiles(args.textfile_dir)
