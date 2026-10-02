@@ -3,7 +3,7 @@
 #
 # 전제(2026-10-02 확인): 서버 AI 사본 /home/ubuntu/Soomgil-INFRA-ai-data-monitoring/AI,
 #   .venv에 pyspark 4.2.0·pandas 3.0.5·psutil, Java 21, raw 17일(dt=2026-09-15~10-01, 하루 약 6.4만 행),
-#   recent_long 185,386행, 고정 패널 2024-2025 3,987,000행, 여유 메모리 약 12GB.
+#   recent_long 185,386행, 고정 패널 2024-2025 와이드 3,987,000행(롱으로 펼치면 7,974,000행), 여유 메모리 약 12GB.
 # 쓰는 곳은 data/CROWD/interim/spark_exp/panel_check/ 하나뿐(격리 경로). 운영 파일은 읽기만 한다.
 #
 # 실행(로컬에서, 이 저장소 AI/ 기준):
