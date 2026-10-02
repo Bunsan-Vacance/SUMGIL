@@ -1,0 +1,50 @@
+# 로컬 전용 Grafana 검증 스택 (S15P21A104-341 W1-4). 서버 배포용이 아니다.
+# 서버 제안서(Infra/k8s/ops/)로 옮길 값은 README.md "서버로 옮길 때 바꾸는 값" 표 참고.
+name: sumgil-observability-check
+
+services:
+  grafana:
+    image: grafana/grafana:11.6.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource
+      # 로컬 전용 비밀번호다. 서버는 Secret으로 주입하고 이 값을 쓰지 않는다.
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # 서버 설정 미러(Ingress 서브패스 /grafana). 로컬은 루트 경로라 꺼 둔다.
+      # GF_SERVER_ROOT_URL: http://localhost:3000/grafana/
+      # GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    extra_hosts:
+      # Docker Desktop(Windows/Mac)은 기본 제공, Linux 엔진은 이 줄이 필요하다.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - node-exporter
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    command:
+      - --collector.textfile.directory=/textfile
+    volumes:
+      - ./textfile:/textfile:ro
+
+volumes:
+  grafana-data:
+  prometheus-data:

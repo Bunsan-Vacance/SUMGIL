@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: node
+    # textfile 지표가 자체 라벨 job="crowd_*"를 갖는다. 기본값(false)이면 스크레이프의 job=node와
+    # 충돌해 exported_job으로 밀려나므로, 지표의 job 라벨을 그대로 쓰도록 true로 둔다(서버도 동일).
+    honor_labels: true
+    static_configs:
+      - targets: ["node-exporter:9100"]
