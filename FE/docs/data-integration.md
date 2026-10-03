@@ -16,6 +16,7 @@
 | 구간 전환·대여소 ID               | 선택 `transitionType`과 명시 `rentalId`를 보존하고 기존 TRANSFER 응답과 호환                                                                                                                                                                        | `features/route/types.ts`, `api/routeMapper.ts`, `features/map/routeMapMarkers.ts` |
 | 따릉이 대여소 데이터·지도 마커    | 백엔드 nearby 응답 또는 정적 JSON, CustomOverlay                                                                                                                                                                                                    | `api/repositories.ts`, `features/map/bikeStations.ts`                              |
 | 실시간 열차 도착·잔여 경로 재탐색 | `VITE_GUIDANCE_MOCK=true` 또는 API 주소 미설정 시 mock, 그 외 백엔드 API                                                                                                                                                                            | `api/guidance.ts`, `features/guidance`, `app/useRoutePlanner.ts`                   |
+| 운영자 뷰(개발 전용)              | BE 읽기 API 2개: 대여소 재고 일괄 조회, 호선×시간대 혼잡도 히트맵. 최종 사용자 화면이 아니다. `VITE_OPS_MOCK=true`면 이 둘만 샘플 사용                                                                                                              | `api/ops.ts`, `api/mock/opsRepositories.ts`, `features/ops/useOpsData.ts`          |
 
 ### 따릉이 대여소 정적 데이터
 
@@ -60,6 +61,53 @@
 
 잔여 경로 재탐색은 `POST /api/routes/replan`에 `step`, `boundaryId`, `destStationId`, `destLat`, `destLng`, `modes`, `priority`, `requestedAt`을 평면 JSON으로 보낸다. 응답 후보는 현재 단계 경계에서 목적지까지 이어지는지 검증한 뒤 안내 세션에만 반영한다. 안내 요청은 닫기·교체 시 취소하며 늦게 도착한 응답은 반영하지 않는다.
 
+## 운영자 뷰 API (계약 확정 전)
+
+운영자 뷰는 개발 전용 진입점(`#ops`)에서만 쓰는 화면이다. BE 측 구현은 GitHub PR #7(`BE/docs/ops-api.md`)에 있고, FE 타입은 이를 따른다. 계약은 확정 전이며 필드명·의미는 BE 회신 뒤 바뀔 수 있다.
+
+- `GET /api/ops/bike-stations/stock-overview?swLat&swLng&neLat&neLng[&arrivalTime][&limit]`
+- `GET /api/ops/congestion/heatmap[?date=YYYY-MM-DD]` (생략하면 서버가 Asia/Seoul 오늘로 처리)
+- 기본 URL은 `VITE_API_BASE_URL`이다. 응답은 `ApiResult`(`success: true`)의 `data`를 풀어 쓰고, `success: false`는 오류로 처리한다.
+- 검증 규칙: `null`과 `0`을 구분한다(재고 `null`은 알 수 없음, `0`은 0대). 잘못된 행·셀·호선만 버리고 바깥 구조가 잘못되면 오류를 던진다. 값은 지어내지 않는다.
+- 조회 상태는 `idle`·`loading`·`ready`·`empty`·`error`이며, 오류를 빈 성공으로 바꾸지 않는다.
+
+### 대여소 재고 응답
+
+| 필드                                  | 타입                              | 의미                                                                                                                         |
+| ------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `arrivalTime`                         | string \| null                    | 예측 기준 도착 시각                                                                                                          |
+| `count`                               | number                            | 응답 대여소 수                                                                                                               |
+| `truncated`                           | boolean                           | `limit`에 걸려 일부만 내려왔는지. true면 화면에 안내한다                                                                     |
+| `generatedAt`                         | string \| null                    | 산출 시각                                                                                                                    |
+| `items[].rentalId`·`name`·`lat`·`lng` | string·string·number·number       | 필수. 하나라도 잘못되면 그 행을 버린다                                                                                       |
+| `items[].rackCount`                   | number \| null                    | 총 거치대 수                                                                                                                 |
+| `items[].availableBikes`              | number \| null                    | 현재 재고. `null`은 알 수 없음, `0`은 0대                                                                                    |
+| `items[].stockStatus`                 | `AVAILABLE`·`STALE`·`UNAVAILABLE` | 재고 상태                                                                                                                    |
+| `items[].stockUpdatedAt`              | string \| null                    | 재고 수집 시각                                                                                                               |
+| `items[].predictedBikes`              | number \| null                    | 도착 시 예측 대수                                                                                                            |
+| `items[].availabilityProbability`     | 0~1 \| null                       | 이용 가능 확률                                                                                                               |
+| `items[].predictionStatus`            | `AVAILABLE`·`UNAVAILABLE`         | 예측 상태                                                                                                                    |
+| `items[].predictionSource`            | `TABLE`·`MODEL`·`MOCK` \| null    | 예측 출처. `TABLE`은 일괄 조회가 AI 모델을 호출하지 않고 저장된 예측 표만 읽었다는 뜻이며, 단건 `/prediction`과 다를 수 있다 |
+| `items[].predictedAt`                 | string \| null                    | 예측 산출 시각                                                                                                               |
+
+마커 색은 현재 재고, 없으면 예측값으로 정한다. 부족(2대 이하)·보통·여유(5대 이상)·알 수 없음(둘 다 `null`)이며 임계는 제안값이다.
+
+### 혼잡도 히트맵 응답
+
+| 필드                                            | 타입           | 의미                                                                    |
+| ----------------------------------------------- | -------------- | ----------------------------------------------------------------------- |
+| `date`                                          | string         | 대상 날짜. 없으면 응답 전체를 오류로 처리                               |
+| `source`                                        | string         | 출처. 기본 `congestion_pred`                                            |
+| `generatedAt`                                   | string \| null | 산출 시각                                                               |
+| `predictorVersions`                             | string[]       | 사용한 예측기 버전                                                      |
+| `slotFrom`·`slotTo`                             | number         | 시간 슬롯 범위. 기본 10부터 47까지(30분 슬롯, 05:00부터 24:00까지 38칸) |
+| `lines[].lineId`·`lineName`                     | string         | 호선. `lineId`가 없으면 그 호선을 버리고, 이름이 없으면 ID로 대신한다   |
+| `lines[].cells[].timeSlot`                      | 0~47 정수      | 시간 슬롯                                                               |
+| `lines[].cells[].level`                         | number \| null | 혼잡도 대푯값. 데이터가 없는 칸은 `null`이며 빈 셀로 그린다             |
+| `lines[].cells[].nLinks`·`nFallback`·`maxLevel` | number \| null | 집계한 구간 수, 그중 대체값 수, 최댓값                                  |
+
+셀 색 구간(0/60/90/120/150)은 임시값이다. 표본이 없는 칸은 채우지 않는다.
+
 ## 백엔드 연결 순서
 
 1. 팀과 요청·응답·오류 형식을 합의한다. 임의 endpoint나 HTTP 응답 타입을 먼저 확정하지 않는다.
@@ -77,6 +125,12 @@
 - 대표 경로 분류(빠름/혼잡), `Route.congestionPrediction`의 0 이상 퍼센트·서버 등급·dataStatus·predictionBasis, D+0~D+3 기준과 세 가지 근거 문구.
 - 결과 없음·조회 실패·지원하지 않는 구간·데이터 지연 처리.
 - 안내 중 제안 경로가 전체 경로인지 현재 위치 이후의 잔여 경로인지.
+- 운영자 뷰(BE PR #7 기준, 계약 확정 전):
+  - 일괄 예측이 AI 모델을 호출하지 않고 표만 읽는 것(`predictionSource=TABLE`).
+  - 히트맵 `level`의 중앙값 규칙, fallback 포함 여부, `segment_truncated` 제외 규칙.
+  - `/api/ops/**` prefix.
+  - 운영자 뷰를 공개 노출하기 전의 접근 제어(인증 또는 내부망). 현재 `app/opsAccess`는 노출 제한일 뿐이다.
+  - 부족(≤2)·여유(≥5) 임계와 히트맵 색 구간(임시).
 
 ## 지도 설정과 정리
 

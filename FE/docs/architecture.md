@@ -11,7 +11,9 @@ src/
     useRoutePlanner.ts      검색 → 상세 → 안내 흐름 연결
     preview.ts              미리보기 초기 상태와 제안 경로
     PreviewToolbar.tsx      제품 화면 밖의 시나리오 조작
+    opsAccess.ts            운영자 뷰 노출 조건(DEV 또는 VITE_OPS_VIEW)
   pages/                    Home, Browse, Search, Results, Detail, Arrival
+                            OpsPage.tsx 운영자 뷰(개발 전용 진입점)
   components/
     Modal.tsx               네이티브 dialog, 공통 닫기 동작
     BottomSheet.tsx         손잡이·본문·고정 푸터 배치
@@ -20,11 +22,13 @@ src/
   features/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
+    ops/                    운영자 뷰: 지도 훅·재고 레이어·히트맵·데이터 상태
   map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅
   api/
     contracts.ts            데이터 접근 인터페이스
     repositories.ts         실제로 사용할 구현 선택
-    mock/                   샘플 장소·경로와 비동기 구현
+    ops.ts                  운영자 뷰 BE 저장소와 응답 검증
+    mock/                   샘플 장소·경로와 비동기 구현, 운영자 뷰 샘플(opsFixtures·opsRepositories)
   lib/kakao/sdk.ts           SDK 타입, 스크립트 1회 로드와 재시도
   styles.css                공통 토큰과 화면 스타일
 ```
@@ -45,24 +49,34 @@ src/
 - 길안내의 지속 위치 추적은 `useGuidance`가 소유하며 `locationProgress`에서 도착 지점과 거리·직접 확인 행동을 판정한다. `App`은 유효한 위치를 지도에 전달할 뿐 별도 위치 watch를 만들지 않는다. 지도는 기존 현재 위치 마커를 갱신하고 드래그 시 추종을 중단한다. 위치 갱신 때문에 지도나 경로 오버레이를 재생성하지 않는다.
 - 따릉이 정적 데이터 변환과 선택용 `Place` 변환은 `features/map/bikeStations`, viewport 내 자전거 아이콘 오버레이는 `features/map/bikeStationMarkers`가 맡는다. 선택 결과는 기존 장소 선택 흐름으로 전달한다.
 - 미리보기 시나리오용 제안 경로는 `app/preview`에서 주입한다. 초기 후보·선택 경로를 기능 훅 내부에 숨겨 넣지 않는다.
+- 운영자 뷰 진입은 `app/opsAccess`가 개발 빌드이거나 `VITE_OPS_VIEW=true`일 때만 연다. `useNavigation`과 `resolveScreen`이 같은 검사를 쓴다. 노출 범위 제한이지 접근 제어가 아니다.
+- `OpsPage`는 앱 셸·`useKakaoMap`·`PreviewToolbar` 없이 렌더링한다. `App`이 `screen === 'ops'`일 때 페이지만 반환한다.
+- `features/ops/useOpsMap`은 별도 지도 훅이며 `lib/kakao` 로더와 `features/map/bikeStationMarkers`만 가져온다. `useKakaoMap`은 바텀시트 높이 관찰과 경로·장소 마커에 묶여 있어 재사용하지 않는다.
+- `features/ops/useOpsData`가 조회 상태를 소유한다. 탭이 보일 때만 주기적으로 다시 조회하고, 지도 bbox가 바뀌면 재조회한다. 요청은 `AbortController`로 취소한다.
+- 운영자 뷰 mock은 `VITE_OPS_MOCK=true`일 때만 쓴다. 실제 API 실패를 mock으로 대체하지 않으며, mock 데이터에는 화면에 "샘플" 배지를 표시한다.
 
 타입을 참조하는 의존성은 `import type`으로 명시한다. 페이지의 `Navigate` 타입 참조는 화면 이동 계약이며, 페이지에서 앱 상태를 직접 조회하는 것은 아니다.
 
 ## 수정 위치 안내
 
-| 변경                    | 시작할 파일                                                            |
-| ----------------------- | ---------------------------------------------------------------------- |
-| 카드 디자인             | `features/route/RouteCard.tsx`, `styles.css`                           |
-| 결과 화면 배치          | `pages/ResultsPage.tsx`                                                |
-| 드래그 높이·키보드 동작 | `components/useBottomSheet.ts`                                         |
-| 필터 취소·적용          | `features/route/FilterDialog.tsx`, `tripReducer.ts`                    |
-| 경로 정렬               | `features/route/selectors.ts`                                          |
-| 서버 경로 연결          | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts` |
-| 길안내 단계             | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`         |
-| 지도 수명·마커·크기     | `features/map/useKakaoMap.ts`                                          |
-| 일반 장소 탐색 화면     | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`             |
-| 지도에서 위치 선택      | `features/map/MapPlacePicker.tsx`                                      |
-| 위치 권한·오류          | `features/map/useCurrentLocation.ts`                                   |
+| 변경                        | 시작할 파일                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| 카드 디자인                 | `features/route/RouteCard.tsx`, `styles.css`                                          |
+| 결과 화면 배치              | `pages/ResultsPage.tsx`                                                               |
+| 드래그 높이·키보드 동작     | `components/useBottomSheet.ts`                                                        |
+| 필터 취소·적용              | `features/route/FilterDialog.tsx`, `tripReducer.ts`                                   |
+| 경로 정렬                   | `features/route/selectors.ts`                                                         |
+| 서버 경로 연결              | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts`                |
+| 길안내 단계                 | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`                        |
+| 지도 수명·마커·크기         | `features/map/useKakaoMap.ts`                                                         |
+| 일반 장소 탐색 화면         | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                            |
+| 지도에서 위치 선택          | `features/map/MapPlacePicker.tsx`                                                     |
+| 위치 권한·오류              | `features/map/useCurrentLocation.ts`                                                  |
+| 운영자 뷰 진입·노출 조건    | `app/opsAccess.ts`, `app/useNavigation.ts`                                            |
+| 운영자 뷰 레이아웃          | `pages/OpsPage.tsx`, `styles.css`(`.ops-*`)                                           |
+| 대여소 재고 마커 색·라벨    | `features/ops/bikeStockLayer.ts`, `features/ops/useOpsData.ts`(`stockLevel`)          |
+| 히트맵 색 구간·셀 상세      | `features/ops/CongestionHeatmap.tsx`, `features/ops/useOpsData.ts`(`heatmapCellTone`) |
+| 운영자 뷰 BE 연결·응답 검증 | `api/ops.ts`, `api/contracts.ts`                                                      |
 
 ## 유지한 단순함
 
@@ -76,3 +90,5 @@ src/
 지도 래퍼는 `z-index: 0`으로 별도 쌓임 맥락을 만든다. SDK 내부의 타일·마커가 앱의 길안내 헤더와 버튼을 덮지 않도록 이 경계를 유지한다. 지도 위치 선택기는 검색 화면의 전체 영역을 직접 관리하고, 일반 지도 훅의 시트 높이 계산을 재사용하지 않는다. 결과 화면에서는 지도 래퍼를 마운트하지 않아 경로 카드를 전체 높이로 스크롤한다.
 
 앱 셸은 `.page-viewport`와 안내 복귀 바를 세로로 배치한다. 복귀 바는 화면 영역 밖에 높이를 확보해 시트의 버튼이나 지도 출처 표시를 덮지 않는다. 현재 지도 훅은 부모 `.page-viewport`와 그 안의 `.bottom-sheet` 또는 `.home-panel` 높이를 관찰해 실제 지도 영역을 맞춘다. 상세와 안내는 지도 key를 `route`로 공유하고 같은 `DetailPage`를 유지하여 안내 시작 시 지도·시트 높이·스크롤이 초기화되지 않는다. 나머지 화면은 `key={screen}`으로 다시 마운트한다. 이 클래스나 DOM 배치를 바꾸면 지도 크기·마커·카카오 출처 표시를 함께 확인한다.
+
+운영자 뷰 지도 래퍼(`.ops-map-wrap`)도 `position: relative; z-index: 0`을 유지해 SDK 내부 요소가 페이지의 다른 영역을 덮지 않게 한다. 이 지도는 바텀시트가 없으므로 시트·`.page-viewport` 높이 관찰 로직의 대상이 아니며, 지도 높이는 `.ops-map`의 CSS가 정한다.
