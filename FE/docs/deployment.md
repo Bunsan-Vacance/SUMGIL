@@ -10,6 +10,7 @@ FE 디렉터리에서 실행한다. 아래 두 환경변수를 배포 셸에 먼
 
 - `VITE_API_BASE_URL`: 배포 사이트의 HTTPS origin. 현재는 `https://j15a104.p.ssafy.io`.
 - `VITE_KAKAO_MAP_APP_KEY`: 카카오 JavaScript 키. SDK 허용 도메인에 배포 origin을 등록한다.
+- `VITE_GRAFANA_BASE_URL`(선택): 운영자 뷰의 Grafana 보드 링크 베이스. 운영은 `https://j15a104.p.ssafy.io/grafana`. 비우면 링크가 비활성으로 빌드된다.
 
 ```sh
 docker build --build-arg VITE_API_BASE_URL --build-arg VITE_KAKAO_MAP_APP_KEY -t sumgil-fe:latest .
