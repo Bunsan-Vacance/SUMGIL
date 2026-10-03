@@ -32,7 +32,8 @@ fe-test:
     - npm run build
 
 # 이미지: develop-FE에서 FE 변경 시 (소유자 브랜치 — deploy-fe가 IMAGE_TAG로 배포). VITE_*는 GitLab 변수에서 주입 (미등록 시 빌드 실패).
-# VITE_AI_BASE_URL(재안내 AI 서버, 운영 /ai)만 선택 — 미등록이면 빈 값으로 넘겨 재안내 폴링이 꺼진 이미지가 된다.
+# VITE_AI_BASE_URL(재안내 AI 서버, 운영 /ai)·VITE_GRAFANA_BASE_URL(운영자 뷰 Grafana 링크, 운영 /grafana)은 선택 —
+# 미등록이면 빈 값으로 넘겨 각각 재안내 폴링이 꺼지고 Grafana 링크가 비활성인 이미지가 된다.
 # 전제: 러너 호스트 docker 접근 + insecure-registry 등록 (⬜ 첫 develop 파이프라인에서 확인).
 fe-image:
   stage: build
@@ -46,7 +47,7 @@ fe-image:
     REGISTRY_HOST: "100.103.156.53:30500"
   script:
     - TAG="${CI_COMMIT_SHORT_SHA:-latest}"
-    - docker build --build-arg "VITE_API_BASE_URL=${VITE_API_BASE_URL}" --build-arg "VITE_KAKAO_MAP_APP_KEY=${VITE_KAKAO_MAP_APP_KEY}" --build-arg "VITE_AI_BASE_URL=${VITE_AI_BASE_URL:-}" -t "${REGISTRY_HOST}/sumgil-fe:${TAG}" FE
+    - docker build --build-arg "VITE_API_BASE_URL=${VITE_API_BASE_URL}" --build-arg "VITE_KAKAO_MAP_APP_KEY=${VITE_KAKAO_MAP_APP_KEY}" --build-arg "VITE_AI_BASE_URL=${VITE_AI_BASE_URL:-}" --build-arg "VITE_GRAFANA_BASE_URL=${VITE_GRAFANA_BASE_URL:-}" -t "${REGISTRY_HOST}/sumgil-fe:${TAG}" FE
     - docker push "${REGISTRY_HOST}/sumgil-fe:${TAG}"
     - docker tag "${REGISTRY_HOST}/sumgil-fe:${TAG}" "${REGISTRY_HOST}/sumgil-fe:latest"
     - docker push "${REGISTRY_HOST}/sumgil-fe:latest"
