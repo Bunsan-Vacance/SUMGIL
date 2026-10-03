@@ -179,3 +179,51 @@ describe('운영자 뷰 조회 상태', () => {
     expect(result.current.stock.status).toBe('ready')
   })
 })
+
+describe('지도 bbox 연동', () => {
+  const boundsA = { sw: { lat: 37.5, lng: 126.9 }, ne: { lat: 37.6, lng: 127.0 } }
+  const boundsB = { sw: { lat: 37.4, lng: 126.8 }, ne: { lat: 37.5, lng: 126.9 } }
+
+  it('bbox가 바뀌면 재고를 다시 조회하고 이전 요청을 중단한다', async () => {
+    const signals: AbortSignal[] = []
+    const first = deferred<OpsResult<BikeStockOverview>>()
+    const fn = vi
+      .fn()
+      .mockImplementationOnce((_request, s: AbortSignal) => {
+        signals.push(s)
+        return first.promise
+      })
+      .mockImplementation((_request, s: AbortSignal) => {
+        signals.push(s)
+        return Promise.resolve(okStock({ ...stock, generatedAt: 'B' }))
+      })
+    const repository = makeRepository({ bikeStockOverview: fn })
+    const { result, rerender } = renderHook(({ bounds }) => useOpsData({ repository, bounds }), {
+      initialProps: { bounds: boundsA },
+    })
+    await act(async () => {})
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(fn.mock.calls[0][0]).toMatchObject({ sw: boundsA.sw, ne: boundsA.ne })
+
+    rerender({ bounds: boundsB })
+    await act(async () => {})
+    expect(fn).toHaveBeenCalledTimes(2)
+    expect(fn.mock.calls[1][0]).toMatchObject({ sw: boundsB.sw, ne: boundsB.ne })
+    expect(signals[0].aborted).toBe(true)
+
+    first.resolve(okStock({ ...stock, generatedAt: 'A' }))
+    await act(async () => {})
+    expect(result.current.stock.data?.generatedAt).toBe('B')
+  })
+
+  it('같은 값의 새 bounds 객체로는 다시 조회하지 않는다', async () => {
+    const repository = makeRepository()
+    const { rerender } = renderHook(({ bounds }) => useOpsData({ repository, bounds }), {
+      initialProps: { bounds: boundsA },
+    })
+    await act(async () => {})
+    rerender({ bounds: { sw: { ...boundsA.sw }, ne: { ...boundsA.ne } } })
+    await act(async () => {})
+    expect(repository.bikeStockOverview).toHaveBeenCalledTimes(1)
+  })
+})
