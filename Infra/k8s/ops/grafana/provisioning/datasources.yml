@@ -1,0 +1,41 @@
+# uid는 대시보드 JSON이 참조하므로 바꾸지 않는다. (S15P21A104-341, 서버값: 클러스터 내부 Service)
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+
+  # ops API(app/ops). 클러스터 내부에서는 /ai 접두사가 없다(/ai 는 공개 Ingress에만 존재).
+  - name: AI Ops API
+    uid: infinity-ai
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    editable: false
+    jsonData:
+      auth_method: none
+      allowedHosts:
+        - http://ai:8000
+    url: http://ai:8000
+
+  # PostgreSQL pg-ro 는 지금 필요 없다 - FE 옵션 C가 보드 1을 대체했다. 필요해지면 풀고
+  # 읽기 전용 계정 비밀번호는 ops-secret 에 추가한다.
+  # - name: SUMGIL PostgreSQL (read-only)
+  #   uid: pg-ro
+  #   type: grafana-postgresql-datasource
+  #   access: proxy
+  #   url: postgres:5432
+  #   user: grafana_ro
+  #   editable: false
+  #   jsonData:
+  #     database: sumgil
+  #     sslmode: disable
+  #     postgresVersion: 1600
+  #   secureJsonData:
+  #     password: ${GF_PG_RO_PASSWORD}

@@ -1,0 +1,710 @@
+{
+  "uid": "sumgil-spark-jobs",
+  "title": "Spark 잡 (보드 ⑤)",
+  "description": "panel_rebuild·replay_kafka의 실행 시간·메모리·검증 결과. 원천: ops API /ops/spark-runs.",
+  "tags": [
+    "sumgil",
+    "synthetic-local"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "기준선",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**pandas→Spark 교차점 2,000만~5,000만 행**(165 벤치), **재집계 잡 합성 270일 1.1배**(340 벤치). 현재 최대 테이블은 1,620만 행이라 교차점 아래다 - 이 보드의 실행 시간이 이 기준선을 크게 벗어나는지 본다. (합성 데이터 로컬판의 수치는 실측이 아니다.)"
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "소요 시간 (job별)",
+      "description": "실행 기록당 한 점. job별 시리즈.",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/spark-runs?limit=50",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "job",
+              "text": "job",
+              "type": "string"
+            },
+            {
+              "selector": "generated_at",
+              "text": "generated_at",
+              "type": "timestamp"
+            },
+            {
+              "selector": "elapsed_sec",
+              "text": "elapsed_sec",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 8,
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "always"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "generated_at",
+                "desc": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "job"
+            ],
+            "naming": {
+              "asLabels": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "최대 RSS (job별)",
+      "description": "replay_kafka meta에는 peak_rss_mb가 없어 panel_rebuild만 나온다.",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/spark-runs?limit=50",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "job",
+              "text": "job",
+              "type": "string"
+            },
+            {
+              "selector": "generated_at",
+              "text": "generated_at",
+              "type": "timestamp"
+            },
+            {
+              "selector": "peak_rss_mb",
+              "text": "peak_rss_mb",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 8,
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "always"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "generated_at",
+                "desc": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "job"
+            ],
+            "naming": {
+              "asLabels": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "xychart",
+      "title": "행 수 vs 소요 시간",
+      "description": "점 하나가 한 실행. 오른쪽 위로 갈수록 큰 입력이다.",
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/spark-runs?limit=50",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "rows",
+              "text": "rows",
+              "type": "number"
+            },
+            {
+              "selector": "elapsed_sec",
+              "text": "elapsed_sec",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "pointSize": {
+              "fixed": 8
+            },
+            "show": "points"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "seriesMapping": "manual",
+        "series": [
+          {
+            "x": "rows",
+            "y": "elapsed_sec"
+          }
+        ],
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "rows",
+                "elapsed_sec"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "최신 검증 통과",
+      "description": "가장 최근 실행 1건(generated_at 기준).",
+      "gridPos": {
+        "x": 12,
+        "y": 11,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/spark-runs?limit=50",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "generated_at",
+              "text": "generated_at",
+              "type": "timestamp"
+            },
+            {
+              "selector": "verify_passed",
+              "text": "verify_passed",
+              "type": "boolean"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "true": {
+                  "text": "통과",
+                  "color": "green",
+                  "index": 0
+                },
+                "false": {
+                  "text": "실패",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^verify_passed$/",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "generated_at",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "최신 최대 절대오차",
+      "description": "가장 최근 실행 1건(generated_at 기준).",
+      "gridPos": {
+        "x": 18,
+        "y": 11,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/spark-runs?limit=50",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "generated_at",
+              "text": "generated_at",
+              "type": "timestamp"
+            },
+            {
+              "selector": "verify_max_abs_err",
+              "text": "verify_max_abs_err",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-06
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^verify_max_abs_err$/",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "generated_at",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "전체 실행 기록",
+      "description": "generated_at 내림차순. verify_passed는 panel_rebuild의 verify 또는 replay의 compare.json match.",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/spark-runs?limit=50",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "job",
+              "text": "job",
+              "type": "string"
+            },
+            {
+              "selector": "run",
+              "text": "run",
+              "type": "string"
+            },
+            {
+              "selector": "generated_at",
+              "text": "generated_at",
+              "type": "timestamp"
+            },
+            {
+              "selector": "elapsed_sec",
+              "text": "elapsed_sec",
+              "type": "number"
+            },
+            {
+              "selector": "peak_rss_mb",
+              "text": "peak_rss_mb",
+              "type": "number"
+            },
+            {
+              "selector": "rows",
+              "text": "rows",
+              "type": "number"
+            },
+            {
+              "selector": "input_partitions",
+              "text": "input_partitions",
+              "type": "number"
+            },
+            {
+              "selector": "verify_passed",
+              "text": "verify_passed",
+              "type": "boolean"
+            },
+            {
+              "selector": "verify_max_abs_err",
+              "text": "verify_max_abs_err",
+              "type": "number"
+            },
+            {
+              "selector": "cores",
+              "text": "cores",
+              "type": "string"
+            },
+            {
+              "selector": "driver_memory",
+              "text": "driver_memory",
+              "type": "string"
+            },
+            {
+              "selector": "path",
+              "text": "path",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "verify_passed"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "text": "수락",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "false": {
+                        "text": "거절",
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "elapsed_sec"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "peak_rss_mb"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "decmbytes"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}

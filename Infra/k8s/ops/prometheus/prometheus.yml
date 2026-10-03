@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: node
+    # textfile 지표가 자체 라벨 job="crowd_*"를 갖는다. 기본값(false)이면 스크레이프의 job=node와
+    # 충돌해 exported_job으로 밀려나므로, 지표의 job 라벨을 그대로 쓰도록 true로 둔다(필수).
+    honor_labels: true
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [prod]
+    relabel_configs:
+      # Service node-exporter 의 엔드포인트만 남긴다.
+      - source_labels: [__meta_kubernetes_service_name]
+        regex: node-exporter
+        action: keep
+      # instance = 노드 이름 (hostNetwork라 IP:9100 대신 읽기 쉬운 이름)
+      - source_labels: [__meta_kubernetes_endpoint_node_name]
+        target_label: instance
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

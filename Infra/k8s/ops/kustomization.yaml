@@ -1,0 +1,37 @@
+# 관측 스택 — Grafana + Prometheus + node-exporter (S15P21A104-341). Infra 소유.
+# 루트 Infra/k8s/kustomization.yaml 에는 아직 넣지 않았다(Infra 리드 판단). 단독 적용: kubectl apply -k Infra/k8s/ops
+# 대시보드 JSON은 정본(AI/validation/INFRA/observability-check)의 복사본 — sync-dashboards.sh 참고.
+# 해시 접미사는 끄고 이름을 고정한다(Deployment가 이름으로 참조).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prod
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sumgil-ops
+resources:
+  - grafana.yaml
+  - prometheus.yaml
+  - node-exporter.yaml
+  - ingress.yaml
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml=prometheus/prometheus.yml
+  - name: grafana-datasources
+    files:
+      - datasources.yml=grafana/provisioning/datasources.yml
+  - name: grafana-dashboard-provider
+    files:
+      - dashboards.yml=grafana/provisioning/dashboards.yml
+  - name: grafana-dashboards
+    files:
+      - grafana/dashboards/data-quality.json
+      - grafana/dashboards/model-quality.json
+      - grafana/dashboards/pipeline-health.json
+      - grafana/dashboards/spark-jobs.json
+secretGenerator:
+  - name: ops-secret
+    envs:
+      - ops-secret.env
+generatorOptions:
+  disableNameSuffixHash: true

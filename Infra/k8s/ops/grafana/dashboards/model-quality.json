@@ -1,0 +1,841 @@
+{
+  "uid": "sumgil-model-quality",
+  "title": "모델 품질 (보드 ②)",
+  "description": "챔피언·shadow 일별 채점(RMSE·개선율)과 재학습 게이트 판정. 원천: ops API.",
+  "tags": [
+    "sumgil",
+    "synthetic-local"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "days",
+        "label": "조회 일수",
+        "type": "custom",
+        "query": "7,14,30",
+        "current": {
+          "text": "30",
+          "value": "30"
+        },
+        "options": [
+          {
+            "text": "7",
+            "value": "7",
+            "selected": false
+          },
+          {
+            "text": "14",
+            "value": "14",
+            "selected": false
+          },
+          {
+            "text": "30",
+            "value": "30",
+            "selected": true
+          }
+        ]
+      },
+      {
+        "name": "shadow",
+        "label": "shadow 후보",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ]
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "읽는 법",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "합성 데이터 로컬 검증판일 수 있다(태그 synthetic-local). availability별로 시리즈가 나뉜다(full·d1_only·no_lag). RMSE는 낮을수록, 개선율은 높을수록 좋다. 결측일은 선이 끊긴다."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "승차 RMSE - 모델 vs 룩업",
+      "description": "lookup(기준선)보다 model이 낮아야 한다.",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/score-daily?days=${days}",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp"
+            },
+            {
+              "selector": "availability",
+              "text": "availability",
+              "type": "string"
+            },
+            {
+              "selector": "boarding_rmse_model",
+              "text": "boarding_rmse_model",
+              "type": "number"
+            },
+            {
+              "selector": "boarding_rmse_lookup",
+              "text": "boarding_rmse_lookup",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "availability"
+            ],
+            "naming": {
+              "asLabels": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "하차 RMSE - 모델 vs 룩업",
+      "description": "lookup(기준선)보다 model이 낮아야 한다.",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/score-daily?days=${days}",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp"
+            },
+            {
+              "selector": "availability",
+              "text": "availability",
+              "type": "string"
+            },
+            {
+              "selector": "alighting_rmse_model",
+              "text": "alighting_rmse_model",
+              "type": "number"
+            },
+            {
+              "selector": "alighting_rmse_lookup",
+              "text": "alighting_rmse_lookup",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "availability"
+            ],
+            "naming": {
+              "asLabels": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "승차 RMSE 개선율",
+      "description": "(lookup-model)/lookup. 0 아래면 룩업보다 나쁘다.",
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/score-daily?days=${days}",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp"
+            },
+            {
+              "selector": "availability",
+              "text": "availability",
+              "type": "string"
+            },
+            {
+              "selector": "boarding_improvement_rmse_pct",
+              "text": "boarding_improvement_rmse_pct",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "availability"
+            ],
+            "naming": {
+              "asLabels": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "하차 RMSE 개선율",
+      "description": "(lookup-model)/lookup. 0 아래면 룩업보다 나쁘다.",
+      "gridPos": {
+        "x": 12,
+        "y": 11,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/score-daily?days=${days}",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp"
+            },
+            {
+              "selector": "availability",
+              "text": "availability",
+              "type": "string"
+            },
+            {
+              "selector": "alighting_improvement_rmse_pct",
+              "text": "alighting_improvement_rmse_pct",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "availability"
+            ],
+            "naming": {
+              "asLabels": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "결측 역 수(최신)",
+      "description": "가장 최근 채점일의 missing_station_count.",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 6,
+        "h": 5
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/score-daily?days=${days}",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp"
+            },
+            {
+              "selector": "missing_station_count",
+              "text": "missing_station_count",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^missing_station_count$/",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "date",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "게이트 판정(최근 10건)",
+      "description": "accepted 셀: 수락=초록, 거절=빨강. *_pp는 %p, ci_low>0이어야 수락.",
+      "gridPos": {
+        "x": 6,
+        "y": 19,
+        "w": 18,
+        "h": 5
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/gate?limit=10",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "run",
+              "text": "run",
+              "type": "string"
+            },
+            {
+              "selector": "mode",
+              "text": "mode",
+              "type": "string"
+            },
+            {
+              "selector": "window_start",
+              "text": "window_start",
+              "type": "string"
+            },
+            {
+              "selector": "window_end",
+              "text": "window_end",
+              "type": "string"
+            },
+            {
+              "selector": "decided_at",
+              "text": "decided_at",
+              "type": "timestamp"
+            },
+            {
+              "selector": "accepted",
+              "text": "accepted",
+              "type": "boolean"
+            },
+            {
+              "selector": "boarding_point_pp",
+              "text": "boarding_point_pp",
+              "type": "number"
+            },
+            {
+              "selector": "boarding_ci_low_pp",
+              "text": "boarding_ci_low_pp",
+              "type": "number"
+            },
+            {
+              "selector": "alighting_point_pp",
+              "text": "alighting_point_pp",
+              "type": "number"
+            },
+            {
+              "selector": "alighting_ci_low_pp",
+              "text": "alighting_ci_low_pp",
+              "type": "number"
+            },
+            {
+              "selector": "registered_shadow",
+              "text": "registered_shadow",
+              "type": "boolean"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "accepted"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "text": "수락",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "false": {
+                        "text": "거절",
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 8,
+      "type": "text",
+      "title": "shadow 후보 비교",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "변수 **shadow**(상단)에 후보 폴더명을 넣으면 아래 표가 채워진다(예: auto_synth-r2). /ops/gate의 run 앞에 auto_를 붙인 값이다. **비어 있으면 아래 표는 422 오류가 정상**이다(API가 shadow: 빈 이름을 거부한다)."
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "shadow 채점 - ${shadow}",
+      "description": "source=shadow:<artifact> 의 최근 28개 채점일.",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "infinity-ai"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "infinity-ai"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/ops/score-daily?days=28&source=shadow:${shadow}",
+          "url_options": {
+            "method": "GET",
+            "data": ""
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "date",
+              "text": "date",
+              "type": "timestamp"
+            },
+            {
+              "selector": "source",
+              "text": "source",
+              "type": "string"
+            },
+            {
+              "selector": "availability",
+              "text": "availability",
+              "type": "string"
+            },
+            {
+              "selector": "predictor_version",
+              "text": "predictor_version",
+              "type": "string"
+            },
+            {
+              "selector": "rows_scored",
+              "text": "rows_scored",
+              "type": "number"
+            },
+            {
+              "selector": "missing_station_count",
+              "text": "missing_station_count",
+              "type": "number"
+            },
+            {
+              "selector": "boarding_rmse_model",
+              "text": "boarding_rmse_model",
+              "type": "number"
+            },
+            {
+              "selector": "boarding_rmse_lookup",
+              "text": "boarding_rmse_lookup",
+              "type": "number"
+            },
+            {
+              "selector": "boarding_improvement_rmse_pct",
+              "text": "boarding_improvement_rmse_pct",
+              "type": "number"
+            },
+            {
+              "selector": "alighting_rmse_model",
+              "text": "alighting_rmse_model",
+              "type": "number"
+            },
+            {
+              "selector": "alighting_rmse_lookup",
+              "text": "alighting_rmse_lookup",
+              "type": "number"
+            },
+            {
+              "selector": "alighting_improvement_rmse_pct",
+              "text": "alighting_improvement_rmse_pct",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}
