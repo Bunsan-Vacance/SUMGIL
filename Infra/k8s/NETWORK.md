@@ -16,6 +16,9 @@
 | `be:8080` | 8080 | ClusterIP | Ingress `/api/` | 헬스 `/actuator/health` |
 | `fe:80` | 80 | ClusterIP | Ingress `/` | 헬스 `/healthz` |
 | `ai:8000` | 8000 | ClusterIP | (호출원 없음 — 뼈대) | 헬스 `/health`. Ingress 없음 |
+| `grafana:3000` | 3000 | ClusterIP | Ingress `/grafana` | 헬스 `/grafana/api/health`. 로그인 필수 |
+| `prometheus:9090` | 9090 | ClusterIP | Grafana | 헬스 `/-/healthy`. Ingress 없음 |
+| `node-exporter:9100` | 9100 | headless | Prometheus | DaemonSet hostNetwork(노드 IP:9100). Ingress 없음 |
 
 Service 없음 (headless Deployment): `be-collector`, `be-consumer` — 외부에서 붙을 포트 자체가 없음.
 
@@ -25,6 +28,7 @@ Service 없음 (headless Deployment): `be-collector`, `be-consumer` — 외부�
 |---|---|---|
 | `j15a104.p.ssafy.io:80/443` | ingress-nginx → 위 표 | TLS는 `sumgil-tls` 종결, 내부는 HTTP |
 | `<node>:30500` | registry:5000 | NodePort 고정. 노드 docker push용 (VPN 경유) |
+| `j15a104.p.ssafy.io/grafana` | ingress-nginx -> grafana:3000 | 서브패스 직접 처리(rewrite 없음). `ops/ingress.yaml` |
 
 ingress-nginx LB NodePort(443→3xxxx·80→3xxxx)는 자동 할당이라 표에 고정하지 않는다. 실측치는 `mgmt/ops/port-inventory.md`.
 
