@@ -1,0 +1,24 @@
+# Grafana 라우팅 (S15P21A104-341). Infra 소유 — 경로 /grafana 만 선언한다.
+# Grafana가 GF_SERVER_SERVE_FROM_SUB_PATH 로 서브패스를 직접 처리하므로 rewrite 없음.
+# 단일 호스트 고정. 클러스터 내부는 HTTP (상위 TLS 종결).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - j15a104.p.ssafy.io
+      secretName: sumgil-tls
+  rules:
+    - host: j15a104.p.ssafy.io
+      http:
+        paths:
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
