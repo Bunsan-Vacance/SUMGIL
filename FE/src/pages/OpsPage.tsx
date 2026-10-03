@@ -1,11 +1,23 @@
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { opsRepository } from '../api/repositories'
 import { buildGrafanaLinks } from '../features/ops/grafanaLinks'
-import { stockLevel, useOpsData, type OpsDatasetState } from '../features/ops/useOpsData'
+import CongestionHeatmapView from '../features/ops/CongestionHeatmap'
+import {
+  destroyStockOverlays,
+  syncStockOverlays,
+  type StockOverlay,
+} from '../features/ops/bikeStockLayer'
+import { useOpsMap, type OpsBounds } from '../features/ops/useOpsMap'
+import {
+  SEOUL_BOUNDS,
+  stockLevel,
+  useOpsData,
+  type OpsDatasetState,
+} from '../features/ops/useOpsData'
 import type { BikeStockOverview, CongestionHeatmap } from '../features/ops/types'
 
-// 운영자 뷰 데스크톱 셸. 개발 전용 진입점(#ops)에서만 렌더링된다.
-// 지도·히트맵 그리드 전 단계라 데이터 계층의 상태를 텍스트 목록으로만 보여준다.
+// 운영자 뷰 데스크톱 화면. 개발 전용 진입점(#ops)에서만 렌더링된다.
+// 좌측은 지도 bbox 기준 대여소 재고 레이어, 우측은 호선×시간대 혼잡도 히트맵이다.
 
 function SampleBadge({ source }: { source?: string }) {
   return source === 'mock' ? <span className="ops-badge">샘플</span> : null
@@ -43,9 +55,7 @@ function StockSummary({ data }: { data: BikeStockOverview }) {
   }
   return (
     <ul className="ops-list">
-      <li>
-        대여소 {data.items.length}곳{data.truncated ? ' (일부만 표시됨)' : ''}
-      </li>
+      <li>대여소 {data.items.length}곳</li>
       <li>
         부족 {levels.low} · 보통 {levels.mid} · 여유 {levels.good} · 알 수 없음 {levels.unknown}
       </li>
@@ -57,30 +67,38 @@ function StockSummary({ data }: { data: BikeStockOverview }) {
   )
 }
 
-function HeatmapSummary({ data }: { data: CongestionHeatmap }) {
-  const cells = data.lines.reduce((sum, line) => sum + line.cells.length, 0)
-  const empty = data.lines.reduce(
-    (sum, line) => sum + line.cells.filter((cell) => cell.level === null).length,
-    0,
-  )
+function HeatmapMeta({ data }: { data: CongestionHeatmap }) {
   return (
-    <ul className="ops-list">
-      <li>
-        {data.date} · 출처 {data.source} · 슬롯 {data.slotFrom}~{data.slotTo}
-      </li>
-      <li>
-        호선 {data.lines.length}개 · 셀 {cells}개 (값 없음 {empty}개)
-      </li>
-      <li>산출 시각 {data.generatedAt ?? '알 수 없음'}</li>
-    </ul>
+    <p className="ops-meta">
+      {data.date} · 출처 {data.source} · 산출 시각 {data.generatedAt ?? '알 수 없음'}
+    </p>
   )
 }
 
 export default function OpsPage() {
   const links = useMemo(() => buildGrafanaLinks(), [])
+  const mapRef = useRef<HTMLDivElement>(null)
+  const [bounds, setBounds] = useState<OpsBounds>(SEOUL_BOUNDS)
+  const { handle, mapError } = useOpsMap(mapRef, setBounds)
   const { stock, heatmap, refreshStock, refreshHeatmap } = useOpsData({
     repository: opsRepository,
+    bounds,
   })
+
+  // 조회 중(loading)에는 data가 없어 이전 마커를 그대로 둔다. 새 데이터가 오면 차이만 반영한다.
+  const overlays = useRef<Map<string, StockOverlay>>(new Map())
+  const items = stock.data?.items
+  useEffect(() => {
+    if (!handle || !items) return
+    overlays.current = syncStockOverlays(handle.maps, handle.map, items, overlays.current)
+  }, [handle, items])
+  useEffect(() => {
+    const current = overlays
+    return () => {
+      destroyStockOverlays(current.current)
+      current.current = new Map()
+    }
+  }, [handle])
   return (
     <main className="ops-page">
       <p className="ops-narrow-notice">데스크톱에서 확인해 주세요</p>
@@ -101,30 +119,50 @@ export default function OpsPage() {
             )}
           </nav>
         </header>
-        <section className="ops-section" aria-labelledby="ops-bike-title">
-          <h2 id="ops-bike-title">
-            대여소 재고·예측
-            <SampleBadge source={stock.source} />
-          </h2>
-          <DatasetBody state={stock}>{(data) => <StockSummary data={data} />}</DatasetBody>
-          {stock.status === 'error' && (
-            <button type="button" onClick={refreshStock}>
-              다시 시도
-            </button>
-          )}
-        </section>
-        <section className="ops-section" aria-labelledby="ops-heatmap-title">
-          <h2 id="ops-heatmap-title">
-            호선×시간대 혼잡도
-            <SampleBadge source={heatmap.source} />
-          </h2>
-          <DatasetBody state={heatmap}>{(data) => <HeatmapSummary data={data} />}</DatasetBody>
-          {heatmap.status === 'error' && (
-            <button type="button" onClick={refreshHeatmap}>
-              다시 시도
-            </button>
-          )}
-        </section>
+        <div className="ops-grid">
+          <section className="ops-section" aria-labelledby="ops-bike-title">
+            <h2 id="ops-bike-title">
+              대여소 재고·예측
+              <SampleBadge source={stock.source} />
+            </h2>
+            {mapError && (
+              <p role="alert" className="ops-error">
+                {mapError}
+              </p>
+            )}
+            <div className="ops-map-wrap">
+              <div ref={mapRef} className="ops-map" aria-label="대여소 재고 지도" />
+            </div>
+            {stock.data?.truncated && (
+              <p className="ops-notice">지도 범위 안 대여소가 많아 일부만 표시됩니다</p>
+            )}
+            <DatasetBody state={stock}>{(data) => <StockSummary data={data} />}</DatasetBody>
+            {stock.status === 'error' && (
+              <button type="button" onClick={refreshStock}>
+                다시 시도
+              </button>
+            )}
+          </section>
+          <section className="ops-section" aria-labelledby="ops-heatmap-title">
+            <h2 id="ops-heatmap-title">
+              호선×시간대 혼잡도
+              <SampleBadge source={heatmap.source} />
+            </h2>
+            <DatasetBody state={heatmap}>
+              {(data) => (
+                <>
+                  <HeatmapMeta data={data} />
+                  <CongestionHeatmapView data={data} />
+                </>
+              )}
+            </DatasetBody>
+            {heatmap.status === 'error' && (
+              <button type="button" onClick={refreshHeatmap}>
+                다시 시도
+              </button>
+            )}
+          </section>
+        </div>
       </div>
     </main>
   )
