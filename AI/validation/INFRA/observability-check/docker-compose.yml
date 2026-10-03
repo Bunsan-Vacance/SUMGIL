@@ -8,7 +8,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource
+      # 버전 고정 필수: Infinity 4.x는 Grafana 11.6.11 이상을 요구해 11.6.0에서 패널 화면이 깨진다(쿼리 API는 정상이라 놓치기 쉽다). Grafana를 올릴 때 함께 올린다.
+      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource 3.11.1
       # 로컬 전용 비밀번호다. 서버는 Secret으로 주입하고 이 값을 쓰지 않는다.
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
