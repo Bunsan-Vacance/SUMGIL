@@ -303,8 +303,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "이상치 수(최신일)",
-      "description": "역x슬롯x방향 |z|>3 건수(DQ4). 색 임계(10·50)는 임시값, 실데이터 분포를 본 뒤 조정.",
+      "title": "이상치 수(최신일 · 참고)",
+      "description": "|z|>3 셀 건수(참고용). 경보 판정은 셀 비율 기준(warn 5%·crit 20%)이며 판정 결과는 하단 '스키마·수집 상태' 표의 alerts(DQ4)에 나온다.",
       "gridPos": {
         "x": 16,
         "y": 0,
@@ -352,16 +352,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "blue",
                 "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 10
-              },
-              {
-                "color": "red",
-                "value": 50
               }
             ]
           },
@@ -551,7 +543,29 @@
           },
           "decimals": 2
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byType",
+              "options": "string"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "transparent"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "showHeader": true,
@@ -1469,7 +1483,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**지표 정의 요약**  \nDQ1 행·역 수(결손 역) / DQ2 NaN·0 비율(기준 대비 2배) / DQ3 호선 총량 z / DQ4 역x슬롯x방향 이상치 |z|>3 / DQ5 슬롯 분포 JS 거리 / DQ6 스키마 시그니처 / DQ7 수집 지연. 학습 분포: TD1 피처 PSI, TD2 KS, TD3 타깃 분위수, TD5 lag 가용성.  \n**임계는 권장값**(이상치 |z|>3, PSI 0.1 노랑/0.25 빨강)이다. 실데이터 결과를 본 뒤 최적화할 예정이다.  \n합성 픽스처의 숫자는 해석에 쓰지 않는다(태그 `synthetic-local`)."
+        "content": "**지표 정의 요약**  \nDQ1 행·역 수(결손 역) / DQ2 NaN·0 비율(기준 대비 2배) / DQ3 호선 총량 z / DQ4 역x슬롯x방향 이상치 |z|>3 / DQ5 슬롯 분포 JS 거리 / DQ6 스키마 시그니처 / DQ7 수집 지연. 학습 분포: TD1 피처 PSI, TD2 KS, TD3 타깃 분위수, TD5 lag 가용성.  \n**임계**(2026-10-02 실데이터 17일로 1차 조정): DQ4 이상치 셀 비율 warn 5%·crit 20%(|z|>3 건수 자체는 참고), DQ2 0비율은 기준이 1% 미만이면 하한 1%로 비교, DQ3 호선 총량 |z| 2(warn)·3(crit), DQ5 JS 0.05, DQ7 수집 지연 2일, PSI 0.1·0.25. 공휴일 표가 없으면 명절이 이상치로 보인다. 28일 창에서 2차 조정 예정.  \n합성 픽스처의 숫자는 해석에 쓰지 않는다(태그 `synthetic-local`)."
       }
     }
   ]
