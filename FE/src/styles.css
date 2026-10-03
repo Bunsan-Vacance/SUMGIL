@@ -2472,3 +2472,90 @@ small {
     transition: none !important;
   }
 }
+
+/* 운영자 뷰(개발 전용): 데스크톱 우선, 1024px 이하는 안내 문구만 표시한다. */
+.ops-page {
+  min-height: 100vh;
+  padding: 24px 32px;
+  background: var(--surface-soft);
+  color: #17202a;
+}
+.ops-narrow-notice {
+  display: none;
+  margin: 0;
+  padding: 48px 16px;
+  text-align: center;
+  font-weight: 700;
+}
+.ops-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-bottom: 20px;
+}
+.ops-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+.ops-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ops-links a,
+.ops-link-disabled {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: #fff;
+  font-size: 14px;
+}
+.ops-links a {
+  color: var(--primary-dark);
+  font-weight: 700;
+  text-decoration: none;
+}
+.ops-link-disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.ops-section {
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  background: #fff;
+}
+.ops-section h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+.ops-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff3cd;
+  color: #7a5a00;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ops-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ops-error {
+  color: #b42318;
+}
+@media (max-width: 1024px) {
+  .ops-narrow-notice {
+    display: block;
+  }
+  .ops-body {
+    display: none;
+  }
+}

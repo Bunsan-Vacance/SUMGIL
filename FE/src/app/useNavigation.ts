@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { isOpsViewEnabled } from './opsAccess'
 
 export const screenTitles = {
   home: '숨길 지도 홈',
@@ -8,11 +9,13 @@ export const screenTitles = {
   detail: '선택 경로 상세',
   guide: '길안내',
   arrival: '도착',
+  ops: '운영자 뷰',
 } as const
 export type Screen = keyof typeof screenTitles
 export type Navigate = (screen: Screen) => void
-export function parseScreen(hash: string): Screen {
+export function parseScreen(hash: string, opsEnabled = isOpsViewEnabled()): Screen {
   const candidate = hash.slice(1)
+  if (candidate === 'ops') return opsEnabled ? 'ops' : 'home'
   return Object.hasOwn(screenTitles, candidate) ? (candidate as Screen) : 'home'
 }
 export function useNavigation() {

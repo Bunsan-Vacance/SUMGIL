@@ -51,4 +51,11 @@ describe('브라우저 기록으로 요청한 화면 검증', () => {
   it('안내를 명시적으로 끝낸 뒤 과거 안내 URL로 돌아오면 현재 선택 경로의 상세로 보낸다', () => {
     expect(resolveScreen('guide', loadedTrip, initialGuidance)).toBe('detail')
   })
+  it('운영자 뷰는 활성이면 여행·안내 상태와 무관하게 유지하고 비활성이면 홈으로 보낸다', () => {
+    expect(resolveScreen('ops', previewTrip, initialGuidance, true)).toBe('ops')
+    expect(resolveScreen('ops', loadedTrip, { ...initialGuidance, route: routes[0] }, true)).toBe(
+      'ops',
+    )
+    expect(resolveScreen('ops', loadedTrip, initialGuidance, false)).toBe('home')
+  })
 })
