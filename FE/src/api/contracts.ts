@@ -1,5 +1,12 @@
 import type { Place, Route } from '../features/route/types'
 import type { Mode, Priority } from '../features/route/types'
+import type {
+  BikeStockOverview,
+  BikeStockOverviewRequest,
+  CongestionHeatmap,
+  CongestionHeatmapRequest,
+  OpsResult,
+} from '../features/ops/types'
 
 // Frontend ports, not a finalized backend HTTP/Swagger contract.
 export interface RouteRequest {
@@ -59,4 +66,16 @@ export interface BikeStock {
   stockUpdatedAt: string | null
   status: BikeStockStatus
   rackCount?: number | null
+}
+
+// 운영자 뷰 읽기 API. BE 계약 제안(TO_BE-ops-visualization-01) 기준, 확정 전.
+export interface OpsRepository {
+  bikeStockOverview(
+    request: BikeStockOverviewRequest,
+    signal: AbortSignal,
+  ): Promise<OpsResult<BikeStockOverview>>
+  congestionHeatmap(
+    request: CongestionHeatmapRequest,
+    signal: AbortSignal,
+  ): Promise<OpsResult<CongestionHeatmap>>
 }

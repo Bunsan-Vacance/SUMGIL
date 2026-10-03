@@ -4,6 +4,8 @@ import { bikeStockMockRepository } from './mock/bikeStock'
 import { RepositoryError } from './errors'
 import { mapBackendRoute } from './routeMapper'
 import { createBackendBikePredictionRepository } from './bikePrediction'
+import { createBackendOpsRepository } from './ops'
+import { opsMockRepository } from './mock/opsRepositories'
 import {
   loadKakaoMaps,
   type KakaoMaps,
@@ -15,6 +17,7 @@ import type {
   BikeStock,
   BikeStockStatus,
   NearbyBikeStation,
+  OpsRepository,
   PlaceRepository,
   RouteRepository,
   StationRepository,
@@ -31,6 +34,7 @@ export const isBikePredictionMockEnabled =
   import.meta.env.VITE_BIKE_PREDICTION_MOCK?.trim().toLowerCase() === 'true'
 export const isBikeStockMockEnabled =
   import.meta.env.VITE_BIKE_STOCK_MOCK?.trim().toLowerCase() === 'true'
+export const isOpsMockEnabled = import.meta.env.VITE_OPS_MOCK?.trim().toLowerCase() === 'true'
 
 function validCoordinate(value: string | number, min: number, max: number) {
   if (typeof value === 'string' && !value.trim()) return null
@@ -509,3 +513,9 @@ export const bikePredictionRepository = isBikePredictionMockEnabled
     : null
 export const stationRepository = apiBaseUrl ? createBackendStationRepository(apiBaseUrl) : null
 export const placeRepository = createKakaoPlaceRepository()
+// 운영자 뷰: mock은 VITE_OPS_MOCK=true일 때만 쓴다. 실제 저장소 실패를 mock으로 대체하지 않는다.
+export const opsRepository: OpsRepository | null = isOpsMockEnabled
+  ? opsMockRepository
+  : apiBaseUrl
+    ? createBackendOpsRepository(apiBaseUrl)
+    : null

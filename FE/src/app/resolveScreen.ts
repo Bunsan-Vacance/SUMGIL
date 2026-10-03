@@ -1,8 +1,15 @@
 import type { TripState } from '../features/route/tripReducer'
 import type { GuidanceState } from '../features/guidance/guidanceReducer'
 import type { Screen } from './useNavigation'
+import { isOpsViewEnabled } from './opsAccess'
 
-export function resolveScreen(requested: Screen, trip: TripState, guidance: GuidanceState): Screen {
+export function resolveScreen(
+  requested: Screen,
+  trip: TripState,
+  guidance: GuidanceState,
+  opsEnabled = isOpsViewEnabled(),
+): Screen {
+  if (requested === 'ops') return opsEnabled ? 'ops' : 'home'
   if (requested === 'home' || requested === 'browse' || requested === 'search') return requested
   if (requested === 'guide' || requested === 'arrival') {
     const hasSession =

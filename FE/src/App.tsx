@@ -14,6 +14,7 @@ import ArrivalPage from './pages/ArrivalPage'
 import ActiveGuidanceBar from './features/guidance/ActiveGuidanceBar'
 import Modal from './components/Modal'
 import SplashScreen from './components/SplashScreen'
+import OpsPage from './pages/OpsPage'
 import { isBackendConfigured, isRouteSearchMockEnabled } from './api/repositories'
 import { isGuidanceMockEnabled } from './api/guidance'
 import { remaining } from './features/route/selectors'
@@ -29,6 +30,7 @@ export default function App() {
   useEffect(() => {
     if (!showSplash && screen !== 'search' && screen !== 'browse') title.current?.focus()
   }, [screen, showSplash])
+  if (screen === 'ops') return <OpsPage />
   if (showSplash) return <SplashScreen onComplete={completeSplash} />
 
   return (
