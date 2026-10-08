@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { OpsRepository } from '../../api/contracts'
 import { RepositoryError } from '../../api/errors'
+import { segmentCongestionGradeForLevel } from '../route/segmentCongestion'
+import type { SegmentCongestionGrade } from '../route/types'
 import type {
   BikeStockOverview,
   CongestionHeatmap,
@@ -21,8 +23,11 @@ export type OpsStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error'
 export interface OpsDatasetState<T> {
   status: OpsStatus
   data?: T
+  /** status가 error면 데이터 없이 실패한 것. ready·empty와 함께 있으면 재조회가 실패했지만 이전 data를 유지 중이다. */
   error?: string
   source?: OpsDataSource
+  /** 이전 data를 유지한 채 재조회(bbox·날짜 변경, 수동 새로고침) 중이다. 폴링은 표시하지 않는다. */
+  refreshing?: boolean
 }
 
 const idle = { status: 'idle' } as const
@@ -33,6 +38,8 @@ function errorMessage(error: unknown) {
 
 /**
  * 한 데이터셋의 조회 상태 머신. load는 참조가 안정적이어야 한다(useCallback).
+ * 이전 data가 있으면 재조회 중에도 data·source를 유지하고 refreshing만 켠다(첫 조회만 loading).
+ * 재조회가 실패해도 data를 유지하고 error를 함께 둔다.
  * 탭이 보일 때만 pollMs마다 다시 조회하고, 요청마다 AbortController를 쓰며,
  * 취소·교체된 요청의 늦은 응답은 상태에 반영하지 않는다.
  */
@@ -55,8 +62,14 @@ function useDataset<T>(
       const own = new AbortController()
       controller.current = own
       lastStarted.current = Date.now()
-      // 첫 조회·재시도만 로딩 표시. 폴링 중에는 이전 결과를 그대로 보여준다.
-      if (initial) setState({ status: 'loading' })
+      // 데이터가 없을 때만 전체 로딩. 있으면 유지하고 refreshing만 켠다. 폴링은 아무것도 바꾸지 않는다.
+      if (initial) {
+        setState((prev) =>
+          prev.data === undefined
+            ? { status: 'loading' }
+            : { ...prev, refreshing: true, error: undefined },
+        )
+      }
       load(own.signal).then(
         (result) => {
           if (own.signal.aborted || controller.current !== own) return
@@ -68,7 +81,12 @@ function useDataset<T>(
         },
         (error: unknown) => {
           if (own.signal.aborted || controller.current !== own) return
-          setState({ status: 'error', error: errorMessage(error) })
+          const message = errorMessage(error)
+          setState((prev) =>
+            prev.data === undefined
+              ? { status: 'error', error: message }
+              : { ...prev, refreshing: false, error: message },
+          )
         },
       )
     },
@@ -157,29 +175,30 @@ export function useOpsData({
 
 export type StockLevel = 'low' | 'mid' | 'good' | 'unknown'
 
-/** 부족 ≤2, 여유 ≥5(제안 임계, 확정 전). 현재 재고가 null이면 예측값을 쓰고, 둘 다 null이면 알 수 없음이다. */
+/** 운영자 뷰 전용 재고 구간(확정 규칙). 재고가 이 값 이하면 부족, STOCK_GOOD_MIN 이상이면 여유다. */
+export const STOCK_LOW_MAX = 2
+export const STOCK_GOOD_MIN = 5
+
+/** 현재 재고가 null이면 예측값을 쓰고, 둘 다 null이면 알 수 없음이다. */
 export function stockLevel(
   availableBikes: number | null,
   predictedBikes: number | null,
 ): StockLevel {
   const value = availableBikes ?? predictedBikes
   if (value === null) return 'unknown'
-  if (value <= 2) return 'low'
-  if (value >= 5) return 'good'
+  if (value <= STOCK_LOW_MAX) return 'low'
+  if (value >= STOCK_GOOD_MIN) return 'good'
   return 'mid'
 }
 
-export type HeatmapTone = 'none' | 'tone-1' | 'tone-2' | 'tone-3' | 'tone-4' | 'tone-5'
+/** 'none'은 데이터 없음, 그 외는 사용자 지도와 같은 구간 등급이다. */
+export type HeatmapTone = SegmentCongestionGrade | 'none'
 
 /**
- * 혼잡도 level 구간 버킷. 임계 0/60/90/120/150은 잠정값이며 AI 혼잡 등급표와 맞춰 확정한다.
+ * 혼잡도 level을 사용자 화면과 같은 4단계 등급(40/70/100, `segmentCongestionGradeForLevel`)으로 나눈다.
  * null·비정상 값은 'none'(데이터 없음)이다.
  */
 export function heatmapCellTone(level: number | null): HeatmapTone {
-  if (level === null || !Number.isFinite(level)) return 'none'
-  if (level < 60) return 'tone-1'
-  if (level < 90) return 'tone-2'
-  if (level < 120) return 'tone-3'
-  if (level < 150) return 'tone-4'
-  return 'tone-5'
+  if (level === null) return 'none'
+  return segmentCongestionGradeForLevel(level) ?? 'none'
 }

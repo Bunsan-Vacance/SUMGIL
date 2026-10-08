@@ -10,6 +10,8 @@ import {
 import { useOpsMap, type OpsBounds } from '../features/ops/useOpsMap'
 import {
   SEOUL_BOUNDS,
+  STOCK_GOOD_MIN,
+  STOCK_LOW_MAX,
   stockLevel,
   useOpsData,
   type OpsDatasetState,
@@ -30,18 +32,53 @@ function DatasetBody<T>({
   state: OpsDatasetState<T>
   children: (data: T) => ReactNode
 }) {
-  if (state.status === 'idle' || state.status === 'loading') {
-    return <p role="status">불러오는 중…</p>
+  if (state.data === undefined) {
+    if (state.status === 'idle' || state.status === 'loading') {
+      return <p role="status">불러오는 중…</p>
+    }
+    if (state.status === 'error') {
+      return (
+        <p role="alert" className="ops-error">
+          오류: {state.error}
+        </p>
+      )
+    }
+    return state.status === 'empty' ? <p>데이터 없음</p> : null
   }
-  if (state.status === 'error') {
-    return (
-      <p role="alert" className="ops-error">
-        오류: {state.error}
+  // 이전 데이터가 있으면 재조회 중·재조회 실패에도 내용을 유지하고 알림만 덧붙인다.
+  return (
+    <>
+      <p className="ops-refreshing" aria-live="polite">
+        {state.refreshing ? '갱신 중…' : ''}
       </p>
-    )
-  }
-  if (state.status === 'empty') return <p>데이터 없음</p>
-  return state.data !== undefined ? <>{children(state.data)}</> : null
+      {state.error && (
+        <p role="alert" className="ops-error">
+          갱신 실패: {state.error} (이전 데이터를 표시 중)
+        </p>
+      )}
+      {state.status === 'empty' ? <p>데이터 없음</p> : children(state.data)}
+    </>
+  )
+}
+
+const STOCK_LEGEND = [
+  { level: 'low', label: `부족 ≤${STOCK_LOW_MAX}` },
+  { level: 'mid', label: `보통 ${STOCK_LOW_MAX + 1}~${STOCK_GOOD_MIN - 1}` },
+  { level: 'good', label: `여유 ≥${STOCK_GOOD_MIN}` },
+  { level: 'unknown', label: '알 수 없음' },
+] as const
+
+function StockLegend() {
+  return (
+    <ul className="ops-stock-legend" aria-label="재고 마커 범례">
+      {STOCK_LEGEND.map((item) => (
+        <li key={item.level}>
+          <i className={`ops-stock-${item.level}`} />
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 function StockSummary({ data }: { data: BikeStockOverview }) {
@@ -85,7 +122,8 @@ export default function OpsPage() {
     bounds,
   })
 
-  // 조회 중(loading)에는 data가 없어 이전 마커를 그대로 둔다. 새 데이터가 오면 차이만 반영한다.
+  // 재조회 중에도 이전 data가 유지되므로 마커를 지우지 않는다. 새 데이터가 오면 차이만 반영한다.
+  // 첫 조회 중에는 items가 없어 아무것도 그리지 않는다.
   const overlays = useRef<Map<string, StockOverlay>>(new Map())
   const items = stock.data?.items
   useEffect(() => {
@@ -130,6 +168,7 @@ export default function OpsPage() {
                 {mapError}
               </p>
             )}
+            <StockLegend />
             <div className="ops-map-wrap">
               <div ref={mapRef} className="ops-map" aria-label="대여소 재고 지도" />
             </div>
@@ -137,7 +176,7 @@ export default function OpsPage() {
               <p className="ops-notice">지도 범위 안 대여소가 많아 일부만 표시됩니다</p>
             )}
             <DatasetBody state={stock}>{(data) => <StockSummary data={data} />}</DatasetBody>
-            {stock.status === 'error' && (
+            {stock.error !== undefined && (
               <button type="button" onClick={refreshStock}>
                 다시 시도
               </button>
@@ -156,7 +195,7 @@ export default function OpsPage() {
                 </>
               )}
             </DatasetBody>
-            {heatmap.status === 'error' && (
+            {heatmap.error !== undefined && (
               <button type="button" onClick={refreshHeatmap}>
                 다시 시도
               </button>

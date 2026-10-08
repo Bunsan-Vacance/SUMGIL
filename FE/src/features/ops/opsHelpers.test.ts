@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { heatmapCellTone, stockLevel } from './useOpsData'
+import { STOCK_GOOD_MIN, STOCK_LOW_MAX, heatmapCellTone, stockLevel } from './useOpsData'
 
 describe('stockLevel', () => {
   it('재고 기준으로 부족·보통·여유를 나눈다', () => {
@@ -19,19 +19,30 @@ describe('stockLevel', () => {
   })
 })
 
+describe('재고 임계 상수', () => {
+  it('경계값에서 구간이 갈린다', () => {
+    expect(STOCK_LOW_MAX).toBe(2)
+    expect(STOCK_GOOD_MIN).toBe(5)
+    expect(stockLevel(STOCK_LOW_MAX, null)).toBe('low')
+    expect(stockLevel(STOCK_LOW_MAX + 1, null)).toBe('mid')
+    expect(stockLevel(STOCK_GOOD_MIN - 1, null)).toBe('mid')
+    expect(stockLevel(STOCK_GOOD_MIN, null)).toBe('good')
+  })
+})
+
 describe('heatmapCellTone', () => {
-  it('null은 none이다', () => {
+  it('null·NaN은 데이터 없음이다', () => {
     expect(heatmapCellTone(null)).toBe('none')
     expect(heatmapCellTone(Number.NaN)).toBe('none')
   })
-  it('잠정 임계 60/90/120/150으로 5구간을 나눈다', () => {
-    expect(heatmapCellTone(0)).toBe('tone-1')
-    expect(heatmapCellTone(59.9)).toBe('tone-1')
-    expect(heatmapCellTone(60)).toBe('tone-2')
-    expect(heatmapCellTone(89)).toBe('tone-2')
-    expect(heatmapCellTone(90)).toBe('tone-3')
-    expect(heatmapCellTone(120)).toBe('tone-4')
-    expect(heatmapCellTone(150)).toBe('tone-5')
-    expect(heatmapCellTone(300)).toBe('tone-5')
+  it('사용자 지도와 같은 40/70/100 등급 경계를 쓴다', () => {
+    expect(heatmapCellTone(0)).toBe('RELAXED')
+    expect(heatmapCellTone(39.9)).toBe('RELAXED')
+    expect(heatmapCellTone(40)).toBe('NORMAL')
+    expect(heatmapCellTone(69.9)).toBe('NORMAL')
+    expect(heatmapCellTone(70)).toBe('CONGESTED')
+    expect(heatmapCellTone(99.9)).toBe('CONGESTED')
+    expect(heatmapCellTone(100)).toBe('SATURATED')
+    expect(heatmapCellTone(300)).toBe('SATURATED')
   })
 })

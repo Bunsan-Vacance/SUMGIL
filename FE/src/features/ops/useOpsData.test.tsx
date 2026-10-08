@@ -180,6 +180,70 @@ describe('운영자 뷰 조회 상태', () => {
   })
 })
 
+describe('재조회 중 이전 데이터 유지', () => {
+  it('수동 새로고침 중에는 이전 data를 유지하고 refreshing만 켰다가 끈다', async () => {
+    const repository = makeRepository()
+    const { result } = renderHook(() => useOpsData({ repository }))
+    await act(async () => {})
+    const next = deferred<OpsResult<BikeStockOverview>>()
+    ;(repository.bikeStockOverview as ReturnType<typeof vi.fn>).mockReturnValueOnce(next.promise)
+    act(() => result.current.refreshStock())
+    expect(result.current.stock).toMatchObject({ status: 'ready', refreshing: true, source: 'api' })
+    expect(result.current.stock.data?.items).toHaveLength(1)
+    next.resolve(okStock({ ...stock, generatedAt: 'fresh' }))
+    await act(async () => {})
+    expect(result.current.stock.refreshing).toBeFalsy()
+    expect(result.current.stock.data?.generatedAt).toBe('fresh')
+  })
+
+  it('bbox 변경 재조회에서도 loading으로 되돌아가지 않는다', async () => {
+    const repository = makeRepository()
+    const a = { sw: { lat: 37.5, lng: 126.9 }, ne: { lat: 37.6, lng: 127.0 } }
+    const b = { sw: { lat: 37.4, lng: 126.8 }, ne: { lat: 37.5, lng: 126.9 } }
+    const { result, rerender } = renderHook(({ bounds }) => useOpsData({ repository, bounds }), {
+      initialProps: { bounds: a },
+    })
+    await act(async () => {})
+    ;(repository.bikeStockOverview as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      deferred<OpsResult<BikeStockOverview>>().promise,
+    )
+    rerender({ bounds: b })
+    expect(result.current.stock.status).toBe('ready')
+    expect(result.current.stock.refreshing).toBe(true)
+    expect(result.current.stock.data).toBeDefined()
+  })
+
+  it('재조회가 실패하면 data를 유지하고 error를 함께 둔다', async () => {
+    const repository = makeRepository()
+    const { result } = renderHook(() => useOpsData({ repository }))
+    await act(async () => {})
+    ;(repository.bikeStockOverview as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new RepositoryError('network', '서버에 연결하지 못했어요.'),
+    )
+    await act(async () => result.current.refreshStock())
+    expect(result.current.stock).toMatchObject({
+      status: 'ready',
+      error: '서버에 연결하지 못했어요.',
+      refreshing: false,
+    })
+    expect(result.current.stock.data?.items).toHaveLength(1)
+    // 다음 성공이 오류를 지운다.
+    await act(async () => result.current.refreshStock())
+    expect(result.current.stock.error).toBeUndefined()
+  })
+
+  it('데이터가 없는 첫 조회와 실패 뒤 재시도는 전체 loading이다', async () => {
+    const fail = vi.fn().mockRejectedValue(new RepositoryError('network', '실패'))
+    const repository = makeRepository({ bikeStockOverview: fail })
+    const { result } = renderHook(() => useOpsData({ repository }))
+    expect(result.current.stock).toEqual({ status: 'loading' })
+    await act(async () => {})
+    expect(result.current.stock.status).toBe('error')
+    act(() => result.current.refreshStock())
+    expect(result.current.stock).toEqual({ status: 'loading' })
+  })
+})
+
 describe('지도 bbox 연동', () => {
   const boundsA = { sw: { lat: 37.5, lng: 126.9 }, ne: { lat: 37.6, lng: 127.0 } }
   const boundsB = { sw: { lat: 37.4, lng: 126.8 }, ne: { lat: 37.5, lng: 126.9 } }

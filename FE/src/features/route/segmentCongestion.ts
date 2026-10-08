@@ -11,6 +11,9 @@ export const SEGMENT_CONGESTION_LEVELS = [
   color: string
 }>
 
+/** 등급 경계(%). 여유<40≤보통<70≤혼잡<100≤포화. 등급 판정과 범례 라벨이 같은 값을 쓴다. */
+export const SEGMENT_CONGESTION_THRESHOLDS = [40, 70, 100] as const
+
 const levels = Object.fromEntries(
   SEGMENT_CONGESTION_LEVELS.map((level) => [level.grade, level]),
 ) as Record<SegmentCongestionGrade, (typeof SEGMENT_CONGESTION_LEVELS)[number]>
@@ -21,9 +24,10 @@ export function segmentCongestionPresentation(grade?: SegmentCongestionGrade) {
 
 export function segmentCongestionGradeForLevel(level?: number): SegmentCongestionGrade | undefined {
   if (level === undefined || !Number.isFinite(level)) return undefined
-  if (level < 40) return 'RELAXED'
-  if (level < 70) return 'NORMAL'
-  if (level < 100) return 'CONGESTED'
+  const [normalMin, congestedMin, saturatedMin] = SEGMENT_CONGESTION_THRESHOLDS
+  if (level < normalMin) return 'RELAXED'
+  if (level < congestedMin) return 'NORMAL'
+  if (level < saturatedMin) return 'CONGESTED'
   return 'SATURATED'
 }
 

@@ -2589,11 +2589,6 @@ small {
   --ops-mid: #f79009;
   --ops-good: #12a15a;
   --ops-unknown: #98a2b3;
-  --ops-tone-1: #e6f4ee;
-  --ops-tone-2: #b9e3d0;
-  --ops-tone-3: #ffe08a;
-  --ops-tone-4: #fb9b5a;
-  --ops-tone-5: #d92d20;
 }
 .bike-station-marker.ops-stock-low {
   border-color: var(--ops-low);
@@ -2649,21 +2644,8 @@ small {
   outline: 2px solid var(--primary-dark);
   outline-offset: 1px;
 }
-.ops-heat-tone-1 {
-  background: var(--ops-tone-1);
-}
-.ops-heat-tone-2 {
-  background: var(--ops-tone-2);
-}
-.ops-heat-tone-3 {
-  background: var(--ops-tone-3);
-}
-.ops-heat-tone-4 {
-  background: var(--ops-tone-4);
-}
-.ops-heat-tone-5 {
-  background: var(--ops-tone-5);
-}
+/* 히트맵 셀·범례 색은 사용자 지도 등급 색(SEGMENT_CONGESTION_LEVELS)을 인라인으로 쓴다.
+   같은 값이 같은 색으로 보이게 하려고 옅은 변형 없이 원색을 그대로 쓴다. 값 없음만 여기서 정의한다. */
 .ops-heat-none {
   background: repeating-linear-gradient(135deg, #eef0f2, #eef0f2 3px, #dfe3e7 3px, #dfe3e7 6px);
 }
@@ -2685,6 +2667,44 @@ small {
   width: 14px;
   height: 14px;
   border-radius: 3px;
+}
+.ops-stock-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.ops-stock-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ops-stock-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.ops-stock-legend .ops-stock-low {
+  background: var(--ops-low);
+}
+.ops-stock-legend .ops-stock-mid {
+  background: var(--ops-mid);
+}
+.ops-stock-legend .ops-stock-good {
+  background: var(--ops-good);
+}
+.ops-stock-legend .ops-stock-unknown {
+  background: #e4e7ec;
+  border: 2px solid var(--ops-unknown);
+}
+.ops-refreshing {
+  min-height: 1.4em;
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .ops-heat-detail {
   min-height: 1.5em;
