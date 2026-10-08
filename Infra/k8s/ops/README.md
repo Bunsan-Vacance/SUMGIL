@@ -35,6 +35,7 @@ local-path PVC가 있어 개발자가 아닌 Infra 리드가 apply한다. 대시
 정본은 `AI/validation/INFRA/observability-check/grafana/dashboards/` 하나다. 이 디렉터리의
 `grafana/dashboards/`는 **복사본**이다(kustomize는 루트 밖 파일을 읽지 못한다). 정본을 고친 뒤
 `./sync-dashboards.sh`를 실행하고 같이 커밋한다. 복사본을 직접 고치지 않는다.
+`AI/test/OPS/test_dashboard_consistency.py`가 복사본이 정본과 다르면 실패한다(CI).
 
 ## 적용 순서
 
