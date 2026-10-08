@@ -36,6 +36,8 @@ mr-guard:
         - "AI/requirements.txt"
         - "AI/requirements-dev.txt"
         - "AI/requirements-ci.txt"
+        - "AI/validation/INFRA/observability-check/**/*"
+        - "Infra/k8s/ops/**/*"
         - ".gitlab-ci.yml"
       when: never
     - changes: &be_trigger_paths

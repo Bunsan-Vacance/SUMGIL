@@ -17,6 +17,7 @@
 - 데이터소스 UID: `prometheus`, `infinity-ai`(서버용 `pg-ro`는 `datasources.yml`에 주석 예시만).
 - 대시보드(폴더 `SUMGIL 운영`): `sumgil-model-quality`(보드 ②, 9패널), `sumgil-pipeline-health`(보드 ③, 8패널),
   `sumgil-spark-jobs`(보드 ⑤, 7패널), `sumgil-data-quality`(보드 ⑥, 12패널). 텍스트 패널 포함 개수다.
+- 정본·`Infra/k8s/ops/` 복사본·버전 핀 정합은 `AI/test/OPS/test_dashboard_consistency.py`가 검사한다. 복사본이 어긋나면 이 테스트가 실패한다.
 
 ## 실행 순서
 
