@@ -81,7 +81,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "합성 데이터 로컬 검증판일 수 있다(태그 synthetic-local). availability별로 시리즈가 나뉜다(full·d1_only·no_lag). RMSE는 낮을수록, 개선율은 높을수록 좋다. 결측일은 선이 끊긴다."
+        "content": "로컬 검증 스택에서는 픽스처(합성, synthetic 표시)나 실데이터 사본 중 무엇을 띄웠는지에 따라 수치의 의미가 다르다. 합성 픽스처면 해석하지 않는다. availability별로 시리즈가 나뉜다(full·d1_only·no_lag). RMSE는 낮을수록, 개선율은 높을수록 좋다. 결측일은 선이 끊긴다."
       }
     },
     {

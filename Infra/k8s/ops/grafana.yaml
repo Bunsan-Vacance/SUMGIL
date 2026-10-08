@@ -49,8 +49,9 @@ spec:
           ports:
             - containerPort: 3000
           env:
+            # 버전 고정 필수: Infinity 4.x는 Grafana 11.6.11 이상을 요구해 11.6.0에서 패널 화면이 깨진다(쿼리 API는 정상이라 놓치기 쉽다). Grafana를 올릴 때 함께 올린다.
             - name: GF_INSTALL_PLUGINS
-              value: yesoreyeram-infinity-datasource
+              value: yesoreyeram-infinity-datasource 3.11.1
             - name: GF_SERVER_ROOT_URL
               value: https://j15a104.p.ssafy.io/grafana/
             - name: GF_SERVER_SERVE_FROM_SUB_PATH
