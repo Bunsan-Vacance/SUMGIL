@@ -29,6 +29,7 @@ Prettier는 코드와 문서 형식만 검사한다. ESLint나 React 전용 린�
 - 화면/레이아웃 변경: 관련 흐름을 모바일 크기에서 브라우저로 확인. 확대된 시트의 내부 스크롤과 고정 버튼을 함께 본다.
 - 지도·위치 변경: `localhost:5173`에서 타일, 출발/도착 마커, 시트 크기 변경, 화면 전환과 현재 위치 권한 거부·허용 흐름을 확인한다. 위치 권한은 사용자가 허용한 경우에만 자동 추적을 시작한다.
 - 운영자 뷰 변경: `localhost:5173/#ops`를 데스크톱 폭에서 열어 지도 타일·마커 색·히트맵·1024px 이하 안내를 확인하고, `VITE_OPS_MOCK=true`로 샘플 배지를 본다.
+- 운영자 뷰 색 구간: 히트맵은 사용자 지도와 같은 4단계 등급(`segmentCongestion.ts`의 40/70/100, 여유·보통·혼잡·포화)이고, 재고 마커는 부족 ≤2·여유 ≥5(`useOpsData`의 `STOCK_LOW_MAX`·`STOCK_GOOD_MIN`, 운영자 뷰 전용 확정 규칙)다. 값을 바꾸면 범례와 테스트가 상수를 따라간다.
 - 낮은 영향의 단순 문구/스타일 변경에 구현을 그대로 따라 쓰는 테스트를 추가하지 않는다.
 
 현재 경로 계약 focused 검증은 FE 디렉터리에서 다음으로 실행한다.
@@ -36,6 +37,22 @@ Prettier는 코드와 문서 형식만 검사한다. ESLint나 React 전용 린�
 ```powershell
 node node_modules/vitest/vitest.mjs run src/api/routeMapper.test.ts src/features/route/LegList.test.tsx src/features/map/routeMapMarkers.test.ts src/features/map/KakaoMap.test.tsx src/api/mock/repositories.test.ts
 ```
+
+## 운영자 뷰에서 Grafana 링크 켜기
+
+링크 베이스(`VITE_GRAFANA_BASE_URL`)가 비어 있으면 운영자 뷰의 Grafana 링크는 "Grafana 주소 미설정"으로 비활성이다. 로컬에서 링크를 확인하려면 다음 순서로 한다.
+
+1. 로컬 관측 스택을 띄운다. `AI/validation/INFRA/observability-check`(develop-AI 브랜치)의 안내를 따르며, Grafana가 `http://localhost:3000`에서 열린다.
+2. 그 주소를 지정해 dev 서버를 시작한다. 로컬 Grafana에는 `/grafana` 서브패스가 없다.
+
+```powershell
+$env:VITE_GRAFANA_BASE_URL = "http://localhost:3000"
+npm run dev
+```
+
+- 서버(EC2) 빌드는 `https://j15a104.p.ssafy.io/grafana`를 쓴다([deployment.md](./deployment.md)).
+- `VITE_*` 값은 dev 서버를 시작할 때 읽으므로, 값을 바꾸면 서버를 재시작해야 한다.
+- 매번 지정하기 번거로우면 `FE/.env.local`에 `VITE_GRAFANA_BASE_URL=http://localhost:3000`을 적는다. `.env.local`은 커밋하지 않는다.
 
 ## 수동 회귀 확인
 

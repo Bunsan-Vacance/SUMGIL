@@ -52,31 +52,31 @@ src/
 - 운영자 뷰 진입은 `app/opsAccess`가 개발 빌드이거나 `VITE_OPS_VIEW=true`일 때만 연다. `useNavigation`과 `resolveScreen`이 같은 검사를 쓴다. 노출 범위 제한이지 접근 제어가 아니다.
 - `OpsPage`는 앱 셸·`useKakaoMap`·`PreviewToolbar` 없이 렌더링한다. `App`이 `screen === 'ops'`일 때 페이지만 반환한다.
 - `features/ops/useOpsMap`은 별도 지도 훅이며 `lib/kakao` 로더와 `features/map/bikeStationMarkers`만 가져온다. `useKakaoMap`은 바텀시트 높이 관찰과 경로·장소 마커에 묶여 있어 재사용하지 않는다.
-- `features/ops/useOpsData`가 조회 상태를 소유한다. 탭이 보일 때만 주기적으로 다시 조회하고, 지도 bbox가 바뀌면 재조회한다. 요청은 `AbortController`로 취소한다.
+- `features/ops/useOpsData`가 조회 상태를 소유한다. 탭이 보일 때만 주기적으로 다시 조회하고, 지도 bbox가 바뀌면 재조회한다. 요청은 `AbortController`로 취소한다. 이전 data가 있으면 재조회 중에도 data를 유지하고 `refreshing`만 켜며, 재조회 실패 시에도 data를 유지한 채 `error`를 함께 둔다(data가 없을 때만 전체 로딩·오류 화면).
 - 운영자 뷰 mock은 `VITE_OPS_MOCK=true`일 때만 쓴다. 실제 API 실패를 mock으로 대체하지 않으며, mock 데이터에는 화면에 "샘플" 배지를 표시한다.
 
 타입을 참조하는 의존성은 `import type`으로 명시한다. 페이지의 `Navigate` 타입 참조는 화면 이동 계약이며, 페이지에서 앱 상태를 직접 조회하는 것은 아니다.
 
 ## 수정 위치 안내
 
-| 변경                        | 시작할 파일                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| 카드 디자인                 | `features/route/RouteCard.tsx`, `styles.css`                                          |
-| 결과 화면 배치              | `pages/ResultsPage.tsx`                                                               |
-| 드래그 높이·키보드 동작     | `components/useBottomSheet.ts`                                                        |
-| 필터 취소·적용              | `features/route/FilterDialog.tsx`, `tripReducer.ts`                                   |
-| 경로 정렬                   | `features/route/selectors.ts`                                                         |
-| 서버 경로 연결              | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts`                |
-| 길안내 단계                 | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`                        |
-| 지도 수명·마커·크기         | `features/map/useKakaoMap.ts`                                                         |
-| 일반 장소 탐색 화면         | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                            |
-| 지도에서 위치 선택          | `features/map/MapPlacePicker.tsx`                                                     |
-| 위치 권한·오류              | `features/map/useCurrentLocation.ts`                                                  |
-| 운영자 뷰 진입·노출 조건    | `app/opsAccess.ts`, `app/useNavigation.ts`                                            |
-| 운영자 뷰 레이아웃          | `pages/OpsPage.tsx`, `styles.css`(`.ops-*`)                                           |
-| 대여소 재고 마커 색·라벨    | `features/ops/bikeStockLayer.ts`, `features/ops/useOpsData.ts`(`stockLevel`)          |
-| 히트맵 색 구간·셀 상세      | `features/ops/CongestionHeatmap.tsx`, `features/ops/useOpsData.ts`(`heatmapCellTone`) |
-| 운영자 뷰 BE 연결·응답 검증 | `api/ops.ts`, `api/contracts.ts`                                                      |
+| 변경                        | 시작할 파일                                                                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 카드 디자인                 | `features/route/RouteCard.tsx`, `styles.css`                                                                                               |
+| 결과 화면 배치              | `pages/ResultsPage.tsx`                                                                                                                    |
+| 드래그 높이·키보드 동작     | `components/useBottomSheet.ts`                                                                                                             |
+| 필터 취소·적용              | `features/route/FilterDialog.tsx`, `tripReducer.ts`                                                                                        |
+| 경로 정렬                   | `features/route/selectors.ts`                                                                                                              |
+| 서버 경로 연결              | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts`                                                                     |
+| 길안내 단계                 | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`                                                                             |
+| 지도 수명·마커·크기         | `features/map/useKakaoMap.ts`                                                                                                              |
+| 일반 장소 탐색 화면         | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                                                                                 |
+| 지도에서 위치 선택          | `features/map/MapPlacePicker.tsx`                                                                                                          |
+| 위치 권한·오류              | `features/map/useCurrentLocation.ts`                                                                                                       |
+| 운영자 뷰 진입·노출 조건    | `app/opsAccess.ts`, `app/useNavigation.ts`                                                                                                 |
+| 운영자 뷰 레이아웃          | `pages/OpsPage.tsx`, `styles.css`(`.ops-*`)                                                                                                |
+| 대여소 재고 마커 색·라벨    | `features/ops/bikeStockLayer.ts`, `features/ops/useOpsData.ts`(`stockLevel`)                                                               |
+| 히트맵 색 구간·셀 상세      | `features/ops/CongestionHeatmap.tsx`, `features/ops/useOpsData.ts`(`heatmapCellTone`), `features/route/segmentCongestion.ts`(등급 색·경계) |
+| 운영자 뷰 BE 연결·응답 검증 | `api/ops.ts`, `api/contracts.ts`                                                                                                           |
 
 ## 유지한 단순함
 

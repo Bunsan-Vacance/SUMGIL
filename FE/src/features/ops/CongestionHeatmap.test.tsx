@@ -47,21 +47,35 @@ describe('혼잡도 히트맵', () => {
     const none = container.querySelectorAll('button.ops-heat-none')
     expect(none).toHaveLength(1)
     expect(none[0].textContent).toBe('–')
-    expect(container.querySelectorAll('button.ops-heat-tone-3')).toHaveLength(37)
+    // 95%는 혼잡(70~100%) 등급 색이다.
+    const graded = [...container.querySelectorAll<HTMLElement>('button.ops-heat-cell')].filter(
+      (el) => el.style.background !== '',
+    )
+    expect(graded).toHaveLength(37)
+    expect(new Set(graded.map((el) => el.style.background)).size).toBe(1)
   })
 
   it('title과 aria-label에 상세를 담고 클릭하면 상태 영역에 보여준다', () => {
     render(<CongestionHeatmap data={build()} />)
     const cell = screen.getByLabelText(
-      '2호선 05:00 · 혼잡도 95% · 링크 20 (보정 폴백 2) · 최대 120%',
+      '2호선 05:00 · 혼잡도 95% (혼잡) · 링크 20 (보정 폴백 2) · 최대 120%',
     )
     expect(cell.getAttribute('title')).toBe(cell.getAttribute('aria-label'))
     fireEvent.click(cell)
-    expect(screen.getByRole('status').textContent).toContain('혼잡도 95%')
+    expect(screen.getByRole('status').textContent).toContain('혼잡도 95% (혼잡)')
   })
 
   it('범례를 표시한다', () => {
     render(<CongestionHeatmap data={build()} />)
-    expect(screen.getByLabelText('범례').querySelectorAll('li')).toHaveLength(6)
+    const items = [...screen.getByLabelText('범례').querySelectorAll('li')].map(
+      (li) => li.textContent,
+    )
+    expect(items).toEqual([
+      '여유 40% 미만',
+      '보통 40~70%',
+      '혼잡 70~100%',
+      '포화 100% 이상',
+      '값 없음',
+    ])
   })
 })
