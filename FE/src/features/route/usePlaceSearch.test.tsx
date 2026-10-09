@@ -100,6 +100,7 @@ describe('역 검색 요청', () => {
           lng: 127.094684,
         },
       ]),
+      nearby: vi.fn(async () => []),
     }
     const { result: hook } = renderHook(() => useStationSearch(' 강변역 ', stationRepository))
 

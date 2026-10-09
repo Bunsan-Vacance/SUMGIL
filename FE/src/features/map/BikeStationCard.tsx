@@ -3,9 +3,9 @@ import { Bike, Star, X } from 'lucide-react'
 import type { Place } from '../route/types'
 import { bikeRentalId } from './bikeStations'
 import { bikeStockBadgeLevel } from './bikeStockBadge'
+import { walkMinutes } from './stations'
 import type { OutlookSlot, OutlookState } from './useBikeStationOutlook'
 
-const WALK_METERS_PER_MINUTE = 80
 const slotLabels: Record<OutlookSlot, string> = { now: '지금', in15: '15분 뒤', in30: '30분 뒤' }
 const slots: OutlookSlot[] = ['now', 'in15', 'in30']
 
@@ -158,8 +158,7 @@ export default function BikeStationCard({
           <h2>{station.name}</h2>
           {distance !== undefined && (
             <small>
-              {Math.round(distance)}m · 도보{' '}
-              {Math.max(1, Math.ceil(distance / WALK_METERS_PER_MINUTE))}분
+              {Math.round(distance)}m · 도보 {walkMinutes(distance)}분
             </small>
           )}
         </div>
