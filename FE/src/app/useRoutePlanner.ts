@@ -8,7 +8,12 @@ import { useGuidance } from '../features/guidance/useGuidance'
 import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import { useFavoritePlaces } from '../features/route/useFavoritePlaces'
-import { saveRecentRoute } from '../features/route/recentRoutes'
+import {
+  isCurrentLocation,
+  isRecentRoutePinned,
+  pinRecentRoute,
+  saveRecentRoute,
+} from '../features/route/recentRoutes'
 import { isRegisterablePlace } from '../features/route/favoritePlaces'
 import type { FavoriteLabel } from '../features/route/favoritePlaces'
 import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
@@ -73,6 +78,7 @@ export function useRoutePlanner(
   const guidance = useGuidance(navigation.screen === 'guide')
   const screen = resolveScreen(navigation.screen, trip, guidance)
   const { message, setMessage } = useToast()
+  const [usedRouteSaved, setUsedRouteSaved] = useState(false)
   const favorites = useFavoritePlaces()
   // 화면 전환 시 토스트를 비우는 effect가 등록 완료 안내까지 지우지 않도록 다음 화면에 넘길 메시지를 보관한다.
   const pendingMessage = useRef<string | null>(null)
@@ -128,6 +134,14 @@ export function useRoutePlanner(
   useEffect(() => {
     if (screen !== navigation.screen) replace(screen)
   }, [screen, navigation.screen, replace])
+  useEffect(() => {
+    const { origin, destination } = guidance
+    if (!origin || !destination) {
+      setUsedRouteSaved(false)
+      return
+    }
+    setUsedRouteSaved(isRecentRoutePinned(isCurrentLocation(origin) ? null : origin, destination))
+  }, [screen, guidance.origin, guidance.destination])
   useEffect(() => {
     setModal(null)
     setMessage(pendingMessage.current ?? '')
@@ -194,6 +208,14 @@ export function useRoutePlanner(
   const returnToRouteInput = () => {
     setRoutePanelOpen(true)
     go('home')
+  }
+  const saveUsedRoute = () => {
+    const { origin, destination } = guidance
+    if (!origin || !destination) return false
+    pinRecentRoute(origin, destination)
+    setUsedRouteSaved(true)
+    setMessage('경로를 저장했어요')
+    return true
   }
   const cancelSearch = () => go(searchReturnScreen)
   const findRoutes = (place?: Place) => {
@@ -497,6 +519,8 @@ export function useRoutePlanner(
     returnToRouteInput,
     findRoutes,
     findRoutesFrom,
+    saveUsedRoute,
+    usedRouteSaved,
     choosePlace,
     setOriginFromBrowse,
     setOriginFromCurrentLocation,

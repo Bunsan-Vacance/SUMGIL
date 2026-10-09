@@ -709,3 +709,42 @@ describe('저장된 출발지로 경로 찾기', () => {
     expect(loadRecentRoutes()).toEqual([])
   })
 })
+
+describe('이용한 경로 저장', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+    localStorage.clear()
+  })
+  afterEach(() => localStorage.clear())
+
+  it('안내 세션이 없으면 저장하지 않는다', () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    let saved = true
+    act(() => {
+      saved = result.current.saveUsedRoute()
+    })
+    expect(saved).toBe(false)
+    expect(result.current.message).toBe('')
+    expect(loadRecentRoutes()).toEqual([])
+  })
+
+  it('안내한 출발·도착을 pinned로 저장하고 저장됨 상태와 토스트를 남긴다', () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() =>
+      result.current.guidance.start(routes[0], places[0], places[1], {
+        modes: ['walk'],
+        priority: 'fast',
+      }),
+    )
+    expect(result.current.usedRouteSaved).toBe(false)
+    let saved = false
+    act(() => {
+      saved = result.current.saveUsedRoute()
+    })
+    expect(saved).toBe(true)
+    expect(loadRecentRoutes()[0]).toMatchObject({ pinned: true })
+    expect(result.current.usedRouteSaved).toBe(true)
+    expect(result.current.message).toBe('경로를 저장했어요')
+  })
+})

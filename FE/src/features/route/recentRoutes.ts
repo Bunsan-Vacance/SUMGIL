@@ -13,7 +13,7 @@ export interface RecentRoute {
 export const RECENT_ROUTES_STORAGE_KEY = 'sugil:recent-routes'
 const RECENT_ROUTES_LIMIT = 10
 
-function isCurrentLocation(place: Place): boolean {
+export function isCurrentLocation(place: Place): boolean {
   return place.kind === '현재 위치' || place.id.startsWith('current-location:')
 }
 

@@ -2388,6 +2388,13 @@ small {
   width: 100%;
   margin-top: 32px;
 }
+.arrival .secondary {
+  width: 100%;
+  margin-top: 24px;
+}
+.arrival .secondary + .primary {
+  margin-top: 0;
+}
 .modal {
   border: 0;
   padding: 0;

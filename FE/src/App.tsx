@@ -167,7 +167,13 @@ export default function App() {
             />
           )}
           {screen === 'arrival' && (
-            <ArrivalPage destinationName={destinationName} onHome={() => go('home')} />
+            <ArrivalPage
+              destinationName={destinationName}
+              onHome={() => go('home')}
+              canSave={Boolean(guidance.origin && guidance.destination)}
+              saved={planner.usedRouteSaved}
+              onSaveRoute={planner.saveUsedRoute}
+            />
           )}
           {planner.message && (
             <div className="toast" role="status">
