@@ -9,6 +9,8 @@ export interface BikeStation {
   lng: number
   dockCount?: number
   distanceMeters?: number
+  availableBikes?: number | null
+  stockUpdatedAt?: string | null
 }
 
 export interface NearbyBikeStationLike {
@@ -19,6 +21,8 @@ export interface NearbyBikeStationLike {
   lng: number
   dockCount?: number
   distanceMeters?: number
+  availableBikes?: number | null
+  stockUpdatedAt?: string | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -94,5 +98,13 @@ export function nearbyStationToBikeStation(station: NearbyBikeStationLike): Bike
     lng: station.lng,
     ...(station.dockCount !== undefined ? { dockCount: station.dockCount } : {}),
     ...(station.distanceMeters !== undefined ? { distanceMeters: station.distanceMeters } : {}),
+    ...(station.availableBikes !== undefined ? { availableBikes: station.availableBikes } : {}),
+    ...(station.stockUpdatedAt !== undefined ? { stockUpdatedAt: station.stockUpdatedAt } : {}),
   }
+}
+
+export function bikeRentalId(place: Place) {
+  if (place.rentalId) return place.rentalId
+  if (place.id.startsWith('bike-station:')) return place.id.slice('bike-station:'.length)
+  return undefined
 }

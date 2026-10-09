@@ -13,12 +13,7 @@ import {
 } from '../route/segmentCongestion'
 import { useKakaoMap, type LivePosition } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
-
-function bikeRentalId(place: Place) {
-  if (place.rentalId) return place.rentalId
-  if (place.id.startsWith('bike-station:')) return place.id.slice('bike-station:'.length)
-  return undefined
-}
+import { bikeRentalId } from './bikeStations'
 
 function stockUpdatedLabel(value: string | null) {
   if (!value) return ''

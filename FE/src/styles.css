@@ -342,6 +342,35 @@ small {
   box-shadow: 0 2px 7px #26313b38;
   transform: translateY(-50%);
 }
+.bike-station-marker {
+  position: relative;
+}
+.bike-station-marker .bike-stock-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid white;
+  border-radius: 999px;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  box-sizing: content-box;
+}
+.bike-stock-badge.level-ok {
+  background: #087c63;
+}
+.bike-stock-badge.level-low {
+  background: #c2410c;
+}
+.bike-stock-badge.level-unknown {
+  background: #82909b;
+}
 .bike-station-marker:hover,
 .bike-station-marker:focus-visible,
 .bike-station-marker.selected {

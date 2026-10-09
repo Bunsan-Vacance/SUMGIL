@@ -44,6 +44,8 @@ export interface NearbyBikeStation {
   lng: number
   dockCount?: number
   distanceMeters?: number
+  availableBikes?: number | null
+  stockUpdatedAt?: string | null
 }
 
 export interface BikeStationRequest {
