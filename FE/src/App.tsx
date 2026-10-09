@@ -3,6 +3,9 @@ import { useRoutePlanner } from './app/useRoutePlanner'
 import { screenTitles } from './app/useNavigation'
 import PreviewToolbar from './app/PreviewToolbar'
 import KakaoMap from './features/map/KakaoMap'
+import HomeLayerLegend from './features/map/HomeLayerLegend'
+import HomeLayerToggle from './features/map/HomeLayerToggle'
+import { availableLayers } from './features/map/homeLayers'
 import { useHomeMapLayers } from './features/map/useHomeMapLayers'
 import { useBikeStationOutlook } from './features/map/useBikeStationOutlook'
 import { useNearbyStationCongestion } from './features/map/useNearbyStationCongestion'
@@ -89,6 +92,20 @@ export default function App() {
                 }
                 bikeStationsVisible={screen === 'home' ? homeLayers.layer === 'bike' : undefined}
                 bikeStockBadges={screen === 'home'}
+                bottomControls={
+                  screen === 'home'
+                    ? {
+                        start: <HomeLayerLegend layer={homeLayers.layer} />,
+                        end: (
+                          <HomeLayerToggle
+                            layers={availableLayers}
+                            active={homeLayers.layer}
+                            onChange={homeLayers.setLayer}
+                          />
+                        ),
+                      }
+                    : undefined
+                }
                 onBikeStationSelect={screen === 'home' ? homeLayers.selectBikeStation : undefined}
                 focusedPlace={screen === 'home' ? bikeSelection : undefined}
                 stationMarkers={crowdLayerOn ? stationLayer.stations : EMPTY_STATIONS}
@@ -125,8 +142,6 @@ export default function App() {
               home={planner.favorites.home}
               work={planner.favorites.work}
               openFavoriteRegistration={planner.openFavoriteRegistration}
-              layer={homeLayers.layer}
-              setLayer={homeLayers.setLayer}
               selection={homeLayers.selection}
               outlook={stationOutlook}
               clearSelection={homeLayers.clearSelection}

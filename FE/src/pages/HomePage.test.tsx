@@ -45,8 +45,6 @@ const baseProps = {
   home: null,
   work: null,
   openFavoriteRegistration: vi.fn(),
-  layer: 'bike' as 'bike' | null,
-  setLayer: vi.fn(),
   selection: null as HomeSelection | null,
   outlook: {
     stock: { status: 'unavailable' },
@@ -230,14 +228,13 @@ describe('홈 길찾기 패널', () => {
     expect(openSearch).toHaveBeenCalledWith('destination')
   })
 
-  it('상단 바와 칩 행은 패널이 닫혔을 때만 보이고 레이어 토글을 함께 보여 준다', () => {
+  it('상단 바와 칩 행은 패널이 닫혔을 때만 보인다', () => {
     const { rerender } = render(
       <HomePage {...baseProps} origin={origin} destination={null} routePanelOpen={false} />,
     )
     const topbar = document.querySelector('.home-topbar')
     expect(topbar?.hasAttribute('hidden')).toBe(false)
     expect(screen.getByRole('group', { name: '자주 가는 곳' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '따릉이 레이어' })).toBeTruthy()
     rerender(<HomePage {...baseProps} origin={origin} destination={null} routePanelOpen />)
     expect(topbar?.hasAttribute('hidden')).toBe(true)
     expect(document.querySelector('#home-route-panel .home-chips')).toBeNull()
@@ -307,42 +304,6 @@ describe('홈 길찾기 패널', () => {
     it('패널이 열려 있어도 시트를 렌더링한다', () => {
       render(<HomePage {...baseProps} origin={origin} destination={null} routePanelOpen />)
       expect(document.querySelector('.home-sheet')).not.toBeNull()
-    })
-  })
-
-  describe('홈 레이어', () => {
-    it('따릉이 레이어가 켜져 있으면 범례를 보이고 토글이 끈다', () => {
-      const setLayer = vi.fn()
-      render(
-        <HomePage
-          {...baseProps}
-          origin={origin}
-          destination={null}
-          routePanelOpen={false}
-          setLayer={setLayer}
-        />,
-      )
-      expect(screen.getByText('따릉이 대여 가능 대수')).toBeTruthy()
-      const toggle = screen.getByRole('button', { name: '따릉이 레이어' })
-      expect(toggle.getAttribute('aria-pressed')).toBe('true')
-      fireEvent.click(toggle)
-      expect(setLayer).toHaveBeenCalledWith(null)
-    })
-
-    it('레이어가 꺼져 있으면 범례가 없다', () => {
-      render(
-        <HomePage
-          {...baseProps}
-          origin={origin}
-          destination={null}
-          routePanelOpen={false}
-          layer={null}
-        />,
-      )
-      expect(screen.queryByText('따릉이 대여 가능 대수')).toBeNull()
-      expect(
-        screen.getByRole('button', { name: '따릉이 레이어' }).getAttribute('aria-pressed'),
-      ).toBe('false')
     })
   })
 

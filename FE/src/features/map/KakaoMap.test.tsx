@@ -1117,6 +1117,40 @@ describe('일반 지도 장소 마커', () => {
   })
 })
 
+describe('하단 컨트롤 슬롯', () => {
+  it('start는 좌측 열, end는 우측 열의 현재 위치 버튼 뒤에 렌더한다', async () => {
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    render(
+      <KakaoMap
+        origin={null}
+        onMessage={vi.fn()}
+        bottomControls={{
+          start: <span data-testid="slot-start">범례</span>,
+          end: <button data-testid="slot-end">토글</button>,
+        }}
+      />,
+    )
+    const locate = await screen.findByRole('button', { name: '현재 위치' })
+    const start = document.querySelector('.map-bottom-controls > .map-bottom-start')!
+    const end = document.querySelector('.map-bottom-controls > .map-bottom-end')!
+    expect(start.contains(screen.getByTestId('slot-start'))).toBe(true)
+    expect(end.contains(locate)).toBe(true)
+    expect(end.contains(screen.getByTestId('slot-end'))).toBe(true)
+    expect(
+      locate.compareDocumentPosition(screen.getByTestId('slot-end')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('슬롯이 없으면 두 열은 비어 있고 현재 위치 버튼만 우측 열에 있다', async () => {
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    render(<KakaoMap origin={null} onMessage={vi.fn()} />)
+    await screen.findByRole('button', { name: '현재 위치' })
+    expect(document.querySelector('.map-bottom-start')?.childElementCount).toBe(0)
+    expect(document.querySelector('.map-bottom-end')?.childElementCount).toBe(1)
+  })
+})
+
 describe('지도 영역 크기 계산', () => {
   afterEach(() => vi.restoreAllMocks())
 

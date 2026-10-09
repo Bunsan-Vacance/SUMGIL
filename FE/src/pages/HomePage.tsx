@@ -15,11 +15,7 @@ import BikeStationCard from '../features/map/BikeStationCard'
 import StationCard from '../features/map/StationCard'
 import { nearbyStationToPlace } from '../features/map/stations'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
-import HomeLayerLegend from '../features/map/HomeLayerLegend'
 import type { HomeSelection } from '../features/map/useHomeMapLayers'
-import HomeLayerToggle from '../features/map/HomeLayerToggle'
-import { availableLayers } from '../features/map/homeLayers'
-import type { HomeLayer } from '../features/map/homeLayers'
 import {
   formatSearchedAt,
   loadRecentRoutes,
@@ -44,8 +40,6 @@ interface Props {
   home: FavoritePlace | null
   work: FavoritePlace | null
   openFavoriteRegistration: (label: FavoriteLabel) => void
-  layer: HomeLayer | null
-  setLayer: (layer: HomeLayer | null) => void
   selection: HomeSelection | null
   outlook: OutlookState
   clearSelection: () => void
@@ -66,8 +60,6 @@ export default function HomePage({
   home,
   work,
   openFavoriteRegistration,
-  layer,
-  setLayer,
   selection,
   outlook,
   clearSelection,
@@ -133,8 +125,6 @@ export default function HomePage({
             </button>
           ))}
         </div>
-        <HomeLayerLegend layer={layer} />
-        <HomeLayerToggle layers={availableLayers} active={layer} onChange={setLayer} />
       </div>
       <section
         id="home-route-panel"

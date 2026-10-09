@@ -1,5 +1,5 @@
 import { Bike, LocateFixed, RotateCw, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import BottomSheet from '../../components/BottomSheet'
 import { bikeStockRepository } from '../../api/repositories'
@@ -231,6 +231,7 @@ export default function KakaoMap({
   selectedStationId,
   onStationSelect,
   onViewportChange,
+  bottomControls,
 }: {
   origin?: Place | null
   destination?: Place | null
@@ -250,6 +251,8 @@ export default function KakaoMap({
   selectedStationId?: string | null
   onStationSelect?: (datum: StationMarkerDatum) => void
   onViewportChange?: (center: { lat: number; lng: number }) => void
+  // 하단 컨트롤 슬롯: start는 좌측 하단, end는 우측 하단(현재 위치 버튼 아래)에 놓인다.
+  bottomControls?: { start?: ReactNode; end?: ReactNode }
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [bikeStationsVisibleState, setBikeStationsVisible] = useState(true)
@@ -410,18 +413,22 @@ export default function KakaoMap({
         </div>
       )}
       <div className={`map-bottom-controls${showSelectedPlaceInfo ? ' has-place-info' : ''}`}>
-        {status === 'ready' && (
-          <button
-            className="icon-button kakao-locate"
-            aria-label="현재 위치"
-            disabled={locating}
-            onClick={() => {
-              if (!resumeLivePosition()) locate()
-            }}
-          >
-            {locating ? <span className="spinner" /> : <LocateFixed />}
-          </button>
-        )}
+        <div className="map-bottom-start">{bottomControls?.start}</div>
+        <div className="map-bottom-end">
+          {status === 'ready' && (
+            <button
+              className="icon-button kakao-locate"
+              aria-label="현재 위치"
+              disabled={locating}
+              onClick={() => {
+                if (!resumeLivePosition()) locate()
+              }}
+            >
+              {locating ? <span className="spinner" /> : <LocateFixed />}
+            </button>
+          )}
+          {bottomControls?.end}
+        </div>
         {showSelectedPlaceInfo && selectedPlace && !bikeStockStation && (
           <section
             className="map-place-info"
