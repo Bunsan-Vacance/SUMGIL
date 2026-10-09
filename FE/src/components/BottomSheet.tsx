@@ -2,7 +2,7 @@ import { type ReactNode } from 'react'
 import { useBottomSheet } from './useBottomSheet'
 import { useScrollbarVisibility } from './useScrollbarVisibility'
 
-type Snap = 'default' | 'expanded' | 'collapsed'
+type Snap = 'default' | 'expanded' | 'collapsed' | 'closed'
 type SheetChildren = ReactNode | ((api: { snap: Snap; setSnap: (snap: Snap) => void }) => ReactNode)
 interface Props {
   children: SheetChildren
@@ -14,6 +14,7 @@ interface Props {
   draggable?: boolean
   className?: string
   collapsedHeight?: number
+  onDismiss?: () => void
 }
 export default function BottomSheet({
   children,
@@ -25,21 +26,24 @@ export default function BottomSheet({
   draggable = true,
   className = '',
   collapsedHeight,
+  onDismiss,
 }: Props) {
   const { ref, snap, setSnap, dragHeight, gripProps } = useBottomSheet(initialSnap, preferredSnap, {
     collapsedHeight,
+    onDismiss,
   })
   const bodyRef = useScrollbarVisibility<HTMLDivElement>()
   return (
     <section
       ref={ref}
-      className={`bottom-sheet ${className} ${compact ? 'compact-sheet' : ''} ${dragHeight ? 'dragging' : ''}`}
+      className={`bottom-sheet ${className} ${compact ? 'compact-sheet' : ''} ${dragHeight !== null ? 'dragging' : ''}`}
       data-snap={snap}
-      style={dragHeight ? { height: dragHeight } : undefined}
+      style={dragHeight !== null ? { height: dragHeight } : undefined}
+      aria-hidden={snap === 'closed' ? true : undefined}
       aria-label={ariaLabel}
     >
       {draggable && (
-        <button className="sheet-grip" {...gripProps}>
+        <button className="sheet-grip" tabIndex={snap === 'closed' ? -1 : undefined} {...gripProps}>
           <span />
         </button>
       )}

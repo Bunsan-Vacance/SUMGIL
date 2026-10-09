@@ -1250,6 +1250,12 @@ small {
 .screen-guide .bottom-sheet.compact-sheet[data-snap='collapsed'] {
   height: min(180px, calc(100% - 16px));
 }
+.bottom-sheet[data-snap='closed'] {
+  height: 0;
+  min-height: 0;
+  visibility: hidden;
+  box-shadow: none;
+}
 .bottom-sheet.dragging {
   transition: none;
   user-select: none;
