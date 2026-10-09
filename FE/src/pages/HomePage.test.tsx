@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
 import { pinRecentRoute, saveRecentRoute } from '../features/route/recentRoutes'
+import type { OutlookState } from '../features/map/useBikeStationOutlook'
+import type { Place } from '../features/route/types'
 import HomePage from './HomePage'
 
 const origin = {
@@ -23,6 +25,18 @@ const baseProps = {
   home: null,
   work: null,
   openFavoriteRegistration: vi.fn(),
+  layer: 'bike' as 'bike' | null,
+  setLayer: vi.fn(),
+  selectedStation: null as Place | null,
+  outlook: {
+    stock: { status: 'unavailable' },
+    predictions: { in15: { status: 'unavailable' }, in30: { status: 'unavailable' } },
+    retry: vi.fn(),
+  } as OutlookState,
+  clearStation: vi.fn(),
+  isFavorite: () => false,
+  toggleFavorite: vi.fn(),
+  setOriginFromStation: vi.fn(),
 }
 const favoriteOf = (id: string, label: FavoritePlace['label'] = null): FavoritePlace => ({
   place: { id, name: `장소 ${id}`, address: '서울', kind: '장소', lat: 37.5, lng: 127 },
@@ -196,14 +210,14 @@ describe('홈 길찾기 패널', () => {
     expect(openSearch).toHaveBeenCalledWith('destination')
   })
 
-  it('상단 바와 칩 행은 패널이 닫혔을 때만 보이고 레이어 버튼은 아직 없다', () => {
+  it('상단 바와 칩 행은 패널이 닫혔을 때만 보이고 레이어 토글을 함께 보여 준다', () => {
     const { rerender } = render(
       <HomePage {...baseProps} origin={origin} destination={null} routePanelOpen={false} />,
     )
     const topbar = document.querySelector('.home-topbar')
     expect(topbar?.hasAttribute('hidden')).toBe(false)
     expect(screen.getByRole('group', { name: '자주 가는 곳' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /레이어/ })).toBeNull()
+    expect(screen.getByRole('button', { name: '따릉이 레이어' })).toBeTruthy()
     rerender(<HomePage {...baseProps} origin={origin} destination={null} routePanelOpen />)
     expect(topbar?.hasAttribute('hidden')).toBe(true)
     expect(document.querySelector('#home-route-panel .home-chips')).toBeNull()
@@ -273,6 +287,102 @@ describe('홈 길찾기 패널', () => {
     it('패널이 열려 있어도 시트를 렌더링한다', () => {
       render(<HomePage {...baseProps} origin={origin} destination={null} routePanelOpen />)
       expect(document.querySelector('.home-sheet')).not.toBeNull()
+    })
+  })
+
+  describe('홈 레이어', () => {
+    it('따릉이 레이어가 켜져 있으면 범례를 보이고 토글이 끈다', () => {
+      const setLayer = vi.fn()
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          setLayer={setLayer}
+        />,
+      )
+      expect(screen.getByText('따릉이 대여 가능 대수')).toBeTruthy()
+      const toggle = screen.getByRole('button', { name: '따릉이 레이어' })
+      expect(toggle.getAttribute('aria-pressed')).toBe('true')
+      fireEvent.click(toggle)
+      expect(setLayer).toHaveBeenCalledWith(null)
+    })
+
+    it('레이어가 꺼져 있으면 범례가 없다', () => {
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          layer={null}
+        />,
+      )
+      expect(screen.queryByText('따릉이 대여 가능 대수')).toBeNull()
+      expect(
+        screen.getByRole('button', { name: '따릉이 레이어' }).getAttribute('aria-pressed'),
+      ).toBe('false')
+    })
+  })
+
+  describe('선택한 대여소 카드', () => {
+    const bike: Place = {
+      id: 'bike-station:ST-1',
+      name: '강남역 1번출구',
+      address: '서울',
+      kind: '따릉이 대여소',
+      lat: 37.5,
+      lng: 127,
+    }
+    const renderHome = (props = {}) =>
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          selectedStation={bike}
+          {...props}
+        />,
+      )
+
+    it('선택하면 카드를 보이고 최근 경로는 숨긴다', () => {
+      renderHome()
+      expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
+      expect(screen.queryByText('최근 경로')).toBeNull()
+    })
+
+    it('닫기를 누르면 clearStation을 호출한다', () => {
+      const clearStation = vi.fn()
+      renderHome({ clearStation })
+      fireEvent.click(screen.getByRole('button', { name: '대여소 정보 닫기' }))
+      expect(clearStation).toHaveBeenCalledOnce()
+    })
+
+    it('도착지로 설정하면 길찾기를 시작하고 카드를 닫는다', () => {
+      const findRoutes = vi.fn(() => true)
+      const clearStation = vi.fn()
+      renderHome({ findRoutes, clearStation })
+      fireEvent.click(screen.getByRole('button', { name: '도착지로 설정' }))
+      expect(findRoutes).toHaveBeenCalledWith(bike)
+      expect(clearStation).toHaveBeenCalledOnce()
+    })
+
+    it('도착지 설정이 거부되면 카드를 유지한다', () => {
+      const clearStation = vi.fn()
+      renderHome({ findRoutes: vi.fn(() => false), clearStation })
+      fireEvent.click(screen.getByRole('button', { name: '도착지로 설정' }))
+      expect(clearStation).not.toHaveBeenCalled()
+    })
+
+    it('출발지로 설정하면 setOriginFromStation 후 카드를 닫는다', () => {
+      const setOriginFromStation = vi.fn()
+      const clearStation = vi.fn()
+      renderHome({ setOriginFromStation, clearStation })
+      fireEvent.click(screen.getByRole('button', { name: '출발지로 설정' }))
+      expect(setOriginFromStation).toHaveBeenCalledWith(bike)
+      expect(clearStation).toHaveBeenCalledOnce()
     })
   })
 })

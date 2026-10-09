@@ -66,6 +66,42 @@ describe('따릉이 지도 마커', () => {
     fallbackMarker.destroy()
   })
 
+  it('재고 배지를 선택적으로 붙이고 setBadge로 갱신한다', () => {
+    const maps = {
+      LatLng: class {
+        constructor(
+          readonly lat: number,
+          readonly lng: number,
+        ) {}
+      },
+      CustomOverlay: class {
+        setMap = vi.fn()
+      },
+    } as unknown as KakaoMaps
+    const map = {} as KakaoMapInstance
+
+    const plain = createBikeStationOverlay(maps, map, station, false, vi.fn())
+    expect(plain.element.querySelector('.bike-stock-badge')).toBeNull()
+
+    const marker = createBikeStationOverlay(maps, map, station, false, vi.fn(), false, 1, {
+      count: 5,
+    })
+    const badge = () => marker.element.querySelector('.bike-stock-badge')
+    expect(badge()?.textContent).toBe('5')
+    expect(badge()?.classList.contains('level-ok')).toBe(true)
+    expect(marker.element.getAttribute('aria-label')).toBe('강남역 · 대여 가능 5대')
+    marker.setBadge(1)
+    expect(badge()?.classList.contains('level-low')).toBe(true)
+    marker.setBadge(null)
+    expect(badge()?.textContent).toBe('?')
+    expect(badge()?.classList.contains('level-unknown')).toBe(true)
+    expect(marker.element.title).toBe('강남역 · 재고 알 수 없음')
+
+    plain.setBadge(0)
+    expect(plain.element.querySelector('.bike-stock-badge')?.textContent).toBe('0')
+    expect(marker.element.querySelectorAll('.bike-stock-badge')).toHaveLength(1)
+  })
+
   it('현재 지도 bounds 안의 대여소만 선택한다', () => {
     const maps = {
       LatLng: class {

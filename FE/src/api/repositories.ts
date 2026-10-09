@@ -383,6 +383,16 @@ export function createBackendRouteRepository(baseUrl: string): RouteRepository {
   }
 }
 
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/
+
+function isIsoTimestamp(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    ISO_TIMESTAMP.test(value) &&
+    Number.isFinite(new Date(value).getTime())
+  )
+}
+
 function mapNearbyStation(value: unknown): NearbyBikeStation {
   if (
     !isRecord(value) ||
@@ -402,6 +412,22 @@ function mapNearbyStation(value: unknown): NearbyBikeStation {
   ) {
     throw new RepositoryError('invalid-response', '대여소 응답이 올바르지 않아요.')
   }
+  const stock = value.availableBikes
+  if (
+    stock !== undefined &&
+    stock !== null &&
+    (!Number.isSafeInteger(stock) || (stock as number) < 0)
+  ) {
+    throw new RepositoryError('invalid-response', '대여소 응답이 올바르지 않아요.')
+  }
+  if (
+    value.stockUpdatedAt !== undefined &&
+    value.stockUpdatedAt !== null &&
+    !isIsoTimestamp(value.stockUpdatedAt)
+  ) {
+    throw new RepositoryError('invalid-response', '대여소 응답이 올바르지 않아요.')
+  }
+  const hasStock = typeof stock === 'number'
   return {
     id: value.rentalId as string,
     name: value.name as string,
@@ -410,6 +436,14 @@ function mapNearbyStation(value: unknown): NearbyBikeStation {
     lng: value.lng as number,
     dockCount: value.dockCount as number | undefined,
     distanceMeters: value.distanceMeters as number | undefined,
+    ...(stock !== undefined
+      ? {
+          availableBikes: stock as number | null,
+          stockUpdatedAt: hasStock
+            ? ((value.stockUpdatedAt as string | null | undefined) ?? null)
+            : null,
+        }
+      : {}),
   }
 }
 

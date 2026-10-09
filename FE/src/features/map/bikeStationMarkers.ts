@@ -1,4 +1,5 @@
 import type { KakaoMapInstance, KakaoMaps } from '../../lib/kakao/sdk'
+import { bikeStockBadgeLabel, bikeStockBadgeLevel, bikeStockBadgeText } from './bikeStockBadge'
 import { bikeStations, getBikeStationDisplayName, type BikeStation } from './bikeStations'
 
 const BIKE_ICON =
@@ -8,6 +9,7 @@ export interface BikeStationOverlay {
   element: HTMLButtonElement
   setSelected(selected: boolean): void
   setRouteActive(active: boolean): void
+  setBadge(count: number | null | undefined): void
   destroy(): void
 }
 
@@ -27,6 +29,7 @@ export function createBikeStationOverlay(
   onSelect: () => void,
   routeActive = false,
   zIndex = 1,
+  badge?: { count: number | null | undefined },
 ): BikeStationOverlay {
   const element = document.createElement('button')
   element.type = 'button'
@@ -41,6 +44,19 @@ export function createBikeStationOverlay(
   element.setAttribute('aria-label', markerLabel)
   element.title = markerLabel
   element.innerHTML = BIKE_ICON
+  let badgeElement: HTMLSpanElement | null = null
+  const setBadge = (count: number | null | undefined) => {
+    if (!badgeElement) {
+      badgeElement = document.createElement('span')
+      element.append(badgeElement)
+    }
+    badgeElement.className = 'bike-stock-badge level-' + bikeStockBadgeLevel(count)
+    badgeElement.textContent = bikeStockBadgeText(count)
+    const label = bikeStockBadgeLabel(displayName, count)
+    element.setAttribute('aria-label', label)
+    element.title = label
+  }
+  if (badge) setBadge(badge.count)
   const setSelected = (value: boolean) => {
     element.classList.toggle('selected', value)
     element.setAttribute('aria-pressed', String(value))
@@ -60,6 +76,7 @@ export function createBikeStationOverlay(
     element,
     setSelected,
     setRouteActive,
+    setBadge,
     destroy() {
       element.removeEventListener('click', onSelect)
       overlay.setMap(null)

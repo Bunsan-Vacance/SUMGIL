@@ -24,7 +24,7 @@ src/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태·즐겨찾기·최근 검색 저장
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
     ops/                    운영자 뷰: 지도 훅·재고 레이어·히트맵·데이터 상태
-  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 토글(homeLayers·HomeLayerToggle)
+  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 토글(homeLayers·HomeLayerToggle), 재고 배지(bikeStockBadge)·홈 레이어 상태(useHomeMapLayers)·대여소 카드(BikeStationCard)·재고/예측 훅(useBikeStationOutlook)
   api/
     contracts.ts            데이터 접근 인터페이스
     repositories.ts         실제로 사용할 구현 선택
@@ -45,6 +45,8 @@ src/
 - `SearchPage`의 검색어는 페이지 내부 상태이며 `usePlaceSearch`가 데이터 조회를 맡는다. 최근 검색·즐겨찾기 저장은 `recentPlaces`·`favoritePlaces` 모듈이 맡는다.
 - `HomePage`는 `BottomSheet`를 항상 렌더링한다. 지도 훅이 마운트 때 `.home-topbar`·`.home-panel`·`.bottom-sheet` 높이를 한 번 찾아 관찰하므로 시트를 조건부로 렌더링하지 않는다.
 - `useRoutePlanner.findRoutesFrom`은 저장된 출발·도착으로 바로 검색한다(최근 경로 탭). 출발지 상태 반영과 검색을 같은 틱에서 하기 위해 `trip.search(destination, origin)`을 직접 호출한다.
+- 홈에서는 `KakaoMap`이 대여소 선택만 `onBikeStationSelect`로 알리고 지도 안 재고 시트·대여소 토글을 열지 않는다. 카드는 `HomePage`가 홈 시트 안에 그린다. 상세·탐색 화면의 지도 안 `BikeStockSheet`와 토글은 그대로다.
+- `useKakaoMap`은 `bikeStationsVisible`·`bikeStockBadges`가 바뀌면 다음 idle을 기다리지 않고 마커를 다시 맞춘다. nearby 재조회 결과는 기존 마커의 `setBadge`로 반영한다.
 - 기능 훅은 `api/repositories`를 통해 데이터를 받는다. `api/contracts`는 화면용 타입을 참조하는 프론트엔드 인터페이스다.
 - `selectors`와 reducer는 React·DOM·네트워크 없이 동작하는 함수다.
 - `components`는 특정 경로 데이터나 화면 이름을 알지 않는다.
@@ -75,6 +77,9 @@ src/
 | 홈 레이아웃(검색창·칩·시트) | `pages/HomePage.tsx`, `styles.css`(`.home-*`)                                                                                              |
 | 홈 레이어 토글·가용 레이어  | `features/map/homeLayers.ts`, `features/map/HomeLayerToggle.tsx`                                                                           |
 | 최근 경로 저장·표시 규칙    | `features/route/recentRoutes.ts`, `pages/HomePage.tsx`                                                                                     |
+| 대여소 배지 등급·색         | `features/map/bikeStockBadge.ts`, `styles.css`(`.bike-stock-badge`)                                                                        |
+| 대여소 카드 문구·시점 규칙  | `features/map/BikeStationCard.tsx`(`describeOutlookSlot`)                                                                                  |
+| 홈 레이어·선택 대여소 상태  | `features/map/useHomeMapLayers.ts`, `App.tsx`                                                                                              |
 | 즐겨찾기 저장 규칙·칩       | `features/route/favoritePlaces.ts`, `pages/HomePage.tsx`, `pages/SearchPage.tsx`                                                           |
 | 일반 장소 탐색 화면         | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                                                                                 |
 | 지도에서 위치 선택          | `features/map/MapPlacePicker.tsx`                                                                                                          |

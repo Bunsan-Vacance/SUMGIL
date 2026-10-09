@@ -11,6 +11,9 @@ import {
   Trash2,
 } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
+import BikeStationCard from '../features/map/BikeStationCard'
+import type { OutlookState } from '../features/map/useBikeStationOutlook'
+import HomeLayerLegend from '../features/map/HomeLayerLegend'
 import HomeLayerToggle from '../features/map/HomeLayerToggle'
 import { availableLayers } from '../features/map/homeLayers'
 import type { HomeLayer } from '../features/map/homeLayers'
@@ -38,6 +41,14 @@ interface Props {
   home: FavoritePlace | null
   work: FavoritePlace | null
   openFavoriteRegistration: (label: FavoriteLabel) => void
+  layer: HomeLayer | null
+  setLayer: (layer: HomeLayer | null) => void
+  selectedStation: Place | null
+  outlook: OutlookState
+  clearStation: () => void
+  isFavorite: (id: string) => boolean
+  toggleFavorite: (place: Place) => void
+  setOriginFromStation: (place: Place) => void
 }
 export default function HomePage({
   origin,
@@ -52,9 +63,16 @@ export default function HomePage({
   home,
   work,
   openFavoriteRegistration,
+  layer,
+  setLayer,
+  selectedStation,
+  outlook,
+  clearStation,
+  isFavorite,
+  toggleFavorite,
+  setOriginFromStation,
 }: Props) {
   const [recentRoutes, setRecentRoutes] = useState(loadRecentRoutes)
-  const [layer, setLayer] = useState<HomeLayer | null>(null)
   const extraFavorites = favorites.filter((item) => item.label === null).slice(0, EXTRA_CHIP_LIMIT)
   const placeLabel = (place: Place | null) => {
     if (!place) return '현재 위치'
@@ -111,6 +129,7 @@ export default function HomePage({
             </button>
           ))}
         </div>
+        <HomeLayerLegend layer={layer} />
         <HomeLayerToggle layers={availableLayers} active={layer} onChange={setLayer} />
       </div>
       <section
@@ -156,46 +175,75 @@ export default function HomePage({
           <ArrowRight size={18} />
         </button>
       </section>
-      <BottomSheet ariaLabel="홈 정보" className="home-sheet" initialSnap="default">
-        <h2 className="home-sheet-title">최근 경로</h2>
-        {recentRoutes.length === 0 ? (
-          <p className="home-sheet-empty">아직 찾은 경로가 없어요</p>
+      <BottomSheet
+        ariaLabel="홈 정보"
+        className="home-sheet"
+        initialSnap="default"
+        preferredSnap={selectedStation ? 'default' : undefined}
+      >
+        {selectedStation ? (
+          <BikeStationCard
+            key={selectedStation.id}
+            station={selectedStation}
+            outlook={outlook}
+            favorite={isFavorite(selectedStation.id)}
+            onToggleFavorite={() => toggleFavorite(selectedStation)}
+            onClose={clearStation}
+            onSetOrigin={(place) => {
+              setOriginFromStation(place)
+              clearStation()
+            }}
+            onSetDestination={(place) => {
+              if (findRoutes(place) !== false) clearStation()
+            }}
+          />
         ) : (
-          <ul className="home-recent-routes">
-            {recentRoutes.slice(0, RECENT_ROUTE_DISPLAY_LIMIT).map((route) => {
-              const title = `${placeLabel(route.origin)} → ${placeLabel(route.destination)}`
-              return (
-                <li
-                  className={route.pinned ? 'home-recent-route pinned' : 'home-recent-route'}
-                  key={route.id}
-                >
-                  <button
-                    type="button"
-                    aria-label={`${title} ${route.pinned ? '저장한 ' : ''}경로 찾기`}
-                    onClick={() =>
-                      route.origin
-                        ? findRoutesFrom(route.origin, route.destination)
-                        : findRoutes(route.destination)
-                    }
-                  >
-                    {route.pinned ? <Star size={18} fill="currentColor" /> : <Clock size={18} />}
-                    <span>
-                      <strong>{title}</strong>
-                      <small>{formatSearchedAt(route.searchedAt)}</small>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`${title} 최근 경로 삭제`}
-                    onClick={() => setRecentRoutes(removeRecentRoute(route.id))}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          <>
+            <h2 className="home-sheet-title">최근 경로</h2>
+            {recentRoutes.length === 0 ? (
+              <p className="home-sheet-empty">아직 찾은 경로가 없어요</p>
+            ) : (
+              <ul className="home-recent-routes">
+                {recentRoutes.slice(0, RECENT_ROUTE_DISPLAY_LIMIT).map((route) => {
+                  const title = `${placeLabel(route.origin)} → ${placeLabel(route.destination)}`
+                  return (
+                    <li
+                      className={route.pinned ? 'home-recent-route pinned' : 'home-recent-route'}
+                      key={route.id}
+                    >
+                      <button
+                        type="button"
+                        aria-label={`${title} ${route.pinned ? '저장한 ' : ''}경로 찾기`}
+                        onClick={() =>
+                          route.origin
+                            ? findRoutesFrom(route.origin, route.destination)
+                            : findRoutes(route.destination)
+                        }
+                      >
+                        {route.pinned ? (
+                          <Star size={18} fill="currentColor" />
+                        ) : (
+                          <Clock size={18} />
+                        )}
+                        <span>
+                          <strong>{title}</strong>
+                          <small>{formatSearchedAt(route.searchedAt)}</small>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`${title} 최근 경로 삭제`}
+                        onClick={() => setRecentRoutes(removeRecentRoute(route.id))}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </>
         )}
       </BottomSheet>
     </>

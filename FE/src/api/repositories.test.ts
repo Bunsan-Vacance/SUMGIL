@@ -936,6 +936,59 @@ describe('백엔드 repository', () => {
     ])
   })
 
+  describe('대여소 nearby 재고 필드', () => {
+    const nearbyWith = async (extra: Record<string, unknown>) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          status: 200,
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: [{ rentalId: 'ST-1', name: '대여소', lat: 37.5, lng: 127.03, ...extra }],
+          }),
+        })),
+      )
+      return createBackendBikeStationRepository('http://be.test').nearby(
+        { lat: 37.5, lng: 127.03 },
+        new AbortController().signal,
+      )
+    }
+    const at = '2026-10-09T01:02:03+09:00'
+
+    it('재고와 갱신 시각을 그대로 전달한다', async () => {
+      await expect(nearbyWith({ availableBikes: 5, stockUpdatedAt: at })).resolves.toMatchObject([
+        { availableBikes: 5, stockUpdatedAt: at },
+      ])
+    })
+
+    it('필드가 없으면 키를 만들지 않는다', async () => {
+      const [station] = await nearbyWith({})
+      expect('availableBikes' in station).toBe(false)
+      expect('stockUpdatedAt' in station).toBe(false)
+    })
+
+    it('재고가 null이면 갱신 시각도 null로 만든다', async () => {
+      await expect(nearbyWith({ availableBikes: null, stockUpdatedAt: at })).resolves.toMatchObject(
+        [{ availableBikes: null, stockUpdatedAt: null }],
+      )
+    })
+
+    it.each([-1, 1.5, '3'])('잘못된 재고 %s는 오류다', async (bad) => {
+      await expect(nearbyWith({ availableBikes: bad, stockUpdatedAt: at })).rejects.toMatchObject({
+        code: 'invalid-response',
+      })
+    })
+
+    it('잘못된 ISO 시각은 오류다', async () => {
+      await expect(nearbyWith({ availableBikes: 3, stockUpdatedAt: '어제' })).rejects.toMatchObject(
+        {
+          code: 'invalid-response',
+        },
+      )
+    })
+  })
+
   it('대여소 단건 재고 응답을 상태별로 보존한다', async () => {
     vi.stubGlobal(
       'fetch',
