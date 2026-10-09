@@ -3,6 +3,7 @@ import { useRoutePlanner } from './app/useRoutePlanner'
 import { screenTitles } from './app/useNavigation'
 import PreviewToolbar from './app/PreviewToolbar'
 import KakaoMap from './features/map/KakaoMap'
+import { useHomeMapLayers } from './features/map/useHomeMapLayers'
 import FilterDialog from './features/route/FilterDialog'
 import GuidanceDialogs from './features/guidance/GuidanceDialogs'
 import HomePage from './pages/HomePage'
@@ -23,6 +24,7 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true)
   const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
+  const homeLayers = useHomeMapLayers()
   const { screen, go, trip, guidance, destinationName, modal, setModal } = planner
   const routeView = screen === 'detail' || screen === 'guide'
   const displayedRoute = screen === 'guide' ? guidance.route : trip.selected
@@ -71,6 +73,10 @@ export default function App() {
                 onCurrentLocation={
                   screen === 'home' ? planner.setOriginFromCurrentLocation : undefined
                 }
+                bikeStationsVisible={screen === 'home' ? homeLayers.layer === 'bike' : undefined}
+                bikeStockBadges={screen === 'home'}
+                onBikeStationSelect={screen === 'home' ? homeLayers.selectStation : undefined}
+                focusedPlace={screen === 'home' ? homeLayers.selectedStation : undefined}
                 onMessage={planner.setMessage}
               />
             )}
@@ -88,6 +94,8 @@ export default function App() {
               home={planner.favorites.home}
               work={planner.favorites.work}
               openFavoriteRegistration={planner.openFavoriteRegistration}
+              layer={homeLayers.layer}
+              setLayer={homeLayers.setLayer}
             />
           )}
           {screen === 'browse' && (

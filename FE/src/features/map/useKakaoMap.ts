@@ -64,6 +64,7 @@ export function useKakaoMap(
   route?: Route | null,
   bikeStationsVisible = true,
   livePosition: LivePosition = null,
+  bikeStockBadges = false,
 ) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<KakaoMapInstance | null>(null)
@@ -81,6 +82,7 @@ export function useKakaoMap(
   const highlightedRef = useRef(highlightedPlace)
   const routeActiveRef = useRef(Boolean(route))
   const bikeStationsVisibleRef = useRef(bikeStationsVisible)
+  const bikeStockBadgesRef = useRef(bikeStockBadges)
   const markersRef = useRef(new Map<string, KakaoMarker>())
   const selectedMarkerRef = useRef<KakaoMarker | null>(null)
   const normalMarkerImageRef = useRef<MapMarkerImage | null>(null)
@@ -99,6 +101,7 @@ export function useKakaoMap(
   highlightedRef.current = highlightedPlace
   routeActiveRef.current = Boolean(route)
   bikeStationsVisibleRef.current = bikeStationsVisible
+  bikeStockBadgesRef.current = bikeStockBadges
   livePositionRef.current = livePosition
 
   useEffect(() => {
@@ -109,6 +112,10 @@ export function useKakaoMap(
       ),
     )
   }, [focusedPlace, highlightedPlace])
+
+  useEffect(() => {
+    syncStationMarkersRef.current?.()
+  }, [bikeStationsVisible, bikeStockBadges])
 
   useEffect(() => {
     const active = Boolean(route)
@@ -218,7 +225,11 @@ export function useKakaoMap(
           })
           individualGroups.forEach((group) => {
             const station = group.stations[0]
-            if (stationMarkers.current.has(station.id)) return
+            const existing = stationMarkers.current.get(station.id)
+            if (existing) {
+              if (bikeStockBadgesRef.current) existing.setBadge(station.availableBikes)
+              return
+            }
             stationMarkers.current.set(
               station.id,
               createBikeStationOverlay(
@@ -231,6 +242,8 @@ export function useKakaoMap(
                   placeRef.current?.(stationToPlace(station))
                 },
                 routeActiveRef.current,
+                1,
+                bikeStockBadgesRef.current ? { count: station.availableBikes } : undefined,
               ),
             )
           })

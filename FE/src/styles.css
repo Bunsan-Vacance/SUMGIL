@@ -924,6 +924,35 @@ small {
 .home-topbar .home-chip {
   box-shadow: 0 1px 6px rgb(20 30 50 / 14%);
 }
+.home-layer-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 11px;
+  font-weight: 600;
+}
+.home-layer-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.legend-dot.level-ok {
+  background: #087c63;
+}
+.legend-dot.level-low {
+  background: #c2410c;
+}
 .home-layer-toggle {
   display: flex;
   flex-direction: column;

@@ -427,6 +427,46 @@ describe('일반 지도 장소 마커', () => {
     expect(card.textContent).toContain('지도 중심에서 43m')
   })
 
+  it('onBikeStationSelect가 있으면 대여소 선택을 콜백으로만 전달한다', async () => {
+    mocks.nearby.mockResolvedValueOnce([
+      {
+        id: 'ST-0',
+        name: '대여소',
+        address: '',
+        lat: 37.5,
+        lng: 127,
+        availableBikes: 4,
+        stockUpdatedAt: '2026-10-09T01:00:00+09:00',
+      },
+    ])
+    FakeBounds.containsAll = true
+    const onBikeStationSelect = vi.fn()
+    const onPlaceSelect = vi.fn()
+    const maps = fakeMaps([], vi.fn(), [])
+    mocks.loadKakaoMaps.mockResolvedValue(maps)
+    render(
+      <KakaoMap
+        origin={null}
+        onMessage={vi.fn()}
+        onPlaceSelect={onPlaceSelect}
+        onBikeStationSelect={onBikeStationSelect}
+        bikeStationsVisible
+        bikeStockBadges
+      />,
+    )
+    await waitFor(() => expect(FakeCustomOverlay.instances).toHaveLength(1))
+    const content = (FakeCustomOverlay.instances[0].options as { content: HTMLButtonElement })
+      .content
+    expect(content.querySelector('.bike-stock-badge')?.textContent).toBe('4')
+    fireEvent.click(content)
+    expect(onBikeStationSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'bike-station:ST-0' }),
+    )
+    expect(onPlaceSelect).not.toHaveBeenCalled()
+    expect(screen.queryByRole('region', { name: '따릉이 실시간 재고' })).toBeNull()
+    expect(mocks.stock).not.toHaveBeenCalled()
+  })
+
   it('대여소 메타데이터가 없으면 해당 항목을 숨긴다', async () => {
     const station: Place = {
       id: 'bike-station:ST-1',

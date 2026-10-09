@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
+import HomeLayerLegend from '../features/map/HomeLayerLegend'
 import HomeLayerToggle from '../features/map/HomeLayerToggle'
 import { availableLayers } from '../features/map/homeLayers'
 import type { HomeLayer } from '../features/map/homeLayers'
@@ -38,6 +39,8 @@ interface Props {
   home: FavoritePlace | null
   work: FavoritePlace | null
   openFavoriteRegistration: (label: FavoriteLabel) => void
+  layer: HomeLayer | null
+  setLayer: (layer: HomeLayer | null) => void
 }
 export default function HomePage({
   origin,
@@ -52,9 +55,10 @@ export default function HomePage({
   home,
   work,
   openFavoriteRegistration,
+  layer,
+  setLayer,
 }: Props) {
   const [recentRoutes, setRecentRoutes] = useState(loadRecentRoutes)
-  const [layer, setLayer] = useState<HomeLayer | null>(null)
   const extraFavorites = favorites.filter((item) => item.label === null).slice(0, EXTRA_CHIP_LIMIT)
   const placeLabel = (place: Place | null) => {
     if (!place) return '현재 위치'
@@ -111,6 +115,7 @@ export default function HomePage({
             </button>
           ))}
         </div>
+        <HomeLayerLegend layer={layer} />
         <HomeLayerToggle layers={availableLayers} active={layer} onChange={setLayer} />
       </div>
       <section

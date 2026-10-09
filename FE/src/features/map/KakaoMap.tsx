@@ -223,6 +223,9 @@ export default function KakaoMap({
   autoLocate = false,
   onCurrentLocation,
   livePosition = null,
+  bikeStationsVisible: bikeStationsVisibleProp,
+  bikeStockBadges = false,
+  onBikeStationSelect,
 }: {
   origin?: Place | null
   destination?: Place | null
@@ -235,9 +238,13 @@ export default function KakaoMap({
   autoLocate?: boolean
   onCurrentLocation?: (position: GeolocationPosition) => void
   livePosition?: LivePosition
+  bikeStationsVisible?: boolean
+  bikeStockBadges?: boolean
+  onBikeStationSelect?: (place: Place) => void
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
-  const [bikeStationsVisible, setBikeStationsVisible] = useState(true)
+  const [bikeStationsVisibleState, setBikeStationsVisible] = useState(true)
+  const bikeStationsVisible = bikeStationsVisibleProp ?? bikeStationsVisibleState
   const [bikeStockStation, setBikeStockStation] = useState<Place | null>(null)
   const [bikeStock, setBikeStock] = useState<BikeStock | null>(null)
   const [bikeStockState, setBikeStockState] = useState<
@@ -289,6 +296,10 @@ export default function KakaoMap({
       })
   }
   const selectPlace = (place: Place) => {
+    if (place.kind === '따릉이 대여소' && onBikeStationSelect) {
+      onBikeStationSelect(place)
+      return
+    }
     if (place.kind === '따릉이 대여소') {
       selectBikeStation(place)
       onPlaceSelect?.(place)
@@ -309,6 +320,7 @@ export default function KakaoMap({
     effectiveRoute,
     bikeStationsVisible,
     livePosition,
+    bikeStockBadges,
   )
   const showCurrentPosition = (position: GeolocationPosition) => {
     showPosition(position)
@@ -340,18 +352,20 @@ export default function KakaoMap({
     <div className="kakao-map-wrap">
       <div ref={container} className="kakao-map-canvas" aria-label="카카오 지도" />
       {showCongestionPreview && effectiveRoute && <CongestionPreviewMap route={effectiveRoute} />}
-      <button
-        type="button"
-        className="map-bike-toggle"
-        aria-label={bikeStationsVisible ? '따릉이 대여소 숨기기' : '따릉이 대여소 보이기'}
-        aria-pressed={bikeStationsVisible}
-        title={bikeStationsVisible ? '따릉이 대여소 숨기기' : '따릉이 대여소 보이기'}
-        onClick={() => setBikeStationsVisible((visible) => !visible)}
-      >
-        <span className="map-bike-toggle-thumb" aria-hidden="true">
-          <Bike size={14} strokeWidth={2.4} />
-        </span>
-      </button>
+      {bikeStationsVisibleProp === undefined && (
+        <button
+          type="button"
+          className="map-bike-toggle"
+          aria-label={bikeStationsVisible ? '따릉이 대여소 숨기기' : '따릉이 대여소 보이기'}
+          aria-pressed={bikeStationsVisible}
+          title={bikeStationsVisible ? '따릉이 대여소 숨기기' : '따릉이 대여소 보이기'}
+          onClick={() => setBikeStationsVisible((visible) => !visible)}
+        >
+          <span className="map-bike-toggle-thumb" aria-hidden="true">
+            <Bike size={14} strokeWidth={2.4} />
+          </span>
+        </button>
+      )}
       {effectiveRoute?.legs.some(
         (leg) =>
           (leg.mode === 'subway' || leg.mode === 'bus') &&
