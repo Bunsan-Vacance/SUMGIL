@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
 import { pinRecentRoute, saveRecentRoute } from '../features/route/recentRoutes'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
+import type { HomeSelection } from '../features/map/useHomeMapLayers'
 import type { Place } from '../features/route/types'
 import HomePage from './HomePage'
 
@@ -27,13 +28,13 @@ const baseProps = {
   openFavoriteRegistration: vi.fn(),
   layer: 'bike' as 'bike' | null,
   setLayer: vi.fn(),
-  selectedStation: null as Place | null,
+  selection: null as HomeSelection | null,
   outlook: {
     stock: { status: 'unavailable' },
     predictions: { in15: { status: 'unavailable' }, in30: { status: 'unavailable' } },
     retry: vi.fn(),
   } as OutlookState,
-  clearStation: vi.fn(),
+  clearSelection: vi.fn(),
   isFavorite: () => false,
   toggleFavorite: vi.fn(),
   setOriginFromStation: vi.fn(),
@@ -342,7 +343,7 @@ describe('홈 길찾기 패널', () => {
           origin={origin}
           destination={null}
           routePanelOpen={false}
-          selectedStation={bike}
+          selection={{ kind: 'bike', place: bike }}
           {...props}
         />,
       )
@@ -353,36 +354,36 @@ describe('홈 길찾기 패널', () => {
       expect(screen.queryByText('최근 경로')).toBeNull()
     })
 
-    it('닫기를 누르면 clearStation을 호출한다', () => {
-      const clearStation = vi.fn()
-      renderHome({ clearStation })
+    it('닫기를 누르면 clearSelection을 호출한다', () => {
+      const clearSelection = vi.fn()
+      renderHome({ clearSelection })
       fireEvent.click(screen.getByRole('button', { name: '대여소 정보 닫기' }))
-      expect(clearStation).toHaveBeenCalledOnce()
+      expect(clearSelection).toHaveBeenCalledOnce()
     })
 
     it('도착지로 설정하면 길찾기를 시작하고 카드를 닫는다', () => {
       const findRoutes = vi.fn(() => true)
-      const clearStation = vi.fn()
-      renderHome({ findRoutes, clearStation })
+      const clearSelection = vi.fn()
+      renderHome({ findRoutes, clearSelection })
       fireEvent.click(screen.getByRole('button', { name: '도착지로 설정' }))
       expect(findRoutes).toHaveBeenCalledWith(bike)
-      expect(clearStation).toHaveBeenCalledOnce()
+      expect(clearSelection).toHaveBeenCalledOnce()
     })
 
     it('도착지 설정이 거부되면 카드를 유지한다', () => {
-      const clearStation = vi.fn()
-      renderHome({ findRoutes: vi.fn(() => false), clearStation })
+      const clearSelection = vi.fn()
+      renderHome({ findRoutes: vi.fn(() => false), clearSelection })
       fireEvent.click(screen.getByRole('button', { name: '도착지로 설정' }))
-      expect(clearStation).not.toHaveBeenCalled()
+      expect(clearSelection).not.toHaveBeenCalled()
     })
 
     it('출발지로 설정하면 setOriginFromStation 후 카드를 닫는다', () => {
       const setOriginFromStation = vi.fn()
-      const clearStation = vi.fn()
-      renderHome({ setOriginFromStation, clearStation })
+      const clearSelection = vi.fn()
+      renderHome({ setOriginFromStation, clearSelection })
       fireEvent.click(screen.getByRole('button', { name: '출발지로 설정' }))
       expect(setOriginFromStation).toHaveBeenCalledWith(bike)
-      expect(clearStation).toHaveBeenCalledOnce()
+      expect(clearSelection).toHaveBeenCalledOnce()
     })
   })
 })

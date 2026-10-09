@@ -14,6 +14,7 @@ import BottomSheet from '../components/BottomSheet'
 import BikeStationCard from '../features/map/BikeStationCard'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
 import HomeLayerLegend from '../features/map/HomeLayerLegend'
+import type { HomeSelection } from '../features/map/useHomeMapLayers'
 import HomeLayerToggle from '../features/map/HomeLayerToggle'
 import { availableLayers } from '../features/map/homeLayers'
 import type { HomeLayer } from '../features/map/homeLayers'
@@ -43,9 +44,9 @@ interface Props {
   openFavoriteRegistration: (label: FavoriteLabel) => void
   layer: HomeLayer | null
   setLayer: (layer: HomeLayer | null) => void
-  selectedStation: Place | null
+  selection: HomeSelection | null
   outlook: OutlookState
-  clearStation: () => void
+  clearSelection: () => void
   isFavorite: (id: string) => boolean
   toggleFavorite: (place: Place) => void
   setOriginFromStation: (place: Place) => void
@@ -65,13 +66,15 @@ export default function HomePage({
   openFavoriteRegistration,
   layer,
   setLayer,
-  selectedStation,
+  selection,
   outlook,
-  clearStation,
+  clearSelection,
   isFavorite,
   toggleFavorite,
   setOriginFromStation,
 }: Props) {
+  // 역 카드는 커밋 5에서 추가한다. 지금은 대여소 선택만 카드로 보여 준다.
+  const selectedStation = selection?.kind === 'bike' ? selection.place : null
   const [recentRoutes, setRecentRoutes] = useState(loadRecentRoutes)
   const extraFavorites = favorites.filter((item) => item.label === null).slice(0, EXTRA_CHIP_LIMIT)
   const placeLabel = (place: Place | null) => {
@@ -188,13 +191,13 @@ export default function HomePage({
             outlook={outlook}
             favorite={isFavorite(selectedStation.id)}
             onToggleFavorite={() => toggleFavorite(selectedStation)}
-            onClose={clearStation}
+            onClose={clearSelection}
             onSetOrigin={(place) => {
               setOriginFromStation(place)
-              clearStation()
+              clearSelection()
             }}
             onSetDestination={(place) => {
-              if (findRoutes(place) !== false) clearStation()
+              if (findRoutes(place) !== false) clearSelection()
             }}
           />
         ) : (

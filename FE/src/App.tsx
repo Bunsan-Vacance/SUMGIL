@@ -5,6 +5,8 @@ import PreviewToolbar from './app/PreviewToolbar'
 import KakaoMap from './features/map/KakaoMap'
 import { useHomeMapLayers } from './features/map/useHomeMapLayers'
 import { useBikeStationOutlook } from './features/map/useBikeStationOutlook'
+import { useNearbyStationCongestion } from './features/map/useNearbyStationCongestion'
+import type { StationCongestion } from './features/map/useNearbyStationCongestion'
 import { bikeRentalId } from './features/map/bikeStations'
 import FilterDialog from './features/route/FilterDialog'
 import GuidanceDialogs from './features/guidance/GuidanceDialogs'
@@ -22,14 +24,21 @@ import { isBackendConfigured, isRouteSearchMockEnabled } from './api/repositorie
 import { isGuidanceMockEnabled } from './api/guidance'
 import { remaining } from './features/route/selectors'
 
+// 지도 effect가 배열 참조로 동작하므로 빈 목록은 매 렌더 새로 만들지 않는다.
+const EMPTY_STATIONS: StationCongestion[] = []
+
 export default function App() {
   const [showSplash, setShowSplash] = useState(true)
   const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
   const homeLayers = useHomeMapLayers(planner.screen === 'home')
+  const bikeSelection = homeLayers.selection?.kind === 'bike' ? homeLayers.selection.place : null
   const stationOutlook = useBikeStationOutlook(
-    homeLayers.selectedStation ? (bikeRentalId(homeLayers.selectedStation) ?? null) : null,
+    bikeSelection ? (bikeRentalId(bikeSelection) ?? null) : null,
   )
+  const [viewportCenter, setViewportCenter] = useState<{ lat: number; lng: number } | null>(null)
+  const crowdLayerOn = planner.screen === 'home' && homeLayers.layer === 'crowd'
+  const stationLayer = useNearbyStationCongestion(viewportCenter, crowdLayerOn)
   const { screen, go, trip, guidance, destinationName, modal, setModal } = planner
   const routeView = screen === 'detail' || screen === 'guide'
   const displayedRoute = screen === 'guide' ? guidance.route : trip.selected
@@ -80,8 +89,25 @@ export default function App() {
                 }
                 bikeStationsVisible={screen === 'home' ? homeLayers.layer === 'bike' : undefined}
                 bikeStockBadges={screen === 'home'}
-                onBikeStationSelect={screen === 'home' ? homeLayers.selectStation : undefined}
-                focusedPlace={screen === 'home' ? homeLayers.selectedStation : undefined}
+                onBikeStationSelect={screen === 'home' ? homeLayers.selectBikeStation : undefined}
+                focusedPlace={screen === 'home' ? bikeSelection : undefined}
+                stationMarkers={crowdLayerOn ? stationLayer.stations : EMPTY_STATIONS}
+                selectedStationId={
+                  homeLayers.selection?.kind === 'subway'
+                    ? homeLayers.selection.station.stationId
+                    : null
+                }
+                onStationSelect={
+                  screen === 'home'
+                    ? (datum) => {
+                        const station = stationLayer.stations.find(
+                          (item) => item.stationId === datum.stationId,
+                        )
+                        if (station) homeLayers.selectSubwayStation(station)
+                      }
+                    : undefined
+                }
+                onViewportChange={screen === 'home' ? setViewportCenter : undefined}
                 onMessage={planner.setMessage}
               />
             )}
@@ -101,9 +127,9 @@ export default function App() {
               openFavoriteRegistration={planner.openFavoriteRegistration}
               layer={homeLayers.layer}
               setLayer={homeLayers.setLayer}
-              selectedStation={homeLayers.selectedStation}
+              selection={homeLayers.selection}
               outlook={stationOutlook}
-              clearStation={homeLayers.clearStation}
+              clearSelection={homeLayers.clearSelection}
               isFavorite={planner.favorites.isFavorite}
               toggleFavorite={planner.favorites.toggle}
               setOriginFromStation={planner.setOriginFromBrowse}

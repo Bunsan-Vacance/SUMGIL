@@ -13,6 +13,14 @@ describe('홈 레이어 범례', () => {
     expect(container.querySelectorAll('.legend-dot')).toHaveLength(2)
   })
 
+  it('혼잡도 레이어면 등급 4개와 정보 없음 점을 보여 준다', () => {
+    const { container } = render(<HomeLayerLegend layer="crowd" />)
+    expect(screen.getByText('지금 역 혼잡도')).toBeTruthy()
+    expect(container.querySelectorAll('.legend-dot')).toHaveLength(5)
+    expect(screen.getByText('정보 없음')).toBeTruthy()
+    expect(screen.getByText('포화')).toBeTruthy()
+  })
+
   it('다른 값이면 렌더링하지 않는다', () => {
     const { container } = render(<HomeLayerLegend layer={null} />)
     expect(container.firstChild).toBeNull()
