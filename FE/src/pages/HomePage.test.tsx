@@ -4,6 +4,12 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
 import { pinRecentRoute, saveRecentRoute } from '../features/route/recentRoutes'
+import type { BikeStation } from '../features/map/bikeStations'
+import type { HomeTab } from '../features/home/HomeTabBar'
+import type {
+  NearbyStationStatus,
+  StationCongestion,
+} from '../features/map/useNearbyStationCongestion'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
 import type { HomeSelection } from '../features/map/useHomeMapLayers'
 import type { Place } from '../features/route/types'
@@ -14,15 +20,18 @@ vi.mock('../features/map/StationCard', () => ({
   default: ({
     station,
     onClose,
+    onBack,
     onSetDestination,
   }: {
     station: { stationName: string }
     onClose: () => void
+    onBack?: () => void
     onSetDestination: (place: { id: string }) => void
   }) => (
     <section aria-label="선택한 역">
       <span>{station.stationName}</span>
       <button onClick={onClose}>역 정보 닫기</button>
+      {onBack && <button onClick={onBack}>주변 역 목록으로</button>}
       <button onClick={() => onSetDestination({ id: 'station:222:default' })}>역 도착 설정</button>
     </section>
   ),
@@ -45,6 +54,14 @@ const baseProps = {
   home: null,
   work: null,
   openFavoriteRegistration: vi.fn(),
+  tab: 'recent' as HomeTab | null,
+  stations: [] as StationCongestion[],
+  stationStatus: 'ready' as NearbyStationStatus,
+  retryStations: vi.fn(),
+  selectSubwayStation: vi.fn(),
+  bikeStations: [] as BikeStation[],
+  selectBikeStation: vi.fn(),
+  onDismissTab: vi.fn(),
   selection: null as HomeSelection | null,
   outlook: {
     stock: { status: 'unavailable' },
@@ -253,8 +270,8 @@ describe('홈 길찾기 패널', () => {
       lng: 126.97,
     }
     // 시트는 접힌 채 시작하므로 기본으로 펼친 뒤 전체 목록을 확인한다.
-    const renderHome = (props = {}, expand = true) => {
-      const rendered = render(
+    const renderHome = (props = {}) =>
+      render(
         <HomePage
           {...baseProps}
           origin={origin}
@@ -263,63 +280,34 @@ describe('홈 길찾기 패널', () => {
           {...props}
         />,
       )
-      if (expand) fireEvent.click(screen.getByRole('button', { name: '최근 경로 펼치기' }))
-      return rendered
-    }
 
-    it('초기에는 접혀 첫 경로 1개만 보이고 제목 버튼으로 펼치고 접는다', () => {
+    it('탭이 없으면 시트가 닫혀 있고 최근 기록 탭이면 기본 높이로 전체 목록을 보인다', () => {
       saveRecentRoute(stationA, stationB, new Date('2026-10-08T00:00:00.000Z'))
       saveRecentRoute(stationB, stationA, new Date('2026-10-09T00:00:00.000Z'))
-      renderHome({}, false)
+      const { rerender } = renderHome({ tab: null })
       const sheet = document.querySelector('.home-sheet')!
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
-      expect(document.querySelectorAll('.home-recent-route')).toHaveLength(1)
-      expect(screen.queryByRole('button', { name: /최근 경로 삭제/ })).toBeNull()
-
-      fireEvent.click(screen.getByRole('button', { name: '최근 경로 펼치기' }))
+      expect(sheet.getAttribute('data-snap')).toBe('closed')
+      expect(sheet.getAttribute('aria-hidden')).toBe('true')
+      rerender(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          tab="recent"
+        />,
+      )
       expect(sheet.getAttribute('data-snap')).toBe('default')
+      expect(screen.getByRole('heading', { name: '최근 기록' })).toBeTruthy()
       expect(document.querySelectorAll('.home-recent-route')).toHaveLength(2)
       expect(screen.getAllByRole('button', { name: /최근 경로 삭제/ })).toHaveLength(2)
-
-      fireEvent.click(screen.getByRole('button', { name: '최근 경로 접기' }))
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
     })
 
-    it('카드를 선택하면 펼치고 선택이 풀리면 다시 접는다', () => {
-      const station = {
-        stationId: '222',
-        stationName: '강남',
-        lat: 37.4979,
-        lng: 127.0276,
-        distanceMeters: 100,
-        lines: [],
-        level: null,
-        grade: null,
-        updatedAt: null,
-      }
-      const { rerender } = renderHome({}, false)
-      const sheet = document.querySelector('.home-sheet')!
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
-      rerender(
-        <HomePage
-          {...baseProps}
-          origin={origin}
-          destination={null}
-          routePanelOpen={false}
-          selection={{ kind: 'subway', station }}
-        />,
-      )
-      expect(sheet.getAttribute('data-snap')).toBe('default')
-      rerender(
-        <HomePage
-          {...baseProps}
-          origin={origin}
-          destination={null}
-          routePanelOpen={false}
-          selection={null}
-        />,
-      )
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
+    it('혼잡도·자전거 탭은 최근 기록 본문을 보이지 않는다', () => {
+      saveRecentRoute(stationA, stationB)
+      renderHome({ tab: 'crowd' })
+      expect(screen.queryByRole('heading', { name: '최근 기록' })).toBeNull()
+      expect(document.querySelectorAll('.home-recent-route')).toHaveLength(0)
     })
 
     it('저장된 경로를 현재 위치·집 이름 규칙으로 표시한다', () => {
@@ -392,7 +380,7 @@ describe('홈 길찾기 패널', () => {
     it('선택하면 카드를 보이고 최근 경로는 숨긴다', () => {
       renderHome()
       expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
-      expect(screen.queryByText('최근 경로')).toBeNull()
+      expect(screen.queryByText('최근 기록')).toBeNull()
     })
 
     it('닫기를 누르면 clearSelection을 호출한다', () => {
@@ -456,7 +444,7 @@ describe('홈 길찾기 패널', () => {
       renderHome()
       expect(screen.getByRole('region', { name: '선택한 역' })).toBeTruthy()
       expect(screen.queryByRole('region', { name: '선택한 따릉이 대여소' })).toBeNull()
-      expect(screen.queryByText('최근 경로')).toBeNull()
+      expect(screen.queryByText('최근 기록')).toBeNull()
     })
 
     it('닫기를 누르면 clearSelection을 호출한다', () => {
@@ -491,6 +479,100 @@ describe('홈 길찾기 패널', () => {
       })
       expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
       expect(screen.queryByRole('region', { name: '선택한 역' })).toBeNull()
+    })
+  })
+
+  describe('혼잡도 탭', () => {
+    const subway: StationCongestion = {
+      stationId: '222',
+      stationName: '강남',
+      lat: 37.4979,
+      lng: 127.0276,
+      distanceMeters: 100,
+      lines: [],
+      level: null,
+      grade: null,
+      updatedAt: null,
+    }
+    const renderCrowd = (props = {}) =>
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          tab="crowd"
+          stations={[subway]}
+          {...props}
+        />,
+      )
+
+    it('역을 선택하지 않았으면 주변 역 목록을 보이고 행을 누르면 selectSubwayStation을 호출한다', () => {
+      const selectSubwayStation = vi.fn()
+      renderCrowd({ selectSubwayStation })
+      expect(screen.getByRole('heading', { name: '주변 역 혼잡도' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: /강남/ }))
+      expect(selectSubwayStation).toHaveBeenCalledWith(subway)
+    })
+
+    it('역을 선택하면 카드를 보이고 ← 버튼이 선택을 해제해 목록으로 돌아간다', () => {
+      const clearSelection = vi.fn()
+      renderCrowd({ selection: { kind: 'subway', station: subway }, clearSelection })
+      expect(screen.getByRole('region', { name: '선택한 역' })).toBeTruthy()
+      expect(screen.queryByRole('heading', { name: '주변 역 혼잡도' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '주변 역 목록으로' }))
+      expect(clearSelection).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('자전거 탭', () => {
+    const rentalStation: BikeStation = {
+      id: 'ST-1',
+      name: '101. 강남역 1번출구',
+      address: '서울',
+      lat: 37.5,
+      lng: 127,
+      availableBikes: 4,
+      distanceMeters: 80,
+    }
+    const bikePlace: Place = {
+      id: 'bike-station:ST-1',
+      name: '강남역 1번출구',
+      address: '서울',
+      kind: '따릉이 대여소',
+      lat: 37.5,
+      lng: 127,
+    }
+    const renderBike = (props = {}) =>
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          tab="bike"
+          bikeStations={[rentalStation]}
+          {...props}
+        />,
+      )
+
+    it('대여소를 고르지 않았으면 주변 따릉이 목록을 보이고 행을 누르면 selectBikeStation에 장소로 넘긴다', () => {
+      const selectBikeStation = vi.fn()
+      renderBike({ selectBikeStation })
+      expect(screen.getByRole('heading', { name: '주변 따릉이' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: /강남역 1번출구/ }))
+      expect(selectBikeStation).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'bike-station:ST-1', kind: '따릉이 대여소' }),
+      )
+    })
+
+    it('대여소를 선택하면 카드를 보이고 ← 버튼이 선택을 해제해 목록으로 돌아간다', () => {
+      const clearSelection = vi.fn()
+      renderBike({ selection: { kind: 'bike', place: bikePlace }, clearSelection })
+      expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
+      expect(screen.queryByRole('heading', { name: '주변 따릉이' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '주변 대여소 목록으로' }))
+      expect(clearSelection).toHaveBeenCalledOnce()
     })
   })
 })

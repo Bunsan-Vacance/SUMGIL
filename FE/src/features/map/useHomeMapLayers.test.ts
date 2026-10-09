@@ -4,7 +4,6 @@ import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { StationCongestion } from './useNearbyStationCongestion'
 import type { Place } from '../route/types'
-import { availableLayers } from './homeLayers'
 import { useHomeMapLayers } from './useHomeMapLayers'
 
 const bike: Place = {
@@ -28,9 +27,9 @@ const subway: StationCongestion = {
 }
 
 describe('홈 지도 레이어 상태', () => {
-  it('기본 레이어는 availableLayers의 첫 번째 값이다', () => {
-    const { result } = renderHook(() => useHomeMapLayers())
-    expect(result.current.layer).toBe(availableLayers[0] ?? null)
+  it('레이어는 인자를 그대로 돌려주고 선택은 비어 시작한다', () => {
+    const { result } = renderHook(() => useHomeMapLayers(true, 'crowd'))
+    expect(result.current.layer).toBe('crowd')
     expect(result.current.selection).toBeNull()
   })
 
@@ -53,18 +52,20 @@ describe('홈 지도 레이어 상태', () => {
     expect(result.current.selection).toBeNull()
   })
 
-  it('레이어를 바꾸면 꺼진 레이어의 선택만 해제한다', () => {
-    const { result } = renderHook(() => useHomeMapLayers(true, 'bike'))
+  it('레이어가 바뀌면 꺼진 레이어의 선택만 해제한다', () => {
+    const { result, rerender } = renderHook(({ layer }) => useHomeMapLayers(true, layer), {
+      initialProps: { layer: 'bike' as 'bike' | 'crowd' | null },
+    })
     act(() => result.current.selectBikeStation(bike))
-    act(() => result.current.setLayer('crowd'))
+    rerender({ layer: 'crowd' })
     expect(result.current.selection).toBeNull()
     act(() => result.current.selectSubwayStation(subway))
-    act(() => result.current.setLayer('bike'))
+    rerender({ layer: 'bike' })
     expect(result.current.selection).toBeNull()
     act(() => result.current.selectSubwayStation(subway))
-    act(() => result.current.setLayer('crowd'))
+    rerender({ layer: 'crowd' })
     expect(result.current.selection?.kind).toBe('subway')
-    act(() => result.current.setLayer(null))
+    rerender({ layer: null })
     expect(result.current.selection).toBeNull()
   })
 

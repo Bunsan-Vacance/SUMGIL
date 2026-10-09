@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bike, Star, X } from 'lucide-react'
+import { ArrowLeft, Bike, Star, X } from 'lucide-react'
 import type { Place } from '../route/types'
 import { bikeRentalId } from './bikeStations'
 import { bikeStockBadgeLevel } from './bikeStockBadge'
@@ -126,6 +126,8 @@ interface Props {
   favorite: boolean
   onToggleFavorite: () => void
   onClose: () => void
+  /** 있으면 헤더 왼쪽에 주변 대여소 목록으로 돌아가는 버튼을 그린다. */
+  onBack?: () => void
   onSetOrigin: (place: Place) => void
   onSetDestination: (place: Place) => void
 }
@@ -136,6 +138,7 @@ export default function BikeStationCard({
   favorite,
   onToggleFavorite,
   onClose,
+  onBack,
   onSetOrigin,
   onSetDestination,
 }: Props) {
@@ -150,6 +153,16 @@ export default function BikeStationCard({
   return (
     <section className="bike-station-card" aria-label="선택한 따릉이 대여소" aria-live="polite">
       <header className="bike-station-card-header">
+        {onBack && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="주변 대여소 목록으로"
+            onClick={onBack}
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
         <span className="bike-station-card-icon">
           <Bike size={22} />
         </span>

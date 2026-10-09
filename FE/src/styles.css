@@ -1040,31 +1040,6 @@ small {
 .legend-dot.level-low {
   background: #c2410c;
 }
-.home-layer-toggle {
-  display: flex;
-  flex-direction: row;
-  align-self: flex-end;
-  gap: 6px;
-}
-.home-layer-button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border-radius: 14px;
-  background: white;
-  box-shadow: 0 2px 10px rgb(20 30 50 / 14%);
-  font-size: 10px;
-  color: #3b475c;
-}
-.home-layer-button[aria-pressed='true'] {
-  background: var(--primary);
-  color: white;
-}
 .home-route-button {
   min-width: 76px;
   min-height: 44px;
@@ -1250,6 +1225,12 @@ small {
 .screen-guide .bottom-sheet.compact-sheet[data-snap='collapsed'] {
   height: min(180px, calc(100% - 16px));
 }
+.bottom-sheet[data-snap='closed'] {
+  height: 0;
+  min-height: 0;
+  visibility: hidden;
+  box-shadow: none;
+}
 .bottom-sheet.dragging {
   transition: none;
   user-select: none;
@@ -1302,10 +1283,51 @@ small {
   background: #b4bfce;
 }
 .screen-home .home-sheet[data-snap='default'] {
-  height: 36%;
+  height: min(360px, 60%);
 }
-.screen-home .home-sheet[data-snap='collapsed'] {
-  height: 128px;
+.screen-home .home-sheet .sheet-body {
+  padding-bottom: 88px;
+}
+.page-viewport[data-home-sheet='closed'] .map-bottom-controls {
+  bottom: 88px;
+}
+.home-tabbar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 6;
+  display: flex;
+  box-sizing: border-box;
+  width: 330px;
+  height: 56px;
+  padding: 4px;
+  border-radius: 28px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(20 30 50 / 18%);
+  transform: translateX(-50%);
+}
+.home-tabbar button {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 48px;
+  padding: 0;
+  border-radius: 24px;
+  background: transparent;
+  color: #3b475c;
+  font-size: 11px;
+  font-weight: 600;
+}
+.home-tabbar button[aria-pressed='true'] {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-weight: 700;
+}
+.home-tabbar button:disabled {
+  opacity: 0.4;
 }
 .bike-station-card {
   display: flex;
@@ -1586,23 +1608,6 @@ small {
   margin: 0 0 4px;
   font-size: 16px;
 }
-.home-sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 36px;
-  padding: 0;
-  background: transparent;
-  text-align: left;
-}
-.home-sheet-head .home-sheet-title {
-  margin: 0;
-}
-.home-sheet-title span {
-  color: #687795;
-  font-weight: 600;
-}
 .home-sheet-empty {
   padding: 16px 0;
   color: #687795;
@@ -1649,6 +1654,81 @@ small {
   width: 40px;
   height: 40px;
   color: #82909b;
+}
+.home-sheet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+}
+.home-sheet-heading .home-sheet-title {
+  margin: 0;
+}
+.home-sheet-heading small {
+  color: #687795;
+  font-size: 12px;
+}
+.home-sheet .home-layer-legend {
+  max-width: none;
+  padding: 4px 0 8px;
+  background: none;
+  box-shadow: none;
+}
+.nearby-station-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nearby-station-list > li > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.nearby-station-list > li > button > span {
+  flex: 1;
+  min-width: 0;
+}
+.nearby-station-list strong,
+.nearby-station-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nearby-station-list small {
+  color: #687795;
+  font-size: 12px;
+}
+.nearby-bike-badge {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: white;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+.nearby-bike-badge.level-ok {
+  background: #087c63;
+}
+.nearby-bike-badge.level-low {
+  background: #c2410c;
+}
+.nearby-bike-badge.level-unknown {
+  background: #82909b;
+}
+.nearby-station-grade {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
 }
 .sheet-footer {
   flex-shrink: 0;

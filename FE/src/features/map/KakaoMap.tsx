@@ -14,6 +14,7 @@ import {
 import { useKakaoMap, type LivePosition } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
 import { bikeRentalId } from './bikeStations'
+import type { BikeStation } from './bikeStations'
 import type { StationMarkerDatum } from './stationMarkers'
 
 function stockUpdatedLabel(value: string | null) {
@@ -231,6 +232,7 @@ export default function KakaoMap({
   selectedStationId,
   onStationSelect,
   onViewportChange,
+  onBikeStationsChange,
   bottomControls,
 }: {
   origin?: Place | null
@@ -251,6 +253,8 @@ export default function KakaoMap({
   selectedStationId?: string | null
   onStationSelect?: (datum: StationMarkerDatum) => void
   onViewportChange?: (center: { lat: number; lng: number }) => void
+  /** 지도가 받은 주변 따릉이 대여소가 바뀔 때마다 알린다(홈 자전거 탭 목록용). */
+  onBikeStationsChange?: (stations: BikeStation[]) => void
   // 하단 컨트롤 슬롯: start는 좌측 하단, end는 우측 하단(현재 위치 버튼 아래)에 놓인다.
   bottomControls?: { start?: ReactNode; end?: ReactNode }
 }) {
@@ -337,6 +341,7 @@ export default function KakaoMap({
     selectedStationId,
     onStationSelect,
     onViewportChange,
+    onBikeStationsChange,
   )
   const showCurrentPosition = (position: GeolocationPosition) => {
     showPosition(position)

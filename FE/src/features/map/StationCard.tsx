@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Star, X } from 'lucide-react'
+import { ArrowLeft, Star, X } from 'lucide-react'
 import type { GuidanceRepository } from '../../api/guidance'
 import type { CongestionBatchRepository } from '../../api/congestion'
 import { lineColorById } from '../route/lineColor'
@@ -18,6 +18,8 @@ interface Props {
   favorite: boolean
   onToggleFavorite: () => void
   onClose: () => void
+  /** 있으면 헤더 왼쪽에 주변 역 목록으로 돌아가는 버튼을 그린다. */
+  onBack?: () => void
   onSetOrigin: (place: Place) => void
   onSetDestination: (place: Place) => void
   /** 테스트에서 저장소·시각을 바꿔 끼우기 위한 주입 지점. */
@@ -42,6 +44,7 @@ export default function StationCard({
   favorite,
   onToggleFavorite,
   onClose,
+  onBack,
   onSetOrigin,
   onSetDestination,
   arrivalsRepository,
@@ -130,6 +133,16 @@ export default function StationCard({
   return (
     <section className="station-card" aria-label="선택한 역" aria-live="polite">
       <header className="bike-station-card-header">
+        {onBack && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="주변 역 목록으로"
+            onClick={onBack}
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
         <div className="bike-station-card-title">
           <h2>{displayName}</h2>
           <small>

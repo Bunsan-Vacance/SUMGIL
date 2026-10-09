@@ -15,10 +15,14 @@ const mocks = vi.hoisted(() => ({
   loadKakaoMaps: vi.fn(),
   stock: vi.fn(),
   nearby: vi.fn(),
+  // false이면 저장소가 없는 목업 모드로 본다.
+  repositoryEnabled: true,
 }))
 vi.mock('../../lib/kakao/sdk', () => ({ loadKakaoMaps: mocks.loadKakaoMaps }))
 vi.mock('../../api/repositories', () => ({
-  bikeStationRepository: { nearby: mocks.nearby },
+  get bikeStationRepository() {
+    return mocks.repositoryEnabled ? { nearby: mocks.nearby } : undefined
+  },
   bikeStockRepository: { stock: mocks.stock },
   isBackendConfigured: false,
 }))
@@ -273,6 +277,7 @@ beforeEach(() => {
     stockUpdatedAt: null,
   })
   mocks.nearby.mockReset().mockResolvedValue([])
+  mocks.repositoryEnabled = true
   FakeBounds.containsAll = false
   FakeMap.instances = []
   FakeMap.boundsApplied = false
@@ -1114,6 +1119,45 @@ describe('일반 지도 장소 마커', () => {
     expect(map.setCenter).toHaveBeenLastCalledWith(preservedCenter)
     expect(map.panTo).toHaveBeenCalledTimes(pausedPanCalls)
     rendered.unmount()
+  })
+})
+
+describe('주변 따릉이 대여소 알림', () => {
+  it('nearby 조회가 성공하면 변환한 대여소 목록을 콜백으로 알린다', async () => {
+    mocks.nearby.mockResolvedValueOnce([
+      { id: 'ST-1', name: '101. 대여소', lat: 37.5, lng: 127, availableBikes: 3 },
+    ])
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    const onBikeStationsChange = vi.fn()
+    render(
+      <KakaoMap origin={null} onMessage={vi.fn()} onBikeStationsChange={onBikeStationsChange} />,
+    )
+    await waitFor(() => expect(onBikeStationsChange).toHaveBeenCalledTimes(1))
+    expect(onBikeStationsChange).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'ST-1', availableBikes: 3 }),
+    ])
+  })
+
+  it('nearby 조회가 실패하면 빈 목록을 알린다', async () => {
+    mocks.nearby.mockRejectedValueOnce(new Error('network'))
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    const onBikeStationsChange = vi.fn()
+    render(
+      <KakaoMap origin={null} onMessage={vi.fn()} onBikeStationsChange={onBikeStationsChange} />,
+    )
+    await waitFor(() => expect(onBikeStationsChange).toHaveBeenCalledWith([]))
+  })
+
+  it('저장소가 없는 목업 모드는 정적 대여소 목록을 지도 준비 시 한 번만 알린다', async () => {
+    mocks.repositoryEnabled = false
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    const onBikeStationsChange = vi.fn()
+    render(
+      <KakaoMap origin={null} onMessage={vi.fn()} onBikeStationsChange={onBikeStationsChange} />,
+    )
+    await waitFor(() => expect(onBikeStationsChange).toHaveBeenCalledTimes(1))
+    expect(onBikeStationsChange.mock.calls[0][0].length).toBeGreaterThan(0)
+    expect(mocks.nearby).not.toHaveBeenCalled()
   })
 })
 

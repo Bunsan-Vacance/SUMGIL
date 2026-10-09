@@ -96,3 +96,73 @@ describe('BottomSheet 스냅', () => {
     expect(sheet.style.height).toBe('128px')
   })
 })
+
+describe('BottomSheet 끌어 내려 닫기', () => {
+  // jsdom에는 레이아웃이 없어 부모 높이(800)와 시트 현재 높이를 직접 지정한다.
+  function setup(snap: 'default' | 'expanded', height: number, onDismiss = vi.fn()) {
+    const { container, rerender } = render(
+      <BottomSheet initialSnap={snap} onDismiss={onDismiss}>
+        <div>내용</div>
+      </BottomSheet>,
+    )
+    const sheet = container.querySelector<HTMLElement>('.bottom-sheet')!
+    Object.defineProperty(sheet.parentElement!, 'clientHeight', { configurable: true, value: 800 })
+    sheet.getBoundingClientRect = () => ({ height }) as DOMRect
+    const handle = container.querySelector<HTMLElement>('.sheet-grip')!
+    handle.setPointerCapture = vi.fn()
+    const dragDown = (distance: number) => {
+      fireEvent.pointerDown(handle, { button: 0, clientY: 100, pointerId: 1 })
+      fireEvent.pointerMove(handle, { clientY: 100 + distance, pointerId: 1 })
+      fireEvent.pointerUp(handle, { clientY: 100 + distance, pointerId: 1 })
+    }
+    return { sheet, onDismiss, dragDown, rerender }
+  }
+
+  it('기본 높이의 60%를 아래로 끌어 놓으면 닫히고 onDismiss를 한 번 부른다', () => {
+    const { sheet, onDismiss, dragDown } = setup('default', 300)
+    dragDown(180)
+    expect(sheet.getAttribute('data-snap')).toBe('closed')
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('기본 높이의 40%만 끌어 내리면 기본 높이를 유지하고 onDismiss를 부르지 않는다', () => {
+    const { sheet, onDismiss, dragDown } = setup('default', 300)
+    dragDown(120)
+    expect(sheet.getAttribute('data-snap')).toBe('default')
+    expect(onDismiss).not.toHaveBeenCalled()
+  })
+
+  it('펼침에서 크게 내리면 기본 높이로만 내려가고 닫히지 않는다', () => {
+    const { sheet, onDismiss, dragDown } = setup('expanded', 750)
+    dragDown(600)
+    expect(sheet.getAttribute('data-snap')).toBe('default')
+    expect(onDismiss).not.toHaveBeenCalled()
+  })
+
+  it('닫힘 상태에서 preferredSnap이 default로 바뀌면 다시 열린다', () => {
+    const { container, rerender } = render(
+      <BottomSheet initialSnap="closed" preferredSnap="closed">
+        <div>내용</div>
+      </BottomSheet>,
+    )
+    const sheet = container.querySelector('.bottom-sheet')!
+    expect(sheet.getAttribute('data-snap')).toBe('closed')
+    rerender(
+      <BottomSheet initialSnap="closed" preferredSnap="default">
+        <div>내용</div>
+      </BottomSheet>,
+    )
+    expect(sheet.getAttribute('data-snap')).toBe('default')
+    expect(sheet.getAttribute('aria-hidden')).toBeNull()
+  })
+
+  it('닫힘이면 aria-hidden이고 손잡이는 탭 순서에서 빠진다', () => {
+    const { container } = render(
+      <BottomSheet initialSnap="closed">
+        <div>내용</div>
+      </BottomSheet>,
+    )
+    expect(container.querySelector('.bottom-sheet')!.getAttribute('aria-hidden')).toBe('true')
+    expect(container.querySelector('.sheet-grip')!.getAttribute('tabindex')).toBe('-1')
+  })
+})

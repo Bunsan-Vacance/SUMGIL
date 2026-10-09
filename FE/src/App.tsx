@@ -3,14 +3,14 @@ import { useRoutePlanner } from './app/useRoutePlanner'
 import { screenTitles } from './app/useNavigation'
 import PreviewToolbar from './app/PreviewToolbar'
 import KakaoMap from './features/map/KakaoMap'
-import HomeLayerLegend from './features/map/HomeLayerLegend'
-import HomeLayerToggle from './features/map/HomeLayerToggle'
-import { availableLayers } from './features/map/homeLayers'
+import HomeTabBar from './features/home/HomeTabBar'
+import { tabToLayer, useHomeTab } from './features/home/useHomeTab'
 import { useHomeMapLayers } from './features/map/useHomeMapLayers'
 import { useBikeStationOutlook } from './features/map/useBikeStationOutlook'
 import { useNearbyStationCongestion } from './features/map/useNearbyStationCongestion'
 import type { StationCongestion } from './features/map/useNearbyStationCongestion'
 import { bikeRentalId } from './features/map/bikeStations'
+import type { BikeStation } from './features/map/bikeStations'
 import FilterDialog from './features/route/FilterDialog'
 import GuidanceDialogs from './features/guidance/GuidanceDialogs'
 import HomePage from './pages/HomePage'
@@ -34,11 +34,13 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true)
   const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
-  const homeLayers = useHomeMapLayers(planner.screen === 'home')
+  const homeTab = useHomeTab(planner.screen === 'home')
+  const homeLayers = useHomeMapLayers(planner.screen === 'home', tabToLayer(homeTab.tab))
   const bikeSelection = homeLayers.selection?.kind === 'bike' ? homeLayers.selection.place : null
   const stationOutlook = useBikeStationOutlook(
     bikeSelection ? (bikeRentalId(bikeSelection) ?? null) : null,
   )
+  const [bikeStations, setBikeStations] = useState<BikeStation[]>([])
   const [viewportCenter, setViewportCenter] = useState<{ lat: number; lng: number } | null>(null)
   const crowdLayerOn = planner.screen === 'home' && homeLayers.layer === 'crowd'
   const stationLayer = useNearbyStationCongestion(viewportCenter, crowdLayerOn)
@@ -58,7 +60,10 @@ export default function App() {
         <PreviewToolbar guiding={screen === 'guide'} isLiveApi={!isGuidanceMockEnabled} />
       )}
       <main className={`app-shell screen-${screen}`}>
-        <div className="page-viewport">
+        <div
+          className="page-viewport"
+          data-home-sheet={screen === 'home' ? (homeTab.tab ? 'open' : 'closed') : undefined}
+        >
           <h1 ref={title} tabIndex={-1} className="sr-only">
             {screenTitles[screen]}
           </h1>
@@ -92,20 +97,6 @@ export default function App() {
                 }
                 bikeStationsVisible={screen === 'home' ? homeLayers.layer === 'bike' : undefined}
                 bikeStockBadges={screen === 'home'}
-                bottomControls={
-                  screen === 'home'
-                    ? {
-                        start: <HomeLayerLegend layer={homeLayers.layer} />,
-                        end: (
-                          <HomeLayerToggle
-                            layers={availableLayers}
-                            active={homeLayers.layer}
-                            onChange={homeLayers.setLayer}
-                          />
-                        ),
-                      }
-                    : undefined
-                }
                 onBikeStationSelect={screen === 'home' ? homeLayers.selectBikeStation : undefined}
                 focusedPlace={screen === 'home' ? bikeSelection : undefined}
                 stationMarkers={crowdLayerOn ? stationLayer.stations : EMPTY_STATIONS}
@@ -125,6 +116,7 @@ export default function App() {
                     : undefined
                 }
                 onViewportChange={screen === 'home' ? setViewportCenter : undefined}
+                onBikeStationsChange={screen === 'home' ? setBikeStations : undefined}
                 onMessage={planner.setMessage}
               />
             )}
@@ -142,12 +134,27 @@ export default function App() {
               home={planner.favorites.home}
               work={planner.favorites.work}
               openFavoriteRegistration={planner.openFavoriteRegistration}
+              tab={homeTab.tab}
+              stations={stationLayer.stations}
+              stationStatus={stationLayer.status}
+              retryStations={stationLayer.retry}
+              selectSubwayStation={homeLayers.selectSubwayStation}
+              bikeStations={bikeStations}
+              selectBikeStation={homeLayers.selectBikeStation}
+              onDismissTab={() => homeTab.setTab(null)}
               selection={homeLayers.selection}
               outlook={stationOutlook}
               clearSelection={homeLayers.clearSelection}
               isFavorite={planner.favorites.isFavorite}
               toggleFavorite={planner.favorites.toggle}
               setOriginFromStation={planner.setOriginFromBrowse}
+            />
+          )}
+          {screen === 'home' && (
+            <HomeTabBar
+              active={homeTab.tab}
+              onChange={homeTab.setTab}
+              disabled={isBackendConfigured ? [] : ['crowd']}
             />
           )}
           {screen === 'browse' && (
