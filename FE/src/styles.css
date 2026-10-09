@@ -1205,6 +1205,9 @@ small {
   color: #687795;
   font-size: 12px;
 }
+.home-recent-route.pinned svg {
+  color: var(--primary-dark);
+}
 .home-recent-route > .icon-button {
   width: 40px;
   height: 40px;
@@ -2384,6 +2387,13 @@ small {
 .arrival .primary {
   width: 100%;
   margin-top: 32px;
+}
+.arrival .secondary {
+  width: 100%;
+  margin-top: 24px;
+}
+.arrival .secondary + .primary {
+  margin-top: 0;
 }
 .modal {
   border: 0;

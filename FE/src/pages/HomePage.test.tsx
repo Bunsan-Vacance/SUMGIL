@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
-import { saveRecentRoute } from '../features/route/recentRoutes'
+import { pinRecentRoute, saveRecentRoute } from '../features/route/recentRoutes'
 import HomePage from './HomePage'
 
 const origin = {
@@ -257,6 +257,17 @@ describe('홈 길찾기 패널', () => {
       fireEvent.click(screen.getByRole('button', { name: '강남역 → 서울역 최근 경로 삭제' }))
       expect(screen.queryByRole('button', { name: /경로 찾기/ })).toBeNull()
       expect(screen.getByText('아직 찾은 경로가 없어요')).toBeTruthy()
+    })
+
+    it('저장한 경로는 맨 위에 별 아이콘과 저장 라벨로 나온다', () => {
+      saveRecentRoute(stationA, stationB, new Date('2026-10-08T00:00:00.000Z'))
+      pinRecentRoute(stationB, stationA, new Date('2026-10-01T00:00:00.000Z'))
+      renderHome()
+      const items = document.querySelectorAll('.home-recent-route')
+      expect(items[0].classList.contains('pinned')).toBe(true)
+      expect(items[1].classList.contains('pinned')).toBe(false)
+      expect(screen.getByRole('button', { name: '서울역 → 강남역 저장한 경로 찾기' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '강남역 → 서울역 경로 찾기' })).toBeTruthy()
     })
 
     it('패널이 열려 있어도 시트를 렌더링한다', () => {

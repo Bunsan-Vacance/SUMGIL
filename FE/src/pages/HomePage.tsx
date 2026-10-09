@@ -165,17 +165,20 @@ export default function HomePage({
             {recentRoutes.slice(0, RECENT_ROUTE_DISPLAY_LIMIT).map((route) => {
               const title = `${placeLabel(route.origin)} → ${placeLabel(route.destination)}`
               return (
-                <li className="home-recent-route" key={route.id}>
+                <li
+                  className={route.pinned ? 'home-recent-route pinned' : 'home-recent-route'}
+                  key={route.id}
+                >
                   <button
                     type="button"
-                    aria-label={`${title} 경로 찾기`}
+                    aria-label={`${title} ${route.pinned ? '저장한 ' : ''}경로 찾기`}
                     onClick={() =>
                       route.origin
                         ? findRoutesFrom(route.origin, route.destination)
                         : findRoutes(route.destination)
                     }
                   >
-                    <Clock size={18} />
+                    {route.pinned ? <Star size={18} fill="currentColor" /> : <Clock size={18} />}
                     <span>
                       <strong>{title}</strong>
                       <small>{formatSearchedAt(route.searchedAt)}</small>

@@ -13,7 +13,7 @@ export interface RecentRoute {
 export const RECENT_ROUTES_STORAGE_KEY = 'sugil:recent-routes'
 const RECENT_ROUTES_LIMIT = 10
 
-function isCurrentLocation(place: Place): boolean {
+export function isCurrentLocation(place: Place): boolean {
   return place.kind === '현재 위치' || place.id.startsWith('current-location:')
 }
 
@@ -88,6 +88,30 @@ export function saveRecentRoute(
     return persist(current.map((item) => (item.id === id ? { ...item, searchedAt } : item)))
   }
   return persist([{ id, origin: storedOrigin, destination, searchedAt, pinned: false }, ...current])
+}
+
+/** 경로를 저장(고정)한다. 이미 있으면 검색 시각은 유지하고 고정만 올린다. */
+export function pinRecentRoute(
+  origin: Place,
+  destination: Place,
+  now: Date = new Date(),
+): RecentRoute[] {
+  const current = loadRecentRoutes()
+  const storedOrigin = isCurrentLocation(origin) ? null : origin
+  if (!isStoredPlace(destination) || (storedOrigin && !isStoredPlace(storedOrigin))) return current
+  const id = recentRouteId(storedOrigin, destination)
+  if (current.some((item) => item.id === id)) {
+    return persist(current.map((item) => (item.id === id ? { ...item, pinned: true } : item)))
+  }
+  return persist([
+    { id, origin: storedOrigin, destination, searchedAt: now.toISOString(), pinned: true },
+    ...current,
+  ])
+}
+
+export function isRecentRoutePinned(origin: Place | null, destination: Place): boolean {
+  const id = recentRouteId(origin, destination)
+  return loadRecentRoutes().some((item) => item.id === id && item.pinned)
 }
 
 export function removeRecentRoute(id: string): RecentRoute[] {
