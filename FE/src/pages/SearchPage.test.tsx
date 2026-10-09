@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RECENT_PLACES_STORAGE_KEY } from '../features/route/usePlaceSearch'
+import { RECENT_PLACES_STORAGE_KEY } from '../features/route/recentPlaces'
 import SearchPage from './SearchPage'
 
 const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation')
