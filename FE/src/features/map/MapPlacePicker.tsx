@@ -7,7 +7,7 @@ import {
   type KakaoMapInstance,
   type MapOverlay,
 } from '../../lib/kakao/sdk'
-import type { Place } from '../route/types'
+import type { Place, SearchTarget } from '../route/types'
 import {
   createBikeStationClusterOverlay,
   createBikeStationOverlay,
@@ -23,8 +23,15 @@ import {
   type BikeStation,
 } from './bikeStations'
 
+const targetNames: Record<SearchTarget, string> = {
+  origin: '출발지',
+  destination: '도착지',
+  home: '집',
+  work: '회사',
+}
+
 interface Props {
-  target: 'origin' | 'destination'
+  target: SearchTarget
   onCancel: () => void
   onSelect: (place: Place) => void
 }
@@ -258,7 +265,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
         <button className="icon-button" aria-label="검색으로 돌아가기" onClick={onCancel}>
           <ArrowLeft />
         </button>
-        <h2>{target === 'origin' ? '출발지' : '도착지'}를 지도에서 선택</h2>
+        <h2>{targetNames[target]}를 지도에서 선택</h2>
       </header>
       <div className="map-picker-canvas">
         <div ref={canvas} className="kakao-map-canvas" aria-label="지도에서 장소 선택" />
@@ -306,7 +313,7 @@ export default function MapPlacePicker({ target, onCancel, onSelect }: Props) {
             onClick={() => selected && onSelect(selected)}
           >
             <Check size={16} />
-            {target === 'origin' ? '이 위치를 출발지로 설정' : '이 위치를 도착지로 설정'}
+            {`이 위치를 ${targetNames[target]}로 설정`}
           </button>
         </div>
       </div>

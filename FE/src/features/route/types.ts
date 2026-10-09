@@ -1,5 +1,7 @@
 export type Mode = 'walk' | 'subway' | 'bus' | 'bike'
 export type Priority = 'fast' | 'calm'
+// 장소 검색 화면의 대상: 출발·도착 입력 또는 집·회사 즐겨찾기 등록
+export type SearchTarget = 'origin' | 'destination' | 'home' | 'work'
 export type RouteSource = 'MOCK' | 'ALGORITHM'
 export type TransitionType = 'BOARDING' | 'ALIGHTING' | 'TRANSFER' | 'BIKE_RENTAL' | 'BIKE_RETURN'
 

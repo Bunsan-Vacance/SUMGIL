@@ -589,3 +589,54 @@ describe('경로와 안내 화면의 수명', () => {
     )
   })
 })
+
+describe('집·회사 즐겨찾기 등록 흐름', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+    localStorage.clear()
+  })
+  afterEach(() => localStorage.clear())
+
+  it('등록 화면을 열면 검색 화면과 집 대상이 된다', () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() => result.current.openFavoriteRegistration('home'))
+    expect(result.current.screen).toBe('search')
+    expect(result.current.searchTarget).toBe('home')
+  })
+
+  it('장소를 선택하면 집으로 등록하고 홈으로 돌아와 토스트를 남긴다', async () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() => result.current.openFavoriteRegistration('home'))
+    await waitFor(() => expect(result.current.screen).toBe('search'))
+    let accepted: boolean | void = false
+    act(() => {
+      accepted = result.current.choosePlace(places[0])
+    })
+    expect(accepted).toBe(true)
+    await waitFor(() => expect(result.current.screen).toBe('home'))
+    expect(result.current.favorites.home?.place.id).toBe(places[0].id)
+    expect(result.current.message).toBe('집으로 등록했어요')
+  })
+
+  it('현재 위치는 등록을 거부하고 검색 화면에 머문다', async () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() => result.current.openFavoriteRegistration('work'))
+    await waitFor(() => expect(result.current.screen).toBe('search'))
+    let accepted: boolean | void = true
+    act(() => {
+      accepted = result.current.choosePlace({
+        id: 'current-location:37.5:127',
+        name: '현재 위치',
+        address: '위도 37.500000, 경도 127.000000',
+        kind: '현재 위치',
+        lat: 37.5,
+        lng: 127,
+      })
+    })
+    expect(accepted).toBe(false)
+    expect(result.current.screen).toBe('search')
+    expect(result.current.favorites.work).toBeNull()
+    expect(result.current.message).toBe('현재 위치는 즐겨찾기로 등록할 수 없어요')
+  })
+})

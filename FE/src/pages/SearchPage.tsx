@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { ArrowLeft, Bike, LocateFixed, MapPin, Search, Trash2, X } from 'lucide-react'
-import type { Place } from '../features/route/types'
+import { ArrowLeft, Bike, LocateFixed, MapPin, Search, Star, Trash2, X } from 'lucide-react'
+import type { Place, SearchTarget } from '../features/route/types'
+import { isRegisterablePlace } from '../features/route/favoritePlaces'
+import type { FavoritePlace } from '../features/route/favoritePlaces'
 import MapPlacePicker from '../features/map/MapPlacePicker'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
@@ -16,11 +18,30 @@ import {
   usePlaceSearch,
 } from '../features/route/usePlaceSearch'
 interface Props {
-  searchTarget: 'origin' | 'destination'
+  searchTarget: SearchTarget
   cancelSearch: () => void
   choosePlace: (place: Place) => boolean | void
+  favorites: FavoritePlace[]
+  isFavorite: (id: string) => boolean
+  toggleFavorite: (place: Place) => void
 }
-export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: Props) {
+
+const searchTitles: Record<SearchTarget, string> = {
+  origin: '출발지 검색',
+  destination: '도착지 검색',
+  home: '집 등록',
+  work: '회사 등록',
+}
+const favoriteLabelNames = { home: '집', work: '회사' } as const
+
+export default function SearchPage({
+  searchTarget,
+  cancelSearch,
+  choosePlace,
+  favorites,
+  isFavorite,
+  toggleFavorite,
+}: Props) {
   const searchRef = useScrollbarVisibility<HTMLElement>()
   const [query, setQuery] = useState('')
   const [recentPlaces, setRecentPlaces] = useState<Place[]>(loadRecentPlaces)
@@ -38,6 +59,33 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
     if (accepted !== false && save) setRecentPlaces(saveRecentPlace(place))
     return accepted
   }
+  const renderPlaceButton = (place: Place, kind: string) => (
+    <button onClick={() => selectPlace(place)}>
+      <span className="place-icon">
+        {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
+      </span>
+      <span>
+        <strong>{place.name}</strong>
+        <small>{place.address}</small>
+      </span>
+      <small>{kind}</small>
+    </button>
+  )
+  const renderFavoriteToggle = (place: Place) => {
+    if (!isRegisterablePlace(place)) return null
+    const favorite = isFavorite(place.id)
+    return (
+      <button
+        className="icon-button"
+        aria-label={`${place.name} 즐겨찾기 ${favorite ? '해제' : '추가'}`}
+        aria-pressed={favorite}
+        onClick={() => toggleFavorite(place)}
+      >
+        <Star size={16} fill={favorite ? 'currentColor' : 'none'} />
+      </button>
+    )
+  }
+  const showSavedLists = !query.trim()
   const { locating, locate } = useCurrentLocation(
     (position) => {
       const { latitude, longitude } = position.coords
@@ -89,7 +137,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
         <button className="icon-button" aria-label="이전 화면으로 돌아가기" onClick={cancelSearch}>
           <ArrowLeft />
         </button>
-        <h2>{searchTarget === 'origin' ? '출발지' : '도착지'} 검색</h2>
+        <h2>{searchTitles[searchTarget]}</h2>
       </header>
       <label className="search-input">
         <Search size={20} />
@@ -129,39 +177,38 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
         <MapPin size={17} />
         지도에서 선택
       </button>
-      <p className="section-label">
-        {query.trim()
-          ? '검색 결과'
-          : recentPlaces.length
-            ? '최근 검색'
-            : '검색어를 입력해 장소를 찾아보세요'}
-      </p>
+      {query.trim() ? (
+        <p className="section-label">검색 결과</p>
+      ) : (
+        !favorites.length &&
+        !recentPlaces.length && <p className="section-label">검색어를 입력해 장소를 찾아보세요</p>
+      )}
+      {showSavedLists && favorites.length > 0 && (
+        <>
+          <p className="section-label">즐겨찾기</p>
+          <div className="place-list">
+            {favorites.map(({ place, label }) => (
+              <div className="place-row favorite-place" key={place.id}>
+                {renderPlaceButton(place, label ? favoriteLabelNames[label] : place.kind)}
+                {renderFavoriteToggle(place)}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {showSavedLists && recentPlaces.length > 0 && <p className="section-label">최근 검색</p>}
       <div className="place-list">
         {searchPlaces.map((place) => (
-          <button key={place.id} onClick={() => selectPlace(place)}>
-            <span className="place-icon">
-              {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
-            </span>
-            <span>
-              <strong>{place.name}</strong>
-              <small>{place.address}</small>
-            </span>
-            <small>{place.kind}</small>
-          </button>
+          <div className="place-row" key={place.id}>
+            {renderPlaceButton(place, place.kind)}
+            {renderFavoriteToggle(place)}
+          </div>
         ))}
-        {!query.trim() &&
+        {showSavedLists &&
           recentPlaces.map((place) => (
-            <div className="recent-place" key={place.id}>
-              <button onClick={() => selectPlace(place)}>
-                <span className="place-icon">
-                  {place.kind === '따릉이 대여소' ? <Bike size={20} /> : <MapPin size={20} />}
-                </span>
-                <span>
-                  <strong>{place.name}</strong>
-                  <small>{place.address}</small>
-                </span>
-                <small>{place.kind}</small>
-              </button>
+            <div className="place-row recent-place" key={place.id}>
+              {renderPlaceButton(place, place.kind)}
+              {renderFavoriteToggle(place)}
               <button
                 className="icon-button"
                 aria-label={`${place.name} 최근 검색 삭제`}
@@ -180,7 +227,7 @@ export default function SearchPage({ searchTarget, cancelSearch, choosePlace }: 
           최근 검색 전체 삭제
         </button>
       )}
-      {!query.trim() && !recentPlaces.length && (
+      {!query.trim() && !favorites.length && !recentPlaces.length && (
         <div className="empty">
           <Search />
           <h3>검색어를 입력해 주세요</h3>

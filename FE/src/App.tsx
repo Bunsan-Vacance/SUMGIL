@@ -99,6 +99,9 @@ export default function App() {
               searchTarget={planner.searchTarget}
               cancelSearch={planner.cancelSearch}
               choosePlace={planner.choosePlace}
+              favorites={planner.favorites.favorites}
+              isFavorite={planner.favorites.isFavorite}
+              toggleFavorite={planner.favorites.toggle}
             />
           )}
           {screen === 'results' && (
