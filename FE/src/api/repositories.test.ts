@@ -1232,3 +1232,92 @@ describe('경로 검색 mock 선택', () => {
     }
   })
 })
+
+describe('주변 역 저장소', () => {
+  const station = {
+    stationId: '150',
+    stationName: '서울',
+    lat: 37.55315,
+    lng: 126.972533,
+    distanceMeters: 180.4,
+    lines: [
+      { lineId: '1001', lineName: '1호선' },
+      { lineId: '1065', lineName: '공항철도' },
+    ],
+  }
+  const stubNearby = (data: unknown) => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: true, data }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+  const nearby = (request = { lat: 37.55, lng: 126.97 }) =>
+    createBackendStationRepository('http://be.test').nearby(request, new AbortController().signal)
+
+  it('환승역의 노선 배열을 포함해 주변 역을 매핑한다', async () => {
+    stubNearby([station])
+    await expect(nearby()).resolves.toEqual([station])
+  })
+
+  it('lineName의 null과 빈 문자열은 null로 둔다', async () => {
+    stubNearby([
+      {
+        ...station,
+        lines: [
+          { lineId: '1001', lineName: null },
+          { lineId: '1065', lineName: '' },
+        ],
+      },
+    ])
+    const [result] = await nearby()
+    expect(result.lines).toEqual([
+      { lineId: '1001', lineName: null },
+      { lineId: '1065', lineName: null },
+    ])
+  })
+
+  it('영문자가 섞인 stationId도 그대로 받는다', async () => {
+    stubNearby([{ ...station, stationId: 'S410', stationName: '서울대벤처타운' }])
+    const [result] = await nearby()
+    expect(result.stationId).toBe('S410')
+  })
+
+  it.each([
+    ['좌표 범위 밖', { lat: 91 }],
+    ['음수 거리', { distanceMeters: -1 }],
+    ['lines가 배열이 아님', { lines: null }],
+    ['lineId가 빈 문자열', { lines: [{ lineId: '', lineName: '2호선' }] }],
+    ['stationId가 빈 문자열', { stationId: ' ' }],
+  ])('%s이면 invalid-response다', async (_name, override) => {
+    stubNearby([{ ...station, ...override }])
+    await expect(nearby()).rejects.toMatchObject({ code: 'invalid-response' })
+  })
+
+  it('요청 좌표가 올바르지 않으면 호출하지 않고 bad-request다', async () => {
+    const fetchMock = stubNearby([])
+    await expect(nearby({ lat: Number.NaN, lng: 127 })).rejects.toMatchObject({
+      code: 'bad-request',
+    })
+    await expect(nearby({ lat: 37.5, lng: 181 })).rejects.toMatchObject({ code: 'bad-request' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('radiusMeters와 limit은 값이 있을 때만 쿼리에 넣는다', async () => {
+    const fetchMock = stubNearby([])
+    await nearby()
+    await createBackendStationRepository('http://be.test').nearby(
+      { lat: 37.5, lng: 127, radiusMeters: 1000, limit: 20 },
+      new AbortController().signal,
+    )
+    const urls = fetchMock.mock.calls.map((call) => String((call as unknown[])[0]))
+    expect(urls[0]).toBe('http://be.test/api/stations/nearby?lat=37.55&lng=126.97')
+    expect(urls[1]).toBe(
+      'http://be.test/api/stations/nearby?lat=37.5&lng=127&radiusMeters=1000&limit=20',
+    )
+  })
+})

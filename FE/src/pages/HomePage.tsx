@@ -12,8 +12,11 @@ import {
 } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import BikeStationCard from '../features/map/BikeStationCard'
+import StationCard from '../features/map/StationCard'
+import { nearbyStationToPlace } from '../features/map/stations'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
 import HomeLayerLegend from '../features/map/HomeLayerLegend'
+import type { HomeSelection } from '../features/map/useHomeMapLayers'
 import HomeLayerToggle from '../features/map/HomeLayerToggle'
 import { availableLayers } from '../features/map/homeLayers'
 import type { HomeLayer } from '../features/map/homeLayers'
@@ -43,9 +46,9 @@ interface Props {
   openFavoriteRegistration: (label: FavoriteLabel) => void
   layer: HomeLayer | null
   setLayer: (layer: HomeLayer | null) => void
-  selectedStation: Place | null
+  selection: HomeSelection | null
   outlook: OutlookState
-  clearStation: () => void
+  clearSelection: () => void
   isFavorite: (id: string) => boolean
   toggleFavorite: (place: Place) => void
   setOriginFromStation: (place: Place) => void
@@ -65,13 +68,14 @@ export default function HomePage({
   openFavoriteRegistration,
   layer,
   setLayer,
-  selectedStation,
+  selection,
   outlook,
-  clearStation,
+  clearSelection,
   isFavorite,
   toggleFavorite,
   setOriginFromStation,
 }: Props) {
+  const selectedStation = selection?.kind === 'bike' ? selection.place : null
   const [recentRoutes, setRecentRoutes] = useState(loadRecentRoutes)
   const extraFavorites = favorites.filter((item) => item.label === null).slice(0, EXTRA_CHIP_LIMIT)
   const placeLabel = (place: Place | null) => {
@@ -179,22 +183,37 @@ export default function HomePage({
         ariaLabel="홈 정보"
         className="home-sheet"
         initialSnap="default"
-        preferredSnap={selectedStation ? 'default' : undefined}
+        preferredSnap={selection ? 'default' : undefined}
       >
-        {selectedStation ? (
+        {selection?.kind === 'subway' ? (
+          <StationCard
+            key={selection.station.stationId}
+            station={selection.station}
+            favorite={isFavorite(nearbyStationToPlace(selection.station).id)}
+            onToggleFavorite={() => toggleFavorite(nearbyStationToPlace(selection.station))}
+            onClose={clearSelection}
+            onSetOrigin={(place) => {
+              setOriginFromStation(place)
+              clearSelection()
+            }}
+            onSetDestination={(place) => {
+              if (findRoutes(place) !== false) clearSelection()
+            }}
+          />
+        ) : selectedStation ? (
           <BikeStationCard
             key={selectedStation.id}
             station={selectedStation}
             outlook={outlook}
             favorite={isFavorite(selectedStation.id)}
             onToggleFavorite={() => toggleFavorite(selectedStation)}
-            onClose={clearStation}
+            onClose={clearSelection}
             onSetOrigin={(place) => {
               setOriginFromStation(place)
-              clearStation()
+              clearSelection()
             }}
             onSetDestination={(place) => {
-              if (findRoutes(place) !== false) clearStation()
+              if (findRoutes(place) !== false) clearSelection()
             }}
           />
         ) : (

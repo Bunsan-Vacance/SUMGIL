@@ -19,6 +19,8 @@ import {
   zoomToBikeStationCluster,
 } from './bikeStationMarkers'
 import { bikeStations, nearbyStationToBikeStation, stationToPlace } from './bikeStations'
+import { createStationOverlay } from './stationMarkers'
+import type { StationMarkerDatum, StationOverlay } from './stationMarkers'
 import {
   createRouteEndpointOverlay,
   createRouteSvgOverlay,
@@ -65,6 +67,10 @@ export function useKakaoMap(
   bikeStationsVisible = true,
   livePosition: LivePosition = null,
   bikeStockBadges = false,
+  stationDatums: StationMarkerDatum[] = [],
+  selectedStationId: string | null = null,
+  onStationSelect?: (datum: StationMarkerDatum) => void,
+  onViewportChange?: (center: { lat: number; lng: number }) => void,
 ) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<KakaoMapInstance | null>(null)
@@ -83,6 +89,11 @@ export function useKakaoMap(
   const routeActiveRef = useRef(Boolean(route))
   const bikeStationsVisibleRef = useRef(bikeStationsVisible)
   const bikeStockBadgesRef = useRef(bikeStockBadges)
+  const stationOverlays = useRef(new Map<string, StationOverlay>())
+  const stationPositions = useRef(new Map<string, { lat: number; lng: number }>())
+  const selectedStationIdRef = useRef(selectedStationId)
+  const onStationSelectRef = useRef(onStationSelect)
+  const onViewportChangeRef = useRef(onViewportChange)
   const markersRef = useRef(new Map<string, KakaoMarker>())
   const selectedMarkerRef = useRef<KakaoMarker | null>(null)
   const normalMarkerImageRef = useRef<MapMarkerImage | null>(null)
@@ -102,6 +113,9 @@ export function useKakaoMap(
   routeActiveRef.current = Boolean(route)
   bikeStationsVisibleRef.current = bikeStationsVisible
   bikeStockBadgesRef.current = bikeStockBadges
+  selectedStationIdRef.current = selectedStationId
+  onStationSelectRef.current = onStationSelect
+  onViewportChangeRef.current = onViewportChange
   livePositionRef.current = livePosition
 
   useEffect(() => {
@@ -116,6 +130,39 @@ export function useKakaoMap(
   useEffect(() => {
     syncStationMarkersRef.current?.()
   }, [bikeStationsVisible, bikeStockBadges])
+
+  useEffect(() => {
+    const maps = mapsRef.current
+    const instance = map.current
+    if (status !== 'ready' || !maps || !instance) return
+    const wanted = new Map(stationDatums.map((datum) => [datum.stationId, datum]))
+    stationOverlays.current.forEach((overlay, id) => {
+      if (!wanted.has(id)) {
+        overlay.destroy()
+        stationOverlays.current.delete(id)
+      }
+    })
+    wanted.forEach((datum, id) => {
+      const existing = stationOverlays.current.get(id)
+      const previous = stationPositions.current.get(id)
+      if (existing && previous && previous.lat === datum.lat && previous.lng === datum.lng) {
+        existing.setGrade(datum.grade)
+        return
+      }
+      existing?.destroy()
+      stationPositions.current.set(id, { lat: datum.lat, lng: datum.lng })
+      stationOverlays.current.set(
+        id,
+        createStationOverlay(maps, instance, datum, selectedStationIdRef.current === id, () =>
+          onStationSelectRef.current?.(datum),
+        ),
+      )
+    })
+  }, [stationDatums, status])
+
+  useEffect(() => {
+    stationOverlays.current.forEach((overlay, id) => overlay.setSelected(id === selectedStationId))
+  }, [selectedStationId])
 
   useEffect(() => {
     const active = Boolean(route)
@@ -296,9 +343,14 @@ export function useKakaoMap(
             })
         }
         syncStationMarkers()
+        const notifyViewport = () => {
+          const center = instance.getCenter()
+          onViewportChangeRef.current?.({ lat: center.getLat(), lng: center.getLng() })
+        }
         idleHandler = () => {
           syncStationMarkers()
           loadNearbyStations()
+          notifyViewport()
         }
         maps.event.addListener(instance, 'idle', idleHandler)
         if (bikeStationRepository) loadNearbyStations()
@@ -388,6 +440,7 @@ export function useKakaoMap(
           loadNearbyStations()
         })
         observer.observe(canvas)
+        notifyViewport()
         setStatus('ready')
       })
       .catch(() => {
@@ -417,6 +470,9 @@ export function useKakaoMap(
       stationMarkers.current.clear()
       stationClusterMarkers.current.forEach((marker) => marker.destroy())
       stationClusterMarkers.current.clear()
+      stationOverlays.current.forEach((overlay) => overlay.destroy())
+      stationOverlays.current.clear()
+      stationPositions.current.clear()
       ownMarker.current?.setMap(null)
       ownMarker.current = null
       ownMarkerIsLive.current = false

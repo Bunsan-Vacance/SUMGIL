@@ -32,8 +32,30 @@ export interface StationSearchResult {
   lng?: number
 }
 
+export interface NearbyStationLine {
+  lineId: string
+  lineName: string | null
+}
+
+export interface NearbyStation {
+  stationId: string
+  stationName: string
+  lat: number
+  lng: number
+  distanceMeters: number
+  lines: NearbyStationLine[]
+}
+
+export interface NearbyStationRequest {
+  lat: number
+  lng: number
+  radiusMeters?: number
+  limit?: number
+}
+
 export interface StationRepository {
   search(query: string, signal: AbortSignal): Promise<StationSearchResult[]>
+  nearby(request: NearbyStationRequest, signal: AbortSignal): Promise<NearbyStation[]>
 }
 
 export interface NearbyBikeStation {

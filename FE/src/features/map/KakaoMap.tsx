@@ -14,6 +14,7 @@ import {
 import { useKakaoMap, type LivePosition } from './useKakaoMap'
 import { useCurrentLocation } from './useCurrentLocation'
 import { bikeRentalId } from './bikeStations'
+import type { StationMarkerDatum } from './stationMarkers'
 
 function stockUpdatedLabel(value: string | null) {
   if (!value) return ''
@@ -226,6 +227,10 @@ export default function KakaoMap({
   bikeStationsVisible: bikeStationsVisibleProp,
   bikeStockBadges = false,
   onBikeStationSelect,
+  stationMarkers,
+  selectedStationId,
+  onStationSelect,
+  onViewportChange,
 }: {
   origin?: Place | null
   destination?: Place | null
@@ -241,6 +246,10 @@ export default function KakaoMap({
   bikeStationsVisible?: boolean
   bikeStockBadges?: boolean
   onBikeStationSelect?: (place: Place) => void
+  stationMarkers?: StationMarkerDatum[]
+  selectedStationId?: string | null
+  onStationSelect?: (datum: StationMarkerDatum) => void
+  onViewportChange?: (center: { lat: number; lng: number }) => void
 }) {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [bikeStationsVisibleState, setBikeStationsVisible] = useState(true)
@@ -321,6 +330,10 @@ export default function KakaoMap({
     bikeStationsVisible,
     livePosition,
     bikeStockBadges,
+    stationMarkers,
+    selectedStationId,
+    onStationSelect,
+    onViewportChange,
   )
   const showCurrentPosition = (position: GeolocationPosition) => {
     showPosition(position)

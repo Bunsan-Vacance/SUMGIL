@@ -17,6 +17,8 @@ import type {
   BikeStock,
   BikeStockStatus,
   NearbyBikeStation,
+  NearbyStation,
+  NearbyStationLine,
   OpsRepository,
   PlaceRepository,
   RouteRepository,
@@ -302,8 +304,67 @@ export function backendDepartureTime(value: string) {
     : undefined
 }
 
+function mapNearbyStationLine(value: unknown): NearbyStationLine {
+  if (!isRecord(value) || !text(value.lineId)) {
+    throw new RepositoryError('invalid-response', '주변 역 응답이 올바르지 않아요.')
+  }
+  if (
+    value.lineName !== null &&
+    value.lineName !== undefined &&
+    typeof value.lineName !== 'string'
+  ) {
+    throw new RepositoryError('invalid-response', '주변 역 응답이 올바르지 않아요.')
+  }
+  return { lineId: text(value.lineId) as string, lineName: text(value.lineName) ?? null }
+}
+
+// stationId는 불투명 문자열이다. 숫자·영문자가 섞이므로 정수 파싱이나 정규식 검증을 하지 않는다.
+function mapNearbyStationResult(value: unknown): NearbyStation {
+  if (
+    !isRecord(value) ||
+    !text(value.stationId) ||
+    !text(value.stationName) ||
+    !finite(value.lat, -90, 90) ||
+    !finite(value.lng, -180, 180) ||
+    !finite(value.distanceMeters, 0, Number.MAX_SAFE_INTEGER) ||
+    !Array.isArray(value.lines)
+  ) {
+    throw new RepositoryError('invalid-response', '주변 역 응답이 올바르지 않아요.')
+  }
+  return {
+    stationId: text(value.stationId) as string,
+    stationName: text(value.stationName) as string,
+    lat: value.lat as number,
+    lng: value.lng as number,
+    distanceMeters: value.distanceMeters as number,
+    lines: value.lines.map(mapNearbyStationLine),
+  }
+}
+
 export function createBackendStationRepository(baseUrl: string): StationRepository {
   return {
+    async nearby(request, signal) {
+      if (!finite(request.lat, -90, 90) || !finite(request.lng, -180, 180)) {
+        throw new RepositoryError('bad-request', '좌표를 확인해 주세요.')
+      }
+      const params = new URLSearchParams({ lat: String(request.lat), lng: String(request.lng) })
+      if (request.radiusMeters !== undefined)
+        params.set('radiusMeters', String(request.radiusMeters))
+      if (request.limit !== undefined) params.set('limit', String(request.limit))
+      try {
+        const data = await requestApi<unknown>(
+          `${baseUrl}/api/stations/nearby?${params.toString()}`,
+          signal,
+        )
+        if (!Array.isArray(data)) {
+          throw new RepositoryError('invalid-response', '주변 역 응답이 올바르지 않아요.')
+        }
+        return data.map(mapNearbyStationResult)
+      } catch (error) {
+        if (signal.aborted) throw abortError()
+        throw error
+      }
+    },
     async search(query, signal) {
       const trimmed = query.trim()
       if (!trimmed) return []

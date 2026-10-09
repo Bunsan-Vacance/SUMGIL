@@ -24,7 +24,7 @@ src/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태·즐겨찾기·최근 검색 저장
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
     ops/                    운영자 뷰: 지도 훅·재고 레이어·히트맵·데이터 상태
-  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 토글(homeLayers·HomeLayerToggle), 재고 배지(bikeStockBadge)·홈 레이어 상태(useHomeMapLayers)·대여소 카드(BikeStationCard)·재고/예측 훅(useBikeStationOutlook)
+  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 토글(homeLayers·HomeLayerToggle), 재고 배지(bikeStockBadge)·홈 레이어 상태(useHomeMapLayers)·대여소 카드(BikeStationCard)·재고/예측 훅(useBikeStationOutlook), 역 마커(stationMarkers)·주변 역 조회(useNearbyStationCongestion)·역 카드(StationCard)·도착/시간대 훅(useStationArrivals·useStationHourlyCongestion·congestionAdvice)
   api/
     contracts.ts            데이터 접근 인터페이스
     repositories.ts         실제로 사용할 구현 선택
@@ -47,6 +47,9 @@ src/
 - `useRoutePlanner.findRoutesFrom`은 저장된 출발·도착으로 바로 검색한다(최근 경로 탭). 출발지 상태 반영과 검색을 같은 틱에서 하기 위해 `trip.search(destination, origin)`을 직접 호출한다.
 - 홈에서는 `KakaoMap`이 대여소 선택만 `onBikeStationSelect`로 알리고 지도 안 재고 시트·대여소 토글을 열지 않는다. 카드는 `HomePage`가 홈 시트 안에 그린다. 상세·탐색 화면의 지도 안 `BikeStockSheet`와 토글은 그대로다.
 - `useKakaoMap`은 `bikeStationsVisible`·`bikeStockBadges`가 바뀌면 다음 idle을 기다리지 않고 마커를 다시 맞춘다. nearby 재조회 결과는 기존 마커의 `setBadge`로 반영한다.
+- 역 데이터는 App의 `useNearbyStationCongestion`이 가져오고 `KakaoMap`은 `stationMarkers` prop을 오버레이로만 동기화한다(지도 훅이 idle 때 `onViewportChange`로 중심을 알린다). 따릉이 nearby는 지도 훅 안에 남아 있다(과거 결정).
+- 역 카드의 도착·시간대별 조회 훅은 카드 컴포넌트가 소유한다(카드가 열릴 때만 요청, `key`로 리셋). 대여소 카드가 App에서 훅을 받는 것과 다르다.
+- 혼잡도 등급·색은 `features/route/segmentCongestion`을 재사용한다. 마커·막대·요약·범례가 같은 임계값을 쓴다.
 - 기능 훅은 `api/repositories`를 통해 데이터를 받는다. `api/contracts`는 화면용 타입을 참조하는 프론트엔드 인터페이스다.
 - `selectors`와 reducer는 React·DOM·네트워크 없이 동작하는 함수다.
 - `components`는 특정 경로 데이터나 화면 이름을 알지 않는다.
@@ -64,31 +67,35 @@ src/
 
 ## 수정 위치 안내
 
-| 변경                        | 시작할 파일                                                                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 카드 디자인                 | `features/route/RouteCard.tsx`, `styles.css`                                                                                               |
-| 결과 화면 배치              | `pages/ResultsPage.tsx`                                                                                                                    |
-| 드래그 높이·키보드 동작     | `components/useBottomSheet.ts`                                                                                                             |
-| 필터 취소·적용              | `features/route/FilterDialog.tsx`, `tripReducer.ts`                                                                                        |
-| 경로 정렬                   | `features/route/selectors.ts`                                                                                                              |
-| 서버 경로 연결              | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts`                                                                     |
-| 길안내 단계                 | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`                                                                             |
-| 지도 수명·마커·크기         | `features/map/useKakaoMap.ts`                                                                                                              |
-| 홈 레이아웃(검색창·칩·시트) | `pages/HomePage.tsx`, `styles.css`(`.home-*`)                                                                                              |
-| 홈 레이어 토글·가용 레이어  | `features/map/homeLayers.ts`, `features/map/HomeLayerToggle.tsx`                                                                           |
-| 최근 경로 저장·표시 규칙    | `features/route/recentRoutes.ts`, `pages/HomePage.tsx`                                                                                     |
-| 대여소 배지 등급·색         | `features/map/bikeStockBadge.ts`, `styles.css`(`.bike-stock-badge`)                                                                        |
-| 대여소 카드 문구·시점 규칙  | `features/map/BikeStationCard.tsx`(`describeOutlookSlot`)                                                                                  |
-| 홈 레이어·선택 대여소 상태  | `features/map/useHomeMapLayers.ts`, `App.tsx`                                                                                              |
-| 즐겨찾기 저장 규칙·칩       | `features/route/favoritePlaces.ts`, `pages/HomePage.tsx`, `pages/SearchPage.tsx`                                                           |
-| 일반 장소 탐색 화면         | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                                                                                 |
-| 지도에서 위치 선택          | `features/map/MapPlacePicker.tsx`                                                                                                          |
-| 위치 권한·오류              | `features/map/useCurrentLocation.ts`                                                                                                       |
-| 운영자 뷰 진입·노출 조건    | `app/opsAccess.ts`, `app/useNavigation.ts`                                                                                                 |
-| 운영자 뷰 레이아웃          | `pages/OpsPage.tsx`, `styles.css`(`.ops-*`)                                                                                                |
-| 대여소 재고 마커 색·라벨    | `features/ops/bikeStockLayer.ts`, `features/ops/useOpsData.ts`(`stockLevel`)                                                               |
-| 히트맵 색 구간·셀 상세      | `features/ops/CongestionHeatmap.tsx`, `features/ops/useOpsData.ts`(`heatmapCellTone`), `features/route/segmentCongestion.ts`(등급 색·경계) |
-| 운영자 뷰 BE 연결·응답 검증 | `api/ops.ts`, `api/contracts.ts`                                                                                                           |
+| 변경                                   | 시작할 파일                                                                                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 카드 디자인                            | `features/route/RouteCard.tsx`, `styles.css`                                                                                               |
+| 결과 화면 배치                         | `pages/ResultsPage.tsx`                                                                                                                    |
+| 드래그 높이·키보드 동작                | `components/useBottomSheet.ts`                                                                                                             |
+| 필터 취소·적용                         | `features/route/FilterDialog.tsx`, `tripReducer.ts`                                                                                        |
+| 경로 정렬                              | `features/route/selectors.ts`                                                                                                              |
+| 서버 경로 연결                         | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts`                                                                     |
+| 길안내 단계                            | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`                                                                             |
+| 지도 수명·마커·크기                    | `features/map/useKakaoMap.ts`                                                                                                              |
+| 홈 레이아웃(검색창·칩·시트)            | `pages/HomePage.tsx`, `styles.css`(`.home-*`)                                                                                              |
+| 홈 레이어 토글·가용 레이어             | `features/map/homeLayers.ts`, `features/map/HomeLayerToggle.tsx`                                                                           |
+| 최근 경로 저장·표시 규칙               | `features/route/recentRoutes.ts`, `pages/HomePage.tsx`                                                                                     |
+| 역 마커 모양·등급 색                   | `features/map/stationMarkers.ts`, `styles.css`(`.station-marker`)                                                                          |
+| 주변 역 조회 반경·디바운스·재조회 기준 | `features/map/useNearbyStationCongestion.ts`                                                                                               |
+| 역 카드 문구·요약 규칙                 | `features/map/StationCard.tsx`, `features/map/congestionAdvice.ts`                                                                         |
+| 혼잡도 레이어 노출 조건                | `features/map/homeLayers.ts`                                                                                                               |
+| 대여소 배지 등급·색                    | `features/map/bikeStockBadge.ts`, `styles.css`(`.bike-stock-badge`)                                                                        |
+| 대여소 카드 문구·시점 규칙             | `features/map/BikeStationCard.tsx`(`describeOutlookSlot`)                                                                                  |
+| 홈 레이어·선택 대여소 상태             | `features/map/useHomeMapLayers.ts`, `App.tsx`                                                                                              |
+| 즐겨찾기 저장 규칙·칩                  | `features/route/favoritePlaces.ts`, `pages/HomePage.tsx`, `pages/SearchPage.tsx`                                                           |
+| 일반 장소 탐색 화면                    | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                                                                                 |
+| 지도에서 위치 선택                     | `features/map/MapPlacePicker.tsx`                                                                                                          |
+| 위치 권한·오류                         | `features/map/useCurrentLocation.ts`                                                                                                       |
+| 운영자 뷰 진입·노출 조건               | `app/opsAccess.ts`, `app/useNavigation.ts`                                                                                                 |
+| 운영자 뷰 레이아웃                     | `pages/OpsPage.tsx`, `styles.css`(`.ops-*`)                                                                                                |
+| 대여소 재고 마커 색·라벨               | `features/ops/bikeStockLayer.ts`, `features/ops/useOpsData.ts`(`stockLevel`)                                                               |
+| 히트맵 색 구간·셀 상세                 | `features/ops/CongestionHeatmap.tsx`, `features/ops/useOpsData.ts`(`heatmapCellTone`), `features/route/segmentCongestion.ts`(등급 색·경계) |
+| 운영자 뷰 BE 연결·응답 검증            | `api/ops.ts`, `api/contracts.ts`                                                                                                           |
 
 ## 유지한 단순함
 
