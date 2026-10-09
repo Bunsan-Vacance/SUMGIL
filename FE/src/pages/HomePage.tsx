@@ -196,11 +196,11 @@ export default function HomePage({
             </button>
           </div>
         </div>
-        {chips}
         <button type="button" className="primary" onClick={() => findRoutes()}>
           경로 찾기
           <ArrowRight size={18} />
         </button>
+        {chips}
       </section>
       <BottomSheet
         ariaLabel="홈 정보"

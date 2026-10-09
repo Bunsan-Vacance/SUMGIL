@@ -1003,8 +1003,8 @@ small {
 .home-topbar .home-chips {
   margin-top: 0;
 }
-.home-topbar .home-panel .home-chips {
-  margin-top: 8px;
+.home-panel .home-chips {
+  margin-top: 10px;
   overflow: hidden;
 }
 .home-chip {
