@@ -675,3 +675,37 @@ describe('최근 경로 기록', () => {
     expect(loadRecentRoutes()[0].origin).toBeNull()
   })
 })
+
+describe('저장된 출발지로 경로 찾기', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+    localStorage.clear()
+  })
+  afterEach(() => localStorage.clear())
+
+  it('검색을 시작하고 결과 화면으로 가며 최근 경로에 기록한다', async () => {
+    const search = vi.fn(async () => routes)
+    const { result } = renderHook(() => useRoutePlanner({ search }))
+    let started: boolean = false
+    act(() => {
+      started = result.current.findRoutesFrom(places[0], places[1])
+    })
+    expect(started).toBe(true)
+    await waitFor(() => expect(result.current.screen).toBe('results'))
+    expect(search).toHaveBeenCalled()
+    expect(loadRecentRoutes()[0].id).toBe(places[0].id + '>' + places[1].id)
+  })
+
+  it('출발과 도착이 같으면 거부하고 토스트를 남긴다', () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    let started: boolean = true
+    act(() => {
+      started = result.current.findRoutesFrom(places[0], places[0])
+    })
+    expect(started).toBe(false)
+    expect(result.current.screen).toBe('home')
+    expect(result.current.message).toBe('출발지와 다른 도착지를 선택해 주세요.')
+    expect(loadRecentRoutes()).toEqual([])
+  })
+})

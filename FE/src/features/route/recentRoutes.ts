@@ -93,3 +93,34 @@ export function saveRecentRoute(
 export function removeRecentRoute(id: string): RecentRoute[] {
   return persist(loadRecentRoutes().filter((item) => item.id !== id))
 }
+
+const seoulDateParts = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+function seoulParts(date: Date) {
+  const parts: Record<string, number> = {}
+  for (const part of seoulDateParts.formatToParts(date)) {
+    if (part.type !== 'literal') parts[part.type] = Number(part.value)
+  }
+  return parts
+}
+
+/** 검색 시각을 Asia/Seoul 기준으로 오늘 HH:mm, 어제, M월 D일 중 하나로 표시한다. */
+export function formatSearchedAt(iso: string, now: Date = new Date()): string {
+  const at = seoulParts(new Date(iso))
+  const today = seoulParts(now)
+  const dayNumber = (p: Record<string, number>) => Date.UTC(p.year, p.month - 1, p.day) / 86400000
+  const diff = dayNumber(today) - dayNumber(at)
+  if (diff === 0) {
+    return '오늘 ' + String(at.hour).padStart(2, '0') + ':' + String(at.minute).padStart(2, '0')
+  }
+  if (diff === 1) return '어제'
+  return at.month + '월 ' + at.day + '일'
+}

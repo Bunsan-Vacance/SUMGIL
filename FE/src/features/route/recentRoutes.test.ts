@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Place } from './types'
 import {
   RECENT_ROUTES_STORAGE_KEY,
+  formatSearchedAt,
   loadRecentRoutes,
   recentRouteId,
   removeRecentRoute,
@@ -161,5 +162,19 @@ describe('최근 경로 저장', () => {
     expect(loadRecentRoutes()).toEqual([])
     expect(saveRecentRoute(origin, destination)).toHaveLength(1)
     expect(removeRecentRoute('station-1>station-2')).toEqual([])
+  })
+})
+
+describe('검색 시각 표시', () => {
+  const now = new Date('2026-10-09T03:00:00.000Z')
+  it('오늘은 시각, 어제는 어제, 그 외는 월일로 표시한다', () => {
+    expect(formatSearchedAt('2026-10-09T00:30:00.000Z', now)).toBe('오늘 09:30')
+    expect(formatSearchedAt('2026-10-08T05:00:00.000Z', now)).toBe('어제')
+    expect(formatSearchedAt('2026-10-02T05:00:00.000Z', now)).toBe('10월 2일')
+  })
+  it('날짜 경계는 Asia/Seoul 기준이다', () => {
+    // UTC로는 같은 날 15:30이지만 서울은 이미 다음 날 00:30이다.
+    expect(formatSearchedAt('2026-10-08T15:30:00.000Z', now)).toBe('오늘 00:30')
+    expect(formatSearchedAt('2026-10-08T14:59:00.000Z', now)).toBe('어제')
   })
 })

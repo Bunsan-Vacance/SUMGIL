@@ -216,6 +216,21 @@ export function useRoutePlanner(
     go('results')
     return true
   }
+  const findRoutesFrom = (origin: Place, destination: Place) => {
+    if (!hasRouteLocation(origin)) {
+      trip.setDestination(destination)
+      openSearch('origin')
+      return false
+    }
+    if (samePlace(destination, origin)) {
+      setMessage('출발지와 다른 도착지를 선택해 주세요.')
+      return false
+    }
+    saveRecentRoute(origin, destination)
+    void trip.search(destination, origin)
+    go('results')
+    return true
+  }
   const choosePlace = (place: Place) => {
     if (searchTarget === 'home' || searchTarget === 'work') {
       if (!isRegisterablePlace(place)) {
@@ -481,6 +496,7 @@ export function useRoutePlanner(
     toggleRoutePanel,
     returnToRouteInput,
     findRoutes,
+    findRoutesFrom,
     choosePlace,
     setOriginFromBrowse,
     setOriginFromCurrentLocation,
