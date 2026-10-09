@@ -4,6 +4,8 @@ import { screenTitles } from './app/useNavigation'
 import PreviewToolbar from './app/PreviewToolbar'
 import KakaoMap from './features/map/KakaoMap'
 import { useHomeMapLayers } from './features/map/useHomeMapLayers'
+import { useBikeStationOutlook } from './features/map/useBikeStationOutlook'
+import { bikeRentalId } from './features/map/bikeStations'
 import FilterDialog from './features/route/FilterDialog'
 import GuidanceDialogs from './features/guidance/GuidanceDialogs'
 import HomePage from './pages/HomePage'
@@ -25,6 +27,9 @@ export default function App() {
   const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
   const homeLayers = useHomeMapLayers()
+  const stationOutlook = useBikeStationOutlook(
+    homeLayers.selectedStation ? (bikeRentalId(homeLayers.selectedStation) ?? null) : null,
+  )
   const { screen, go, trip, guidance, destinationName, modal, setModal } = planner
   const routeView = screen === 'detail' || screen === 'guide'
   const displayedRoute = screen === 'guide' ? guidance.route : trip.selected
@@ -96,6 +101,12 @@ export default function App() {
               openFavoriteRegistration={planner.openFavoriteRegistration}
               layer={homeLayers.layer}
               setLayer={homeLayers.setLayer}
+              selectedStation={homeLayers.selectedStation}
+              outlook={stationOutlook}
+              clearStation={homeLayers.clearStation}
+              isFavorite={planner.favorites.isFavorite}
+              toggleFavorite={planner.favorites.toggle}
+              setOriginFromStation={planner.setOriginFromBrowse}
             />
           )}
           {screen === 'browse' && (

@@ -1220,6 +1220,136 @@ small {
 .screen-home .home-sheet[data-snap='collapsed'] {
   height: 88px;
 }
+.bike-station-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.bike-station-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.bike-station-card-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  color: #087c63;
+  background: #e2f1e9;
+}
+.bike-station-card-title {
+  flex: 1;
+  min-width: 0;
+}
+.bike-station-card-title h2 {
+  margin: 2px 0;
+  overflow: hidden;
+  font-size: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bike-station-card-title small,
+.bike-station-outlook small {
+  display: block;
+  color: #687795;
+  font-size: 12px;
+}
+.bike-station-outlook {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #f4f6f5;
+}
+.bike-station-outlook-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.bike-station-mock-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: #687795;
+  background: white;
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
+.bike-station-outlook-count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.bike-station-outlook-count > strong {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.bike-station-outlook-count span {
+  color: #687795;
+  font-size: 13px;
+}
+.bike-station-outlook .level-ok {
+  color: #087c63;
+}
+.bike-station-outlook .level-low {
+  color: #c2410c;
+}
+.bike-station-outlook .level-unknown {
+  color: #82909b;
+}
+.bike-station-outlook-message {
+  margin: 0;
+  font-size: 15px;
+}
+.bike-station-outlook-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfe5e2;
+}
+.bike-station-outlook-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+}
+.bike-station-slots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.bike-station-slots button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  font-size: 13px;
+}
+.bike-station-slots button small {
+  color: inherit;
+}
+.bike-station-slots button[aria-pressed='true'] {
+  border-color: #087c63;
+  color: white;
+  background: #087c63;
+}
+.bike-station-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.bike-station-actions button {
+  min-height: 50px;
+}
 .home-sheet-title {
   margin: 0 0 4px;
   font-size: 16px;
