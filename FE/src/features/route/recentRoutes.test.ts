@@ -5,6 +5,8 @@ import type { Place } from './types'
 import {
   RECENT_ROUTES_STORAGE_KEY,
   formatSearchedAt,
+  isRecentRoutePinned,
+  pinRecentRoute,
   loadRecentRoutes,
   recentRouteId,
   removeRecentRoute,
@@ -176,5 +178,40 @@ describe('검색 시각 표시', () => {
     // UTC로는 같은 날 15:30이지만 서울은 이미 다음 날 00:30이다.
     expect(formatSearchedAt('2026-10-08T15:30:00.000Z', now)).toBe('오늘 00:30')
     expect(formatSearchedAt('2026-10-08T14:59:00.000Z', now)).toBe('어제')
+  })
+})
+
+describe('경로 저장(고정)', () => {
+  it('새 경로를 pinned로 추가한다', () => {
+    const next = pinRecentRoute(origin, destination, new Date(at))
+    expect(next).toHaveLength(1)
+    expect(next[0]).toMatchObject({ pinned: true, searchedAt: at })
+  })
+
+  it('기존 경로는 검색 시각을 유지한 채 pinned로 올린다', () => {
+    saveRecentRoute(origin, destination, new Date(at))
+    const next = pinRecentRoute(origin, destination, new Date('2026-10-05T00:00:00.000Z'))
+    expect(next).toHaveLength(1)
+    expect(next[0]).toMatchObject({ pinned: true, searchedAt: at })
+  })
+
+  it('현재 위치 출발은 origin을 null로 저장한다', () => {
+    const current: Place = { ...origin, id: 'gps', kind: '현재 위치' }
+    expect(pinRecentRoute(current, destination)[0].origin).toBeNull()
+  })
+
+  it('저장 여부를 확인한다', () => {
+    expect(isRecentRoutePinned(origin, destination)).toBe(false)
+    saveRecentRoute(origin, destination)
+    expect(isRecentRoutePinned(origin, destination)).toBe(false)
+    pinRecentRoute(origin, destination)
+    expect(isRecentRoutePinned(origin, destination)).toBe(true)
+  })
+
+  it('pinned가 한도를 넘어도 제거하지 않는다', () => {
+    for (let index = 0; index < 11; index += 1) {
+      pinRecentRoute(origin, { ...destination, id: 'p-' + index })
+    }
+    expect(loadRecentRoutes()).toHaveLength(11)
   })
 })

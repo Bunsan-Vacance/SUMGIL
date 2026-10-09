@@ -1205,6 +1205,9 @@ small {
   color: #687795;
   font-size: 12px;
 }
+.home-recent-route.pinned svg {
+  color: var(--primary-dark);
+}
 .home-recent-route > .icon-button {
   width: 40px;
   height: 40px;
