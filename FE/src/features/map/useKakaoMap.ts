@@ -191,17 +191,13 @@ export function useKakaoMap(
     const wrapper = container.current!.parentElement!
     const shell = wrapper.parentElement!
     const homePanel = shell.querySelector<HTMLElement>('.home-panel')
-    const homeTopbar = shell.querySelector<HTMLElement>('.home-topbar')
+    // 홈 상단 바(.home-topbar)는 지도 위에 겹치는 absolute 오버레이라 지도 높이에서 빼지 않는다.
     const browseToolbar = shell.querySelector<HTMLElement>('.browse-toolbar')
     const guideTop = shell.querySelector<HTMLElement>('.guide-top')
     const bottomSheet = shell.querySelector<HTMLElement>('.bottom-sheet')
     const resize = () => {
       const topOffset =
-        homePanel?.offsetHeight ||
-        homeTopbar?.offsetHeight ||
-        browseToolbar?.offsetHeight ||
-        guideTop?.offsetHeight ||
-        0
+        homePanel?.offsetHeight || browseToolbar?.offsetHeight || guideTop?.offsetHeight || 0
       const bottomOffset = bottomSheet?.offsetHeight || 0
       wrapper.style.top = `${topOffset}px`
       wrapper.style.height = `${Math.max(1, shell.clientHeight - topOffset - bottomOffset)}px`
@@ -209,7 +205,6 @@ export function useKakaoMap(
     const observer = new ResizeObserver(resize)
     observer.observe(shell)
     if (homePanel) observer.observe(homePanel)
-    if (homeTopbar) observer.observe(homeTopbar)
     if (browseToolbar) observer.observe(browseToolbar)
     if (guideTop) observer.observe(guideTop)
     if (bottomSheet) observer.observe(bottomSheet)
