@@ -23,6 +23,21 @@ export function lineColor(leg: Leg) {
   )
 }
 
+const DARK_TEXT_EXCLUDED = ['#0052A4', '#996CAC', '#E6186C']
+
+/** 노선 ID(없으면 이름)로 노선 색과 글자색을 찾는다. 모르는 노선이면 undefined다. */
+export function lineColorById(
+  lineId: string,
+  lineName?: string | null,
+): { background: string; text: string } | undefined {
+  const name = (lineName ?? '').replace(/[·ㆍ\s]/g, '')
+  const background =
+    LINES.find(([id]) => id === lineId)?.[2] ??
+    (name ? LINES.find(([, line]) => name.includes(line))?.[2] : undefined)
+  if (!background) return undefined
+  return { background, text: DARK_TEXT_EXCLUDED.includes(background) ? '#fff' : '#17212b' }
+}
+
 export function lineTextColor(leg: Leg) {
   const color = lineColor(leg)
   if (!color) return undefined

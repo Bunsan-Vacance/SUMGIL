@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import BikeStationCard from '../features/map/BikeStationCard'
+import StationCard from '../features/map/StationCard'
+import { nearbyStationToPlace } from '../features/map/stations'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
 import HomeLayerLegend from '../features/map/HomeLayerLegend'
 import type { HomeSelection } from '../features/map/useHomeMapLayers'
@@ -73,7 +75,6 @@ export default function HomePage({
   toggleFavorite,
   setOriginFromStation,
 }: Props) {
-  // 역 카드는 커밋 5에서 추가한다. 지금은 대여소 선택만 카드로 보여 준다.
   const selectedStation = selection?.kind === 'bike' ? selection.place : null
   const [recentRoutes, setRecentRoutes] = useState(loadRecentRoutes)
   const extraFavorites = favorites.filter((item) => item.label === null).slice(0, EXTRA_CHIP_LIMIT)
@@ -182,9 +183,24 @@ export default function HomePage({
         ariaLabel="홈 정보"
         className="home-sheet"
         initialSnap="default"
-        preferredSnap={selectedStation ? 'default' : undefined}
+        preferredSnap={selection ? 'default' : undefined}
       >
-        {selectedStation ? (
+        {selection?.kind === 'subway' ? (
+          <StationCard
+            key={selection.station.stationId}
+            station={selection.station}
+            favorite={isFavorite(nearbyStationToPlace(selection.station).id)}
+            onToggleFavorite={() => toggleFavorite(nearbyStationToPlace(selection.station))}
+            onClose={clearSelection}
+            onSetOrigin={(place) => {
+              setOriginFromStation(place)
+              clearSelection()
+            }}
+            onSetDestination={(place) => {
+              if (findRoutes(place) !== false) clearSelection()
+            }}
+          />
+        ) : selectedStation ? (
           <BikeStationCard
             key={selectedStation.id}
             station={selectedStation}

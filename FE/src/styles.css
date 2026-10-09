@@ -1421,6 +1421,151 @@ small {
 .bike-station-actions button {
   min-height: 50px;
 }
+.station-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.station-card h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.station-card small {
+  color: #687795;
+  font-size: 12px;
+}
+.station-card-lines {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+.station-card-lines button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.station-card-lines button[aria-pressed='true'] {
+  border-color: #152536;
+  color: white;
+  background: #152536;
+}
+.station-card-line-badge {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.station-card-arrivals,
+.station-card-hourly {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #f4f6f5;
+}
+.station-card-arrivals p,
+.station-card-hourly p {
+  margin: 0;
+  font-size: 14px;
+}
+.station-card-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.station-card-directions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.station-card-direction {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.station-card-direction strong {
+  font-size: 16px;
+  font-weight: 800;
+}
+.station-card-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.station-card-pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+}
+.station-card-bars {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  align-items: end;
+  gap: 8px;
+  height: 120px;
+}
+.station-card-bar-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 2px;
+}
+.station-card-bar-cell > small {
+  font-size: 11px;
+}
+.station-card-bar {
+  display: block;
+  width: 100%;
+  border-radius: 6px 6px 0 0;
+  opacity: 0.55;
+}
+.station-card-bar.now {
+  opacity: 1;
+  outline: 2px solid #152536;
+  outline-offset: 2px;
+}
+.station-card-bar.grade-relaxed {
+  background: #1d4ed8;
+}
+.station-card-bar.grade-normal {
+  background: #15803d;
+}
+.station-card-bar.grade-congested {
+  background: #b91c1c;
+}
+.station-card-bar.grade-saturated {
+  background: #7e22ce;
+}
+.station-card-bar.grade-none {
+  background: repeating-linear-gradient(135deg, #b8c2cc 0 4px, #d9dfe5 4px 8px);
+}
+.station-card-bar-labels {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+  text-align: center;
+}
 .home-sheet-title {
   margin: 0 0 4px;
   font-size: 16px;

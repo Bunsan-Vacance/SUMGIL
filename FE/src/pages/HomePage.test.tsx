@@ -9,6 +9,25 @@ import type { HomeSelection } from '../features/map/useHomeMapLayers'
 import type { Place } from '../features/route/types'
 import HomePage from './HomePage'
 
+// 역 카드의 조회 훅은 StationCard.test.tsx에서 검증하므로 여기서는 연결만 확인한다.
+vi.mock('../features/map/StationCard', () => ({
+  default: ({
+    station,
+    onClose,
+    onSetDestination,
+  }: {
+    station: { stationName: string }
+    onClose: () => void
+    onSetDestination: (place: { id: string }) => void
+  }) => (
+    <section aria-label="선택한 역">
+      <span>{station.stationName}</span>
+      <button onClick={onClose}>역 정보 닫기</button>
+      <button onClick={() => onSetDestination({ id: 'station:222:default' })}>역 도착 설정</button>
+    </section>
+  ),
+}))
+
 const origin = {
   id: 'origin',
   name: '강남역',
@@ -384,6 +403,72 @@ describe('홈 길찾기 패널', () => {
       fireEvent.click(screen.getByRole('button', { name: '출발지로 설정' }))
       expect(setOriginFromStation).toHaveBeenCalledWith(bike)
       expect(clearSelection).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('선택한 역 카드', () => {
+    const subway = {
+      stationId: '222',
+      stationName: '강남',
+      lat: 37.4979,
+      lng: 127.0276,
+      distanceMeters: 100,
+      lines: [],
+      level: null,
+      grade: null,
+      updatedAt: null,
+    }
+    const renderHome = (props = {}) =>
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          selection={{ kind: 'subway', station: subway }}
+          {...props}
+        />,
+      )
+
+    it('역을 선택하면 역 카드를 보이고 대여소 카드·최근 경로는 숨긴다', () => {
+      renderHome()
+      expect(screen.getByRole('region', { name: '선택한 역' })).toBeTruthy()
+      expect(screen.queryByRole('region', { name: '선택한 따릉이 대여소' })).toBeNull()
+      expect(screen.queryByText('최근 경로')).toBeNull()
+    })
+
+    it('닫기를 누르면 clearSelection을 호출한다', () => {
+      const clearSelection = vi.fn()
+      renderHome({ clearSelection })
+      fireEvent.click(screen.getByRole('button', { name: '역 정보 닫기' }))
+      expect(clearSelection).toHaveBeenCalledOnce()
+    })
+
+    it('도착지 설정이 받아들여지면 길찾기 후 선택을 해제한다', () => {
+      const findRoutes = vi.fn(() => true)
+      const clearSelection = vi.fn()
+      renderHome({ findRoutes, clearSelection })
+      fireEvent.click(screen.getByRole('button', { name: '역 도착 설정' }))
+      expect(findRoutes).toHaveBeenCalledWith({ id: 'station:222:default' })
+      expect(clearSelection).toHaveBeenCalledOnce()
+    })
+
+    it('대여소를 선택하면 대여소 카드를 보인다', () => {
+      renderHome({
+        selection: {
+          kind: 'bike',
+          place: {
+            id: 'bike-station:ST-1',
+            name: '강남역 1번출구',
+            address: '서울',
+            kind: '따릉이 대여소',
+            lat: 37.5,
+            lng: 127,
+          },
+        },
+      })
+      expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
+      expect(screen.queryByRole('region', { name: '선택한 역' })).toBeNull()
     })
   })
 })

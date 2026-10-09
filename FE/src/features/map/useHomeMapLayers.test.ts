@@ -2,7 +2,7 @@
 
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { NearbyStation } from '../../api/contracts'
+import type { StationCongestion } from './useNearbyStationCongestion'
 import type { Place } from '../route/types'
 import { availableLayers } from './homeLayers'
 import { useHomeMapLayers } from './useHomeMapLayers'
@@ -15,13 +15,16 @@ const bike: Place = {
   lat: 37.5,
   lng: 127,
 }
-const subway: NearbyStation = {
+const subway: StationCongestion = {
   stationId: '222',
   stationName: '강남',
   lat: 37.4979,
   lng: 127.0276,
   distanceMeters: 100,
   lines: [],
+  level: null,
+  grade: null,
+  updatedAt: null,
 }
 
 describe('홈 지도 레이어 상태', () => {

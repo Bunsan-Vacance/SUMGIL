@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { NearbyStation } from '../../api/contracts'
 import type { Place } from '../route/types'
 import { availableLayers } from './homeLayers'
+import type { StationCongestion } from './useNearbyStationCongestion'
 import type { HomeLayer } from './homeLayers'
 
 export type HomeSelection =
-  { kind: 'bike'; place: Place } | { kind: 'subway'; station: NearbyStation }
+  { kind: 'bike'; place: Place } | { kind: 'subway'; station: StationCongestion }
 
 /**
  * 홈 지도의 레이어 선택과 선택한 대여소·역을 소유한다(App에서 한 번 호출).
@@ -34,7 +34,7 @@ export function useHomeMapLayers(
   const selectBikeStation = (place: Place) => {
     if (active && place.kind === '따릉이 대여소') setSelection({ kind: 'bike', place })
   }
-  const selectSubwayStation = (station: NearbyStation) => {
+  const selectSubwayStation = (station: StationCongestion) => {
     if (active) setSelection({ kind: 'subway', station })
   }
   const clearSelection = () => setSelection(null)
