@@ -82,6 +82,7 @@ export default function App() {
               routePanelOpen={planner.routePanelOpen}
               toggleRoutePanel={planner.toggleRoutePanel}
               findRoutes={planner.findRoutes}
+              findRoutesFrom={planner.findRoutesFrom}
               swapPlaces={planner.swapPlaces}
               favorites={planner.favorites.favorites}
               home={planner.favorites.home}

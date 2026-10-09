@@ -8,6 +8,7 @@ import { useGuidance } from '../features/guidance/useGuidance'
 import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import { useFavoritePlaces } from '../features/route/useFavoritePlaces'
+import { saveRecentRoute } from '../features/route/recentRoutes'
 import { isRegisterablePlace } from '../features/route/favoritePlaces'
 import type { FavoriteLabel } from '../features/route/favoritePlaces'
 import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
@@ -77,7 +78,7 @@ export function useRoutePlanner(
   const pendingMessage = useRef<string | null>(null)
   const [searchTarget, setSearchTarget] = useState<SearchTarget>('destination')
   const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
-  const [routePanelOpen, setRoutePanelOpen] = useState(true)
+  const [routePanelOpen, setRoutePanelOpen] = useState(false)
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
   const [arrivals, setArrivals] = useState<TrainArrival[]>([])
   const [arrivalStatus, setArrivalStatus] = useState<GuidanceRequestStatus>('idle')
@@ -173,7 +174,7 @@ export function useRoutePlanner(
   const openSearch = (target: 'origin' | 'destination') => {
     setSearchTarget(target)
     setSearchReturnScreen(screen === 'results' ? 'results' : 'home')
-    if (screen === 'home') setRoutePanelOpen(true)
+    // 홈 패널의 열림 상태는 그대로 둔다. 상단 검색창에서 열었다 취소하면 검색창 홈으로 돌아온다.
     go('search')
   }
   const openFavoriteRegistration = (label: FavoriteLabel) => {
@@ -210,7 +211,23 @@ export function useRoutePlanner(
       setMessage('출발지와 다른 도착지를 선택해 주세요.')
       return false
     }
+    saveRecentRoute(trip.origin, destination)
     void trip.search(destination)
+    go('results')
+    return true
+  }
+  const findRoutesFrom = (origin: Place, destination: Place) => {
+    if (!hasRouteLocation(origin)) {
+      trip.setDestination(destination)
+      openSearch('origin')
+      return false
+    }
+    if (samePlace(destination, origin)) {
+      setMessage('출발지와 다른 도착지를 선택해 주세요.')
+      return false
+    }
+    saveRecentRoute(origin, destination)
+    void trip.search(destination, origin)
     go('results')
     return true
   }
@@ -231,6 +248,7 @@ export function useRoutePlanner(
         return false
       }
       if (trip.destination) {
+        saveRecentRoute(place, trip.destination)
         void trip.search(trip.destination, place)
         go('results')
         return true
@@ -254,6 +272,7 @@ export function useRoutePlanner(
   const swapPlaces = () => {
     if (!trip.destination || !hasRouteLocation(trip.origin)) return false
     if (screen === 'results') {
+      saveRecentRoute(trip.destination, trip.origin)
       void trip.search(trip.origin, trip.destination)
       go('results')
     } else {
@@ -477,6 +496,7 @@ export function useRoutePlanner(
     toggleRoutePanel,
     returnToRouteInput,
     findRoutes,
+    findRoutesFrom,
     choosePlace,
     setOriginFromBrowse,
     setOriginFromCurrentLocation,

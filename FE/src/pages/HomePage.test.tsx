@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
+import { saveRecentRoute } from '../features/route/recentRoutes'
 import HomePage from './HomePage'
 
 const origin = {
@@ -14,6 +15,7 @@ const origin = {
 
 const baseProps = {
   openSearch: vi.fn(),
+  findRoutesFrom: vi.fn(),
   toggleRoutePanel: vi.fn(),
   findRoutes: vi.fn(),
   swapPlaces: vi.fn(),
@@ -28,6 +30,7 @@ const favoriteOf = (id: string, label: FavoritePlace['label'] = null): FavoriteP
   savedAt: '2026-10-01T00:00:00.000Z',
 })
 
+beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 
 describe('홈 길찾기 패널', () => {
@@ -134,7 +137,7 @@ describe('홈 길찾기 패널', () => {
         {...baseProps}
         origin={origin}
         destination={null}
-        routePanelOpen
+        routePanelOpen={false}
         findRoutes={findRoutes}
         openFavoriteRegistration={openFavoriteRegistration}
       />,
@@ -152,7 +155,7 @@ describe('홈 길찾기 패널', () => {
         {...baseProps}
         origin={origin}
         destination={null}
-        routePanelOpen
+        routePanelOpen={false}
         findRoutes={findRoutes}
         home={home}
         favorites={[home]}
@@ -169,12 +172,96 @@ describe('홈 길찾기 패널', () => {
         {...baseProps}
         origin={origin}
         destination={null}
-        routePanelOpen
+        routePanelOpen={false}
         favorites={favorites}
       />,
     )
     const group = screen.getByRole('group', { name: '자주 가는 곳' })
     expect(group.querySelectorAll('button')).toHaveLength(2 + 5)
     expect(screen.queryByRole('button', { name: '장소 5 길찾기' })).toBeNull()
+  })
+
+  it('검색창을 누르면 도착지 검색을 연다', () => {
+    const openSearch = vi.fn()
+    render(
+      <HomePage
+        {...baseProps}
+        origin={origin}
+        destination={null}
+        routePanelOpen={false}
+        openSearch={openSearch}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '도착지 검색' }))
+    expect(openSearch).toHaveBeenCalledWith('destination')
+  })
+
+  it('상단 바와 칩 행은 패널이 닫혔을 때만 보이고 레이어 버튼은 아직 없다', () => {
+    const { rerender } = render(
+      <HomePage {...baseProps} origin={origin} destination={null} routePanelOpen={false} />,
+    )
+    const topbar = document.querySelector('.home-topbar')
+    expect(topbar?.hasAttribute('hidden')).toBe(false)
+    expect(screen.getByRole('group', { name: '자주 가는 곳' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /레이어/ })).toBeNull()
+    rerender(<HomePage {...baseProps} origin={origin} destination={null} routePanelOpen />)
+    expect(topbar?.hasAttribute('hidden')).toBe(true)
+    expect(document.querySelector('#home-route-panel .home-chips')).toBeNull()
+  })
+
+  describe('최근 경로 시트', () => {
+    const stationA = { id: 'a', name: '강남역', address: '서울', kind: '역', lat: 37.5, lng: 127 }
+    const stationB = {
+      id: 'b',
+      name: '서울역',
+      address: '서울',
+      kind: '역',
+      lat: 37.55,
+      lng: 126.97,
+    }
+    const renderHome = (props = {}) =>
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          {...props}
+        />,
+      )
+
+    it('저장된 경로를 현재 위치·집 이름 규칙으로 표시한다', () => {
+      saveRecentRoute(stationA, stationB)
+      saveRecentRoute({ ...stationA, id: 'current-location:1', kind: '현재 위치' }, stationA)
+      const home = { ...favoriteOf('a', 'home'), place: stationA }
+      renderHome({ home, favorites: [home] })
+      expect(screen.getByRole('button', { name: '현재 위치 → 집 경로 찾기' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '집 → 서울역 경로 찾기' })).toBeTruthy()
+    })
+
+    it('탭하면 출발지가 있으면 findRoutesFrom, 없으면 findRoutes를 호출한다', () => {
+      saveRecentRoute(stationA, stationB)
+      saveRecentRoute({ ...stationA, id: 'current-location:1', kind: '현재 위치' }, stationB)
+      const findRoutes = vi.fn()
+      const findRoutesFrom = vi.fn()
+      renderHome({ findRoutes, findRoutesFrom })
+      fireEvent.click(screen.getByRole('button', { name: '강남역 → 서울역 경로 찾기' }))
+      expect(findRoutesFrom).toHaveBeenCalledWith(stationA, stationB)
+      fireEvent.click(screen.getByRole('button', { name: '현재 위치 → 서울역 경로 찾기' }))
+      expect(findRoutes).toHaveBeenCalledWith(stationB)
+    })
+
+    it('삭제하면 목록에서 사라지고 비면 안내 문구를 보여 준다', () => {
+      saveRecentRoute(stationA, stationB)
+      renderHome()
+      fireEvent.click(screen.getByRole('button', { name: '강남역 → 서울역 최근 경로 삭제' }))
+      expect(screen.queryByRole('button', { name: /경로 찾기/ })).toBeNull()
+      expect(screen.getByText('아직 찾은 경로가 없어요')).toBeTruthy()
+    })
+
+    it('패널이 열려 있어도 시트를 렌더링한다', () => {
+      render(<HomePage {...baseProps} origin={origin} destination={null} routePanelOpen />)
+      expect(document.querySelector('.home-sheet')).not.toBeNull()
+    })
   })
 })

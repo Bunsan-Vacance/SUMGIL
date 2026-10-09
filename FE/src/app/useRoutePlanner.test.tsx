@@ -7,6 +7,7 @@ import type { Route } from '../features/route/types'
 import type { GuidanceRepository, ReplanProposal } from '../api/guidance'
 import { places, routes } from '../api/mock/fixtures'
 import { GUIDANCE_STORAGE_KEY } from '../features/guidance/useGuidance'
+import { loadRecentRoutes } from '../features/route/recentRoutes'
 import { useRoutePlanner } from './useRoutePlanner'
 
 const repository: RouteRepository = { search: async () => routes }
@@ -140,10 +141,8 @@ describe('경로와 안내 화면의 수명', () => {
     })
     const { result } = renderHook(() => useRoutePlanner(repository))
 
-    expect(result.current.routePanelOpen).toBe(true)
-    expect(getCurrentPosition).not.toHaveBeenCalled()
-    act(() => result.current.toggleRoutePanel())
     expect(result.current.routePanelOpen).toBe(false)
+    expect(getCurrentPosition).not.toHaveBeenCalled()
     act(() => result.current.toggleRoutePanel())
     expect(result.current.routePanelOpen).toBe(true)
     expect(getCurrentPosition).toHaveBeenCalledOnce()
@@ -206,7 +205,6 @@ describe('경로와 안내 화면의 수명', () => {
     })
     const { result } = renderHook(() => useRoutePlanner(repository))
 
-    act(() => result.current.toggleRoutePanel())
     act(() => result.current.toggleRoutePanel())
     act(() => getCurrentPosition.mock.calls[0][1]({ code: 1 } as GeolocationPositionError))
 
@@ -638,5 +636,76 @@ describe('집·회사 즐겨찾기 등록 흐름', () => {
     expect(result.current.screen).toBe('search')
     expect(result.current.favorites.work).toBeNull()
     expect(result.current.message).toBe('현재 위치는 즐겨찾기로 등록할 수 없어요')
+  })
+})
+
+describe('최근 경로 기록', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+    localStorage.clear()
+  })
+  afterEach(() => localStorage.clear())
+
+  it('도착지 선택으로 검색이 시작되면 출발과 도착 항목을 저장한다', async () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() => result.current.trip.setOrigin(places[0]))
+    act(() => result.current.findRoutes(places[1]))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    const saved = loadRecentRoutes()
+    expect(saved).toHaveLength(1)
+    expect(saved[0].origin?.id).toBe(places[0].id)
+    expect(saved[0].destination.id).toBe(places[1].id)
+  })
+
+  it('현재 위치 출발이면 origin을 null로 저장한다', async () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() =>
+      result.current.trip.setOrigin({
+        id: 'current-location:37.5:127',
+        name: '현재 위치',
+        address: '위도 37.500000, 경도 127.000000',
+        kind: '현재 위치',
+        lat: 37.5,
+        lng: 127,
+      }),
+    )
+    act(() => result.current.findRoutes(places[1]))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    expect(loadRecentRoutes()[0].origin).toBeNull()
+  })
+})
+
+describe('저장된 출발지로 경로 찾기', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+    localStorage.clear()
+  })
+  afterEach(() => localStorage.clear())
+
+  it('검색을 시작하고 결과 화면으로 가며 최근 경로에 기록한다', async () => {
+    const search = vi.fn(async () => routes)
+    const { result } = renderHook(() => useRoutePlanner({ search }))
+    let started: boolean = false
+    act(() => {
+      started = result.current.findRoutesFrom(places[0], places[1])
+    })
+    expect(started).toBe(true)
+    await waitFor(() => expect(result.current.screen).toBe('results'))
+    expect(search).toHaveBeenCalled()
+    expect(loadRecentRoutes()[0].id).toBe(places[0].id + '>' + places[1].id)
+  })
+
+  it('출발과 도착이 같으면 거부하고 토스트를 남긴다', () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    let started: boolean = true
+    act(() => {
+      started = result.current.findRoutesFrom(places[0], places[0])
+    })
+    expect(started).toBe(false)
+    expect(result.current.screen).toBe('home')
+    expect(result.current.message).toBe('출발지와 다른 도착지를 선택해 주세요.')
+    expect(loadRecentRoutes()).toEqual([])
   })
 })
