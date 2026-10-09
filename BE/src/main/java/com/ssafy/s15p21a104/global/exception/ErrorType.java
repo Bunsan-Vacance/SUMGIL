@@ -21,7 +21,8 @@ public enum ErrorType {
     ACCESS_CANDIDATE_NOT_FOUND(404, "ACCESS_CANDIDATE_NOT_FOUND", "좌표 주변 보행 접근 가능한 교통망 후보를 찾을 수 없습니다."),
     ROUTE_DATA_NOT_READY(503, "ROUTE_DATA_NOT_READY", "교통망 데이터가 아직 준비되지 않았습니다."),
     BIKE_STATION_NOT_FOUND(404, "BIKE_STATION_NOT_FOUND", "대여소를 찾을 수 없습니다."),
-    ROUTE_SEARCH_BUSY(503, "ROUTE_SEARCH_BUSY", "지금 경로 검색 요청이 많아 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    ROUTE_SEARCH_BUSY(503, "ROUTE_SEARCH_BUSY", "지금 경로 검색 요청이 많아 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."),
+    CONGESTION_BATCH_TOO_LARGE(400, "CONGESTION_BATCH_TOO_LARGE", "한 번에 조회할 수 있는 대상·시간대 수를 넘었습니다.");
 
     private final int status;
     private final String code;

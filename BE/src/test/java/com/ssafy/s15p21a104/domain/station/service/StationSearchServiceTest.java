@@ -39,7 +39,8 @@ class StationSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        stationSearchService = new StationSearchService(stationRepository, routeEdgeTimeRepository, routeLineRepository);
+        stationSearchService = new StationSearchService(
+                stationRepository, new StationLineLookup(routeEdgeTimeRepository, routeLineRepository));
     }
 
     @Test
