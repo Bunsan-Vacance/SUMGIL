@@ -170,3 +170,12 @@ SDK 로더는 진행 중인 Promise를 공유하고 실패하면 다시 시도�
 ## 도착 시 따릉이 예측 (2026-09-17)
 
 BIKE 구간의 명시적 `from.rentalId`와 `departedAt + 이전 구간 minutes 합`을 사용해 `/api/bike-stations/{rentalId}/prediction?arrivalTime=<offset ISO>`를 조회한다. `VITE_BIKE_PREDICTION_MOCK=true`일 때만 mock을 사용하며, 라이브 요청 실패를 mock으로 대체하지 않는다. `predictedBikes=0`과 `null`을 구분하고 현재 재고와 도착 시 예측을 하나의 상세 카드 안에서 독립된 상태로 표시한다. 현재 재고는 `/api/bike-stations/{rentalId}/stock`을 별도로 조회하며, `AVAILABLE`은 현재 수량, `STALE`은 마지막 확인 시각과 수량, `UNAVAILABLE`은 정보 없음으로 구분한다. 자세한 계약은 [FE-06-따릉이예측-API-계약](../../../FE-06-따릉이예측-API-계약.md)을 따른다.
+
+## 주변 역과 혼잡도 일괄 조회 (2026-10-09)
+
+홈 혼잡도 레이어와 역 카드가 쓴다. 계약 원문은 `BE/docs/api/api-spec.md` 4·5절이다.
+
+- `GET /api/stations/nearby`: 요청은 `lat`·`lng`와 `radiusMeters` 1500·`limit` 30이다. 응답은 물리 역 1행에 `lines[]`(`lineId`, `lineName`)를 담고, `lineName`은 null일 수 있다. `stationId`는 숫자·영문자가 섞이는 불투명 문자열이라 정수로 파싱하거나 정규식으로 검증하지 않는다.
+- `GET /api/congestion/batch`: 요청은 `targetType`, 쉼표로 이은 `targetIds`, 쉼표로 이은 ISO `departureTimes`(생략하면 서버 현재 시각 1개)다. 상한은 대상 50·시각 12·조합 200이며 FE가 서버에 보내기 전에 먼저 막는다. 응답은 모든 (대상 × 시각) 조합을 요청 순서대로 돌려주고, 없는 조합은 `level`이 null이다. null은 데이터 없음이며 0이 아니다. 응답의 대상·시각 순서와 개수가 요청과 다르면 오류로 본다.
+- 실시간 도착은 기존 `/api/transit/arrivals`를 `routeId = lineId`로 재사용한다.
+- 시간대별 막대는 정적 `congestion` 표 값이며 예측 표(`congestion_pred`)가 아니다. 백엔드 주소가 없으면 이 기능을 쓰지 않는다.
