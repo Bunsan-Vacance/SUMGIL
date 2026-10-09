@@ -1655,6 +1655,60 @@ small {
   height: 40px;
   color: #82909b;
 }
+.home-sheet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+}
+.home-sheet-heading .home-sheet-title {
+  margin: 0;
+}
+.home-sheet-heading small {
+  color: #687795;
+  font-size: 12px;
+}
+.home-sheet .home-layer-legend {
+  max-width: none;
+  padding: 4px 0 8px;
+  background: none;
+  box-shadow: none;
+}
+.nearby-station-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nearby-station-list > li > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.nearby-station-list > li > button > span {
+  flex: 1;
+  min-width: 0;
+}
+.nearby-station-list strong,
+.nearby-station-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nearby-station-list small {
+  color: #687795;
+  font-size: 12px;
+}
+.nearby-station-grade {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
 .sheet-footer {
   flex-shrink: 0;
   display: flex;

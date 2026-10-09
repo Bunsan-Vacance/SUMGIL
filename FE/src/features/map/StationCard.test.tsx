@@ -237,4 +237,16 @@ describe('역 카드', () => {
     expect(onToggleFavorite).toHaveBeenCalledOnce()
     expect(onClose).toHaveBeenCalledOnce()
   })
+
+  it('onBack이 있으면 주변 역 목록으로 돌아가는 버튼을 보이고 없으면 숨긴다', async () => {
+    const onBack = vi.fn()
+    const first = setup({ props: { onBack } })
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: '주변 역 목록으로' }))
+    expect(onBack).toHaveBeenCalledOnce()
+    first.unmount()
+    setup()
+    await settle()
+    expect(screen.queryByRole('button', { name: '주변 역 목록으로' })).toBeNull()
+  })
 })

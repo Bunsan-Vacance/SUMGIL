@@ -132,6 +132,10 @@ export default function App() {
               work={planner.favorites.work}
               openFavoriteRegistration={planner.openFavoriteRegistration}
               tab={homeTab.tab}
+              stations={stationLayer.stations}
+              stationStatus={stationLayer.status}
+              retryStations={stationLayer.retry}
+              selectSubwayStation={homeLayers.selectSubwayStation}
               onDismissTab={() => homeTab.setTab(null)}
               selection={homeLayers.selection}
               outlook={stationOutlook}

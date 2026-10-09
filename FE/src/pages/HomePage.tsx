@@ -13,7 +13,12 @@ import {
 import BottomSheet from '../components/BottomSheet'
 import type { HomeTab } from '../features/home/HomeTabBar'
 import BikeStationCard from '../features/map/BikeStationCard'
+import NearbyStationList from '../features/map/NearbyStationList'
 import StationCard from '../features/map/StationCard'
+import type {
+  NearbyStationStatus,
+  StationCongestion,
+} from '../features/map/useNearbyStationCongestion'
 import { nearbyStationToPlace } from '../features/map/stations'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
 import type { HomeSelection } from '../features/map/useHomeMapLayers'
@@ -43,6 +48,10 @@ interface Props {
   openFavoriteRegistration: (label: FavoriteLabel) => void
   tab: HomeTab | null
   onDismissTab: () => void
+  stations: StationCongestion[]
+  stationStatus: NearbyStationStatus
+  retryStations: () => void
+  selectSubwayStation: (station: StationCongestion) => void
   selection: HomeSelection | null
   outlook: OutlookState
   clearSelection: () => void
@@ -113,6 +122,10 @@ export default function HomePage({
   openFavoriteRegistration,
   tab,
   onDismissTab,
+  stations,
+  stationStatus,
+  retryStations,
+  selectSubwayStation,
   selection,
   outlook,
   clearSelection,
@@ -216,6 +229,7 @@ export default function HomePage({
             favorite={isFavorite(nearbyStationToPlace(selection.station).id)}
             onToggleFavorite={() => toggleFavorite(nearbyStationToPlace(selection.station))}
             onClose={clearSelection}
+            onBack={tab === 'crowd' ? clearSelection : undefined}
             onSetOrigin={(place) => {
               setOriginFromStation(place)
               clearSelection()
@@ -239,6 +253,13 @@ export default function HomePage({
             onSetDestination={(place) => {
               if (findRoutes(place) !== false) clearSelection()
             }}
+          />
+        ) : tab === 'crowd' ? (
+          <NearbyStationList
+            stations={stations}
+            status={stationStatus}
+            onSelect={selectSubwayStation}
+            onRetry={retryStations}
           />
         ) : tab === 'recent' ? (
           <>

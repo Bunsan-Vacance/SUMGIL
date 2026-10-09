@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
 import { pinRecentRoute, saveRecentRoute } from '../features/route/recentRoutes'
 import type { HomeTab } from '../features/home/HomeTabBar'
+import type {
+  NearbyStationStatus,
+  StationCongestion,
+} from '../features/map/useNearbyStationCongestion'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
 import type { HomeSelection } from '../features/map/useHomeMapLayers'
 import type { Place } from '../features/route/types'
@@ -15,15 +19,18 @@ vi.mock('../features/map/StationCard', () => ({
   default: ({
     station,
     onClose,
+    onBack,
     onSetDestination,
   }: {
     station: { stationName: string }
     onClose: () => void
+    onBack?: () => void
     onSetDestination: (place: { id: string }) => void
   }) => (
     <section aria-label="선택한 역">
       <span>{station.stationName}</span>
       <button onClick={onClose}>역 정보 닫기</button>
+      {onBack && <button onClick={onBack}>주변 역 목록으로</button>}
       <button onClick={() => onSetDestination({ id: 'station:222:default' })}>역 도착 설정</button>
     </section>
   ),
@@ -47,6 +54,10 @@ const baseProps = {
   work: null,
   openFavoriteRegistration: vi.fn(),
   tab: 'recent' as HomeTab | null,
+  stations: [] as StationCongestion[],
+  stationStatus: 'ready' as NearbyStationStatus,
+  retryStations: vi.fn(),
+  selectSubwayStation: vi.fn(),
   onDismissTab: vi.fn(),
   selection: null as HomeSelection | null,
   outlook: {
@@ -465,6 +476,49 @@ describe('홈 길찾기 패널', () => {
       })
       expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
       expect(screen.queryByRole('region', { name: '선택한 역' })).toBeNull()
+    })
+  })
+
+  describe('혼잡도 탭', () => {
+    const subway: StationCongestion = {
+      stationId: '222',
+      stationName: '강남',
+      lat: 37.4979,
+      lng: 127.0276,
+      distanceMeters: 100,
+      lines: [],
+      level: null,
+      grade: null,
+      updatedAt: null,
+    }
+    const renderCrowd = (props = {}) =>
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          tab="crowd"
+          stations={[subway]}
+          {...props}
+        />,
+      )
+
+    it('역을 선택하지 않았으면 주변 역 목록을 보이고 행을 누르면 selectSubwayStation을 호출한다', () => {
+      const selectSubwayStation = vi.fn()
+      renderCrowd({ selectSubwayStation })
+      expect(screen.getByRole('heading', { name: '주변 역 혼잡도' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: /강남/ }))
+      expect(selectSubwayStation).toHaveBeenCalledWith(subway)
+    })
+
+    it('역을 선택하면 카드를 보이고 ← 버튼이 선택을 해제해 목록으로 돌아간다', () => {
+      const clearSelection = vi.fn()
+      renderCrowd({ selection: { kind: 'subway', station: subway }, clearSelection })
+      expect(screen.getByRole('region', { name: '선택한 역' })).toBeTruthy()
+      expect(screen.queryByRole('heading', { name: '주변 역 혼잡도' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '주변 역 목록으로' }))
+      expect(clearSelection).toHaveBeenCalledOnce()
     })
   })
 })
