@@ -1,10 +1,6 @@
 package com.ssafy.s15p21a104.domain.station.service;
 
-import com.ssafy.s15p21a104.domain.route.repository.RouteEdgeTimeRepository;
-import com.ssafy.s15p21a104.domain.route.repository.RouteLineRepository;
-import com.ssafy.s15p21a104.domain.route.repository.StationRouteEdge;
 import com.ssafy.s15p21a104.domain.station.dto.response.StationSearchResultResponse;
-import com.ssafy.s15p21a104.domain.station.entity.Line;
 import com.ssafy.s15p21a104.domain.station.entity.Station;
 import com.ssafy.s15p21a104.domain.station.repository.StationRepository;
 import lombok.RequiredArgsConstructor;
@@ -12,12 +8,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -32,8 +26,7 @@ public class StationSearchService {
     private static final int MAX_RESULTS = 20;
 
     private final StationRepository stationRepository;
-    private final RouteEdgeTimeRepository routeEdgeTimeRepository;
-    private final RouteLineRepository routeLineRepository;
+    private final StationLineLookup stationLineLookup;
 
     public List<StationSearchResultResponse> search(String query) {
         String normalized = normalize(query);
@@ -50,40 +43,14 @@ public class StationSearchService {
         }
 
         Set<String> stationIds = ranked.stream().map(Station::getStationId).collect(Collectors.toSet());
-        Map<String, Set<String>> lineIdsByStation = groupLineIdsByStation(stationIds);
-        Map<String, String> lineNameById = lineNamesFor(lineIdsByStation);
+        Map<String, Set<String>> lineIdsByStation = stationLineLookup.groupLineIdsByStation(stationIds);
+        Map<String, String> lineNameById = stationLineLookup.lineNamesFor(lineIdsByStation);
 
         return ranked.stream()
                 .flatMap(station -> toResults(station, lineIdsByStation.get(station.getStationId()), lineNameById)
                         .stream())
                 .limit(MAX_RESULTS)
                 .toList();
-    }
-
-    /** 매칭된 역 전체의 소속 노선을 쿼리 한 번으로 묶어 온다(역마다 따로 조회하는 N+1 방지). */
-    private Map<String, Set<String>> groupLineIdsByStation(Set<String> stationIds) {
-        Map<String, Set<String>> result = new HashMap<>();
-        for (StationRouteEdge edge : routeEdgeTimeRepository.findSubwayRouteEdgesTouchingStations(stationIds)) {
-            if (stationIds.contains(edge.fromNode())) {
-                result.computeIfAbsent(edge.fromNode(), key -> new TreeSet<>()).add(edge.routeId());
-            }
-            if (stationIds.contains(edge.toNode())) {
-                result.computeIfAbsent(edge.toNode(), key -> new TreeSet<>()).add(edge.routeId());
-            }
-        }
-        return result;
-    }
-
-    /** 등장한 노선 ID 전체의 이름을 쿼리 한 번으로 묶어 온다. */
-    private Map<String, String> lineNamesFor(Map<String, Set<String>> lineIdsByStation) {
-        Set<String> allLineIds = lineIdsByStation.values().stream()
-                .flatMap(Set::stream)
-                .collect(Collectors.toSet());
-        if (allLineIds.isEmpty()) {
-            return Map.of();
-        }
-        return routeLineRepository.findAllById(allLineIds).stream()
-                .collect(Collectors.toMap(Line::getLineId, Line::getName));
     }
 
     /** 앞뒤 공백 제거, 끝의 "역" 표기 허용(예: "강변역" -> "강변"). */
