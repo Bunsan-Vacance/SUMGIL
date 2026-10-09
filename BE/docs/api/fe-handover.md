@@ -64,6 +64,15 @@
   - `source: MOCK` = 평균 예측표(실데이터 평균, 가짜 아님). 도착이 30분보다 멀거나, AI 호출이 실패·지연(1초)·실시간 재고 없음일 때. 이때 `predictedAt`은 평균표 적재 시각이다.
   - 같은 대여소라도 도착 시각에 따라 `MODEL`/`MOCK`이 바뀐다. "샘플" 배지는 `MOCK`에서도 오해를 부르므로 문구 조정 권장("평균 기준" 등).
 
+## 9. 혼잡도 일괄 조회·주변 역 조회 — FE 346 사용 예 (354)
+
+- 원인: 홈 지도의 역 마커·역 카드를 단건 `GET /api/congestion`으로 그리면 호출이 수십 번이 된다.
+- 해결방안: `GET /api/stations/nearby`로 역 목록을 받고, `GET /api/congestion/batch`로 여러 역·여러 시각을 한 번에 조회한다.
+- 결과(API 변경사항): 신규 2개, 기존 응답 변경 없음. 계약은 `api-spec.md` 4·5절.
+  - 마커(역 N × 현재 시각): `GET /api/stations/nearby?lat=37.4979&lng=127.0276&radiusMeters=1000&limit=20` → 받은 `stationId`들을 `GET /api/congestion/batch?targetType=STATION&targetIds=222,223,150` (`departureTimes` 생략 시 서버 현재 시각 1개).
+  - 카드(역 1 × 시간대 6, 30분 간격): `GET /api/congestion/batch?targetType=STATION&targetIds=222&departureTimes=2026-10-09T18:00:00,2026-10-09T18:30:00,2026-10-09T19:00:00,2026-10-09T19:30:00,2026-10-09T20:00:00,2026-10-09T20:30:00`.
+  - `level`·`source`·`updatedAt`이 `null`이면 "데이터 없음"으로 그린다(0으로 해석 금지). 조합 상한은 대상 50·시각 12·조합 200이며 넘으면 `400 CONGESTION_BATCH_TOO_LARGE`. `stationId`는 문자열로만 다룬다.
+
 ## 참고 — 이미 반영済 (FE 문서가 구버전 기준이라 대조용)
 
 - `GET /api/transit/arrivals?stationId&routeId` 구현済 (192). 응답은 `{ status: LIVE|NO_INFO|OUTSIDE_WINDOW|STALE, trains: [{trainId, direction, arrivalTime, updatedAt, source}], updatedAt }` 객체형. FE 문서의 배열형과 다름 — 사용 전 대조 필요.

@@ -26,6 +26,8 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 | `priority`(쾌적/시간 우선) | 일단 지금 초안(`TIME`\|`COMFORT`) 그대로 둔다. 경로 추천 로직이 구체화되면 그때 같이 조정 |
 | 지도 표시용 좌표 | **MVP는 지점 좌표만 제공.** `legs`에 `fromLat`/`fromLng`/`toLat`/`toLng` 추가 (아래 예시 참고). 지점 사이 실제 이동 경로선(폴리라인)은 범위 밖 — 필요해지면 별도 Task |
 | 카카오 검색 ↔ 내부 ID 연결 | FE는 건물/장소를 카카오 API로 직접 불러온다. 우리 쪽 역·정류소·대여소 데이터를 만드는 건 별도 BE 작업이고, 필요하면 다른 BE 팀원이 그때 손본다 — 지금 이 명세를 막는 요소 아님 |
+| 혼잡도 일괄 조회 | `GET /api/congestion/batch`(대상 최대 50·시각 최대 12·조합 최대 200). 값이 없는 조합은 행을 빼지 않고 `level`·`source`·`updatedAt`을 `null`로 돌려준다 — 4절 |
+| 근처 역 조회 | `GET /api/stations/nearby`(기본 반경 1000m·최대 3000m, 기본 20개·최대 50개). 물리 역 1행에 `lines` 배열 — 5절 |
 
 ## 남은 논의사항
 
@@ -219,3 +221,118 @@ FE 검토 의견(`api-spec-fe-review.md`, 2026-09-08)을 반영해 정리했다.
 - 환승역은 노선별 코드 중 **최솟값**을 쓴다 (시청은 `201`이 아니라 `151`).
 - **정수로 파싱하지 않는다. `^\d+$` 같은 검증도 넣지 않는다.** 불투명한 문자열로 받아서 그대로 되돌려주면 된다.
 - 실제로 이 검증 때문에 사고가 났다(2026-09-14). `query=서울`은 서울 `150` · 서울대벤처타운 `S410` · 서울지방병무청 `S403` · 서울숲 `1847` · 서울대입구 `228`을 함께 돌려주는데, FE가 행마다 `^\d+$`를 검사하고 하나라도 걸리면 응답 전체를 `invalid-response`로 버려서 **서울역까지 검색 결과에 안 나왔다**. FE에서 `S15P21A104-207`로 수정됨.
+
+---
+
+## 4. `GET /api/congestion/batch` — [구현 완료 · FE 346 연동 대기]
+
+여러 대상(역·노선)의 여러 시각 혼잡도를 한 번에 조회한다.
+
+### 배경
+
+홈의 주변 역 마커(역 N개 × 현재 시각)와 역 카드의 시간대별 막대(역 1개 × 시간대 6개)를 단건 `GET /api/congestion`으로 그리면 호출이 수십 번이 된다. 같은 값을 한 번에 돌려주는 일괄 API를 둔다. 정적 `congestion` 표를 **그대로 옮기며 가공·추정·보간이 없다**. 운영자 뷰 heatmap이 읽는 `congestion_pred`(예측 표)와는 다른 표다.
+
+단건 `GET /api/congestion`과 같은 표·같은 슬롯 규칙(`dow_type`·`time_slot`)을 써서 값이 같다. 차이는 데이터가 없을 때 단건은 `data` 없이 응답하지만 일괄은 값이 `null`인 행을 돌려준다는 점이다.
+
+### 요청
+
+| 파라미터 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `targetType` | String (`STATION` \| `LINE` \| `ROUTE`) | Y | 대상 종류. 단건과 같은 enum |
+| `targetIds` | String (콤마 구분) | Y | 대상 ID 목록. 공백·빈 값·중복은 정리(첫 등장 순서 유지). 정리 후 **1~50개**. 불투명 문자열이므로 정수로 파싱하지 않는다 |
+| `departureTimes` | String (콤마 구분 ISO `LocalDateTime`) | N | 기준 시각 목록(예 `2026-10-09T18:00:00,2026-10-09T18:30:00`). 중복은 정리. 생략하면 서버 현재 시각 1개. 정리 후 **1~12개** |
+
+- 조합 수(대상 수 × 시각 수) 상한은 **200**이다. 대상·시각·조합 중 하나라도 넘으면 `400 CONGESTION_BATCH_TOO_LARGE`.
+- `targetIds`는 `a,b,c`와 `targetIds=a&targetIds=b` 두 방식 모두 받는다.
+
+### 응답
+
+```json
+{
+  "success": true,
+  "data": {
+    "targetType": "STATION",
+    "departureTimes": ["2026-10-09T18:00:00", "2026-10-09T18:30:00"],
+    "targets": [
+      {
+        "targetId": "222",
+        "slots": [
+          { "departureTime": "2026-10-09T18:00:00", "dowType": 0, "timeSlot": 36, "level": 72.5, "source": "stat", "updatedAt": "2026-10-01T03:00:00Z" },
+          { "departureTime": "2026-10-09T18:30:00", "dowType": 0, "timeSlot": 37, "level": null, "source": null, "updatedAt": null }
+        ]
+      }
+    ]
+  }
+}
+```
+
+| 필드 | 설명 |
+| --- | --- |
+| `departureTimes` | 정리(기본값·중복 제거) 뒤의 시각 목록. `slots`와 같은 순서 |
+| `targets[].targetId` | 요청한 대상 ID(정리 뒤). 요청 `targetIds` 순서 |
+| `slots[].departureTime` | 요청 시각 |
+| `slots[].dowType` · `timeSlot` | 시각에서 변환한 조회 키. 0 평일 / 1 토 / 2 일요일·공휴일, `timeSlot`은 0~47(30분 단위). **값이 없어도 항상 채워진다** |
+| `slots[].level` | 혼잡도 수치(소수 1자리). 가공·반올림 없음. 데이터 없음이면 `null` |
+| `slots[].source` · `updatedAt` | 값의 출처·갱신 시각. 데이터 없음이면 `null` |
+
+- **모든 (대상 × 시각) 조합을 빠짐없이 돌려준다.** 값이 없는 조합은 `level`·`source`·`updatedAt`이 `null`이며 `0`이나 추정값으로 바꾸지 않는다. FE는 `null`을 "데이터 없음"으로 그려야 한다.
+- 순서는 요청 순서다(`targets`는 `targetIds`, `slots`는 `departureTimes`).
+- 존재하지 않는 `targetId`도 404가 아니라 모든 슬롯이 `null`인 행이다.
+
+### 실패
+
+| 상황 | ErrorType | HTTP |
+| --- | --- | --- |
+| `targetIds`가 없거나 정리 후 비어 있음, 잘못된 `targetType`, 시각 형식 오류 | `BAD_REQUEST` | 400 |
+| 대상 50개·시각 12개·조합 200개 중 하나라도 초과 | `CONGESTION_BATCH_TOO_LARGE` (**신규**) | 400 |
+
+---
+
+## 5. `GET /api/stations/nearby` — [구현 완료 · FE 346 연동 대기]
+
+좌표 기준 반경 안의 역을 거리순으로 조회한다. 홈 지도의 주변 역 마커와 역 카드를 그리는 용도다.
+
+### 요청
+
+| 파라미터 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `lat` | Double | Y | 기준 위도 |
+| `lng` | Double | Y | 기준 경도 |
+| `radiusMeters` | Integer | N | 기본 1000, 최대 3000 |
+| `limit` | Integer | N | 기본 20, 최대 50 |
+
+### 응답 — 배열
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "stationId": "222",
+      "stationName": "강남",
+      "lat": 37.4979,
+      "lng": 127.0276,
+      "distanceMeters": 180.4,
+      "lines": [{ "lineId": "1002", "lineName": "2호선" }]
+    }
+  ]
+}
+```
+
+| 필드 | 설명 |
+| --- | --- |
+| `stationId` | `routes/search`의 `originStationId`/`destStationId`, `congestion/batch`의 `targetIds`에 그대로 쓰는 값. **불투명 문자열** — 숫자·영문자 혼재([stationId 형식](#stationid-형식) 그대로, 정수 파싱·`^\d+$` 검증 금지) |
+| `stationName` | 역명("역" 없이 저장) |
+| `distanceMeters` | 요청 좌표에서 역까지의 하버사인 거리(m) |
+| `lines` | 역에 속한 노선 배열(`lineId` 오름차순). 노선 정보를 못 찾으면 빈 배열 |
+
+- 거리순 오름차순 정렬. 좌표가 없는 역은 결과에서 제외한다.
+- **검색 API(3절)와의 차이**: 검색은 환승역을 노선 수만큼 행으로 나누지만, 이 API는 **물리 역 1행**에 `lines` 배열을 담는다. 지도 마커 하나·카드 하나에 대응시키기 위해서다.
+- 결과 0개면 `200` + `data: []` (에러 아님).
+
+### 실패
+
+| 상황 | ErrorType | HTTP |
+| --- | --- | --- |
+| `lat`/`lng`가 없거나 범위 밖 | `INVALID_COORDINATE` | 400 |
+| `radiusMeters`/`limit`이 허용 범위(1 이상 최대값 이하) 밖 | `BAD_REQUEST` | 400 |
