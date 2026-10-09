@@ -39,3 +39,18 @@ describe('홈 지도 레이어 상태', () => {
     expect(result.current.selectedStation).toBeNull()
   })
 })
+
+describe('홈을 벗어날 때', () => {
+  it('선택한 대여소를 해제하고 레이어는 유지한다', () => {
+    const { result, rerender } = renderHook(({ active }) => useHomeMapLayers(active), {
+      initialProps: { active: true },
+    })
+    act(() => result.current.selectStation(station))
+    expect(result.current.selectedStation).toBe(station)
+    rerender({ active: false })
+    expect(result.current.selectedStation).toBeNull()
+    expect(result.current.layer).toBe('bike')
+    act(() => result.current.selectStation(station))
+    expect(result.current.selectedStation).toBeNull()
+  })
+})

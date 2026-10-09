@@ -26,7 +26,7 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true)
   const completeSplash = useCallback(() => setShowSplash(false), [])
   const planner = useRoutePlanner()
-  const homeLayers = useHomeMapLayers()
+  const homeLayers = useHomeMapLayers(planner.screen === 'home')
   const stationOutlook = useBikeStationOutlook(
     homeLayers.selectedStation ? (bikeRentalId(homeLayers.selectedStation) ?? null) : null,
   )
