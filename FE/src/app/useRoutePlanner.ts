@@ -8,6 +8,7 @@ import { useGuidance } from '../features/guidance/useGuidance'
 import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import { useFavoritePlaces } from '../features/route/useFavoritePlaces'
+import { saveRecentRoute } from '../features/route/recentRoutes'
 import { isRegisterablePlace } from '../features/route/favoritePlaces'
 import type { FavoriteLabel } from '../features/route/favoritePlaces'
 import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
@@ -210,6 +211,7 @@ export function useRoutePlanner(
       setMessage('출발지와 다른 도착지를 선택해 주세요.')
       return false
     }
+    saveRecentRoute(trip.origin, destination)
     void trip.search(destination)
     go('results')
     return true
@@ -231,6 +233,7 @@ export function useRoutePlanner(
         return false
       }
       if (trip.destination) {
+        saveRecentRoute(place, trip.destination)
         void trip.search(trip.destination, place)
         go('results')
         return true
@@ -254,6 +257,7 @@ export function useRoutePlanner(
   const swapPlaces = () => {
     if (!trip.destination || !hasRouteLocation(trip.origin)) return false
     if (screen === 'results') {
+      saveRecentRoute(trip.destination, trip.origin)
       void trip.search(trip.origin, trip.destination)
       go('results')
     } else {

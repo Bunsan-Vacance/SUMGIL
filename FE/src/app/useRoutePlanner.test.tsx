@@ -7,6 +7,7 @@ import type { Route } from '../features/route/types'
 import type { GuidanceRepository, ReplanProposal } from '../api/guidance'
 import { places, routes } from '../api/mock/fixtures'
 import { GUIDANCE_STORAGE_KEY } from '../features/guidance/useGuidance'
+import { loadRecentRoutes } from '../features/route/recentRoutes'
 import { useRoutePlanner } from './useRoutePlanner'
 
 const repository: RouteRepository = { search: async () => routes }
@@ -638,5 +639,42 @@ describe('집·회사 즐겨찾기 등록 흐름', () => {
     expect(result.current.screen).toBe('search')
     expect(result.current.favorites.work).toBeNull()
     expect(result.current.message).toBe('현재 위치는 즐겨찾기로 등록할 수 없어요')
+  })
+})
+
+describe('최근 경로 기록', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+    localStorage.clear()
+  })
+  afterEach(() => localStorage.clear())
+
+  it('도착지 선택으로 검색이 시작되면 출발과 도착 항목을 저장한다', async () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() => result.current.trip.setOrigin(places[0]))
+    act(() => result.current.findRoutes(places[1]))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    const saved = loadRecentRoutes()
+    expect(saved).toHaveLength(1)
+    expect(saved[0].origin?.id).toBe(places[0].id)
+    expect(saved[0].destination.id).toBe(places[1].id)
+  })
+
+  it('현재 위치 출발이면 origin을 null로 저장한다', async () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() =>
+      result.current.trip.setOrigin({
+        id: 'current-location:37.5:127',
+        name: '현재 위치',
+        address: '위도 37.500000, 경도 127.000000',
+        kind: '현재 위치',
+        lat: 37.5,
+        lng: 127,
+      }),
+    )
+    act(() => result.current.findRoutes(places[1]))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    expect(loadRecentRoutes()[0].origin).toBeNull()
   })
 })
