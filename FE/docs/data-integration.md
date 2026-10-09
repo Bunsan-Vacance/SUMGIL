@@ -28,6 +28,8 @@
 `addr2`를 합친 값이며, 내부 대여소 ID는 선택 장소 식별에만 사용하고 화면에는 노출하지 않는다.
 지도를 축소하면 화면 기준으로 가까운 대여소를 숫자 그룹으로 묶고, 그룹 버튼을 누르면 해당 지역을 확대한다. `VITE_API_BASE_URL` 설정 시 지도 대여소는 nearby API를 사용하며, 요청 실패 시 정적 데이터로 대체하지 않는다.
 
+백엔드 nearby 응답의 `availableBikes`(캐시가 없으면 null)와 `stockUpdatedAt`(`availableBikes`가 null이면 null)은 홈 마커 배지에 쓴다. 목록은 값의 유무만 주고 신선·오래됨 구분은 단건 `/stock`이 맡는다(백엔드 주석). 홈 대여소 카드는 `/stock` 1건과 `/prediction`(arrivalTime = 현재+15분·+30분) 2건을 병렬로 호출한다. 정적 `bike-stations.json`(백엔드 없음)에는 재고가 없어 배지가 `?`로 보인다.
+
 백엔드 nearby 응답의 `dockCount`와 `distanceMeters`는 `Place`까지 보존해 선택 카드에
 표시한다. 거치대 수는 실시간 자전거 재고가 아닌 전체 거치대 수이며, 거리는 해당 응답을
 조회한 지도 중심 기준이다. 값이 없으면 해당 항목을 숨기고 주소가 없어도 대여소 이름과
