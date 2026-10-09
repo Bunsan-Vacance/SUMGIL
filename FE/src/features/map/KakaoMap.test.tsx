@@ -1117,6 +1117,80 @@ describe('일반 지도 장소 마커', () => {
   })
 })
 
+describe('하단 컨트롤 슬롯', () => {
+  it('start는 좌측 열, end는 우측 열의 현재 위치 버튼 뒤에 렌더한다', async () => {
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    render(
+      <KakaoMap
+        origin={null}
+        onMessage={vi.fn()}
+        bottomControls={{
+          start: <span data-testid="slot-start">범례</span>,
+          end: <button data-testid="slot-end">토글</button>,
+        }}
+      />,
+    )
+    const locate = await screen.findByRole('button', { name: '현재 위치' })
+    const start = document.querySelector('.map-bottom-controls > .map-bottom-start')!
+    const end = document.querySelector('.map-bottom-controls > .map-bottom-end')!
+    expect(start.contains(screen.getByTestId('slot-start'))).toBe(true)
+    expect(end.contains(locate)).toBe(true)
+    expect(end.contains(screen.getByTestId('slot-end'))).toBe(true)
+    expect(
+      locate.compareDocumentPosition(screen.getByTestId('slot-end')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('슬롯이 없으면 두 열은 비어 있고 현재 위치 버튼만 우측 열에 있다', async () => {
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    render(<KakaoMap origin={null} onMessage={vi.fn()} />)
+    await screen.findByRole('button', { name: '현재 위치' })
+    expect(document.querySelector('.map-bottom-start')?.childElementCount).toBe(0)
+    expect(document.querySelector('.map-bottom-end')?.childElementCount).toBe(1)
+  })
+})
+
+describe('지도 영역 크기 계산', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  // jsdom은 레이아웃이 없어 클래스별 높이를 프로토타입 getter로 지정한다.
+  function renderInShell(heights: Record<string, number>) {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return heights[this.className] ?? 0
+    })
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.className === 'test-shell' ? 800 : 0
+    })
+    mocks.loadKakaoMaps.mockResolvedValue(fakeMaps([], vi.fn(), []))
+    const { container } = render(
+      <div className="test-shell">
+        {Object.keys(heights).map((className) => (
+          <div key={className} className={className} />
+        ))}
+        <KakaoMap origin={null} onMessage={vi.fn()} />
+      </div>,
+    )
+    return container.querySelector<HTMLElement>('.kakao-map-wrap')!
+  }
+
+  it('.home-topbar가 셸 안에 있어도 지도 top은 0이고 높이는 셸에서 바텀시트만 뺀다', () => {
+    const wrapper = renderInShell({ 'home-topbar': 200, 'bottom-sheet': 300 })
+    expect(wrapper.style.top).toBe('0px')
+    expect(wrapper.style.height).toBe('500px')
+  })
+
+  it('.home-panel이 보이면 그 높이만큼 지도 top이 내려가고 높이가 줄어든다', () => {
+    const wrapper = renderInShell({ 'home-topbar': 200, 'home-panel': 120, 'bottom-sheet': 300 })
+    expect(wrapper.style.top).toBe('120px')
+    expect(wrapper.style.height).toBe('380px')
+  })
+})
+
 describe('따릉이 재고 조회', () => {
   const bike = { ...origin, id: 'bike-station:ST-1', name: '시험 대여소', kind: '따릉이 대여소' }
   const bikeRoute: Route = {

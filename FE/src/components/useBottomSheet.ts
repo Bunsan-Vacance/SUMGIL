@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes } from 'react'
 
 type Snap = 'default' | 'expanded' | 'collapsed'
-export function useBottomSheet(initialSnap: Snap = 'default', preferredSnap?: Snap) {
+export function useBottomSheet(
+  initialSnap: Snap = 'default',
+  preferredSnap?: Snap,
+  options?: { collapsedHeight?: number },
+) {
   const [snap, setSnap] = useState<Snap>(initialSnap)
   const [dragHeight, setDragHeight] = useState<number | null>(null)
   const ref = useRef<HTMLElement>(null)
@@ -30,7 +34,8 @@ export function useBottomSheet(initialSnap: Snap = 'default', preferredSnap?: Sn
         suppressClick.current = false
         return
       }
-      setSnap(snap === 'expanded' ? 'default' : 'expanded')
+      // 접힘 → 기본 → 펼침 → 기본 순으로 순환한다.
+      setSnap(snap === 'collapsed' ? 'default' : snap === 'default' ? 'expanded' : 'default')
     },
     onKeyDown: (event) => {
       if (['ArrowUp', 'ArrowDown', 'Escape'].includes(event.key)) {
@@ -61,11 +66,16 @@ export function useBottomSheet(initialSnap: Snap = 'default', preferredSnap?: Sn
       if (Math.abs(delta) > 6) current.moved = true
       if (current.moved) {
         const max = ref.current!.parentElement!.clientHeight
-        setDragHeight(Math.max(max * 0.3, Math.min(max * 0.94, current.height + delta)))
+        setDragHeight(
+          Math.max(
+            options?.collapsedHeight ?? max * 0.3,
+            Math.min(max * 0.94, current.height + delta),
+          ),
+        )
       }
     },
     onPointerUp: (event) => finish(false, event.clientY),
     onPointerCancel: (event) => finish(true, event.clientY),
   }
-  return { ref, snap, dragHeight, gripProps }
+  return { ref, snap, setSnap, dragHeight, gripProps }
 }

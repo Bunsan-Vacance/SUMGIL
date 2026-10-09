@@ -84,7 +84,7 @@ export function useRoutePlanner(
   const pendingMessage = useRef<string | null>(null)
   const [searchTarget, setSearchTarget] = useState<SearchTarget>('destination')
   const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
-  const [routePanelOpen, setRoutePanelOpen] = useState(false)
+  const [routePanelOpen, setRoutePanelOpen] = useState(true)
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
   const [arrivals, setArrivals] = useState<TrainArrival[]>([])
   const [arrivalStatus, setArrivalStatus] = useState<GuidanceRequestStatus>('idle')
