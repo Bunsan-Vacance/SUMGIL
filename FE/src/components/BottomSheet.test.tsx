@@ -46,3 +46,53 @@ describe('BottomSheet 스크롤바', () => {
     expect(clearTimeout).toHaveBeenCalled()
   })
 })
+
+describe('BottomSheet 스냅', () => {
+  const grip = (container: HTMLElement) => container.querySelector('.sheet-grip')!
+
+  it('손잡이 클릭은 접힘 → 기본 → 펼침 → 기본 순으로 순환한다', () => {
+    const { container } = render(
+      <BottomSheet initialSnap="collapsed">
+        <div>내용</div>
+      </BottomSheet>,
+    )
+    const sheet = container.querySelector('.bottom-sheet')!
+    expect(sheet.getAttribute('data-snap')).toBe('collapsed')
+    fireEvent.click(grip(container))
+    expect(sheet.getAttribute('data-snap')).toBe('default')
+    fireEvent.click(grip(container))
+    expect(sheet.getAttribute('data-snap')).toBe('expanded')
+    fireEvent.click(grip(container))
+    expect(sheet.getAttribute('data-snap')).toBe('default')
+  })
+
+  it('children이 함수면 현재 snap과 setSnap을 받는다', () => {
+    const { container } = render(
+      <BottomSheet initialSnap="collapsed">
+        {({ snap, setSnap }) => <button onClick={() => setSnap('expanded')}>현재 {snap}</button>}
+      </BottomSheet>,
+    )
+    const button = container.querySelector('.sheet-body button')!
+    expect(button.textContent).toBe('현재 collapsed')
+    fireEvent.click(button)
+    expect(container.querySelector('.bottom-sheet')!.getAttribute('data-snap')).toBe('expanded')
+    expect(button.textContent).toBe('현재 expanded')
+  })
+
+  it('collapsedHeight가 드래그 최소 높이로 쓰인다', () => {
+    const { container } = render(
+      <BottomSheet collapsedHeight={128}>
+        <div>내용</div>
+      </BottomSheet>,
+    )
+    const sheet = container.querySelector<HTMLElement>('.bottom-sheet')!
+    // jsdom에는 레이아웃이 없어 부모 높이(800)와 시트 현재 높이(300)를 직접 지정한다.
+    Object.defineProperty(sheet.parentElement!, 'clientHeight', { configurable: true, value: 800 })
+    sheet.getBoundingClientRect = () => ({ height: 300 }) as DOMRect
+    const handle = grip(container) as HTMLElement
+    handle.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(handle, { button: 0, clientY: 500, pointerId: 1 })
+    fireEvent.pointerMove(handle, { clientY: 900, pointerId: 1 })
+    expect(sheet.style.height).toBe('128px')
+  })
+})

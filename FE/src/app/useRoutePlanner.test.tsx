@@ -141,8 +141,11 @@ describe('경로와 안내 화면의 수명', () => {
     })
     const { result } = renderHook(() => useRoutePlanner(repository))
 
-    expect(result.current.routePanelOpen).toBe(false)
+    // 홈은 입력 패널이 열린 채 시작하므로 한 번 닫았다가 다시 열 때 위치를 적용한다.
+    expect(result.current.routePanelOpen).toBe(true)
     expect(getCurrentPosition).not.toHaveBeenCalled()
+    act(() => result.current.toggleRoutePanel())
+    expect(result.current.routePanelOpen).toBe(false)
     act(() => result.current.toggleRoutePanel())
     expect(result.current.routePanelOpen).toBe(true)
     expect(getCurrentPosition).toHaveBeenCalledOnce()
@@ -205,6 +208,7 @@ describe('경로와 안내 화면의 수명', () => {
     })
     const { result } = renderHook(() => useRoutePlanner(repository))
 
+    act(() => result.current.toggleRoutePanel())
     act(() => result.current.toggleRoutePanel())
     act(() => getCurrentPosition.mock.calls[0][1]({ code: 1 } as GeolocationPositionError))
 

@@ -1003,7 +1003,11 @@ small {
 .home-topbar .home-chips {
   margin-top: 0;
 }
-.home-topbar .home-chip {
+.home-topbar .home-panel .home-chips {
+  margin-top: 8px;
+  overflow: hidden;
+}
+.home-chip {
   box-shadow: 0 1px 6px rgb(20 30 50 / 14%);
 }
 .home-layer-legend {
@@ -1301,7 +1305,7 @@ small {
   height: 36%;
 }
 .screen-home .home-sheet[data-snap='collapsed'] {
-  height: 88px;
+  height: 128px;
 }
 .bike-station-card {
   display: flex;
@@ -1581,6 +1585,23 @@ small {
 .home-sheet-title {
   margin: 0 0 4px;
   font-size: 16px;
+}
+.home-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+}
+.home-sheet-head .home-sheet-title {
+  margin: 0;
+}
+.home-sheet-title span {
+  color: #687795;
+  font-weight: 600;
 }
 .home-sheet-empty {
   padding: 16px 0;
