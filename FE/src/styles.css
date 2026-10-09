@@ -904,6 +904,37 @@ small {
   border-radius: 12px;
   padding: 5px 8px;
 }
+.home-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.home-chips::-webkit-scrollbar {
+  display: none;
+}
+.home-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.home-chip svg {
+  color: var(--primary-dark);
+}
+.home-chip.unset {
+  border-style: dashed;
+  color: #687795;
+}
 .trip-field-values {
   min-width: 0;
   flex: 1;
@@ -1701,16 +1732,16 @@ small {
   padding: 14px 0;
   border-bottom: 1px solid #edf0f4;
 }
-.recent-place {
+.place-row {
   display: flex;
   align-items: center;
   border-bottom: 1px solid #edf0f4;
 }
-.recent-place > button:first-child {
+.place-row > button:first-child {
   border-bottom: 0;
   flex: 1;
 }
-.recent-place > .icon-button {
+.place-row > .icon-button {
   width: 40px;
   height: 40px;
   color: #82909b;

@@ -83,6 +83,10 @@ export default function App() {
               toggleRoutePanel={planner.toggleRoutePanel}
               findRoutes={planner.findRoutes}
               swapPlaces={planner.swapPlaces}
+              favorites={planner.favorites.favorites}
+              home={planner.favorites.home}
+              work={planner.favorites.work}
+              openFavoriteRegistration={planner.openFavoriteRegistration}
             />
           )}
           {screen === 'browse' && (
@@ -99,6 +103,9 @@ export default function App() {
               searchTarget={planner.searchTarget}
               cancelSearch={planner.cancelSearch}
               choosePlace={planner.choosePlace}
+              favorites={planner.favorites.favorites}
+              isFavorite={planner.favorites.isFavorite}
+              toggleFavorite={planner.favorites.toggle}
             />
           )}
           {screen === 'results' && (

@@ -8,7 +8,7 @@ import {
   loadRecentPlaces,
   removeRecentPlace,
   saveRecentPlace,
-} from './usePlaceSearch'
+} from './recentPlaces'
 
 const place: Place = {
   id: 'station-1',

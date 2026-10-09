@@ -7,9 +7,12 @@ import { useTrip } from '../features/route/useTrip'
 import { useGuidance } from '../features/guidance/useGuidance'
 import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
+import { useFavoritePlaces } from '../features/route/useFavoritePlaces'
+import { isRegisterablePlace } from '../features/route/favoritePlaces'
+import type { FavoriteLabel } from '../features/route/favoritePlaces'
 import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
 import type { RouteRepository } from '../api/contracts'
-import type { Mode, Place } from '../features/route/types'
+import type { Mode, Place, SearchTarget } from '../features/route/types'
 import { RepositoryError } from '../api/errors'
 import {
   guidanceRepository as defaultGuidanceRepository,
@@ -69,7 +72,10 @@ export function useRoutePlanner(
   const guidance = useGuidance(navigation.screen === 'guide')
   const screen = resolveScreen(navigation.screen, trip, guidance)
   const { message, setMessage } = useToast()
-  const [searchTarget, setSearchTarget] = useState<'origin' | 'destination'>('destination')
+  const favorites = useFavoritePlaces()
+  // 화면 전환 시 토스트를 비우는 effect가 등록 완료 안내까지 지우지 않도록 다음 화면에 넘길 메시지를 보관한다.
+  const pendingMessage = useRef<string | null>(null)
+  const [searchTarget, setSearchTarget] = useState<SearchTarget>('destination')
   const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
   const [routePanelOpen, setRoutePanelOpen] = useState(true)
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
@@ -123,7 +129,8 @@ export function useRoutePlanner(
   }, [screen, navigation.screen, replace])
   useEffect(() => {
     setModal(null)
-    setMessage('')
+    setMessage(pendingMessage.current ?? '')
+    pendingMessage.current = null
     arrivalRequest.current?.abort()
     replanRequest.current?.abort()
     setArrivals([])
@@ -169,6 +176,11 @@ export function useRoutePlanner(
     if (screen === 'home') setRoutePanelOpen(true)
     go('search')
   }
+  const openFavoriteRegistration = (label: FavoriteLabel) => {
+    setSearchTarget(label)
+    setSearchReturnScreen(screen === 'results' ? 'results' : 'home')
+    go('search')
+  }
   const openBrowse = () => go('browse')
   const toggleRoutePanel = () => {
     if (routePanelOpen) {
@@ -203,6 +215,16 @@ export function useRoutePlanner(
     return true
   }
   const choosePlace = (place: Place) => {
+    if (searchTarget === 'home' || searchTarget === 'work') {
+      if (!isRegisterablePlace(place)) {
+        setMessage('현재 위치는 즐겨찾기로 등록할 수 없어요')
+        return false
+      }
+      favorites.setLabel(place, searchTarget)
+      pendingMessage.current = searchTarget === 'home' ? '집으로 등록했어요' : '회사로 등록했어요'
+      go(searchReturnScreen)
+      return true
+    }
     if (searchTarget === 'origin') {
       if (trip.destination && samePlace(place, trip.destination)) {
         setMessage('출발지와 도착지는 다른 장소를 선택해 주세요.')
@@ -445,9 +467,11 @@ export function useRoutePlanner(
     setMessage,
     searchTarget,
     cancelSearch,
+    favorites,
     modal,
     setModal,
     openSearch,
+    openFavoriteRegistration,
     openBrowse,
     routePanelOpen,
     toggleRoutePanel,

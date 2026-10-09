@@ -4,13 +4,8 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PlaceRepository, StationRepository } from '../../api/contracts'
 import type { Place } from './types'
-import {
-  RECENT_PLACES_STORAGE_KEY,
-  loadRecentPlaces,
-  stationSearchResultToPlace,
-  usePlaceSearch,
-  useStationSearch,
-} from './usePlaceSearch'
+import { RECENT_PLACES_STORAGE_KEY, loadRecentPlaces } from './recentPlaces'
+import { stationSearchResultToPlace, usePlaceSearch, useStationSearch } from './usePlaceSearch'
 
 afterEach(() => {
   cleanup()
