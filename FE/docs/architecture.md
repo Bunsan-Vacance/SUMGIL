@@ -13,7 +13,7 @@ src/
     PreviewToolbar.tsx      제품 화면 밖의 시나리오 조작
     opsAccess.ts            운영자 뷰 노출 조건(DEV 또는 VITE_OPS_VIEW)
   pages/                    Home, Browse, Search, Results, Detail, Arrival
-                            HomePage는 상단 검색창·칩·레이어 토글·최근 경로 시트
+                            HomePage는 길찾기 패널·칩·탭별 시트(최근 기록·주변 역·주변 대여소), 하단 탭 바는 features/home
                             OpsPage.tsx 운영자 뷰(개발 전용 진입점)
   components/
     Modal.tsx               네이티브 dialog, 공통 닫기 동작
@@ -24,7 +24,7 @@ src/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태·즐겨찾기·최근 검색 저장
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
     ops/                    운영자 뷰: 지도 훅·재고 레이어·히트맵·데이터 상태
-  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 토글(homeLayers·HomeLayerToggle), 재고 배지(bikeStockBadge)·홈 레이어 상태(useHomeMapLayers)·대여소 카드(BikeStationCard)·재고/예측 훅(useBikeStationOutlook), 역 마커(stationMarkers)·주변 역 조회(useNearbyStationCongestion)·역 카드(StationCard)·도착/시간대 훅(useStationArrivals·useStationHourlyCongestion·congestionAdvice)
+  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 타입(homeLayers), 재고 배지(bikeStockBadge)·홈 선택 상태(useHomeMapLayers)·주변 역/대여소 목록(NearbyStationList·NearbyBikeStationList)·대여소 카드(BikeStationCard)·재고/예측 훅(useBikeStationOutlook), 역 마커(stationMarkers)·주변 역 조회(useNearbyStationCongestion)·역 카드(StationCard)·도착/시간대 훅(useStationArrivals·useStationHourlyCongestion·congestionAdvice)
   api/
     contracts.ts            데이터 접근 인터페이스
     repositories.ts         실제로 사용할 구현 선택
@@ -43,9 +43,11 @@ src/
 - 타임라인은 교통수단 아이콘과 세로 노선선으로 승하차를 연결한다. 노선명·방면·구간 혼잡도를 노선선 옆에 표시하며 출발·도착 이름과 완전히 같은 endpoint pair만 중복 제거한다. 환승 등 실제 leg는 합치거나 생략하지 않는다. 상세 시트의 기본 높이는 내용에 맞추되 최대 76%로 제한하며, 사용자가 펼치면 기존 94% 높이를 유지한다.
 - 검색 결과 카드와 상세·안내 요약의 이동 시간 막대는 `RouteModeStrip`을 공유한다. 구간은 이동 시간 비율로 폭을 배정하고 짧은 구간은 44px까지 보장한다. 구간이 많아지면 44px 최소 폭을 컨테이너 폭을 구간 수로 나눈 값까지 낮춰 flex로 함께 줄어든다. 구간 축약·폭 비율·노선 색상·환승 아이콘과 좁은 폭의 표시 규칙을 동일하게 유지한다. 검색 결과 카드는 막대 위 혼잡도 라벨을 숨기고 각 승차역 행의 노선명 왼쪽에 구간 등급을 표시한다. 상세·안내 요약은 기존 막대 위 라벨을 유지한다.
 - `SearchPage`의 검색어는 페이지 내부 상태이며 `usePlaceSearch`가 데이터 조회를 맡는다. 최근 검색·즐겨찾기 저장은 `recentPlaces`·`favoritePlaces` 모듈이 맡는다.
-- `HomePage`는 `BottomSheet`를 항상 렌더링한다. 지도 훅이 마운트 때 `.home-panel`·`.bottom-sheet` 높이를 한 번 찾아 관찰하므로 시트를 조건부로 렌더링하지 않는다. `.home-topbar`는 지도 위에 겹치는 오버레이라 관찰·차감하지 않는다. 홈은 길찾기 입력 패널이 열린 채 시작하며(`routePanelOpen` 초기 true), 집·회사·즐겨찾기 칩 행(`FavoriteChips`)은 패널 안과 상단 바 두 곳에서 같은 컴포넌트로 그린다.
+- 홈은 위에서 아래로 길찾기 패널 → 지도 → 떠 있는 하단 탭 바(`features/home/HomeTabBar`) → 시트 순으로 겹쳐 쌓인다. 탭(`useHomeTab`, `App` 소유)이 지도 레이어를 파생하고(`tabToLayer`: 혼잡도→crowd, 자전거→bike, 최근기록·없음→null), `useHomeMapLayers(active, layer)`는 선택한 역·대여소만 소유한다. 시트 내용은 탭이 정한다: 최근 기록, 주변 역 혼잡도 목록, 주변 따릉이 목록. 목록에서 항목이나 지도 마커를 고르면 같은 카드로 바뀌고 카드의 ← 버튼이 선택을 해제해 목록으로 돌아간다.
+- `HomePage`는 `BottomSheet`를 항상 렌더링한다. 시트는 `closed` 스냅(높이 0, `visibility: hidden`)을 가지며 탭이 열리면 `default`, 닫히면 `closed`다. 지도 훅이 마운트 때 `.home-panel`·`.bottom-sheet` 높이를 한 번 찾아 관찰하므로 시트를 조건부로 렌더링하지 않고, 닫힘 때 높이가 0이 되어 지도가 바닥까지 늘어난다. `onDismiss`를 넘긴 시트(홈)만 기본 높이의 50% 미만으로 끌어 내리면 닫히며, 다른 화면 시트는 기존대로 접힘까지만 내려간다. `.home-topbar`는 지도 위에 겹치는 오버레이라 관찰·차감하지 않는다. 홈은 길찾기 입력 패널이 열린 채 시작하며(`routePanelOpen` 초기 true), 집·회사·즐겨찾기 칩 행(`FavoriteChips`)은 패널 안과 상단 바 두 곳에서 같은 컴포넌트로 그린다.
 - `useRoutePlanner.findRoutesFrom`은 저장된 출발·도착으로 바로 검색한다(최근 경로 탭). 출발지 상태 반영과 검색을 같은 틱에서 하기 위해 `trip.search(destination, origin)`을 직접 호출한다.
 - 홈에서는 `KakaoMap`이 대여소 선택만 `onBikeStationSelect`로 알리고 지도 안 재고 시트·대여소 토글을 열지 않는다. 카드는 `HomePage`가 홈 시트 안에 그린다. 상세·탐색 화면의 지도 안 `BikeStockSheet`와 토글은 그대로다.
+- 홈 목록은 새 네트워크 호출을 쓰지 않는다. 주변 역 목록은 지도 마커와 같은 `useNearbyStationCongestion` 배열을 가까운 순으로 보여 주고, 주변 대여소 목록은 `KakaoMap`의 `onBikeStationsChange`가 지도 idle마다 nearby 결과를 `App`에 알려 채운다(저장소 없는 목업 모드는 정적 목록을 한 번 알린다). 이 콜백은 `onViewportChange`처럼 ref로 받아 지도를 다시 초기화하지 않는다.
 - `useKakaoMap`은 `bikeStationsVisible`·`bikeStockBadges`가 바뀌면 다음 idle을 기다리지 않고 마커를 다시 맞춘다. nearby 재조회 결과는 기존 마커의 `setBadge`로 반영한다.
 - 역 데이터는 App의 `useNearbyStationCongestion`이 가져오고 `KakaoMap`은 `stationMarkers` prop을 오버레이로만 동기화한다(지도 훅이 idle 때 `onViewportChange`로 중심을 알린다). 따릉이 nearby는 지도 훅 안에 남아 있다(과거 결정).
 - 역 카드의 도착·시간대별 조회 훅은 카드 컴포넌트가 소유한다(카드가 열릴 때만 요청, `key`로 리셋). 대여소 카드가 App에서 훅을 받는 것과 다르다.
@@ -78,17 +80,19 @@ src/
 | 길안내 단계                            | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`                                                                             |
 | 지도 수명·마커·크기                    | `features/map/useKakaoMap.ts`                                                                                                              |
 | 홈 레이아웃(검색창·칩·시트)            | `pages/HomePage.tsx`, `styles.css`(`.home-*`)                                                                                              |
-| 홈 시트 스냅·접힘 높이                 | `pages/HomePage.tsx`(`HOME_SHEET_COLLAPSED_HEIGHT`), `components/useBottomSheet.ts`, `styles.css`                                          |
-| 지도 하단 컨트롤 배치                  | `features/map/KakaoMap.tsx`, `App.tsx`, `styles.css`                                                                                       |
-| 홈 레이어 토글·가용 레이어             | `features/map/homeLayers.ts`, `features/map/HomeLayerToggle.tsx`                                                                           |
+| 홈 하단 탭·탭별 시트 내용              | `features/home/*`, `pages/HomePage.tsx`, `styles.css`(`.home-tabbar`·`.home-sheet`)                                                        |
+| 지도 하단 컨트롤 배치·위치 버튼 높이   | `features/map/KakaoMap.tsx`, `styles.css`(`.map-bottom-controls`·`data-home-sheet`)                                                        |
+| 주변 역·대여소 목록                    | `features/map/NearbyStationList.tsx`, `features/map/NearbyBikeStationList.tsx`                                                             |
+| 시트 닫힘 스냅·끌어 닫기 기준          | `components/useBottomSheet.ts`, `components/BottomSheet.tsx`                                                                               |
+| 탭 → 레이어 파생·혼잡도 탭 비활성      | `features/home/useHomeTab.ts`, `App.tsx`(`isBackendConfigured`)                                                                            |
 | 최근 경로 저장·표시 규칙               | `features/route/recentRoutes.ts`, `pages/HomePage.tsx`                                                                                     |
 | 역 마커 모양·등급 색                   | `features/map/stationMarkers.ts`, `styles.css`(`.station-marker`)                                                                          |
 | 주변 역 조회 반경·디바운스·재조회 기준 | `features/map/useNearbyStationCongestion.ts`                                                                                               |
 | 역 카드 문구·요약 규칙                 | `features/map/StationCard.tsx`, `features/map/congestionAdvice.ts`                                                                         |
-| 혼잡도 레이어 노출 조건                | `features/map/homeLayers.ts`                                                                                                               |
+| 혼잡도 탭 노출 조건                    | `App.tsx`(`disabled`), `api/repositories.ts`(`isBackendConfigured`)                                                                        |
 | 대여소 배지 등급·색                    | `features/map/bikeStockBadge.ts`, `styles.css`(`.bike-stock-badge`)                                                                        |
 | 대여소 카드 문구·시점 규칙             | `features/map/BikeStationCard.tsx`(`describeOutlookSlot`)                                                                                  |
-| 홈 레이어·선택 대여소 상태             | `features/map/useHomeMapLayers.ts`, `App.tsx`                                                                                              |
+| 홈 선택(역·대여소) 상태                | `features/map/useHomeMapLayers.ts`, `App.tsx`                                                                                              |
 | 즐겨찾기 저장 규칙·칩                  | `features/route/favoritePlaces.ts`, `pages/HomePage.tsx`, `pages/SearchPage.tsx`                                                           |
 | 일반 장소 탐색 화면                    | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                                                                                 |
 | 지도에서 위치 선택                     | `features/map/MapPlacePicker.tsx`                                                                                                          |
@@ -110,6 +114,6 @@ src/
 
 지도 래퍼는 `z-index: 0`으로 별도 쌓임 맥락을 만든다. SDK 내부의 타일·마커가 앱의 길안내 헤더와 버튼을 덮지 않도록 이 경계를 유지한다. 지도 위치 선택기는 검색 화면의 전체 영역을 직접 관리하고, 일반 지도 훅의 시트 높이 계산을 재사용하지 않는다. 결과 화면에서는 지도 래퍼를 마운트하지 않아 경로 카드를 전체 높이로 스크롤한다.
 
-앱 셸은 `.page-viewport`와 안내 복귀 바를 세로로 배치한다. 복귀 바는 화면 영역 밖에 높이를 확보해 시트의 버튼이나 지도 출처 표시를 덮지 않는다. 현재 지도 훅은 부모 `.page-viewport`와 그 안의 `.bottom-sheet` 또는 `.home-panel` 높이를 관찰해 실제 지도 영역을 맞춘다. 홈에서는 `.home-topbar`를 관찰하지도 지도 높이에서 빼지도 않고(오버레이), 열린 `.home-panel`과 홈 시트(`.home-sheet`)만 차감한다. 지도 하단 컨트롤은 `KakaoMap`의 `bottomControls` 슬롯이 맡는다. `start`는 좌측 하단(홈에서는 레이어 범례), `end`는 우측 하단의 현재 위치 버튼 아래(홈에서는 레이어 토글)에 놓이며, 지도 래퍼 안에 있어 시트 높이를 따라 움직인다. 슬롯 내용은 `App`이 넘기고 `HomePage`는 토글·범례를 렌더링하지 않는다. 상세와 안내는 지도 key를 `route`로 공유하고 같은 `DetailPage`를 유지하여 안내 시작 시 지도·시트 높이·스크롤이 초기화되지 않는다. 나머지 화면은 `key={screen}`으로 다시 마운트한다. 이 클래스나 DOM 배치를 바꾸면 지도 크기·마커·카카오 출처 표시를 함께 확인한다.
+앱 셸은 `.page-viewport`와 안내 복귀 바를 세로로 배치한다. 복귀 바는 화면 영역 밖에 높이를 확보해 시트의 버튼이나 지도 출처 표시를 덮지 않는다. 현재 지도 훅은 부모 `.page-viewport`와 그 안의 `.bottom-sheet` 또는 `.home-panel` 높이를 관찰해 실제 지도 영역을 맞춘다. 홈에서는 `.home-topbar`를 관찰하지도 지도 높이에서 빼지도 않고(오버레이), 열린 `.home-panel`과 홈 시트(`.home-sheet`)만 차감한다. 지도 하단 컨트롤은 `KakaoMap`의 `bottomControls` 슬롯(`start` 좌측 하단, `end` 우측 하단의 현재 위치 버튼 아래)이 맡지만 홈에서는 비운다. 위치 버튼은 지도 래퍼 안에 있어 시트 높이를 따라 움직이고, 시트가 닫혀 있으면(`.page-viewport[data-home-sheet='closed']`) 탭 바와 겹치지 않도록 `bottom: 88px`로 올린다. 레이어 범례는 각 목록 시트 안에 있다. 상세와 안내는 지도 key를 `route`로 공유하고 같은 `DetailPage`를 유지하여 안내 시작 시 지도·시트 높이·스크롤이 초기화되지 않는다. 나머지 화면은 `key={screen}`으로 다시 마운트한다. 이 클래스나 DOM 배치를 바꾸면 지도 크기·마커·카카오 출처 표시를 함께 확인한다.
 
 운영자 뷰 지도 래퍼(`.ops-map-wrap`)도 `position: relative; z-index: 0`을 유지해 SDK 내부 요소가 페이지의 다른 영역을 덮지 않게 한다. 이 지도는 바텀시트가 없으므로 시트·`.page-viewport` 높이 관찰 로직의 대상이 아니며, 지도 높이는 `.ops-map`의 CSS가 정한다.
