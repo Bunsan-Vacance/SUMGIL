@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
 import { pinRecentRoute, saveRecentRoute } from '../features/route/recentRoutes'
+import type { BikeStation } from '../features/map/bikeStations'
 import type { HomeTab } from '../features/home/HomeTabBar'
 import type {
   NearbyStationStatus,
@@ -58,6 +59,8 @@ const baseProps = {
   stationStatus: 'ready' as NearbyStationStatus,
   retryStations: vi.fn(),
   selectSubwayStation: vi.fn(),
+  bikeStations: [] as BikeStation[],
+  selectBikeStation: vi.fn(),
   onDismissTab: vi.fn(),
   selection: null as HomeSelection | null,
   outlook: {
@@ -518,6 +521,57 @@ describe('홈 길찾기 패널', () => {
       expect(screen.getByRole('region', { name: '선택한 역' })).toBeTruthy()
       expect(screen.queryByRole('heading', { name: '주변 역 혼잡도' })).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: '주변 역 목록으로' }))
+      expect(clearSelection).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('자전거 탭', () => {
+    const rentalStation: BikeStation = {
+      id: 'ST-1',
+      name: '101. 강남역 1번출구',
+      address: '서울',
+      lat: 37.5,
+      lng: 127,
+      availableBikes: 4,
+      distanceMeters: 80,
+    }
+    const bikePlace: Place = {
+      id: 'bike-station:ST-1',
+      name: '강남역 1번출구',
+      address: '서울',
+      kind: '따릉이 대여소',
+      lat: 37.5,
+      lng: 127,
+    }
+    const renderBike = (props = {}) =>
+      render(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          tab="bike"
+          bikeStations={[rentalStation]}
+          {...props}
+        />,
+      )
+
+    it('대여소를 고르지 않았으면 주변 따릉이 목록을 보이고 행을 누르면 selectBikeStation에 장소로 넘긴다', () => {
+      const selectBikeStation = vi.fn()
+      renderBike({ selectBikeStation })
+      expect(screen.getByRole('heading', { name: '주변 따릉이' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: /강남역 1번출구/ }))
+      expect(selectBikeStation).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'bike-station:ST-1', kind: '따릉이 대여소' }),
+      )
+    })
+
+    it('대여소를 선택하면 카드를 보이고 ← 버튼이 선택을 해제해 목록으로 돌아간다', () => {
+      const clearSelection = vi.fn()
+      renderBike({ selection: { kind: 'bike', place: bikePlace }, clearSelection })
+      expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
+      expect(screen.queryByRole('heading', { name: '주변 따릉이' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '주변 대여소 목록으로' }))
       expect(clearSelection).toHaveBeenCalledOnce()
     })
   })

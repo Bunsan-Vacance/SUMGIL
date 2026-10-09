@@ -10,6 +10,7 @@ import { useBikeStationOutlook } from './features/map/useBikeStationOutlook'
 import { useNearbyStationCongestion } from './features/map/useNearbyStationCongestion'
 import type { StationCongestion } from './features/map/useNearbyStationCongestion'
 import { bikeRentalId } from './features/map/bikeStations'
+import type { BikeStation } from './features/map/bikeStations'
 import FilterDialog from './features/route/FilterDialog'
 import GuidanceDialogs from './features/guidance/GuidanceDialogs'
 import HomePage from './pages/HomePage'
@@ -39,6 +40,7 @@ export default function App() {
   const stationOutlook = useBikeStationOutlook(
     bikeSelection ? (bikeRentalId(bikeSelection) ?? null) : null,
   )
+  const [bikeStations, setBikeStations] = useState<BikeStation[]>([])
   const [viewportCenter, setViewportCenter] = useState<{ lat: number; lng: number } | null>(null)
   const crowdLayerOn = planner.screen === 'home' && homeLayers.layer === 'crowd'
   const stationLayer = useNearbyStationCongestion(viewportCenter, crowdLayerOn)
@@ -114,6 +116,7 @@ export default function App() {
                     : undefined
                 }
                 onViewportChange={screen === 'home' ? setViewportCenter : undefined}
+                onBikeStationsChange={screen === 'home' ? setBikeStations : undefined}
                 onMessage={planner.setMessage}
               />
             )}
@@ -136,6 +139,8 @@ export default function App() {
               stationStatus={stationLayer.status}
               retryStations={stationLayer.retry}
               selectSubwayStation={homeLayers.selectSubwayStation}
+              bikeStations={bikeStations}
+              selectBikeStation={homeLayers.selectBikeStation}
               onDismissTab={() => homeTab.setTab(null)}
               selection={homeLayers.selection}
               outlook={stationOutlook}

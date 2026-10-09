@@ -13,7 +13,10 @@ import {
 import BottomSheet from '../components/BottomSheet'
 import type { HomeTab } from '../features/home/HomeTabBar'
 import BikeStationCard from '../features/map/BikeStationCard'
+import NearbyBikeStationList from '../features/map/NearbyBikeStationList'
 import NearbyStationList from '../features/map/NearbyStationList'
+import { stationToPlace } from '../features/map/bikeStations'
+import type { BikeStation } from '../features/map/bikeStations'
 import StationCard from '../features/map/StationCard'
 import type {
   NearbyStationStatus,
@@ -52,6 +55,8 @@ interface Props {
   stationStatus: NearbyStationStatus
   retryStations: () => void
   selectSubwayStation: (station: StationCongestion) => void
+  bikeStations: BikeStation[]
+  selectBikeStation: (place: Place) => void
   selection: HomeSelection | null
   outlook: OutlookState
   clearSelection: () => void
@@ -126,6 +131,8 @@ export default function HomePage({
   stationStatus,
   retryStations,
   selectSubwayStation,
+  bikeStations,
+  selectBikeStation,
   selection,
   outlook,
   clearSelection,
@@ -246,6 +253,7 @@ export default function HomePage({
             favorite={isFavorite(selectedStation.id)}
             onToggleFavorite={() => toggleFavorite(selectedStation)}
             onClose={clearSelection}
+            onBack={tab === 'bike' ? clearSelection : undefined}
             onSetOrigin={(place) => {
               setOriginFromStation(place)
               clearSelection()
@@ -253,6 +261,11 @@ export default function HomePage({
             onSetDestination={(place) => {
               if (findRoutes(place) !== false) clearSelection()
             }}
+          />
+        ) : tab === 'bike' ? (
+          <NearbyBikeStationList
+            stations={bikeStations}
+            onSelect={(station) => selectBikeStation(stationToPlace(station))}
           />
         ) : tab === 'crowd' ? (
           <NearbyStationList

@@ -1703,6 +1703,27 @@ small {
   color: #687795;
   font-size: 12px;
 }
+.nearby-bike-badge {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: white;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+.nearby-bike-badge.level-ok {
+  background: #087c63;
+}
+.nearby-bike-badge.level-low {
+  background: #c2410c;
+}
+.nearby-bike-badge.level-unknown {
+  background: #82909b;
+}
 .nearby-station-grade {
   flex-shrink: 0;
   width: 12px;

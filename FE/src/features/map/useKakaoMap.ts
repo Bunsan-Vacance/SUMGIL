@@ -19,6 +19,7 @@ import {
   zoomToBikeStationCluster,
 } from './bikeStationMarkers'
 import { bikeStations, nearbyStationToBikeStation, stationToPlace } from './bikeStations'
+import type { BikeStation } from './bikeStations'
 import { createStationOverlay } from './stationMarkers'
 import type { StationMarkerDatum, StationOverlay } from './stationMarkers'
 import {
@@ -71,6 +72,7 @@ export function useKakaoMap(
   selectedStationId: string | null = null,
   onStationSelect?: (datum: StationMarkerDatum) => void,
   onViewportChange?: (center: { lat: number; lng: number }) => void,
+  onBikeStationsChange?: (stations: BikeStation[]) => void,
 ) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<KakaoMapInstance | null>(null)
@@ -94,6 +96,7 @@ export function useKakaoMap(
   const selectedStationIdRef = useRef(selectedStationId)
   const onStationSelectRef = useRef(onStationSelect)
   const onViewportChangeRef = useRef(onViewportChange)
+  const onBikeStationsChangeRef = useRef(onBikeStationsChange)
   const markersRef = useRef(new Map<string, KakaoMarker>())
   const selectedMarkerRef = useRef<KakaoMarker | null>(null)
   const normalMarkerImageRef = useRef<MapMarkerImage | null>(null)
@@ -116,6 +119,7 @@ export function useKakaoMap(
   selectedStationIdRef.current = selectedStationId
   onStationSelectRef.current = onStationSelect
   onViewportChangeRef.current = onViewportChange
+  onBikeStationsChangeRef.current = onBikeStationsChange
   livePositionRef.current = livePosition
 
   useEffect(() => {
@@ -329,11 +333,13 @@ export function useKakaoMap(
               if (cancelled || controller.signal.aborted || requestId !== nearbyRequestId) return
               stationListRef.current = stations.map(nearbyStationToBikeStation)
               syncStationMarkers()
+              onBikeStationsChangeRef.current?.(stationListRef.current)
             })
             .catch(() => {
               if (cancelled || controller.signal.aborted || requestId !== nearbyRequestId) return
               stationListRef.current = []
               syncStationMarkers()
+              onBikeStationsChangeRef.current?.(stationListRef.current)
               messageRef.current('주변 대여소 정보를 불러오지 못했어요.')
             })
         }
@@ -349,6 +355,8 @@ export function useKakaoMap(
         }
         maps.event.addListener(instance, 'idle', idleHandler)
         if (bikeStationRepository) loadNearbyStations()
+        // 목업 모드는 정적 대여소 목록을 지도 준비 시 한 번만 알린다.
+        else onBikeStationsChangeRef.current?.(stationListRef.current)
         const bounds = new maps.LatLngBounds()
         normalMarkerImageRef.current = new maps.MarkerImage(
           NORMAL_MARKER_SRC,

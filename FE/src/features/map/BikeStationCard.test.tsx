@@ -215,4 +215,14 @@ describe('대여소 카드', () => {
     expect(onToggleFavorite).toHaveBeenCalledOnce()
     expect(onClose).toHaveBeenCalledOnce()
   })
+
+  it('onBack이 있으면 주변 대여소 목록으로 돌아가는 버튼을 보이고 없으면 숨긴다', () => {
+    const onBack = vi.fn()
+    const first = renderCard({ onBack })
+    fireEvent.click(screen.getByRole('button', { name: '주변 대여소 목록으로' }))
+    expect(onBack).toHaveBeenCalledOnce()
+    first.unmount()
+    renderCard()
+    expect(screen.queryByRole('button', { name: '주변 대여소 목록으로' })).toBeNull()
+  })
 })
