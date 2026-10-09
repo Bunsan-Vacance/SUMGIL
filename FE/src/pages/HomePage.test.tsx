@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FavoritePlace } from '../features/route/favoritePlaces'
 import { pinRecentRoute, saveRecentRoute } from '../features/route/recentRoutes'
+import type { HomeTab } from '../features/home/HomeTabBar'
 import type { OutlookState } from '../features/map/useBikeStationOutlook'
 import type { HomeSelection } from '../features/map/useHomeMapLayers'
 import type { Place } from '../features/route/types'
@@ -45,6 +46,8 @@ const baseProps = {
   home: null,
   work: null,
   openFavoriteRegistration: vi.fn(),
+  tab: 'recent' as HomeTab | null,
+  onDismissTab: vi.fn(),
   selection: null as HomeSelection | null,
   outlook: {
     stock: { status: 'unavailable' },
@@ -253,8 +256,8 @@ describe('홈 길찾기 패널', () => {
       lng: 126.97,
     }
     // 시트는 접힌 채 시작하므로 기본으로 펼친 뒤 전체 목록을 확인한다.
-    const renderHome = (props = {}, expand = true) => {
-      const rendered = render(
+    const renderHome = (props = {}) =>
+      render(
         <HomePage
           {...baseProps}
           origin={origin}
@@ -263,63 +266,34 @@ describe('홈 길찾기 패널', () => {
           {...props}
         />,
       )
-      if (expand) fireEvent.click(screen.getByRole('button', { name: '최근 경로 펼치기' }))
-      return rendered
-    }
 
-    it('초기에는 접혀 첫 경로 1개만 보이고 제목 버튼으로 펼치고 접는다', () => {
+    it('탭이 없으면 시트가 닫혀 있고 최근 기록 탭이면 기본 높이로 전체 목록을 보인다', () => {
       saveRecentRoute(stationA, stationB, new Date('2026-10-08T00:00:00.000Z'))
       saveRecentRoute(stationB, stationA, new Date('2026-10-09T00:00:00.000Z'))
-      renderHome({}, false)
+      const { rerender } = renderHome({ tab: null })
       const sheet = document.querySelector('.home-sheet')!
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
-      expect(document.querySelectorAll('.home-recent-route')).toHaveLength(1)
-      expect(screen.queryByRole('button', { name: /최근 경로 삭제/ })).toBeNull()
-
-      fireEvent.click(screen.getByRole('button', { name: '최근 경로 펼치기' }))
+      expect(sheet.getAttribute('data-snap')).toBe('closed')
+      expect(sheet.getAttribute('aria-hidden')).toBe('true')
+      rerender(
+        <HomePage
+          {...baseProps}
+          origin={origin}
+          destination={null}
+          routePanelOpen={false}
+          tab="recent"
+        />,
+      )
       expect(sheet.getAttribute('data-snap')).toBe('default')
+      expect(screen.getByRole('heading', { name: '최근 기록' })).toBeTruthy()
       expect(document.querySelectorAll('.home-recent-route')).toHaveLength(2)
       expect(screen.getAllByRole('button', { name: /최근 경로 삭제/ })).toHaveLength(2)
-
-      fireEvent.click(screen.getByRole('button', { name: '최근 경로 접기' }))
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
     })
 
-    it('카드를 선택하면 펼치고 선택이 풀리면 다시 접는다', () => {
-      const station = {
-        stationId: '222',
-        stationName: '강남',
-        lat: 37.4979,
-        lng: 127.0276,
-        distanceMeters: 100,
-        lines: [],
-        level: null,
-        grade: null,
-        updatedAt: null,
-      }
-      const { rerender } = renderHome({}, false)
-      const sheet = document.querySelector('.home-sheet')!
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
-      rerender(
-        <HomePage
-          {...baseProps}
-          origin={origin}
-          destination={null}
-          routePanelOpen={false}
-          selection={{ kind: 'subway', station }}
-        />,
-      )
-      expect(sheet.getAttribute('data-snap')).toBe('default')
-      rerender(
-        <HomePage
-          {...baseProps}
-          origin={origin}
-          destination={null}
-          routePanelOpen={false}
-          selection={null}
-        />,
-      )
-      expect(sheet.getAttribute('data-snap')).toBe('collapsed')
+    it('혼잡도·자전거 탭은 최근 기록 본문을 보이지 않는다', () => {
+      saveRecentRoute(stationA, stationB)
+      renderHome({ tab: 'crowd' })
+      expect(screen.queryByRole('heading', { name: '최근 기록' })).toBeNull()
+      expect(document.querySelectorAll('.home-recent-route')).toHaveLength(0)
     })
 
     it('저장된 경로를 현재 위치·집 이름 규칙으로 표시한다', () => {
@@ -392,7 +366,7 @@ describe('홈 길찾기 패널', () => {
     it('선택하면 카드를 보이고 최근 경로는 숨긴다', () => {
       renderHome()
       expect(screen.getByRole('region', { name: '선택한 따릉이 대여소' })).toBeTruthy()
-      expect(screen.queryByText('최근 경로')).toBeNull()
+      expect(screen.queryByText('최근 기록')).toBeNull()
     })
 
     it('닫기를 누르면 clearSelection을 호출한다', () => {
@@ -456,7 +430,7 @@ describe('홈 길찾기 패널', () => {
       renderHome()
       expect(screen.getByRole('region', { name: '선택한 역' })).toBeTruthy()
       expect(screen.queryByRole('region', { name: '선택한 따릉이 대여소' })).toBeNull()
-      expect(screen.queryByText('최근 경로')).toBeNull()
+      expect(screen.queryByText('최근 기록')).toBeNull()
     })
 
     it('닫기를 누르면 clearSelection을 호출한다', () => {
