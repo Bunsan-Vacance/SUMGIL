@@ -134,7 +134,7 @@ describe('홈 길찾기 패널', () => {
         {...baseProps}
         origin={origin}
         destination={null}
-        routePanelOpen
+        routePanelOpen={false}
         findRoutes={findRoutes}
         openFavoriteRegistration={openFavoriteRegistration}
       />,
@@ -152,7 +152,7 @@ describe('홈 길찾기 패널', () => {
         {...baseProps}
         origin={origin}
         destination={null}
-        routePanelOpen
+        routePanelOpen={false}
         findRoutes={findRoutes}
         home={home}
         favorites={[home]}
@@ -169,12 +169,40 @@ describe('홈 길찾기 패널', () => {
         {...baseProps}
         origin={origin}
         destination={null}
-        routePanelOpen
+        routePanelOpen={false}
         favorites={favorites}
       />,
     )
     const group = screen.getByRole('group', { name: '자주 가는 곳' })
     expect(group.querySelectorAll('button')).toHaveLength(2 + 5)
     expect(screen.queryByRole('button', { name: '장소 5 길찾기' })).toBeNull()
+  })
+
+  it('검색창을 누르면 도착지 검색을 연다', () => {
+    const openSearch = vi.fn()
+    render(
+      <HomePage
+        {...baseProps}
+        origin={origin}
+        destination={null}
+        routePanelOpen={false}
+        openSearch={openSearch}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '도착지 검색' }))
+    expect(openSearch).toHaveBeenCalledWith('destination')
+  })
+
+  it('상단 바와 칩 행은 패널이 닫혔을 때만 보이고 레이어 버튼은 아직 없다', () => {
+    const { rerender } = render(
+      <HomePage {...baseProps} origin={origin} destination={null} routePanelOpen={false} />,
+    )
+    const topbar = document.querySelector('.home-topbar')
+    expect(topbar?.hasAttribute('hidden')).toBe(false)
+    expect(screen.getByRole('group', { name: '자주 가는 곳' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /레이어/ })).toBeNull()
+    rerender(<HomePage {...baseProps} origin={origin} destination={null} routePanelOpen />)
+    expect(topbar?.hasAttribute('hidden')).toBe(true)
+    expect(document.querySelector('#home-route-panel .home-chips')).toBeNull()
   })
 })

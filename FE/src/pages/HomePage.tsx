@@ -1,4 +1,8 @@
+import { useState } from 'react'
 import { ArrowDownUp, ArrowRight, Briefcase, Home, Pencil, Search, Star } from 'lucide-react'
+import HomeLayerToggle from '../features/map/HomeLayerToggle'
+import { availableLayers } from '../features/map/homeLayers'
+import type { HomeLayer } from '../features/map/homeLayers'
 import type { Place } from '../features/route/types'
 import type { FavoriteLabel, FavoritePlace } from '../features/route/favoritePlaces'
 
@@ -30,20 +34,58 @@ export default function HomePage({
   work,
   openFavoriteRegistration,
 }: Props) {
+  const [layer, setLayer] = useState<HomeLayer | null>(null)
   const extraFavorites = favorites.filter((item) => item.label === null).slice(0, EXTRA_CHIP_LIMIT)
   return (
     <>
       <div className="home-topbar" hidden={routePanelOpen}>
-        <button
-          type="button"
-          className="primary home-route-button"
-          aria-expanded={routePanelOpen}
-          aria-controls="home-route-panel"
-          onClick={toggleRoutePanel}
-        >
-          길찾기
-          <ArrowRight size={16} />
-        </button>
+        <div className="home-search-bar">
+          <button type="button" aria-label="도착지 검색" onClick={() => openSearch('destination')}>
+            <Search size={18} />
+            <span>어디로 갈까요?</span>
+          </button>
+          <button
+            type="button"
+            className="primary home-route-button"
+            aria-expanded={routePanelOpen}
+            aria-controls="home-route-panel"
+            onClick={toggleRoutePanel}
+          >
+            길찾기
+          </button>
+        </div>
+        <div className="home-chips" role="group" aria-label="자주 가는 곳">
+          <button
+            type="button"
+            className={home ? 'home-chip' : 'home-chip unset'}
+            aria-label={home ? '집으로 길찾기' : '집 등록'}
+            onClick={() => (home ? findRoutes(home.place) : openFavoriteRegistration('home'))}
+          >
+            <Home size={15} />집
+          </button>
+          <button
+            type="button"
+            className={work ? 'home-chip' : 'home-chip unset'}
+            aria-label={work ? '회사로 길찾기' : '회사 등록'}
+            onClick={() => (work ? findRoutes(work.place) : openFavoriteRegistration('work'))}
+          >
+            <Briefcase size={15} />
+            회사
+          </button>
+          {extraFavorites.map(({ place }) => (
+            <button
+              key={place.id}
+              type="button"
+              className="home-chip"
+              aria-label={`${place.name} 길찾기`}
+              onClick={() => findRoutes(place)}
+            >
+              <Star size={15} />
+              {place.name}
+            </button>
+          ))}
+        </div>
+        <HomeLayerToggle layers={availableLayers} active={layer} onChange={setLayer} />
       </div>
       <section
         id="home-route-panel"
@@ -82,37 +124,6 @@ export default function HomePage({
               <Search size={17} />
             </button>
           </div>
-        </div>
-        <div className="home-chips" role="group" aria-label="자주 가는 곳">
-          <button
-            type="button"
-            className={home ? 'home-chip' : 'home-chip unset'}
-            aria-label={home ? '집으로 길찾기' : '집 등록'}
-            onClick={() => (home ? findRoutes(home.place) : openFavoriteRegistration('home'))}
-          >
-            <Home size={15} />집
-          </button>
-          <button
-            type="button"
-            className={work ? 'home-chip' : 'home-chip unset'}
-            aria-label={work ? '회사로 길찾기' : '회사 등록'}
-            onClick={() => (work ? findRoutes(work.place) : openFavoriteRegistration('work'))}
-          >
-            <Briefcase size={15} />
-            회사
-          </button>
-          {extraFavorites.map(({ place }) => (
-            <button
-              key={place.id}
-              type="button"
-              className="home-chip"
-              aria-label={`${place.name} 길찾기`}
-              onClick={() => findRoutes(place)}
-            >
-              <Star size={15} />
-              {place.name}
-            </button>
-          ))}
         </div>
         <button type="button" className="primary" onClick={() => findRoutes()}>
           경로 찾기

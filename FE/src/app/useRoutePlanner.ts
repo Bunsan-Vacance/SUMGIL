@@ -78,7 +78,7 @@ export function useRoutePlanner(
   const pendingMessage = useRef<string | null>(null)
   const [searchTarget, setSearchTarget] = useState<SearchTarget>('destination')
   const [searchReturnScreen, setSearchReturnScreen] = useState<'home' | 'results'>('home')
-  const [routePanelOpen, setRoutePanelOpen] = useState(true)
+  const [routePanelOpen, setRoutePanelOpen] = useState(false)
   const [modal, setModal] = useState<GuidanceDialog | 'filter' | 'replace-guide' | null>(null)
   const [arrivals, setArrivals] = useState<TrainArrival[]>([])
   const [arrivalStatus, setArrivalStatus] = useState<GuidanceRequestStatus>('idle')
@@ -174,7 +174,7 @@ export function useRoutePlanner(
   const openSearch = (target: 'origin' | 'destination') => {
     setSearchTarget(target)
     setSearchReturnScreen(screen === 'results' ? 'results' : 'home')
-    if (screen === 'home') setRoutePanelOpen(true)
+    // 홈 패널의 열림 상태는 그대로 둔다. 상단 검색창에서 열었다 취소하면 검색창 홈으로 돌아온다.
     go('search')
   }
   const openFavoriteRegistration = (label: FavoriteLabel) => {
