@@ -371,6 +371,77 @@ small {
 .bike-stock-badge.level-unknown {
   background: #82909b;
 }
+.station-marker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px 5px 8px;
+  border: 2px solid white;
+  border-radius: 999px;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(21, 37, 54, 0.28);
+  transform: translate(-50%, -100%);
+}
+.station-marker::after {
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  width: 0;
+  height: 0;
+  margin-left: -5px;
+  border-top: 7px solid transparent;
+  border-right: 5px solid transparent;
+  border-left: 5px solid transparent;
+  content: '';
+}
+.station-marker-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+}
+.station-marker-grade {
+  font-weight: 600;
+  opacity: 0.92;
+}
+.station-marker.grade-relaxed {
+  background: #1d4ed8;
+}
+.station-marker.grade-relaxed::after {
+  border-top-color: #1d4ed8;
+}
+.station-marker.grade-normal {
+  background: #15803d;
+}
+.station-marker.grade-normal::after {
+  border-top-color: #15803d;
+}
+.station-marker.grade-congested {
+  background: #b91c1c;
+}
+.station-marker.grade-congested::after {
+  border-top-color: #b91c1c;
+}
+.station-marker.grade-saturated {
+  background: #7e22ce;
+}
+.station-marker.grade-saturated::after {
+  border-top-color: #7e22ce;
+}
+.station-marker.grade-none {
+  background: #82909b;
+}
+.station-marker.grade-none::after {
+  border-top-color: #82909b;
+}
+.station-marker.selected {
+  border-width: 3px;
+  box-shadow: 0 4px 14px rgba(21, 37, 54, 0.42);
+}
 .bike-station-marker:hover,
 .bike-station-marker:focus-visible,
 .bike-station-marker.selected {

@@ -467,6 +467,69 @@ describe('일반 지도 장소 마커', () => {
     expect(mocks.stock).not.toHaveBeenCalled()
   })
 
+  it('stationMarkers를 주면 역 오버레이를 만들고 클릭 시 datum으로 알린다', async () => {
+    const maps = fakeMaps([], vi.fn(), [])
+    mocks.loadKakaoMaps.mockResolvedValue(maps)
+    const datum = {
+      stationId: '222',
+      stationName: '강남',
+      lat: 37.4979,
+      lng: 127.0276,
+      grade: 'NORMAL' as const,
+    }
+    const onStationSelect = vi.fn()
+    const onViewportChange = vi.fn()
+    const { rerender } = render(
+      <KakaoMap
+        origin={null}
+        onMessage={vi.fn()}
+        stationMarkers={[datum]}
+        onStationSelect={onStationSelect}
+        onViewportChange={onViewportChange}
+      />,
+    )
+    await waitFor(() => expect(FakeCustomOverlay.instances).toHaveLength(1))
+    const content = (FakeCustomOverlay.instances[0].options as { content: HTMLButtonElement })
+      .content
+    expect(content.classList.contains('station-marker')).toBe(true)
+    expect(content.classList.contains('grade-normal')).toBe(true)
+    expect(onViewportChange).toHaveBeenCalledWith({ lat: 37.5, lng: 127 })
+    fireEvent.click(content)
+    expect(onStationSelect).toHaveBeenCalledWith(datum)
+
+    rerender(
+      <KakaoMap
+        origin={null}
+        onMessage={vi.fn()}
+        stationMarkers={[{ ...datum, grade: 'CONGESTED' }]}
+        onStationSelect={onStationSelect}
+        selectedStationId="222"
+      />,
+    )
+    await waitFor(() => expect(content.classList.contains('grade-congested')).toBe(true))
+    expect(content.classList.contains('selected')).toBe(true)
+    expect(FakeCustomOverlay.instances).toHaveLength(1)
+  })
+
+  it('역 마커 목록에서 사라진 역의 오버레이는 정리한다', async () => {
+    const maps = fakeMaps([], vi.fn(), [])
+    mocks.loadKakaoMaps.mockResolvedValue(maps)
+    const datum = {
+      stationId: '222',
+      stationName: '강남',
+      lat: 37.4979,
+      lng: 127.0276,
+      grade: null,
+    }
+    const { rerender } = render(
+      <KakaoMap origin={null} onMessage={vi.fn()} stationMarkers={[datum]} />,
+    )
+    await waitFor(() => expect(FakeCustomOverlay.instances).toHaveLength(1))
+    const overlay = FakeCustomOverlay.instances[0]
+    rerender(<KakaoMap origin={null} onMessage={vi.fn()} stationMarkers={[]} />)
+    await waitFor(() => expect(overlay.setMap).toHaveBeenCalledWith(null))
+  })
+
   it('대여소 메타데이터가 없으면 해당 항목을 숨긴다', async () => {
     const station: Place = {
       id: 'bike-station:ST-1',
