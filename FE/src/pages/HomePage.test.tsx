@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { FavoritePlace } from '../features/route/favoritePlaces'
 import HomePage from './HomePage'
 
 const origin = {
@@ -11,12 +12,29 @@ const origin = {
   kind: '지하철역',
 }
 
+const baseProps = {
+  openSearch: vi.fn(),
+  toggleRoutePanel: vi.fn(),
+  findRoutes: vi.fn(),
+  swapPlaces: vi.fn(),
+  favorites: [] as FavoritePlace[],
+  home: null,
+  work: null,
+  openFavoriteRegistration: vi.fn(),
+}
+const favoriteOf = (id: string, label: FavoritePlace['label'] = null): FavoritePlace => ({
+  place: { id, name: `장소 ${id}`, address: '서울', kind: '장소', lat: 37.5, lng: 127 },
+  label,
+  savedAt: '2026-10-01T00:00:00.000Z',
+})
+
 afterEach(cleanup)
 
 describe('홈 길찾기 패널', () => {
   it('초기 출발지는 임의의 장소 대신 선택 안내를 표시한다', () => {
     render(
       <HomePage
+        {...baseProps}
         origin={{ id: 'empty-origin', name: '', address: '', kind: '장소' }}
         destination={null}
         openSearch={vi.fn()}
@@ -34,6 +52,7 @@ describe('홈 길찾기 패널', () => {
     const toggleRoutePanel = vi.fn()
     const { rerender } = render(
       <HomePage
+        {...baseProps}
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
@@ -52,6 +71,7 @@ describe('홈 길찾기 패널', () => {
 
     rerender(
       <HomePage
+        {...baseProps}
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
@@ -68,6 +88,7 @@ describe('홈 길찾기 패널', () => {
     const openSearch = vi.fn()
     render(
       <HomePage
+        {...baseProps}
         origin={origin}
         destination={null}
         openSearch={openSearch}
@@ -88,6 +109,7 @@ describe('홈 길찾기 패널', () => {
     const swapPlaces = vi.fn()
     render(
       <HomePage
+        {...baseProps}
         origin={origin}
         destination={null}
         openSearch={vi.fn()}
@@ -102,5 +124,57 @@ describe('홈 길찾기 패널', () => {
     expect(swap.getAttribute('disabled')).toBe('')
     fireEvent.click(swap)
     expect(swapPlaces).not.toHaveBeenCalled()
+  })
+
+  it('미등록 집 칩은 등록 화면을 열고 길찾기는 호출하지 않는다', () => {
+    const openFavoriteRegistration = vi.fn()
+    const findRoutes = vi.fn()
+    render(
+      <HomePage
+        {...baseProps}
+        origin={origin}
+        destination={null}
+        routePanelOpen
+        findRoutes={findRoutes}
+        openFavoriteRegistration={openFavoriteRegistration}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '집 등록' }))
+    expect(openFavoriteRegistration).toHaveBeenCalledWith('home')
+    expect(findRoutes).not.toHaveBeenCalled()
+  })
+
+  it('등록된 집 칩은 해당 장소로 길찾기를 시작한다', () => {
+    const findRoutes = vi.fn()
+    const home = favoriteOf('home-1', 'home')
+    render(
+      <HomePage
+        {...baseProps}
+        origin={origin}
+        destination={null}
+        routePanelOpen
+        findRoutes={findRoutes}
+        home={home}
+        favorites={[home]}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '집으로 길찾기' }))
+    expect(findRoutes).toHaveBeenCalledWith(home.place)
+  })
+
+  it('label 없는 즐겨찾기 칩은 최대 5개만 보여 준다', () => {
+    const favorites = Array.from({ length: 6 }, (_, index) => favoriteOf(String(index)))
+    render(
+      <HomePage
+        {...baseProps}
+        origin={origin}
+        destination={null}
+        routePanelOpen
+        favorites={favorites}
+      />,
+    )
+    const group = screen.getByRole('group', { name: '자주 가는 곳' })
+    expect(group.querySelectorAll('button')).toHaveLength(2 + 5)
+    expect(screen.queryByRole('button', { name: '장소 5 길찾기' })).toBeNull()
   })
 })

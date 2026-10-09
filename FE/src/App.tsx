@@ -83,6 +83,10 @@ export default function App() {
               toggleRoutePanel={planner.toggleRoutePanel}
               findRoutes={planner.findRoutes}
               swapPlaces={planner.swapPlaces}
+              favorites={planner.favorites.favorites}
+              home={planner.favorites.home}
+              work={planner.favorites.work}
+              openFavoriteRegistration={planner.openFavoriteRegistration}
             />
           )}
           {screen === 'browse' && (
