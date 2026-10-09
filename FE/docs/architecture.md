@@ -13,6 +13,7 @@ src/
     PreviewToolbar.tsx      제품 화면 밖의 시나리오 조작
     opsAccess.ts            운영자 뷰 노출 조건(DEV 또는 VITE_OPS_VIEW)
   pages/                    Home, Browse, Search, Results, Detail, Arrival
+                            HomePage는 상단 검색창·칩·레이어 토글·최근 경로 시트
                             OpsPage.tsx 운영자 뷰(개발 전용 진입점)
   components/
     Modal.tsx               네이티브 dialog, 공통 닫기 동작
@@ -23,7 +24,7 @@ src/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태·즐겨찾기·최근 검색 저장
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
     ops/                    운영자 뷰: 지도 훅·재고 레이어·히트맵·데이터 상태
-  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅
+  map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 토글(homeLayers·HomeLayerToggle)
   api/
     contracts.ts            데이터 접근 인터페이스
     repositories.ts         실제로 사용할 구현 선택
@@ -42,6 +43,8 @@ src/
 - 타임라인은 교통수단 아이콘과 세로 노선선으로 승하차를 연결한다. 노선명·방면·구간 혼잡도를 노선선 옆에 표시하며 출발·도착 이름과 완전히 같은 endpoint pair만 중복 제거한다. 환승 등 실제 leg는 합치거나 생략하지 않는다. 상세 시트의 기본 높이는 내용에 맞추되 최대 76%로 제한하며, 사용자가 펼치면 기존 94% 높이를 유지한다.
 - 검색 결과 카드와 상세·안내 요약의 이동 시간 막대는 `RouteModeStrip`을 공유한다. 구간은 이동 시간 비율로 폭을 배정하고 짧은 구간은 44px까지 보장한다. 구간이 많아지면 44px 최소 폭을 컨테이너 폭을 구간 수로 나눈 값까지 낮춰 flex로 함께 줄어든다. 구간 축약·폭 비율·노선 색상·환승 아이콘과 좁은 폭의 표시 규칙을 동일하게 유지한다. 검색 결과 카드는 막대 위 혼잡도 라벨을 숨기고 각 승차역 행의 노선명 왼쪽에 구간 등급을 표시한다. 상세·안내 요약은 기존 막대 위 라벨을 유지한다.
 - `SearchPage`의 검색어는 페이지 내부 상태이며 `usePlaceSearch`가 데이터 조회를 맡는다. 최근 검색·즐겨찾기 저장은 `recentPlaces`·`favoritePlaces` 모듈이 맡는다.
+- `HomePage`는 `BottomSheet`를 항상 렌더링한다. 지도 훅이 마운트 때 `.home-topbar`·`.home-panel`·`.bottom-sheet` 높이를 한 번 찾아 관찰하므로 시트를 조건부로 렌더링하지 않는다.
+- `useRoutePlanner.findRoutesFrom`은 저장된 출발·도착으로 바로 검색한다(최근 경로 탭). 출발지 상태 반영과 검색을 같은 틱에서 하기 위해 `trip.search(destination, origin)`을 직접 호출한다.
 - 기능 훅은 `api/repositories`를 통해 데이터를 받는다. `api/contracts`는 화면용 타입을 참조하는 프론트엔드 인터페이스다.
 - `selectors`와 reducer는 React·DOM·네트워크 없이 동작하는 함수다.
 - `components`는 특정 경로 데이터나 화면 이름을 알지 않는다.
@@ -69,6 +72,9 @@ src/
 | 서버 경로 연결              | `api/contracts.ts`, `api/repositories.ts`, `features/route/useTrip.ts`                                                                     |
 | 길안내 단계                 | `features/guidance/guidanceReducer.ts`, `pages/DetailPage.tsx`                                                                             |
 | 지도 수명·마커·크기         | `features/map/useKakaoMap.ts`                                                                                                              |
+| 홈 레이아웃(검색창·칩·시트) | `pages/HomePage.tsx`, `styles.css`(`.home-*`)                                                                                              |
+| 홈 레이어 토글·가용 레이어  | `features/map/homeLayers.ts`, `features/map/HomeLayerToggle.tsx`                                                                           |
+| 최근 경로 저장·표시 규칙    | `features/route/recentRoutes.ts`, `pages/HomePage.tsx`                                                                                     |
 | 즐겨찾기 저장 규칙·칩       | `features/route/favoritePlaces.ts`, `pages/HomePage.tsx`, `pages/SearchPage.tsx`                                                           |
 | 일반 장소 탐색 화면         | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                                                                                 |
 | 지도에서 위치 선택          | `features/map/MapPlacePicker.tsx`                                                                                                          |
@@ -90,6 +96,6 @@ src/
 
 지도 래퍼는 `z-index: 0`으로 별도 쌓임 맥락을 만든다. SDK 내부의 타일·마커가 앱의 길안내 헤더와 버튼을 덮지 않도록 이 경계를 유지한다. 지도 위치 선택기는 검색 화면의 전체 영역을 직접 관리하고, 일반 지도 훅의 시트 높이 계산을 재사용하지 않는다. 결과 화면에서는 지도 래퍼를 마운트하지 않아 경로 카드를 전체 높이로 스크롤한다.
 
-앱 셸은 `.page-viewport`와 안내 복귀 바를 세로로 배치한다. 복귀 바는 화면 영역 밖에 높이를 확보해 시트의 버튼이나 지도 출처 표시를 덮지 않는다. 현재 지도 훅은 부모 `.page-viewport`와 그 안의 `.bottom-sheet` 또는 `.home-panel` 높이를 관찰해 실제 지도 영역을 맞춘다. 상세와 안내는 지도 key를 `route`로 공유하고 같은 `DetailPage`를 유지하여 안내 시작 시 지도·시트 높이·스크롤이 초기화되지 않는다. 나머지 화면은 `key={screen}`으로 다시 마운트한다. 이 클래스나 DOM 배치를 바꾸면 지도 크기·마커·카카오 출처 표시를 함께 확인한다.
+앱 셸은 `.page-viewport`와 안내 복귀 바를 세로로 배치한다. 복귀 바는 화면 영역 밖에 높이를 확보해 시트의 버튼이나 지도 출처 표시를 덮지 않는다. 현재 지도 훅은 부모 `.page-viewport`와 그 안의 `.bottom-sheet` 또는 `.home-panel` 높이를 관찰해 실제 지도 영역을 맞춘다. 홈에서는 `.home-topbar`와 홈 시트(`.home-sheet`)도 관찰 대상이다. 상세와 안내는 지도 key를 `route`로 공유하고 같은 `DetailPage`를 유지하여 안내 시작 시 지도·시트 높이·스크롤이 초기화되지 않는다. 나머지 화면은 `key={screen}`으로 다시 마운트한다. 이 클래스나 DOM 배치를 바꾸면 지도 크기·마커·카카오 출처 표시를 함께 확인한다.
 
 운영자 뷰 지도 래퍼(`.ops-map-wrap`)도 `position: relative; z-index: 0`을 유지해 SDK 내부 요소가 페이지의 다른 영역을 덮지 않게 한다. 이 지도는 바텀시트가 없으므로 시트·`.page-viewport` 높이 관찰 로직의 대상이 아니며, 지도 높이는 `.ops-map`의 CSS가 정한다.
