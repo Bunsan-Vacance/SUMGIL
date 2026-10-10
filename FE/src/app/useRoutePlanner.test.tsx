@@ -853,3 +853,58 @@ describe('결과·상세 화면 URL 동기화', () => {
     await waitFor(() => expect(location.hash).toBe('#home'))
   })
 })
+
+describe('경로 공유', () => {
+  const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  const originalShare = Object.getOwnPropertyDescriptor(navigator, 'share')
+
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+    // share가 없는 환경으로 고정해 클립보드 폴백을 검증한다.
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true })
+  })
+
+  afterEach(() => {
+    if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard)
+    else Reflect.deleteProperty(navigator, 'clipboard')
+    if (originalShare) Object.defineProperty(navigator, 'share', originalShare)
+    else Reflect.deleteProperty(navigator, 'share')
+  })
+
+  const renderResults = async () => {
+    const rendered = renderHook(() => useRoutePlanner(repository))
+    act(() => rendered.result.current.trip.setOrigin(places[0]))
+    act(() => rendered.result.current.findRoutes(places[1]))
+    await waitFor(() => expect(rendered.result.current.trip.status).toBe('success'))
+    return rendered
+  }
+
+  it('검색 조건이 없으면 canShare가 false다', () => {
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    expect(result.current.canShare).toBe(false)
+  })
+
+  it('결과 상태에서 결과 URL을 복사하고 토스트를 띄운다', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const { result } = await renderResults()
+    expect(result.current.canShare).toBe(true)
+    await act(() => result.current.shareRoute())
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const url = String(writeText.mock.calls[0][0])
+    expect(url.startsWith(location.origin + location.pathname + '#results?from=')).toBe(true)
+    expect(url).toContain('&to=')
+    expect(result.current.message).toBe('링크를 복사했어요')
+  })
+
+  it('복사에 실패하면 안내 토스트를 띄운다', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('거부'))
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const { result } = await renderResults()
+    await act(() => result.current.shareRoute())
+    expect(result.current.message).toBe(
+      '링크를 복사하지 못했어요. 주소창의 링크를 직접 복사해 주세요',
+    )
+  })
+})

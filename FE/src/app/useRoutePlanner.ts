@@ -9,6 +9,7 @@ import {
   departureAtToIso,
   serializeRouteQuery,
 } from './routeQuery'
+import { buildShareUrl, shareLink, shareText } from '../features/share/shareRoute'
 import { useToast } from '../components/useToast'
 import { useTrip } from '../features/route/useTrip'
 import { useGuidance } from '../features/guidance/useGuidance'
@@ -359,6 +360,20 @@ export function useRoutePlanner(
     setModal(null)
     go('guide')
   }
+  const canShare = currentRouteQuery(trip) !== null
+  // 클릭 제스처 안에서 호출되므로 shareLink 전에 await하지 않는다.
+  const shareRoute = async () => {
+    const query = currentRouteQuery(trip)
+    if (!query) return
+    const outcome = await shareLink({
+      title: '숨길',
+      text: shareText(query.origin, query.destination),
+      url: buildShareUrl(location.origin + location.pathname, query),
+    })
+    if (outcome === 'copied') setMessage('링크를 복사했어요')
+    else if (outcome === 'failed')
+      setMessage('링크를 복사하지 못했어요. 주소창의 링크를 직접 복사해 주세요')
+  }
   const resumeGuide = () => go('guide')
   const advance = () => {
     if (!guidance.route) return
@@ -549,6 +564,8 @@ export function useRoutePlanner(
     setOriginFromBrowse,
     setOriginFromCurrentLocation,
     swapPlaces,
+    canShare,
+    shareRoute,
     selectRoute,
     startGuide,
     confirmReplacement,
