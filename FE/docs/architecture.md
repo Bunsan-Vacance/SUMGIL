@@ -8,7 +8,9 @@ src/
   App.tsx                   지도·페이지·모달을 조립하는 앱 셸
   app/
     useNavigation.ts        해시 URL과 브라우저 뒤로 가기
-    useRoutePlanner.ts      검색 → 상세 → 안내 흐름 연결
+    useRoutePlanner.ts      검색 → 상세 → 안내 흐름 연결, 결과·상세 URL 동기화
+    routeQuery.ts           경로 검색 조건의 URL 직렬화·파싱·검증(순수 함수)
+    restoreTrip.ts          결과·상세 해시에서 초기 검색 상태 복원
     preview.ts              미리보기 초기 상태와 제안 경로
     PreviewToolbar.tsx      제품 화면 밖의 시나리오 조작
     opsAccess.ts            운영자 뷰 노출 조건(DEV 또는 VITE_OPS_VIEW)
@@ -21,7 +23,7 @@ src/
     useBottomSheet.ts       드래그, 높이 상태, 키보드 조작
     useToast.ts             일시적인 안내 문구
   features/
-    route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태·즐겨찾기·최근 검색 저장
+    route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태·즐겨찾기·최근 검색 저장·장소 규칙(placeRules)
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
     ops/                    운영자 뷰: 지도 훅·재고 레이어·히트맵·데이터 상태
   map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 타입(homeLayers), 재고 배지(bikeStockBadge)·홈 선택 상태(useHomeMapLayers)·주변 역/대여소 목록(NearbyStationList·NearbyBikeStationList)·대여소 카드(BikeStationCard)·재고/예측 훅(useBikeStationOutlook), 역 마커(stationMarkers)·주변 역 조회(useNearbyStationCongestion)·역 카드(StationCard)·도착/시간대 훅(useStationArrivals·useStationHourlyCongestion·congestionAdvice)
@@ -97,6 +99,7 @@ src/
 | 일반 장소 탐색 화면                    | `pages/BrowsePage.tsx`, `features/route/usePlaceSearch.ts`                                                                                 |
 | 지도에서 위치 선택                     | `features/map/MapPlacePicker.tsx`                                                                                                          |
 | 위치 권한·오류                         | `features/map/useCurrentLocation.ts`                                                                                                       |
+| 경로 검색 조건 URL 형식·검증           | `app/routeQuery.ts`, `app/restoreTrip.ts`, `app/useNavigation.ts`(`parseHash`)                                                             |
 | 운영자 뷰 진입·노출 조건               | `app/opsAccess.ts`, `app/useNavigation.ts`                                                                                                 |
 | 운영자 뷰 레이아웃                     | `pages/OpsPage.tsx`, `styles.css`(`.ops-*`)                                                                                                |
 | 대여소 재고 마커 색·라벨               | `features/ops/bikeStockLayer.ts`, `features/ops/useOpsData.ts`(`stockLevel`)                                                               |
@@ -108,6 +111,7 @@ src/
 - 공통 버튼의 클래스는 공유하지만, 모든 버튼을 새로운 래퍼 컴포넌트로 만들지는 않았다. 공통 로딩·비활성화·아이콘 규칙이 필요해지면 추출한다.
 - 공통 스타일은 `styles.css`에 두고, 경로 상세와 타임라인 스타일만 각각의 CSS로 분리한다.
 - 라우팅은 기존 해시 방식을 유지한다. 중첩 경로·라우트별 데이터 로딩 등이 필요하면 라우터 도입을 검토한다.
+- URL 동기화는 `useRoutePlanner`의 effect 한 곳에서만 한다. 페이지는 쿼리를 모르고 `go(screen)`만 부른다.
 - `useRoutePlanner`는 업무 규칙의 저장소가 아니다. 계산과 상태 변경 규칙은 각 기능에 두고, 화면 이동과 기능 간 호출만 연결한다.
 
 ## 지도와 레이아웃 사이의 계약
