@@ -2,12 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigation } from './useNavigation'
 import { resolveScreen } from './resolveScreen'
 import { previewTripFor } from './preview'
+import { restoredTripFor } from './restoreTrip'
+import {
+  departureAtFromIso,
+  departureAtToClock,
+  departureAtToIso,
+  serializeRouteQuery,
+} from './routeQuery'
 import { useToast } from '../components/useToast'
 import { useTrip } from '../features/route/useTrip'
 import { useGuidance } from '../features/guidance/useGuidance'
 import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import { useFavoritePlaces } from '../features/route/useFavoritePlaces'
+import { hasRouteLocation, samePlace } from '../features/route/placeRules'
 import {
   isCurrentLocation,
   isRecentRoutePinned,
@@ -42,31 +50,6 @@ interface ReplanState {
 
 const initialReplan: ReplanState = { status: 'idle', proposals: [], error: '' }
 
-function samePlace(first: Place, second: Place) {
-  return (
-    first.id === second.id ||
-    (first.lat !== undefined &&
-      first.lng !== undefined &&
-      second.lat !== undefined &&
-      second.lng !== undefined &&
-      first.lat === second.lat &&
-      first.lng === second.lng)
-  )
-}
-
-function hasRouteLocation(place: Place) {
-  const hasCoordinates =
-    typeof place.lat === 'number' &&
-    typeof place.lng === 'number' &&
-    Number.isFinite(place.lat) &&
-    Number.isFinite(place.lng) &&
-    place.lat >= -90 &&
-    place.lat <= 90 &&
-    place.lng >= -180 &&
-    place.lng <= 180
-  return Boolean(place.stationId?.trim()) || hasCoordinates
-}
-
 export function useRoutePlanner(
   repository?: RouteRepository,
   guidanceApi: GuidanceRepository = defaultGuidanceRepository,
@@ -74,7 +57,27 @@ export function useRoutePlanner(
 ) {
   const navigation = useNavigation()
   const { go, replace } = navigation
-  const trip = useTrip(previewTripFor(location.search), repository)
+  // 새로고침·링크 진입 시 URL의 출발·도착·시각을 마운트 때 한 번만 읽는다.
+  const [restored] = useState(() => restoredTripFor(location.hash, previewTripFor(location.search)))
+  const trip = useTrip(
+    restored?.trip ?? previewTripFor(location.search),
+    repository,
+    restored?.departureAt ? departureAtToClock(restored.departureAt) : undefined,
+  )
+  const restoreStarted = useRef(false)
+  useEffect(() => {
+    if (!restored || restoreStarted.current) return
+    restoreStarted.current = true
+    const { origin, destination } = restored.trip
+    if (!destination) return
+    void trip.search(
+      destination,
+      origin,
+      trip.enabled,
+      restored.departureAt ? departureAtToIso(restored.departureAt) : undefined,
+    )
+    // 마운트 때 한 번만 실행한다.
+  }, [])
   const guidance = useGuidance(navigation.screen === 'guide')
   const screen = resolveScreen(navigation.screen, trip, guidance)
   const { message, setMessage } = useToast()
@@ -131,9 +134,34 @@ export function useRoutePlanner(
     })
   }
   const { locate } = useCurrentLocation(setOriginFromCurrentLocation, setMessage, screen)
+  // 해시 동기화는 이 effect 한 곳에서만 한다. 결과·상세는 검색 조건을 쿼리로 보존하고, 그 밖의 화면은 쿼리를 지운다.
   useEffect(() => {
-    if (screen !== navigation.screen) replace(screen)
-  }, [screen, navigation.screen, replace])
+    if (screen === 'results' || screen === 'detail') {
+      if (!trip.destination || !hasRouteLocation(trip.origin)) {
+        if (screen !== navigation.screen) replace(screen)
+        return
+      }
+      // 시각을 고른 경우, 복원 직후 첫 검색이 시작되기 전에는 시각을 알 수 없으므로 기다린다.
+      if (trip.departureTime && !trip.departedAt) return
+      const departureAt =
+        trip.departureTime && trip.departedAt ? departureAtFromIso(trip.departedAt) : undefined
+      replace(
+        screen,
+        serializeRouteQuery({ origin: trip.origin, destination: trip.destination, departureAt }),
+      )
+      return
+    }
+    if (screen !== navigation.screen || navigation.query) replace(screen)
+  }, [
+    screen,
+    navigation.screen,
+    navigation.query,
+    trip.origin,
+    trip.destination,
+    trip.departureTime,
+    trip.departedAt,
+    replace,
+  ])
   useEffect(() => {
     const { origin, destination } = guidance
     if (!origin || !destination) {

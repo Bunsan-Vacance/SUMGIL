@@ -418,4 +418,24 @@ describe('경로 검색 요청 수명', () => {
     expect(result.current.departureTime).toBeNull()
     expect(repository.search).not.toHaveBeenCalled()
   })
+
+  it('초기 출발 시각을 departureTime에 반영하고 다음 검색에 쓴다', async () => {
+    const repository: RouteRepository = { search: vi.fn(async () => routes) }
+    const { result } = renderHook(() => useTrip(previewTrip, repository, '18:30'))
+    expect(result.current.departureTime).toBe('18:30')
+
+    await act(async () => {
+      await result.current.search(places[1])
+    })
+
+    const request = vi.mocked(repository.search).mock.calls[0][0]
+    expect(
+      new Date(request.departedAt ?? '').toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Seoul',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    ).toBe('18:30')
+    expect(result.current.departedAt).toBe(request.departedAt)
+  })
 })
