@@ -329,3 +329,43 @@ describe('경로 상세 버스 선택', () => {
     expect(setSelectedId).toHaveBeenCalledWith('second')
   })
 })
+
+describe('경로 공유 버튼', () => {
+  const current = route('share', 'BUS', '버스')
+  const props = {
+    selected: current,
+    alternatives: [current],
+    setSelectedId: vi.fn(),
+    go: vi.fn(),
+    startGuide: vi.fn(),
+  }
+
+  it('상세에서 버튼을 보이고 누르면 콜백을 부른다', () => {
+    const onShare = vi.fn()
+    render(<DetailPage {...props} onShare={onShare} />)
+    fireEvent.click(screen.getByRole('button', { name: '경로 공유' }))
+    expect(onShare).toHaveBeenCalledOnce()
+  })
+
+  it('onShare가 없으면 버튼이 없다', () => {
+    render(<DetailPage {...props} />)
+    expect(screen.queryByRole('button', { name: '경로 공유' })).toBeNull()
+  })
+
+  it('안내 중에는 버튼이 없다', () => {
+    const guidance: RouteGuidanceControls = {
+      step: 0,
+      locationStatus: 'tracking',
+      onExit: vi.fn(),
+      onPrevious: vi.fn(),
+      onNext: vi.fn(),
+      onTrain: vi.fn(),
+      onReplan: vi.fn(),
+      replanDisabled: false,
+      onRetryLocation: vi.fn(),
+      onStepChange: vi.fn(),
+    }
+    render(<DetailPage {...props} onShare={vi.fn()} guidance={guidance} />)
+    expect(screen.queryByRole('button', { name: '경로 공유' })).toBeNull()
+  })
+})

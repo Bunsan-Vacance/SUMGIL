@@ -201,6 +201,7 @@ export default function App() {
               onDepartureTimeChange={trip.setDepartureTime}
               onResetModes={trip.resetModes}
               onSearchWalk={trip.searchWalkOnly}
+              onShare={planner.canShare ? () => void planner.shareRoute() : undefined}
             />
           )}
           {routeView && displayedRoute && (
@@ -210,6 +211,7 @@ export default function App() {
               setSelectedId={planner.selectRoute}
               go={go}
               startGuide={planner.startGuide}
+              onShare={planner.canShare ? () => void planner.shareRoute() : undefined}
               originName={screen === 'guide' ? guidance.origin?.name : trip.origin.name}
               destinationName={destinationName}
               guidance={

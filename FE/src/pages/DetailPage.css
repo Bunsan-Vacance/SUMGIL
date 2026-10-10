@@ -27,6 +27,12 @@
 .route-detail-time-group {
   min-width: 0;
 }
+.route-detail-share {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  color: #445760;
+}
 .route-detail-congestion {
   display: flex;
   flex: 0 0 auto;
