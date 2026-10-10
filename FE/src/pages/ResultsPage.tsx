@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeftRight, ChevronDown, SlidersHorizontal, X } from 'lucide-react'
+import { ArrowLeftRight, ChevronDown, Share2, SlidersHorizontal, X } from 'lucide-react'
 import DepartureTimeDialog from '../features/route/DepartureTimeDialog'
 import RouteCard from '../features/route/RouteCard'
 import type { Mode, Place, Priority, Route } from '../features/route/types'
@@ -35,6 +35,7 @@ interface Props {
   onDepartureTimeChange?: (time: string) => void
   onResetModes?: () => void
   onSearchWalk?: () => void
+  onShare?: () => void
 }
 
 type Recommendation = 'fast' | 'calm'
@@ -122,6 +123,7 @@ export default function ResultsPage({
   onDepartureTimeChange,
   onResetModes,
   onSearchWalk,
+  onShare,
 }: Props) {
   const resultsRef = useScrollbarVisibility<HTMLDivElement>()
   const [choosingTime, setChoosingTime] = useState(false)
@@ -210,6 +212,17 @@ export default function ResultsPage({
             이동수단
             <span className="sr-only">{enabled.length}/4 선택됨</span>
           </button>
+          {onShare && (
+            <button
+              type="button"
+              className="results-filter results-share"
+              aria-label="경로 공유"
+              onClick={onShare}
+            >
+              <Share2 size={14} aria-hidden="true" />
+              공유
+            </button>
+          )}
         </div>
 
         {status === 'loading' ? (

@@ -1,4 +1,4 @@
-import { ArrowLeft, Navigation, Radio } from 'lucide-react'
+import { ArrowLeft, Navigation, Radio, Share2 } from 'lucide-react'
 import BottomSheet from '../components/BottomSheet'
 import RouteTimeline from '../features/route/RouteTimeline'
 import BikePrediction from '../features/route/BikePrediction'
@@ -53,6 +53,7 @@ interface Props {
   originName?: string
   destinationName?: string
   guidance?: RouteGuidanceControls
+  onShare?: () => void
 }
 const locationMessages: Record<GuidanceLocationStatus, string> = {
   idle: '위치 안내를 준비하고 있어요.',
@@ -72,6 +73,7 @@ export default function DetailPage({
   originName,
   destinationName,
   guidance,
+  onShare,
 }: Props) {
   const selectedGroup = groupRoutes(alternatives).find((group) =>
     group.variants.some((route) => route.id === selected.id),
@@ -155,6 +157,16 @@ export default function DetailPage({
                 </strong>
                 <span>혼잡도 예상</span>
               </div>
+            )}
+            {!guidance && onShare && (
+              <button
+                type="button"
+                className="icon-button route-detail-share"
+                aria-label="경로 공유"
+                onClick={onShare}
+              >
+                <Share2 size={18} />
+              </button>
             )}
           </div>
           <RouteModeStrip legs={selected.legs} />

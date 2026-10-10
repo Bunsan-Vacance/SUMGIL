@@ -1864,7 +1864,7 @@ small {
 }
 .results-sort-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 4px;
   padding: 3px 14px;

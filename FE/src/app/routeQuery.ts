@@ -83,3 +83,17 @@ export function departureAtToClock(local: string): string {
 export function departureAtFromIso(iso: string): string | undefined {
   return backendDepartureTime(iso)?.slice(0, 16)
 }
+
+/** 화면 상태(trip)에서 URL·공유에 쓸 검색 조건을 뽑는다. 도착지가 없거나 출발지 위치가 없으면 null이다. */
+export function currentRouteQuery(trip: {
+  origin: Place
+  destination: Place | null
+  departureTime: string | null
+  departedAt?: string
+}): RouteQuery | null {
+  if (!trip.destination || !hasRouteLocation(trip.origin)) return null
+  // 사용자가 출발 시각을 고른 경우에만 시각을 싣는다.
+  const departureAt =
+    trip.departureTime && trip.departedAt ? departureAtFromIso(trip.departedAt) : undefined
+  return { origin: trip.origin, destination: trip.destination, departureAt }
+}

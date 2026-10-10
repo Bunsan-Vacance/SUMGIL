@@ -298,3 +298,27 @@ describe('경로 결과 상태', () => {
     expect(swapPlaces).not.toHaveBeenCalled()
   })
 })
+
+describe('경로 공유 버튼', () => {
+  it('onShare가 있으면 버튼을 보이고 누르면 콜백을 부른다', () => {
+    const onShare = vi.fn()
+    render(<ResultsPage {...props({ onShare })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '경로 공유' }))
+
+    expect(onShare).toHaveBeenCalledOnce()
+  })
+
+  it('onShare가 없으면 버튼이 없다', () => {
+    render(<ResultsPage {...props()} />)
+    expect(screen.queryByRole('button', { name: '경로 공유' })).toBeNull()
+  })
+
+  it('로딩·오류 상태에서도 버튼을 보인다', () => {
+    const onShare = vi.fn()
+    const { rerender } = render(<ResultsPage {...props({ onShare, status: 'loading' })} />)
+    expect(screen.getByRole('button', { name: '경로 공유' })).toBeTruthy()
+    rerender(<ResultsPage {...props({ onShare, status: 'error' })} />)
+    expect(screen.getByRole('button', { name: '경로 공유' })).toBeTruthy()
+  })
+})
