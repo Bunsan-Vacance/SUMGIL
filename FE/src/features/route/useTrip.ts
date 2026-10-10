@@ -39,11 +39,19 @@ function departureAt(time: string, date = new Date()) {
   return today ? new Date(`${today}T${time}:00+09:00`).toISOString() : date.toISOString()
 }
 
-export function useTrip(initial: TripState, repository: RouteRepository = routeRepository) {
+export function useTrip(
+  initial: TripState,
+  repository: RouteRepository = routeRepository,
+  initialDepartureTime?: string,
+) {
   const [state, dispatch] = useReducer(tripReducer, initial)
-  const [departureTime, setDeparture] = useState<string | null>(null)
+  const [departureTime, setDeparture] = useState<string | null>(initialDepartureTime ?? null)
+  // 마지막 검색에 실제로 쓴 출발 시각(ISO). URL 동기화가 effect 의존성으로 쓰도록 상태로 둔다.
+  const [departedAt, setDepartedAt] = useState<string | undefined>(
+    initial.candidates[0]?.departedAt,
+  )
   const request = useRef<AbortController | null>(null)
-  const departureOverride = useRef<string | null>(null)
+  const departureOverride = useRef<string | null>(initialDepartureTime ?? null)
   const priorityRef = useRef(initial.priority)
   const lastDepartureAt = useRef(initial.candidates[0]?.departedAt)
   const visible = useMemo(
@@ -66,6 +74,7 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
       requestedDepartureAt ||
       (selectedDeparture ? departureAt(selectedDeparture) : new Date().toISOString())
     lastDepartureAt.current = departedAt
+    setDepartedAt(departedAt)
     dispatch({ type: 'search', origin, destination })
     try {
       const candidates = await repository.search(
@@ -114,6 +123,7 @@ export function useTrip(initial: TripState, repository: RouteRepository = routeR
   return {
     ...state,
     departureTime,
+    departedAt,
     visible,
     search,
     setOrigin: (place: Place) => {

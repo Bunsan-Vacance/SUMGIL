@@ -9,6 +9,8 @@ import { places, routes } from '../api/mock/fixtures'
 import { GUIDANCE_STORAGE_KEY } from '../features/guidance/useGuidance'
 import { loadRecentRoutes } from '../features/route/recentRoutes'
 import { useRoutePlanner } from './useRoutePlanner'
+import { serializeRouteQuery } from './routeQuery'
+import type { Place } from '../features/route/types'
 
 const repository: RouteRepository = { search: async () => routes }
 const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation')
@@ -364,7 +366,7 @@ describe('경로와 안내 화면의 수명', () => {
       window.dispatchEvent(new HashChangeEvent('hashchange'))
     })
     await waitFor(() => expect(result.current.screen).toBe('detail'))
-    expect(location.hash).toBe('#detail')
+    expect(location.hash).toMatch(/^#detail\?from=/)
   })
 
   it('검색 목적지가 바뀐 뒤 도착해도 시작 당시 목적지 스냅샷을 표시한다', async () => {
@@ -750,5 +752,104 @@ describe('이용한 경로 저장', () => {
     expect(loadRecentRoutes()[0]).toMatchObject({ pinned: true })
     expect(result.current.usedRouteSaved).toBe(true)
     expect(result.current.message).toBe('경로를 저장했어요')
+  })
+})
+
+describe('결과·상세 화면 URL 동기화', () => {
+  const from: Place = {
+    id: 'a',
+    name: '역삼역',
+    address: '서울 강남구',
+    kind: '역',
+    stationId: 'S1',
+  }
+  const to: Place = { id: 'b', name: '선릉역', address: '서울 강남구', kind: '역', stationId: 'S2' }
+  const hashFor = (screen: string, at?: string) =>
+    `#${screen}?${serializeRouteQuery({ origin: from, destination: to, departureAt: at })}`
+  const spyRepository = () => {
+    const search = vi.fn<RouteRepository['search']>(async () => routes)
+    return { repository: { search } as RouteRepository, search }
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('(a) 결과 URL로 시작하면 첫 렌더부터 결과 화면이고 URL 조건으로 한 번 검색한다', async () => {
+    history.replaceState(null, '', hashFor('results', '2026-10-09T18:30'))
+    const { repository, search } = spyRepository()
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    expect(result.current.screen).toBe('results')
+    expect(result.current.trip.status).toBe('loading')
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    expect(search).toHaveBeenCalledTimes(1)
+    expect(search.mock.calls[0][0]).toMatchObject({
+      origin: from,
+      destination: to,
+      departedAt: '2026-10-09T09:30:00.000Z',
+    })
+    expect(result.current.trip.departureTime).toBe('18:30')
+    expect(location.hash).toBe(hashFor('results', '2026-10-09T18:30'))
+  })
+
+  it('(b) at가 없으면 지금 시각으로 검색하고 해시에도 at을 붙이지 않는다', async () => {
+    history.replaceState(null, '', hashFor('detail'))
+    const { repository, search } = spyRepository()
+    const before = Date.now()
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    const departedAt = Date.parse(search.mock.calls[0][0].departedAt ?? '')
+    expect(departedAt).toBeGreaterThanOrEqual(before - 1000)
+    expect(departedAt).toBeLessThanOrEqual(Date.now() + 1000)
+    expect(location.hash).not.toContain('at=')
+  })
+
+  it('(c) 깨진 쿼리면 홈으로 가고 해시의 쿼리를 지운다', async () => {
+    history.replaceState(null, '', '#results?from=broken&to=broken')
+    const { repository, search } = spyRepository()
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    await waitFor(() => expect(result.current.screen).toBe('home'))
+    expect(location.hash).toBe('#home')
+    expect(search).not.toHaveBeenCalled()
+  })
+
+  it('(d) 검색 뒤 해시에 출발·도착이 담기고 at은 시각을 고른 뒤에만 붙는다', async () => {
+    history.replaceState(null, '', '#home')
+    const { repository } = spyRepository()
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    act(() => result.current.trip.setOrigin(from))
+    act(() => result.current.findRoutes(to))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    await waitFor(() => expect(location.hash).toBe(hashFor('results')))
+    act(() => {
+      result.current.trip.setDepartureTime('07:15')
+    })
+    await waitFor(() => expect(location.hash).toContain('at='))
+    const query = new URLSearchParams(location.hash.split('?')[1])
+    expect(query.get('at')).toMatch(/^\d{4}-\d{2}-\d{2}T07:15$/)
+  })
+
+  it('(e) 출발·도착을 바꾸면 해시도 갱신된다', async () => {
+    history.replaceState(null, '', hashFor('results'))
+    const { repository } = spyRepository()
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    act(() => {
+      result.current.swapPlaces()
+    })
+    await waitFor(() =>
+      expect(location.hash).toBe(
+        `#results?${serializeRouteQuery({ origin: to, destination: from })}`,
+      ),
+    )
+  })
+
+  it('(f) 홈으로 가면 쿼리가 사라진다', async () => {
+    history.replaceState(null, '', hashFor('results'))
+    const { repository } = spyRepository()
+    const { result } = renderHook(() => useRoutePlanner(repository))
+    await waitFor(() => expect(result.current.trip.status).toBe('success'))
+    act(() => result.current.go('home'))
+    await waitFor(() => expect(location.hash).toBe('#home'))
   })
 })
