@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  currentRouteQuery,
   departureAtFromIso,
   departureAtToClock,
   departureAtToIso,
@@ -143,5 +144,38 @@ describe('출발 시각 변환', () => {
   it('해석할 수 없는 ISO는 undefined다', () => {
     expect(departureAtFromIso('')).toBeUndefined()
     expect(departureAtFromIso('not-a-dateZ')).toBeUndefined()
+  })
+})
+
+describe('currentRouteQuery', () => {
+  const base = { origin: station, destination: point, departureTime: null }
+
+  it('도착지가 없으면 null이다', () => {
+    expect(currentRouteQuery({ ...base, destination: null })).toBeNull()
+  })
+
+  it('출발지 위치가 없으면 null이다', () => {
+    const origin: Place = { id: 'empty', name: '', address: '', kind: '장소' }
+    expect(currentRouteQuery({ ...base, origin })).toBeNull()
+  })
+
+  it('departureTime이 없으면 departedAt이 있어도 at이 없다', () => {
+    const query = currentRouteQuery({ ...base, departedAt: '2026-10-09T09:30:00.000Z' })
+    expect(query?.departureAt).toBeUndefined()
+    expect(query?.origin).toBe(station)
+    expect(query?.destination).toBe(point)
+  })
+
+  it('departureTime이 있어도 departedAt이 없으면 at이 없다', () => {
+    expect(currentRouteQuery({ ...base, departureTime: '18:30' })?.departureAt).toBeUndefined()
+  })
+
+  it('departureTime과 departedAt이 있으면 서울 로컬로 변환한다', () => {
+    const query = currentRouteQuery({
+      ...base,
+      departureTime: '18:30',
+      departedAt: '2026-10-09T09:30:00.000Z',
+    })
+    expect(query?.departureAt).toBe('2026-10-09T18:30')
   })
 })

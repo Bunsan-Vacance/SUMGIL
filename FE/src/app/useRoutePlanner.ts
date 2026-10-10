@@ -4,7 +4,7 @@ import { resolveScreen } from './resolveScreen'
 import { previewTripFor } from './preview'
 import { restoredTripFor } from './restoreTrip'
 import {
-  departureAtFromIso,
+  currentRouteQuery,
   departureAtToClock,
   departureAtToIso,
   serializeRouteQuery,
@@ -137,18 +137,14 @@ export function useRoutePlanner(
   // 해시 동기화는 이 effect 한 곳에서만 한다. 결과·상세는 검색 조건을 쿼리로 보존하고, 그 밖의 화면은 쿼리를 지운다.
   useEffect(() => {
     if (screen === 'results' || screen === 'detail') {
-      if (!trip.destination || !hasRouteLocation(trip.origin)) {
+      const query = currentRouteQuery(trip)
+      if (!query) {
         if (screen !== navigation.screen) replace(screen)
         return
       }
       // 시각을 고른 경우, 복원 직후 첫 검색이 시작되기 전에는 시각을 알 수 없으므로 기다린다.
       if (trip.departureTime && !trip.departedAt) return
-      const departureAt =
-        trip.departureTime && trip.departedAt ? departureAtFromIso(trip.departedAt) : undefined
-      replace(
-        screen,
-        serializeRouteQuery({ origin: trip.origin, destination: trip.destination, departureAt }),
-      )
+      replace(screen, serializeRouteQuery(query))
       return
     }
     if (screen !== navigation.screen || navigation.query) replace(screen)
