@@ -9,7 +9,7 @@ src/
   app/
     useNavigation.ts        해시 URL과 브라우저 뒤로 가기
     useRoutePlanner.ts      검색 → 상세 → 안내 흐름 연결, 결과·상세 URL 동기화
-    routeQuery.ts           경로 검색 조건의 URL 직렬화·파싱·검증(순수 함수)
+    routeQuery.ts           경로 검색 조건의 URL 직렬화·파싱·검증, 화면 상태에서 조건 추출(currentRouteQuery, 순수 함수)
     restoreTrip.ts          결과·상세 해시에서 초기 검색 상태 복원
     preview.ts              미리보기 초기 상태와 제안 경로
     PreviewToolbar.tsx      제품 화면 밖의 시나리오 조작
@@ -25,6 +25,7 @@ src/
   features/
     route/                  경로 타입·계산·카드·구간 목록·필터·검색/선택 상태·즐겨찾기·최근 검색 저장·장소 규칙(placeRules)
     guidance/               독립된 안내 세션, 안내 복귀 바, 안내 관련 모달
+    share/                  경로 공유 링크 조립과 공유 시트·클립보드 공유(shareRoute.ts)
     ops/                    운영자 뷰: 지도 훅·재고 레이어·히트맵·데이터 상태
   map/                    지도 컴포넌트, 지도 위치 선택, 대여소 마커, SDK 수명 관리, 현재 위치 훅, 홈 레이어 타입(homeLayers), 재고 배지(bikeStockBadge)·홈 선택 상태(useHomeMapLayers)·주변 역/대여소 목록(NearbyStationList·NearbyBikeStationList)·대여소 카드(BikeStationCard)·재고/예측 훅(useBikeStationOutlook), 역 마커(stationMarkers)·주변 역 조회(useNearbyStationCongestion)·역 카드(StationCard)·도착/시간대 훅(useStationArrivals·useStationHourlyCongestion·congestionAdvice)
   api/
@@ -100,6 +101,7 @@ src/
 | 지도에서 위치 선택                     | `features/map/MapPlacePicker.tsx`                                                                                                          |
 | 위치 권한·오류                         | `features/map/useCurrentLocation.ts`                                                                                                       |
 | 경로 검색 조건 URL 형식·검증           | `app/routeQuery.ts`, `app/restoreTrip.ts`, `app/useNavigation.ts`(`parseHash`)                                                             |
+| 공유 링크 형식·공유 방식               | `features/share/shareRoute.ts`, `app/useRoutePlanner.ts`(`shareRoute`), `pages/ResultsPage.tsx`, `pages/DetailPage.tsx`                    |
 | 운영자 뷰 진입·노출 조건               | `app/opsAccess.ts`, `app/useNavigation.ts`                                                                                                 |
 | 운영자 뷰 레이아웃                     | `pages/OpsPage.tsx`, `styles.css`(`.ops-*`)                                                                                                |
 | 대여소 재고 마커 색·라벨               | `features/ops/bikeStockLayer.ts`, `features/ops/useOpsData.ts`(`stockLevel`)                                                               |
