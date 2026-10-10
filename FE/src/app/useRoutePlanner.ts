@@ -8,6 +8,7 @@ import { useGuidance } from '../features/guidance/useGuidance'
 import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
 import { useFavoritePlaces } from '../features/route/useFavoritePlaces'
+import { hasRouteLocation, samePlace } from '../features/route/placeRules'
 import {
   isCurrentLocation,
   isRecentRoutePinned,
@@ -41,31 +42,6 @@ interface ReplanState {
 }
 
 const initialReplan: ReplanState = { status: 'idle', proposals: [], error: '' }
-
-function samePlace(first: Place, second: Place) {
-  return (
-    first.id === second.id ||
-    (first.lat !== undefined &&
-      first.lng !== undefined &&
-      second.lat !== undefined &&
-      second.lng !== undefined &&
-      first.lat === second.lat &&
-      first.lng === second.lng)
-  )
-}
-
-function hasRouteLocation(place: Place) {
-  const hasCoordinates =
-    typeof place.lat === 'number' &&
-    typeof place.lng === 'number' &&
-    Number.isFinite(place.lat) &&
-    Number.isFinite(place.lng) &&
-    place.lat >= -90 &&
-    place.lat <= 90 &&
-    place.lng >= -180 &&
-    place.lng <= 180
-  return Boolean(place.stationId?.trim()) || hasCoordinates
-}
 
 export function useRoutePlanner(
   repository?: RouteRepository,
