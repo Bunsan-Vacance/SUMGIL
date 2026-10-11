@@ -1,6 +1,7 @@
 import type { Place, Route } from '../route/types'
 import type { GuidanceConditions, TrainArrival } from '../../api/guidance'
 import { isTransitLeg } from '../route/transitions'
+import type { FeedbackGrade } from '../../api/congestionFeedback'
 import {
   confirmationLabel,
   distanceToEndpoint,
@@ -24,6 +25,8 @@ export interface GuidanceState {
   conditions?: GuidanceConditions
   selectedArrival?: TrainArrival | null
   completed: boolean
+  /** 도착 화면에서 보낸 혼잡 체감. 안내 한 번에 한 번만 기록한다. */
+  feedbackGrade?: FeedbackGrade | null
   locationStatus: GuidanceLocationStatus
   position?: GuidancePosition | null
   /** Transient GPS confirmation state; callers must not persist these fields. */
@@ -40,6 +43,7 @@ export const initialGuidance: GuidanceState = {
   conditions: { modes: [], priority: 'fast' },
   selectedArrival: null,
   completed: false,
+  feedbackGrade: null,
   locationStatus: 'idle',
   position: null,
   locationCandidateStep: null,
@@ -55,6 +59,7 @@ export type GuidanceAction =
       conditions?: GuidanceConditions
     }
   | { type: 'stop' }
+  | { type: 'feedback-sent'; grade: FeedbackGrade }
   | { type: 'previous' }
   | { type: 'next' }
   | { type: 'set-step'; step: number }
@@ -153,6 +158,10 @@ export function guidanceReducer(state: GuidanceState, action: GuidanceAction): G
     }
     case 'stop':
       return initialGuidance
+    case 'feedback-sent':
+      return state.completed && !state.feedbackGrade
+        ? { ...state, feedbackGrade: action.grade }
+        : state
     case 'previous':
       if (!state.route) return state
       if (state.completed)

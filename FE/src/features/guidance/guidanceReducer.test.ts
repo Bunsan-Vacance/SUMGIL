@@ -389,4 +389,37 @@ describe('길안내 진행 상태', () => {
     const uncertain = { ...fix, accuracy: 25 }
     expect(guidanceReducer(guidanceReducer(state, uncertain), uncertain).step).toBe(0)
   })
+
+  it('혼잡 체감은 완료된 안내에 한 번만 기록한다', () => {
+    const active = {
+      ...initialGuidance,
+      route: routes[0],
+      origin: places[0],
+      destination: places[1],
+    }
+    expect(guidanceReducer(active, { type: 'feedback-sent', grade: 'NORMAL' })).toBe(active)
+    const completed = { ...active, completed: true }
+    const sent = guidanceReducer(completed, { type: 'feedback-sent', grade: 'CONGESTED' })
+    expect(sent.feedbackGrade).toBe('CONGESTED')
+    expect(guidanceReducer(sent, { type: 'feedback-sent', grade: 'RELAXED' })).toBe(sent)
+  })
+  it('이전 단계로 돌아가도 보낸 체감은 유지하고 새 안내를 시작하면 지운다', () => {
+    const sent = {
+      ...initialGuidance,
+      route: routes[0],
+      origin: places[0],
+      destination: places[1],
+      completed: true,
+      feedbackGrade: 'NORMAL' as const,
+    }
+    expect(guidanceReducer(sent, { type: 'previous' }).feedbackGrade).toBe('NORMAL')
+    const restarted = guidanceReducer(sent, {
+      type: 'start',
+      route: routes[1],
+      origin: places[0],
+      destination: places[1],
+    })
+    expect(restarted.feedbackGrade).toBeNull()
+    expect(guidanceReducer(sent, { type: 'stop' }).feedbackGrade).toBeNull()
+  })
 })

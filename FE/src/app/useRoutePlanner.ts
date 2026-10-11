@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigation } from './useNavigation'
 import { resolveScreen } from './resolveScreen'
 import { previewTripFor } from './preview'
@@ -27,6 +27,12 @@ import { isRegisterablePlace } from '../features/route/favoritePlaces'
 import type { FavoriteLabel } from '../features/route/favoritePlaces'
 import type { GuidanceDialog, GuidanceRequestStatus } from '../features/guidance/GuidanceDialogs'
 import type { RouteRepository } from '../api/contracts'
+import {
+  congestionFeedbackRepository as defaultFeedbackRepository,
+  type CongestionFeedbackRepository,
+  type FeedbackGrade,
+} from '../api/congestionFeedback'
+import { buildFeedbackRequest, feedbackTarget } from '../features/feedback/congestionFeedback'
 import type { Mode, Place, SearchTarget } from '../features/route/types'
 import { RepositoryError } from '../api/errors'
 import {
@@ -55,6 +61,7 @@ export function useRoutePlanner(
   repository?: RouteRepository,
   guidanceApi: GuidanceRepository = defaultGuidanceRepository,
   rerouteApi: RerouteRepository | null = defaultRerouteRepository,
+  feedbackApi: CongestionFeedbackRepository = defaultFeedbackRepository,
 ) {
   const navigation = useNavigation()
   const { go, replace } = navigation
@@ -360,6 +367,13 @@ export function useRoutePlanner(
     setModal(null)
     go('guide')
   }
+  const feedbackTargetLeg = useMemo(() => feedbackTarget(guidance.route), [guidance.route])
+  // 상태를 먼저 기록해 응답을 기다리지 않고, 전송 실패는 사용자에게 알리지 않는다.
+  const sendFeedback = (grade: FeedbackGrade) => {
+    if (!feedbackTargetLeg || !guidance.completed || guidance.feedbackGrade) return
+    guidance.markFeedbackSent(grade)
+    void feedbackApi.submit(buildFeedbackRequest(feedbackTargetLeg, grade)).catch(() => undefined)
+  }
   const canShare = currentRouteQuery(trip) !== null
   // 클릭 제스처 안에서 호출되므로 shareLink 전에 await하지 않는다.
   const shareRoute = async () => {
@@ -560,6 +574,9 @@ export function useRoutePlanner(
     findRoutesFrom,
     saveUsedRoute,
     usedRouteSaved,
+    feedbackTarget: feedbackTargetLeg,
+    feedbackGrade: guidance.feedbackGrade ?? null,
+    sendFeedback,
     choosePlace,
     setOriginFromBrowse,
     setOriginFromCurrentLocation,
