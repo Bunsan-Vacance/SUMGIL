@@ -7,11 +7,12 @@ import {
   currentRouteQuery,
   departureAtToClock,
   departureAtToIso,
+  parseRouteQuery,
   serializeRouteQuery,
 } from './routeQuery'
 import { buildShareUrl, shareLink, shareText } from '../features/share/shareRoute'
 import { useToast } from '../components/useToast'
-import { useTrip } from '../features/route/useTrip'
+import { todayInSeoul, useTrip } from '../features/route/useTrip'
 import { featuredRoutes } from '../features/route/featuredRoutes'
 import { useDepartureAlternatives } from '../features/route/useDepartureAlternatives'
 import { useGuidance } from '../features/guidance/useGuidance'
@@ -100,9 +101,12 @@ export function useRoutePlanner(
     enabled: screen === 'results' && trip.status === 'success',
     repository,
   })
-  // 제안 칩 적용. 지금은 다이얼로그와 같은 시각 변경 경로를 쓴다.
+  // 제안 칩 적용: 새 history 항목으로 URL만 바꾼다. 상태 반영은 해시 동기화 effect가 맡는다(중복 검색 방지).
   const applyDepartureSuggestion = (clock: string) => {
-    trip.setDepartureTime(clock)
+    const query = currentRouteQuery(trip)
+    const today = todayInSeoul(new Date())
+    if (!query || !today) return
+    go('results', serializeRouteQuery({ ...query, departureAt: `${today}T${clock}` }))
   }
   const { message, setMessage } = useToast()
   const [usedRouteSaved, setUsedRouteSaved] = useState(false)
@@ -158,10 +162,29 @@ export function useRoutePlanner(
     })
   }
   const { locate } = useCurrentLocation(setOriginFromCurrentLocation, setMessage, screen)
+  // 직전 effect 실행 때의 URL 쿼리. 쿼리가 바뀐 실행(칩 적용 push·뒤로가기)과 상태가 바뀐 실행을 구분한다.
+  const previousQuery = useRef(navigation.query)
   // 해시 동기화는 이 effect 한 곳에서만 한다. 결과·상세는 검색 조건을 쿼리로 보존하고, 그 밖의 화면은 쿼리를 지운다.
   useEffect(() => {
+    const queryChanged = previousQuery.current !== navigation.query
+    previousQuery.current = navigation.query
     if (screen === 'results' || screen === 'detail') {
       const query = currentRouteQuery(trip)
+      // URL이 바뀐 실행(제안 시각 적용·뒤로가기)에서 출발 시각만 다르면 URL을 따라 상태를 맞춘다.
+      // 같은 실행에서 상태→URL replace를 하면 방금 바뀐 URL을 덮어쓰므로 여기서 끝낸다.
+      if (screen === 'results' && queryChanged && query) {
+        const target = parseRouteQuery(navigation.query)
+        if (
+          target &&
+          samePlace(target.origin, query.origin) &&
+          samePlace(target.destination, query.destination) &&
+          target.departureAt !== query.departureAt
+        ) {
+          if (target.departureAt) trip.setDepartureTime(departureAtToClock(target.departureAt))
+          else trip.resetDepartureTime()
+          return
+        }
+      }
       if (!query) {
         if (screen !== navigation.screen) replace(screen)
         return

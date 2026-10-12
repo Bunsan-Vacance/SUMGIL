@@ -19,7 +19,7 @@ function validDepartureTime(value: string) {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
 }
 
-function todayInSeoul(date: Date) {
+export function todayInSeoul(date: Date) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Seoul',
     year: 'numeric',
@@ -111,6 +111,15 @@ export function useTrip(
     return true
   }
 
+  // 사용자가 고른 시각을 지우고 지금 기준으로 다시 찾는다. 뒤로가기로 '시각 미지정' 상태를 복원할 때 쓴다.
+  const resetDepartureTime = () => {
+    departureOverride.current = null
+    setDeparture(null)
+    if (state.destination) {
+      void search(state.destination, state.origin, state.enabled, new Date().toISOString())
+    }
+  }
+
   const searchWithModes = (selected: Mode[]) => {
     const nextModes = withWalk(selected)
     if (sameModes(state.enabled, nextModes)) {
@@ -140,6 +149,7 @@ export function useTrip(
     },
     setModes,
     setDepartureTime,
+    resetDepartureTime,
     setPriority: (priority: Priority) => {
       if (priority === priorityRef.current) return
       priorityRef.current = priority
