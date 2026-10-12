@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { places, routes } from '../api/mock/fixtures'
 import type { ComponentProps } from 'react'
 import type { Mode } from '../features/route/types'
+import type { DepartureSuggestion } from '../features/route/departureSuggestion'
 import ResultsPage from './ResultsPage'
 
 afterEach(() => {
@@ -320,5 +321,53 @@ describe('경로 공유 버튼', () => {
     expect(screen.getByRole('button', { name: '경로 공유' })).toBeTruthy()
     rerender(<ResultsPage {...props({ onShare, status: 'error' })} />)
     expect(screen.getByRole('button', { name: '경로 공유' })).toBeTruthy()
+  })
+})
+
+describe('덜 붐비는 출발 시각 제안 칩', () => {
+  const suggestion: DepartureSuggestion = {
+    offsetMin: 20,
+    clock: '19:00',
+    fromGrade: 'CONGESTED',
+    toGrade: 'RELAXED',
+    arrivalDeltaMin: 18,
+  }
+  const chipName = /이 시각으로 다시 찾기/
+
+  it('가장 빠른 경로 카드 바로 다음에 렌더되고 누르면 시각을 넘긴다', () => {
+    const onApplySuggestion = vi.fn()
+    const { container } = render(
+      <ResultsPage {...props({ visible: routes.slice(0, 2), suggestion, onApplySuggestion })} />,
+    )
+    const chip = screen.getByRole('button', { name: chipName })
+    expect(chip.previousElementSibling?.classList.contains('route-card')).toBe(true)
+    expect(container.querySelectorAll('.route-list')[0].firstElementChild?.classList).toContain(
+      'route-card',
+    )
+    fireEvent.click(chip)
+    expect(onApplySuggestion).toHaveBeenCalledWith('19:00')
+  })
+
+  it('제안이 없거나 콜백이 없으면 렌더하지 않는다', () => {
+    const { rerender } = render(<ResultsPage {...props({ visible: routes.slice(0, 2) })} />)
+    expect(screen.queryByRole('button', { name: chipName })).toBeNull()
+    rerender(
+      <ResultsPage
+        {...props({ visible: routes.slice(0, 2), suggestion: null, onApplySuggestion: vi.fn() })}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: chipName })).toBeNull()
+    rerender(<ResultsPage {...props({ visible: routes.slice(0, 2), suggestion })} />)
+    expect(screen.queryByRole('button', { name: chipName })).toBeNull()
+  })
+
+  it('로딩·에러 상태에서는 렌더하지 않는다', () => {
+    const onApplySuggestion = vi.fn()
+    const { rerender } = render(
+      <ResultsPage {...props({ status: 'loading', suggestion, onApplySuggestion })} />,
+    )
+    expect(screen.queryByRole('button', { name: chipName })).toBeNull()
+    rerender(<ResultsPage {...props({ status: 'error', suggestion, onApplySuggestion })} />)
+    expect(screen.queryByRole('button', { name: chipName })).toBeNull()
   })
 })

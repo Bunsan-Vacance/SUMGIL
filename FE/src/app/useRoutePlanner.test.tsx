@@ -964,3 +964,37 @@ describe('혼잡 체감 피드백 전송', () => {
     expect(result.current.feedbackGrade).toBeNull()
   })
 })
+
+describe('덜 붐비는 출발 시각 비교 조회', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+  })
+
+  it('비교 조회가 실패해도 본 결과는 그대로다', async () => {
+    const crowded: Route = {
+      ...routes[0],
+      departedAt: new Date().toISOString(),
+      congestionPrediction: {
+        congestionPercent: 120,
+        congestionGrade: null,
+        dataStatus: 'AVAILABLE',
+        predictionBasis: null,
+      },
+    }
+    const search = vi
+      .fn<RouteRepository['search']>()
+      .mockResolvedValueOnce([crowded])
+      .mockRejectedValue(new Error('boom'))
+    const rendered = renderHook(() => useRoutePlanner({ search }))
+    act(() => rendered.result.current.trip.setOrigin(places[0]))
+    act(() => rendered.result.current.findRoutes(places[1]))
+    await waitFor(() => expect(rendered.result.current.trip.status).toBe('success'))
+    await waitFor(() => expect(search.mock.calls.length).toBeGreaterThanOrEqual(3), {
+      timeout: 3000,
+    })
+    expect(rendered.result.current.trip.status).toBe('success')
+    expect(rendered.result.current.trip.visible).toHaveLength(1)
+    expect(rendered.result.current.departureSuggestion).toBeNull()
+  })
+})

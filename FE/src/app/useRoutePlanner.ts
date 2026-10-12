@@ -12,6 +12,8 @@ import {
 import { buildShareUrl, shareLink, shareText } from '../features/share/shareRoute'
 import { useToast } from '../components/useToast'
 import { useTrip } from '../features/route/useTrip'
+import { featuredRoutes } from '../features/route/featuredRoutes'
+import { useDepartureAlternatives } from '../features/route/useDepartureAlternatives'
 import { useGuidance } from '../features/guidance/useGuidance'
 import { useRerouteCheck } from '../features/guidance/useRerouteCheck'
 import { useCurrentLocation } from '../features/map/useCurrentLocation'
@@ -88,6 +90,20 @@ export function useRoutePlanner(
   }, [])
   const guidance = useGuidance(navigation.screen === 'guide')
   const screen = resolveScreen(navigation.screen, trip, guidance)
+  const { suggestion: departureSuggestion } = useDepartureAlternatives({
+    base: featuredRoutes(trip.visible)[0]?.route,
+    origin: trip.origin,
+    destination: trip.destination,
+    modes: trip.enabled,
+    priority: trip.priority,
+    departedAt: trip.departedAt,
+    enabled: screen === 'results' && trip.status === 'success',
+    repository,
+  })
+  // 제안 칩 적용. 지금은 다이얼로그와 같은 시각 변경 경로를 쓴다.
+  const applyDepartureSuggestion = (clock: string) => {
+    trip.setDepartureTime(clock)
+  }
   const { message, setMessage } = useToast()
   const [usedRouteSaved, setUsedRouteSaved] = useState(false)
   const favorites = useFavoritePlaces()
@@ -583,6 +599,8 @@ export function useRoutePlanner(
     swapPlaces,
     canShare,
     shareRoute,
+    departureSuggestion,
+    applyDepartureSuggestion,
     selectRoute,
     startGuide,
     confirmReplacement,
