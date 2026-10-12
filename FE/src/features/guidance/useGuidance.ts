@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import type { Place, Route } from '../route/types'
 import type { GuidanceConditions, TrainArrival } from '../../api/guidance'
+import type { FeedbackGrade } from '../../api/congestionFeedback'
+import { isFeedbackGrade } from '../feedback/congestionFeedback'
 import { LOCATION_MAX_AGE_MS } from './locationProgress'
 import {
   guidanceReducer,
@@ -66,6 +68,7 @@ function restoreGuidance(): GuidanceState {
   return {
     ...initialGuidance,
     ...(parsed as unknown as GuidanceState),
+    feedbackGrade: isFeedbackGrade(parsed.feedbackGrade) ? parsed.feedbackGrade : null,
     locationStatus: 'idle',
     position: null,
     locationCandidateStep: undefined,
@@ -204,5 +207,6 @@ export function useGuidance(trackingEnabled = false) {
     setTrain: (time: string, arrival?: TrainArrival | null) =>
       dispatch({ type: 'train', time, arrival }),
     replan: (route: Route, keepLegs?: number) => dispatch({ type: 'replan', route, keepLegs }),
+    markFeedbackSent: (grade: FeedbackGrade) => dispatch({ type: 'feedback-sent', grade }),
   }
 }

@@ -908,3 +908,59 @@ describe('경로 공유', () => {
     )
   })
 })
+
+describe('혼잡 체감 피드백 전송', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#arrival')
+    sessionStorage.clear()
+    sessionStorage.setItem(
+      GUIDANCE_STORAGE_KEY,
+      JSON.stringify({
+        route: routes[0],
+        step: routes[0].legs.length - 1,
+        completed: true,
+        origin: places[0],
+        destination: places[1],
+      }),
+    )
+  })
+
+  it('누르면 상태를 먼저 기록하고 한 번만 전송한다', () => {
+    const submit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() => useRoutePlanner(repository, undefined, null, { submit }))
+    expect(result.current.feedbackTarget).not.toBeNull()
+    expect(result.current.feedbackGrade).toBeNull()
+    act(() => result.current.sendFeedback('CONGESTED'))
+    expect(result.current.feedbackGrade).toBe('CONGESTED')
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(submit.mock.calls[0][0]).toMatchObject({
+      mode: 'subway',
+      reportedGrade: 'CONGESTED',
+      routeId: result.current.feedbackTarget!.leg.routeId,
+    })
+    act(() => result.current.sendFeedback('RELAXED'))
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(result.current.feedbackGrade).toBe('CONGESTED')
+  })
+
+  it('전송이 실패해도 메시지를 띄우지 않는다', async () => {
+    const submit = vi.fn().mockRejectedValue(new Error('실패'))
+    const { result } = renderHook(() => useRoutePlanner(repository, undefined, null, { submit }))
+    await act(async () => result.current.sendFeedback('NORMAL'))
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(result.current.message).toBe('')
+    expect(result.current.feedbackGrade).toBe('NORMAL')
+  })
+
+  it('안내가 끝나지 않았거나 대상 구간이 없으면 보내지 않는다', () => {
+    const submit = vi.fn().mockResolvedValue(undefined)
+    sessionStorage.setItem(
+      GUIDANCE_STORAGE_KEY,
+      JSON.stringify({ route: routes[0], step: 0, completed: false }),
+    )
+    const { result } = renderHook(() => useRoutePlanner(repository, undefined, null, { submit }))
+    act(() => result.current.sendFeedback('NORMAL'))
+    expect(submit).not.toHaveBeenCalled()
+    expect(result.current.feedbackGrade).toBeNull()
+  })
+})

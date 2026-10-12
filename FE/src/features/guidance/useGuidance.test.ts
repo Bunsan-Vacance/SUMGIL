@@ -221,4 +221,35 @@ describe('길안내 위치 추적', () => {
     rerender({ enabled: false })
     expect(clearWatch).toHaveBeenCalledWith(10)
   })
+
+  it('보낸 혼잡 체감을 저장하고 복원한다', () => {
+    sessionStorage.setItem(
+      GUIDANCE_STORAGE_KEY,
+      JSON.stringify({ route: routes[0], step: 0, completed: true, feedbackGrade: 'CONGESTED' }),
+    )
+    const { result } = renderHook(() => useGuidance(false))
+    expect(result.current.feedbackGrade).toBe('CONGESTED')
+    expect(JSON.parse(sessionStorage.getItem(GUIDANCE_STORAGE_KEY)!).feedbackGrade).toBe(
+      'CONGESTED',
+    )
+  })
+
+  it('저장된 체감 값이 세 등급이 아니면 버린다', () => {
+    sessionStorage.setItem(
+      GUIDANCE_STORAGE_KEY,
+      JSON.stringify({ route: routes[0], step: 0, completed: true, feedbackGrade: 'SATURATED' }),
+    )
+    const { result } = renderHook(() => useGuidance(false))
+    expect(result.current.feedbackGrade).toBeNull()
+  })
+
+  it('markFeedbackSent는 완료된 안내에서만 기록한다', () => {
+    sessionStorage.setItem(
+      GUIDANCE_STORAGE_KEY,
+      JSON.stringify({ route: routes[0], step: 0, completed: false }),
+    )
+    const { result } = renderHook(() => useGuidance(false))
+    act(() => result.current.markFeedbackSent('NORMAL'))
+    expect(result.current.feedbackGrade).toBeNull()
+  })
 })

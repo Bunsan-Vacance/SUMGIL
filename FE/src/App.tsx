@@ -242,6 +242,9 @@ export default function App() {
               canSave={Boolean(guidance.origin && guidance.destination)}
               saved={planner.usedRouteSaved}
               onSaveRoute={planner.saveUsedRoute}
+              feedbackTarget={planner.feedbackTarget}
+              feedbackGrade={planner.feedbackGrade}
+              onFeedback={planner.sendFeedback}
             />
           )}
           {planner.message && (
