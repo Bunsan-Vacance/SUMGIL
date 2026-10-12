@@ -6,6 +6,7 @@ import type { Mode, Place, Priority, Route } from '../features/route/types'
 import type { TripState } from '../features/route/tripReducer'
 import type { Navigate } from '../app/useNavigation'
 import { clockTime, congestionPredictionFor } from '../features/route/selectors'
+import { featuredRoutes, sortRoutes } from '../features/route/featuredRoutes'
 import { groupRoutes } from '../features/route/routeGrouping'
 import type { RepositoryErrorCode } from '../api/errors'
 import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
@@ -36,68 +37,6 @@ interface Props {
   onResetModes?: () => void
   onSearchWalk?: () => void
   onShare?: () => void
-}
-
-type Recommendation = 'fast' | 'calm'
-
-interface FeaturedRoute {
-  route: Route
-  recommendations: Recommendation[]
-}
-
-function compareByTime(a: Route, b: Route, aIndex: number, bIndex: number) {
-  return a.minutes - b.minutes || aIndex - bIndex
-}
-
-function sortRoutes(routes: Route[], priority: Priority) {
-  return routes
-    .map((route, index) => ({
-      route,
-      index,
-      prediction: congestionPredictionFor(route)?.congestionPercent,
-    }))
-    .sort((a, b) => {
-      if (priority === 'fast') return compareByTime(a.route, b.route, a.index, b.index)
-      if (a.prediction !== undefined && b.prediction !== undefined) {
-        return a.prediction - b.prediction || compareByTime(a.route, b.route, a.index, b.index)
-      }
-      if (a.prediction !== undefined) return -1
-      if (b.prediction !== undefined) return 1
-      return compareByTime(a.route, b.route, a.index, b.index)
-    })
-    .map(({ route }) => route)
-}
-
-function featuredRoutes(routes: Route[]): FeaturedRoute[] {
-  if (!routes.length) return []
-  const fastest = routes.reduce(
-    (best, route, index) =>
-      !best || compareByTime(route, best.route, index, best.index) < 0 ? { route, index } : best,
-    undefined as { route: Route; index: number } | undefined,
-  )
-  const taggedCalm = routes.filter((route) => route.routeType === 'LOW_CONGESTION')
-  const calmCandidates = taggedCalm.length
-    ? taggedCalm
-    : routes.filter((route) => congestionPredictionFor(route) !== undefined)
-  const calm = calmCandidates.reduce<Route | undefined>((best, route) => {
-    if (!best) return route
-    if (taggedCalm.length) return compareByTime(route, best, 0, 0) < 0 ? route : best
-    const routePercent = congestionPredictionFor(route)?.congestionPercent
-    const bestPercent = congestionPredictionFor(best)?.congestionPercent
-    if (routePercent === undefined || bestPercent === undefined) return best
-    return routePercent < bestPercent ||
-      (routePercent === bestPercent && route.minutes < best.minutes)
-      ? route
-      : best
-  }, undefined)
-  const result: FeaturedRoute[] = []
-  if (fastest) result.push({ route: fastest.route, recommendations: ['fast'] })
-  if (calm) {
-    const existing = result.find((entry) => entry.route.id === calm.id)
-    if (existing) existing.recommendations.push('calm')
-    else result.push({ route: calm, recommendations: ['calm'] })
-  }
-  return result
 }
 
 export default function ResultsPage({
