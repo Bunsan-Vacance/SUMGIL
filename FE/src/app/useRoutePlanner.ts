@@ -91,8 +91,11 @@ export function useRoutePlanner(
   }, [])
   const guidance = useGuidance(navigation.screen === 'guide')
   const screen = resolveScreen(navigation.screen, trip, guidance)
-  const { suggestion: departureSuggestion } = useDepartureAlternatives({
-    base: featuredRoutes(trip.visible)[0]?.route,
+  const { suggestions: departureSuggestions } = useDepartureAlternatives({
+    bases: featuredRoutes(trip.visible).map(({ route, recommendations }) => ({
+      kind: recommendations.length > 1 ? ('both' as const) : recommendations[0],
+      route,
+    })),
     origin: trip.origin,
     destination: trip.destination,
     modes: trip.enabled,
@@ -622,7 +625,7 @@ export function useRoutePlanner(
     swapPlaces,
     canShare,
     shareRoute,
-    departureSuggestion,
+    departureSuggestions,
     applyDepartureSuggestion,
     selectRoute,
     startGuide,

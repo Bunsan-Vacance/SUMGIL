@@ -88,23 +88,25 @@ export function pickSuggestion(
   }
 }
 
-/** 칩 표시용 파생 값. 등급 단어·색은 구간 혼잡 표현을 따른다. */
+/** 띠의 행 표시용 파생 값. 등급 단어·색은 구간 혼잡 표현을 따른다. */
 export function suggestionView(s: DepartureSuggestion) {
   const from = segmentCongestionPresentation(s.fromGrade)
   const to = segmentCongestionPresentation(s.toGrade)
   const fromLabel = from?.label ?? ''
   const toLabel = to?.label ?? ''
   const d = s.arrivalDeltaMin
-  const arrivalText = d > 0 ? `도착 +${d}분` : d < 0 ? `도착 −${-d}분` : '도착 시각 비슷'
+  const arrival = d > 0 ? `도착 +${d}분` : d < 0 ? `도착 −${-d}분` : '도착 시각 비슷'
   const arrivalAria =
     d > 0 ? `도착 ${d}분 늦어짐` : d < 0 ? `도착 ${-d}분 빨라짐` : '도착 시각 비슷'
   return {
-    title: `${s.offsetMin}분 늦게 출발하면`,
+    detail: `${s.clock} 출발`,
     fromLabel,
     fromColor: from?.color ?? 'currentColor',
     toLabel,
     toColor: to?.color ?? 'currentColor',
-    detail: `${s.clock} 출발 · ${arrivalText} · 예측 기준`,
-    ariaLabel: `${s.offsetMin}분 늦게 ${s.clock}에 출발하면 ${fromLabel}에서 ${toLabel}, ${arrivalAria}, 예측 기준. 이 시각으로 다시 찾기`,
+    arrival,
+    /** kindLabel 예: '가장 빠른 경로'. */
+    ariaLabel: (kindLabel: string) =>
+      `${kindLabel}, ${s.clock}에 출발하면 ${fromLabel}에서 ${toLabel}, ${arrivalAria}, 예측 기준. 이 시각으로 다시 찾기`,
   }
 }

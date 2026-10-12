@@ -996,7 +996,7 @@ describe('덜 붐비는 출발 시각 비교 조회', () => {
     })
     expect(rendered.result.current.trip.status).toBe('success')
     expect(rendered.result.current.trip.visible).toHaveLength(1)
-    expect(rendered.result.current.departureSuggestion).toBeNull()
+    expect(rendered.result.current.departureSuggestions).toEqual([])
   })
 })
 

@@ -15,8 +15,22 @@ import type { Mode, Place, Priority, Route } from './types'
 const SEARCH_DELAY_MS = 600
 const CACHE_LIMIT = 20
 
+/** 제안 기준 경로. kind는 추천 경로 배지 종류(둘을 겸하면 both). */
+export type SuggestionKind = 'fast' | 'calm' | 'both'
+export interface SuggestionBase {
+  kind: SuggestionKind
+  route: Route
+}
+export interface RouteSuggestion {
+  kind: SuggestionKind
+  routeId: string
+  suggestion: DepartureSuggestion
+}
+
+const NO_SUGGESTIONS: RouteSuggestion[] = []
+
 interface Input {
-  base: Route | undefined
+  bases: SuggestionBase[]
   origin: Place
   destination: Place | null
   modes: Mode[]
@@ -40,7 +54,7 @@ function placeKey(place: Place) {
  * 본 검색 상태(useTrip)에는 영향을 주지 않으며, 실패는 조용히 무시한다.
  */
 export function useDepartureAlternatives({
-  base,
+  bases,
   origin,
   destination,
   modes,
@@ -48,32 +62,32 @@ export function useDepartureAlternatives({
   departedAt,
   enabled,
   repository = routeRepository,
-}: Input): { suggestion: DepartureSuggestion | null } {
-  const [suggestion, setSuggestion] = useState<DepartureSuggestion | null>(null)
+}: Input): { suggestions: RouteSuggestion[] } {
+  const [suggestions, setSuggestions] = useState<RouteSuggestion[]>(NO_SUGGESTIONS)
   const cache = useRef(new Map<string, Route[]>())
-  const latest = useRef({ base, origin, destination, modes, repository })
-  latest.current = { base, origin, destination, modes, repository }
+  const latest = useRef({ bases, origin, destination, modes, repository })
+  latest.current = { bases, origin, destination, modes, repository }
 
   // base 객체 참조 대신 판정에 쓰이는 값만 키로 삼아 재렌더마다 재조회하지 않는다.
-  const baseIndex = base ? gradeIndex(base) : undefined
-  const baseKey = base
-    ? `${base.id}|${routeSignature(base) ?? ''}|${baseIndex ?? ''}|${base.minutes}`
-    : ''
+  const baseKey = bases
+    .map(({ kind, route }) =>
+      [kind, route.id, routeSignature(route) ?? '', gradeIndex(route) ?? '', route.minutes].join(
+        ':',
+      ),
+    )
+    .join('|')
+  const needsComparison = bases.some(({ route }) => {
+    const index = gradeIndex(route)
+    return index !== undefined && index > 0
+  })
   const destinationKey = destination ? placeKey(destination) : ''
   const originKey = placeKey(origin)
   const modesKey = [...withWalk(modes)].sort().join(',')
 
   useEffect(() => {
-    const { base: current, origin, destination, modes, repository } = latest.current
-    if (
-      !enabled ||
-      !current ||
-      !destination ||
-      !departedAt ||
-      baseIndex === undefined ||
-      baseIndex === 0
-    ) {
-      setSuggestion(null)
+    const { bases: currentBases, origin, destination, modes, repository } = latest.current
+    if (!enabled || !destination || !departedAt || !needsComparison) {
+      setSuggestions(NO_SUGGESTIONS)
       return
     }
     const targets = SUGGESTION_OFFSETS_MIN.flatMap((offsetMin) => {
@@ -89,10 +103,16 @@ export function useDepartureAlternatives({
         return routes ? [{ offsetMin, clock: shifted.clock, routes }] : []
       })
 
-    setSuggestion(null)
+    const pick = () =>
+      currentBases.flatMap(({ kind, route }) => {
+        const suggestion = pickSuggestion(route, fromCache())
+        return suggestion ? [{ kind, routeId: route.id, suggestion }] : []
+      })
+
+    setSuggestions(NO_SUGGESTIONS)
     if (targets.length === 0) return
     if (fromCache().length === targets.length) {
-      setSuggestion(pickSuggestion(current, fromCache()))
+      setSuggestions(pick())
       return
     }
 
@@ -125,7 +145,7 @@ export function useDepartureAlternatives({
           }
         }),
       ).then(() => {
-        if (!controller.signal.aborted) setSuggestion(pickSuggestion(current, fromCache()))
+        if (!controller.signal.aborted) setSuggestions(pick())
       })
     }, SEARCH_DELAY_MS)
 
@@ -134,7 +154,7 @@ export function useDepartureAlternatives({
       controller.abort()
     }
     // 장소·수단·기준 경로는 키로 비교하고 실제 값은 latest ref로 읽는다.
-  }, [enabled, baseKey, baseIndex, originKey, destinationKey, modesKey, priority, departedAt])
+  }, [enabled, baseKey, needsComparison, originKey, destinationKey, modesKey, priority, departedAt])
 
-  return { suggestion }
+  return { suggestions }
 }

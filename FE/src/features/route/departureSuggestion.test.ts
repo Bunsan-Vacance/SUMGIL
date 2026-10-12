@@ -161,27 +161,29 @@ describe('suggestionView', () => {
   })
 
   it('늦게 도착하는 경우 문구', () => {
-    expect(suggestionView(suggestion(18))).toEqual({
-      title: '20분 늦게 출발하면',
+    const view = suggestionView(suggestion(18))
+    expect(view).toMatchObject({
+      detail: '19:00 출발',
       fromLabel: '혼잡',
       fromColor: '#b91c1c',
       toLabel: '여유',
       toColor: '#1d4ed8',
-      detail: '19:00 출발 · 도착 +18분 · 예측 기준',
-      ariaLabel:
-        '20분 늦게 19:00에 출발하면 혼잡에서 여유, 도착 18분 늦어짐, 예측 기준. 이 시각으로 다시 찾기',
+      arrival: '도착 +18분',
     })
+    expect(view.ariaLabel('가장 빠른 경로')).toBe(
+      '가장 빠른 경로, 19:00에 출발하면 혼잡에서 여유, 도착 18분 늦어짐, 예측 기준. 이 시각으로 다시 찾기',
+    )
   })
 
   it('빨리 도착하는 경우 U+2212 마이너스를 쓴다', () => {
     const view = suggestionView(suggestion(-3))
-    expect(view.detail).toBe('19:00 출발 · 도착 −3분 · 예측 기준')
-    expect(view.ariaLabel).toContain('도착 3분 빨라짐')
+    expect(view.arrival).toBe('도착 −3분')
+    expect(view.ariaLabel('덜 붐비는 경로')).toContain('도착 3분 빨라짐')
   })
 
   it('차이가 없으면 도착 시각 비슷', () => {
     const view = suggestionView(suggestion(0))
-    expect(view.detail).toBe('19:00 출발 · 도착 시각 비슷 · 예측 기준')
-    expect(view.ariaLabel).toContain('도착 시각 비슷, 예측 기준')
+    expect(view.arrival).toBe('도착 시각 비슷')
+    expect(view.ariaLabel('추천 경로')).toContain('도착 시각 비슷, 예측 기준')
   })
 })

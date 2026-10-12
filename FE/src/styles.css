@@ -1995,43 +1995,53 @@ small {
   background: linear-gradient(90deg, #f5f9ff 0%, #f5f9ff 50%, #fbf8ff 50%, #fbf8ff 100%);
   box-shadow: inset 0 0 0 1px #9f76d2;
 }
-.results-suggestion {
+.results-suggestions {
+  display: grid;
+  padding: 6px 14px 4px;
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--line);
+}
+.results-suggestions-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: calc(100% - 28px);
-  min-height: 48px;
-  margin: -2px 14px 12px;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--primary-soft);
+  gap: 6px;
   color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+.results-suggestions-head small {
+  font-weight: 400;
+  color: #3f6b5f;
+}
+.results-suggestion-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
   text-align: left;
+  font-size: 12px;
   cursor: pointer;
 }
+.results-suggestion-row .route-recommendation-badge {
+  flex: none;
+  min-height: 20px;
+  padding: 0 6px;
+}
 .results-suggestion-text {
-  display: flex;
   flex: 1;
-  flex-direction: column;
-  gap: 2px;
   min-width: 0;
-}
-.results-suggestion-text strong {
-  font-size: 13px;
-  font-weight: 700;
   color: #152536;
-}
-.results-suggestion-text small {
-  font-size: 11px;
-  color: #3f6b5f;
 }
 .results-suggestion-action {
   display: inline-flex;
   align-items: center;
   flex: none;
-  font-size: 12px;
   font-weight: 700;
+  color: var(--primary-dark);
 }
 .route-card-heading {
   display: inline-flex;

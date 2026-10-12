@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { useState } from 'react'
 import { ArrowLeftRight, ChevronDown, Share2, SlidersHorizontal, X } from 'lucide-react'
 import DepartureTimeDialog from '../features/route/DepartureTimeDialog'
 import RouteCard from '../features/route/RouteCard'
@@ -9,8 +9,8 @@ import { clockTime, congestionPredictionFor } from '../features/route/selectors'
 import { featuredRoutes, sortRoutes } from '../features/route/featuredRoutes'
 import { groupRoutes } from '../features/route/routeGrouping'
 import type { RepositoryErrorCode } from '../api/errors'
-import DepartureSuggestionChip from '../features/route/DepartureSuggestionChip'
-import type { DepartureSuggestion } from '../features/route/departureSuggestion'
+import DepartureSuggestionBanner from '../features/route/DepartureSuggestionBanner'
+import type { RouteSuggestion } from '../features/route/useDepartureAlternatives'
 import { useScrollbarVisibility } from '../components/useScrollbarVisibility'
 
 interface Props {
@@ -39,7 +39,7 @@ interface Props {
   onResetModes?: () => void
   onSearchWalk?: () => void
   onShare?: () => void
-  suggestion?: DepartureSuggestion | null
+  suggestions?: RouteSuggestion[]
   onApplySuggestion?: (clock: string) => void
 }
 
@@ -67,7 +67,7 @@ export default function ResultsPage({
   onResetModes,
   onSearchWalk,
   onShare,
-  suggestion,
+  suggestions,
   onApplySuggestion,
 }: Props) {
   const resultsRef = useScrollbarVisibility<HTMLDivElement>()
@@ -219,6 +219,9 @@ export default function ResultsPage({
           </div>
         ) : (
           <>
+            {suggestions && onApplySuggestion && (
+              <DepartureSuggestionBanner suggestions={suggestions} onApply={onApplySuggestion} />
+            )}
             {!liveApi && <p className="results-sample">시안 · 예시 데이터</p>}
             {featured.length > 0 && (
               <section className="route-section" aria-labelledby="recommended-routes-heading">
@@ -226,24 +229,17 @@ export default function ResultsPage({
                   <h2 id="recommended-routes-heading">추천 경로</h2>
                 </div>
                 <div className="route-list">
-                  {featured.map(({ route, recommendations }, index) => (
-                    <Fragment key={route.id}>
-                      <RouteCard
-                        route={route}
-                        selected={route.id === selectedId}
-                        recommendations={recommendations}
-                        onDetail={() => {
-                          setSelectedId(route.id)
-                          go('detail')
-                        }}
-                      />
-                      {index === 0 && suggestion && onApplySuggestion && (
-                        <DepartureSuggestionChip
-                          suggestion={suggestion}
-                          onApply={onApplySuggestion}
-                        />
-                      )}
-                    </Fragment>
+                  {featured.map(({ route, recommendations }) => (
+                    <RouteCard
+                      key={route.id}
+                      route={route}
+                      selected={route.id === selectedId}
+                      recommendations={recommendations}
+                      onDetail={() => {
+                        setSelectedId(route.id)
+                        go('detail')
+                      }}
+                    />
                   ))}
                 </div>
               </section>
