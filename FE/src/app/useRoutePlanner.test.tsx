@@ -9,6 +9,7 @@ import { places, routes } from '../api/mock/fixtures'
 import { GUIDANCE_STORAGE_KEY } from '../features/guidance/useGuidance'
 import { loadRecentRoutes } from '../features/route/recentRoutes'
 import { useRoutePlanner } from './useRoutePlanner'
+import { todayInSeoul } from '../features/route/useTrip'
 import { serializeRouteQuery } from './routeQuery'
 import type { Place } from '../features/route/types'
 
@@ -962,5 +963,131 @@ describe('혼잡 체감 피드백 전송', () => {
     act(() => result.current.sendFeedback('NORMAL'))
     expect(submit).not.toHaveBeenCalled()
     expect(result.current.feedbackGrade).toBeNull()
+  })
+})
+
+describe('덜 붐비는 출발 시각 비교 조회', () => {
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+  })
+
+  it('비교 조회가 실패해도 본 결과는 그대로다', async () => {
+    const crowded: Route = {
+      ...routes[0],
+      departedAt: new Date().toISOString(),
+      congestionPrediction: {
+        congestionPercent: 120,
+        congestionGrade: null,
+        dataStatus: 'AVAILABLE',
+        predictionBasis: null,
+      },
+    }
+    const search = vi
+      .fn<RouteRepository['search']>()
+      .mockResolvedValueOnce([crowded])
+      .mockRejectedValue(new Error('boom'))
+    const rendered = renderHook(() => useRoutePlanner({ search }))
+    act(() => rendered.result.current.trip.setOrigin(places[0]))
+    act(() => rendered.result.current.findRoutes(places[1]))
+    await waitFor(() => expect(rendered.result.current.trip.status).toBe('success'))
+    await waitFor(() => expect(search.mock.calls.length).toBeGreaterThanOrEqual(3), {
+      timeout: 3000,
+    })
+    expect(rendered.result.current.trip.status).toBe('success')
+    expect(rendered.result.current.trip.visible).toHaveLength(1)
+    expect(rendered.result.current.departureSuggestions).toEqual([])
+  })
+})
+
+describe('제안 시각 적용과 뒤로가기 복원', () => {
+  // URL에 실을 수 있도록 도착지에 역 id를 둔다.
+  const destination: Place = { ...places[1], stationId: '0214' }
+  const plainRoutes = routes.map((route) => ({ ...route, congestionPrediction: undefined }))
+  const settle = () => act(async () => void (await new Promise((done) => setTimeout(done, 80))))
+  const hashAt = () => new URLSearchParams(location.hash.split('?')[1] ?? '').get('at')
+  const goBackTo = (hash: string) => {
+    history.replaceState(null, '', hash)
+    act(() => {
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+    })
+  }
+
+  beforeEach(() => {
+    history.replaceState(null, '', '#home')
+    sessionStorage.clear()
+  })
+
+  const setup = async () => {
+    const search = vi.fn<RouteRepository['search']>(async () => plainRoutes)
+    const rendered = renderHook(() => useRoutePlanner({ search }))
+    act(() => rendered.result.current.trip.setOrigin(places[0]))
+    act(() => rendered.result.current.findRoutes(destination))
+    await waitFor(() => expect(rendered.result.current.trip.status).toBe('success'))
+    await settle()
+    return { search, rendered }
+  }
+  const isoAt = (clock: string) => {
+    const today = todayInSeoul(new Date())
+    return new Date(`${today}T${clock}:00+09:00`).toISOString()
+  }
+
+  it('칩 적용은 새 history 항목을 쌓고 본 검색을 정확히 1회 한다', async () => {
+    const { search, rendered } = await setup()
+    const before = search.mock.calls.length
+    const length = history.length
+    act(() => rendered.result.current.applyDepartureSuggestion('10:20'))
+    await waitFor(() => expect(rendered.result.current.trip.departureTime).toBe('10:20'))
+    await settle()
+    expect(hashAt()).toBe(`${todayInSeoul(new Date())}T10:20`)
+    expect(history.length).toBe(length + 1)
+    expect(search.mock.calls.length).toBe(before + 1)
+    expect(search.mock.calls.at(-1)?.[0].departedAt).toBe(isoAt('10:20'))
+  })
+
+  it('뒤로가기로 이전 시각을 복원 검색 1회로 되돌린다', async () => {
+    const { search, rendered } = await setup()
+    act(() => rendered.result.current.trip.setDepartureTime('09:00'))
+    await settle()
+    const previousHash = location.hash
+    act(() => rendered.result.current.applyDepartureSuggestion('09:20'))
+    await waitFor(() => expect(rendered.result.current.trip.departureTime).toBe('09:20'))
+    await settle()
+    const before = search.mock.calls.length
+    goBackTo(previousHash)
+    await waitFor(() => expect(rendered.result.current.trip.departureTime).toBe('09:00'))
+    await settle()
+    expect(search.mock.calls.length).toBe(before + 1)
+    expect(search.mock.calls.at(-1)?.[0].departedAt).toBe(isoAt('09:00'))
+    expect(location.hash).toBe(previousHash)
+  })
+
+  it('원래 시각이 없었다면 뒤로가기는 시각 지정을 풀고 지금 기준으로 다시 찾는다', async () => {
+    const { search, rendered } = await setup()
+    const previousHash = location.hash
+    act(() => rendered.result.current.applyDepartureSuggestion('10:20'))
+    await waitFor(() => expect(rendered.result.current.trip.departureTime).toBe('10:20'))
+    await settle()
+    const before = search.mock.calls.length
+    const started = Date.now()
+    goBackTo(previousHash)
+    await waitFor(() => expect(rendered.result.current.trip.departureTime).toBeNull())
+    await settle()
+    expect(search.mock.calls.length).toBe(before + 1)
+    const sent = Date.parse(search.mock.calls.at(-1)?.[0].departedAt ?? '')
+    expect(Math.abs(sent - started)).toBeLessThan(5000)
+    expect(hashAt()).toBeNull()
+  })
+
+  it('다이얼로그 시각 변경은 검색 1회이고 effect가 추가 검색하지 않는다', async () => {
+    const { search, rendered } = await setup()
+    const before = search.mock.calls.length
+    const length = history.length
+    act(() => rendered.result.current.trip.setDepartureTime('11:00'))
+    await settle()
+    await settle()
+    expect(search.mock.calls.length).toBe(before + 1)
+    expect(history.length).toBe(length)
+    expect(hashAt()).toBe(`${todayInSeoul(new Date())}T11:00`)
   })
 })

@@ -202,6 +202,8 @@ export default function App() {
               onResetModes={trip.resetModes}
               onSearchWalk={trip.searchWalkOnly}
               onShare={planner.canShare ? () => void planner.shareRoute() : undefined}
+              suggestions={planner.departureSuggestions}
+              onApplySuggestion={planner.applyDepartureSuggestion}
             />
           )}
           {routeView && displayedRoute && (

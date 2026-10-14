@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { places, routes } from '../api/mock/fixtures'
 import type { ComponentProps } from 'react'
 import type { Mode } from '../features/route/types'
+import type { RouteSuggestion } from '../features/route/useDepartureAlternatives'
 import ResultsPage from './ResultsPage'
 
 afterEach(() => {
@@ -320,5 +321,72 @@ describe('경로 공유 버튼', () => {
     expect(screen.getByRole('button', { name: '경로 공유' })).toBeTruthy()
     rerender(<ResultsPage {...props({ onShare, status: 'error' })} />)
     expect(screen.getByRole('button', { name: '경로 공유' })).toBeTruthy()
+  })
+})
+
+describe('덜 붐비는 출발 시각 제안 띠', () => {
+  const suggestions: RouteSuggestion[] = [
+    {
+      kind: 'fast',
+      routeId: 'a',
+      suggestion: {
+        offsetMin: 20,
+        clock: '19:00',
+        fromGrade: 'CONGESTED',
+        toGrade: 'RELAXED',
+        arrivalDeltaMin: 18,
+      },
+    },
+    {
+      kind: 'calm',
+      routeId: 'b',
+      suggestion: {
+        offsetMin: 10,
+        clock: '18:50',
+        fromGrade: 'NORMAL',
+        toGrade: 'RELAXED',
+        arrivalDeltaMin: 9,
+      },
+    },
+  ]
+  const bannerName = '덜 붐비는 출발 시각'
+
+  it('출발 시각 줄 다음, 추천 경로 앞에 렌더되고 행을 누르면 시각을 넘긴다', () => {
+    const onApplySuggestion = vi.fn()
+    const { container } = render(
+      <ResultsPage {...props({ visible: routes.slice(0, 2), suggestions, onApplySuggestion })} />,
+    )
+    const banner = screen.getByRole('region', { name: bannerName })
+    expect(container.querySelector('.results-sort-row')?.nextElementSibling).toBe(banner)
+    const firstSection = container.querySelector('.route-section') as Element
+    expect(
+      banner.compareDocumentPosition(firstSection) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    const rows = banner.querySelectorAll('button.results-suggestion-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].getAttribute('aria-label')).toContain('가장 빠른 경로, 19:00에 출발하면')
+    expect(rows[1].textContent).toContain('덜 붐비는')
+    fireEvent.click(rows[1])
+    expect(onApplySuggestion).toHaveBeenCalledWith('18:50')
+  })
+
+  it('빈 배열이거나 제안·콜백이 없으면 렌더하지 않는다', () => {
+    const visible = routes.slice(0, 2)
+    const { rerender } = render(
+      <ResultsPage {...props({ visible, suggestions: [], onApplySuggestion: vi.fn() })} />,
+    )
+    expect(screen.queryByRole('region', { name: bannerName })).toBeNull()
+    rerender(<ResultsPage {...props({ visible, suggestions })} />)
+    expect(screen.queryByRole('region', { name: bannerName })).toBeNull()
+  })
+
+  it('로딩·에러 상태에서는 렌더하지 않는다', () => {
+    const onApplySuggestion = vi.fn()
+    const { rerender } = render(
+      <ResultsPage {...props({ status: 'loading', suggestions, onApplySuggestion })} />,
+    )
+    expect(screen.queryByRole('region', { name: bannerName })).toBeNull()
+    rerender(<ResultsPage {...props({ status: 'error', suggestions, onApplySuggestion })} />)
+    expect(screen.queryByRole('region', { name: bannerName })).toBeNull()
   })
 })

@@ -439,3 +439,22 @@ describe('경로 검색 요청 수명', () => {
     expect(result.current.departedAt).toBe(request.departedAt)
   })
 })
+
+describe('출발 시각 지정 해제', () => {
+  it('resetDepartureTime은 지정 시각을 지우고 지금 기준으로 다시 찾는다', async () => {
+    const search = vi.fn<RouteRepository['search']>(async () => routes)
+    const { result } = renderHook(() => useTrip(loadedTrip, { search }))
+    act(() => {
+      result.current.setDepartureTime('09:00')
+    })
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    expect(result.current.departureTime).toBe('09:00')
+    const started = Date.now()
+    act(() => result.current.resetDepartureTime())
+    await waitFor(() => expect(result.current.status).toBe('success'))
+    expect(result.current.departureTime).toBeNull()
+    const sent = Date.parse(search.mock.calls.at(-1)?.[0].departedAt ?? '')
+    expect(Math.abs(sent - started)).toBeLessThan(5000)
+    expect(search).toHaveBeenCalledTimes(2)
+  })
+})

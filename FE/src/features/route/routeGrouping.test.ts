@@ -8,6 +8,7 @@ import {
   busRouteOptions,
   formatBusLabel,
   groupRoutes,
+  routeSignature,
 } from './routeGrouping'
 
 const endpoint = (id: string, name = id) => ({ id, name })
@@ -115,5 +116,38 @@ describe('버스 대안 경로 그룹화', () => {
     expect(busOptionCount(current)).toBe(2)
     expect(busOptionLabel(current.legs[2].busRouteOptions[0])).toBe('420번')
     expect(busOptionLabel(current.legs[2].busRouteOptions[1])).toBe('N26')
+  })
+})
+
+describe('routeSignature', () => {
+  it('탑승 구간 키를 잇고 도보 구간은 제외한다', () => {
+    const a = route('a', '420', '420')
+    const b = route('b', '420', '420')
+    b.legs[0] = { ...b.legs[0], from: endpoint('elsewhere'), to: endpoint('else2') }
+    expect(routeSignature(a)).toBeDefined()
+    expect(routeSignature(a)).toBe(routeSignature(b))
+  })
+
+  it('경로 id가 달라도 서명은 같다', () => {
+    expect(routeSignature(route('a', '420', '420'))).toBe(routeSignature(route('b', '420', '420')))
+  })
+
+  it('버스 노선이 달라도 서명은 같고 지하철 노선이 다르면 달라진다', () => {
+    expect(routeSignature(route('a', '420', '420'))).toBe(routeSignature(route('b', 'N26', 'N26')))
+    expect(routeSignature(route('a', '420', '420'))).not.toBe(
+      routeSignature(route('b', '420', '420', '1003')),
+    )
+  })
+
+  it('탑승 구간 endpoint가 없으면 undefined다', () => {
+    const current = route('a', '420', '420')
+    current.legs[1] = { ...current.legs[1], from: undefined }
+    expect(routeSignature(current)).toBeUndefined()
+  })
+
+  it('탑승 구간이 없으면 undefined다', () => {
+    const current = route('a', '420', '420')
+    current.legs = [current.legs[0]]
+    expect(routeSignature(current)).toBeUndefined()
   })
 })

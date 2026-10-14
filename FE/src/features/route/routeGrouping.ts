@@ -1,3 +1,4 @@
+import { isTransitLeg } from './transitions'
 import type { BusRouteOption, Leg, Route, RouteEndpoint } from './types'
 
 export interface RouteGroup {
@@ -34,6 +35,15 @@ function groupingKey(route: Route) {
   if (!route.legs.some((leg) => leg.mode === 'bus')) return undefined
   const legs = route.legs.map(legKey)
   return legs.every((key): key is string => !!key) ? legs.join('|') : undefined
+}
+
+/**
+ * 탑승 구간(isTransitLeg, 도보·환승·승하차 제외)의 키를 이은 경로 서명. 같은 서명이면 시각만 다른 같은 경로로 본다.
+ * 탑승 구간이 없거나 하나라도 키가 없으면 undefined.
+ */
+export function routeSignature(route: Route): string | undefined {
+  const keys = route.legs.filter(isTransitLeg).map(legKey)
+  return keys.length > 0 && keys.every((key): key is string => !!key) ? keys.join('|') : undefined
 }
 
 /** Groups only routes with the same endpoints, modes, and non-bus lines. */
